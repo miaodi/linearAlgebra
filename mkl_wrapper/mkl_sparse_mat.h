@@ -12,6 +12,9 @@ public:
   void sp_fill();
 
   sparse_matrix_t &mkl_handler() { return _mkl_mat; }
+  MKL_INT rows() const { return _nrow; }
+  MKL_INT cols() const { return _ncol; }
+  void mult_vec(double const *const b, double *const x);
 
 protected:
   sparse_matrix_t _mkl_mat;

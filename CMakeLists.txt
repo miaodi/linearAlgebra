@@ -22,3 +22,4 @@ add_subdirectory(utils)
 add_subdirectory(mkl_wrapper)
 
 add_subdirectory(execs)
+add_subdirectory(tests)

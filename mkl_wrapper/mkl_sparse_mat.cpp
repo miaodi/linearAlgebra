@@ -56,4 +56,9 @@ mkl_sparse_mat::~mkl_sparse_mat() {
   if (_owned)
     mkl_sparse_destroy(_mkl_mat);
 }
+
+void mkl_sparse_mat::mult_vec(double const *const b, double *const x) {
+  _mkl_stat = mkl_sparse_d_mv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, _mkl_mat,
+                              _mkl_descr, b, 0.0, x);
+}
 } // namespace mkl_wrapper
