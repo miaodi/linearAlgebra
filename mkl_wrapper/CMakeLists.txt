@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.5...3.20)
+project(mkl_wrapper CXX)
+
+set(MKL_WRAPPER_SRC mkl_sparse_mat.cpp)
+
+add_library(${PROJECT_NAME} SHARED ${MKL_WRAPPER_SRC})
+
+target_compile_options(${PROJECT_NAME} PRIVATE $<TARGET_PROPERTY:MKL::MKL,INTERFACE_COMPILE_OPTIONS>)
+target_include_directories(${PROJECT_NAME} PRIVATE $<TARGET_PROPERTY:MKL::MKL,INTERFACE_INCLUDE_DIRECTORIES>)
+target_link_libraries(${PROJECT_NAME} PRIVATE $<LINK_ONLY:MKL::MKL>)
