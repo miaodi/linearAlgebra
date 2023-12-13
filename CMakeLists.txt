@@ -6,7 +6,7 @@ FetchContent_Declare(
   fast_matrix_market
   GIT_REPOSITORY https://github.com/alugowski/fast_matrix_market.git
   GIT_TAG main
-  OVERRIDE_FIND_PACKAGE
+  GIT_SHALLOW TRUE
 )
 # The following will automatically forward through to FetchContent_MakeAvailable()
 # find_package(fast_matrix_market)
@@ -19,5 +19,6 @@ set(MKL_INTERFACE ilp64)
 find_package(MKL CONFIG REQUIRED)
 
 add_subdirectory(utils)
-add_subdirectory(execs)
 add_subdirectory(mkl_wrapper)
+
+add_subdirectory(execs)

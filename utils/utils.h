@@ -1,6 +1,7 @@
 #pragma once
 #include <Eigen/Sparse>
 #include <fast_matrix_market/fast_matrix_market.hpp>
+#include <iostream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -20,9 +21,8 @@ void read_matrix_market_csr(
   fast_matrix_market::read_matrix_market_triplet(instream, header, coo_rows,
                                                  cols, values, options);
   rows = IVEC(header.nrows + 1, 0);
-  IVEC index(header.nnz);
-  //   if (header.nnz == 0)
-  //     return;
+  typename IVEC::value_type nnz = cols.size();
+  IVEC index(nnz);
   for (typename IVEC::value_type i = 0; i < index.size(); i++) {
     index[i] = i;
   }
@@ -33,22 +33,19 @@ void read_matrix_market_csr(
                 return cols[a] < cols[b];
               return coo_rows[a] < coo_rows[b];
             });
-  //   typename IVEC::value_type tmp_i, tmp_j, tmp_ind;
-  //   typename VVEC::value_type tmp_v;
-  //   bool own{false};
-  for (typename IVEC::value_type i = 0; i != header.nnz;) {
-    typename IVEC::value_type cur = index[i];
-    if (cur == i) {
-      i++;
-    } else {
-      std::swap(coo_rows[i], coo_rows[cur]);
-      std::swap(cols[i], cols[cur]);
-      std::swap(values[i], values[cur]);
-      std::swap(index[i], index[cur]);
+  for (typename IVEC::value_type i = 0; i != nnz; i++) {
+    typename IVEC::value_type current = i;
+    while (i != index[current]) {
+      typename IVEC::value_type next = index[current];
+      std::swap(coo_rows[current], coo_rows[next]);
+      std::swap(cols[current], cols[next]);
+      std::swap(values[current], values[next]);
+      index[current] = current;
+      current = next;
     }
+    index[current] = current;
   }
-
-  for (typename IVEC::value_type i = 0; i < header.nnz; i++) {
+  for (typename IVEC::value_type i = 0; i < nnz; i++) {
     rows[coo_rows[i] + 1]++;
   }
   for (typename IVEC::value_type i = 0; i < header.nrows; i++) {
