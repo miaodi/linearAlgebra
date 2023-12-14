@@ -1,6 +1,8 @@
 #include "mkl_pcg.h"
 #include "mkl_sparse_mat.h"
+#include <cassert>
 #include <vector>
+#include <cstdio> 
 
 namespace mkl_wrapper {
 
@@ -21,7 +23,7 @@ bool mkl_pcg_solver::solve(double const *const b, double *const x) {
   MKL_INT ipar[128];
   double dpar[128];
   std::vector<double> tmp(n * 4);
-  double *ptmp = &tmp[0];
+  auto ptmp = tmp.data();
 
   // initialize parameters
   dcg_init(&n, x, b, &rci_request, ipar, dpar, ptmp);
@@ -29,8 +31,7 @@ bool mkl_pcg_solver::solve(double const *const b, double *const x) {
     return false;
 
   // set the desired parameters:
-  if (m_maxiter > 0)
-    ipar[4] = m_maxiter;   // max nr of iterations
+  ipar[4] = m_maxiter;     // max nr of iterations
   ipar[8] = 1;             // do residual stopping test
   ipar[9] = 0;             // do not request for the user defined stopping test
   ipar[10] = (_P ? 1 : 0); // preconditioning
@@ -50,26 +51,32 @@ bool mkl_pcg_solver::solve(double const *const b, double *const x) {
 
     switch (rci_request) {
     case 0: // solution converged!
+    {
       bsuccess = true;
       bdone = true;
       break;
+    }
     case 1: // compute vector A*tmp[0] and store in tmp[n]
     {
       _A->mult_vec(ptmp, ptmp + n);
 
-      // if (_Print_level == 1) {
-      //   fprintf(stderr, "%3d = %lg (%lg), %lg (%lg)\n", ipar[3], dpar[4],
-      //           dpar[3], dpar[6], dpar[7]);
-      // }
-    } break;
+      if (_print_level == 1) {
+        fprintf(stderr, "%3d = %lg (%lg), %lg (%lg)\n", ipar[3], dpar[4],
+                dpar[3], dpar[6], dpar[7]);
+      }
+      break;
+    }
     case 3: {
-      // assert(_P);
+      assert(_P);
+      // apply preconditioner
       _P->mult_vec(ptmp + n * 2, ptmp + n * 3);
-    } break;
-    default:
+      break;
+    }
+    default: {
       bsuccess = false;
       bdone = true;
       break;
+    }
     }
   } while (!bdone);
 
@@ -77,14 +84,10 @@ bool mkl_pcg_solver::solve(double const *const b, double *const x) {
   MKL_INT niter;
   dcg_get(&n, x, b, &rci_request, ipar, dpar, ptmp, &niter);
 
-  // if (_Print_level > 0) {
-  //   fprintf(stderr, "%3d = %lg (%lg), %lg (%lg)\n", ipar[3], dpar[4],
-  //   dpar[3],
-  //           dpar[6], dpar[7]);
-  // }
-
-  // release internal MKL buffers
-  //	MKL_Free_Buffers();
+  if (_print_level > 0) {
+    fprintf(stderr, "%3d = %lg (%lg), %lg (%lg)\n", ipar[3], dpar[4], dpar[3],
+            dpar[6], dpar[7]);
+  }
 
   return (m_fail_max_iters ? bsuccess : true);
 }

@@ -16,8 +16,9 @@ protected:
   mkl_sparse_mat *_A;
   mkl_sparse_mat *_P;
 
-  int m_maxiter; // max nr of iterations
-  double m_tol;  // residual relative tolerance
-  bool m_fail_max_iters;
+  int m_maxiter{1000}; // max nr of iterations
+  double m_tol{1e-8};  // residual relative tolerance
+  bool m_fail_max_iters{true};
+  int _print_level{1}; // output level
 };
 } // namespace mkl_wrapper

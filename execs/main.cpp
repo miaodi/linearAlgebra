@@ -1,4 +1,5 @@
 
+#include "../mkl_wrapper/mkl_pcg.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
 #include "../utils/utils.h"
 #include <Eigen/Sparse>
@@ -15,10 +16,10 @@ using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
 int main() {
 
-  std::ifstream f("../../data/cage15.mtx");
+  std::ifstream f("../../data/thermal2.mtx");
 
-  SpMat mat;
-  fast_matrix_market::read_matrix_market_eigen(f, mat);
+  // SpMat mat;
+  // fast_matrix_market::read_matrix_market_eigen(f, mat);
   // std::cout << mat.rows() << " , " << mat.cols() << std::endl;
   // std::cout << Eigen::MatrixXd(mat) << std::endl << std::endl;
   f.clear();
@@ -30,13 +31,16 @@ int main() {
                    csr_rows.data(), csr_cols.data(), csr_vals.data());
   // std::cout << mat_csr.rows() << " , " << mat_csr.cols() << std::endl;
   // std::cout << mat_csr << std::endl << std::endl;
-  SpMat res = mat_csr - mat;
+  // SpMat res = mat_csr - mat;
   // Eigen::MatrixXd dense_csr(mat_csr);
   // Eigen::MatrixXd res = dense_csr - mat;
-  std::cout << res.norm() << std::endl;
+  // std::cout << res.norm() << std::endl;
+
+  std::shared_ptr<MKL_INT[]> csr_rows_ptr(csr_rows.data(), [](MKL_INT[]) {});
+  std::shared_ptr<MKL_INT[]> csr_cols_ptr(csr_cols.data(), [](MKL_INT[]) {});
+  std::shared_ptr<double[]> csr_vals_ptr(csr_vals.data(), [](double[]) {});
   mkl_wrapper::mkl_sparse_mat mkl_mat(csr_rows.size() - 1, csr_rows.size() - 1,
-                                      csr_rows.data(), csr_cols.data(),
-                                      csr_vals.data());
+                                      csr_rows_ptr, csr_cols_ptr, csr_vals_ptr);
 
   // First create an instance of an engine.
   std::random_device rnd_device;
@@ -53,9 +57,15 @@ int main() {
   std::vector<double> x(mkl_mat.rows());
   std::cout << "m: " << mkl_mat.rows() << " , n: " << mkl_mat.cols()
             << std::endl;
-  for (int i = 0; i < 100; i++) {
-    std::cout << i << std::endl;
-    mkl_mat.mult_vec(rhs.data(), x.data());
-  }
+  // for (int i = 0; i < 100; i++) {
+  //   std::cout << i << std::endl;
+  //   mkl_mat.mult_vec(rhs.data(), x.data());
+  // }
+  mkl_wrapper::mkl_ilu0 prec(&mkl_mat);
+  prec.factorize();
+  mkl_wrapper::mkl_pcg_solver pcg(&mkl_mat, &prec);
+  pcg.SetMaxIterations(1e5);
+  pcg.solve(rhs.data(), x.data());
+
   return 0;
 }
