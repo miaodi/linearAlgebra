@@ -8,16 +8,18 @@ public:
   mkl_pcg_solver(mkl_sparse_mat *A, mkl_sparse_mat *P = nullptr)
       : _A(A), _P(P) {}
 
-  void SetMaxIterations(int n) { m_maxiter = n; }
-  void SetTolerance(double tol) { m_tol = tol; }
+  void SetMaxIterations(int n) { _maxiter = n; }
+  void SetRelTol(double tol) { _rel_tol = tol; }
+  void SetAbsTol(double tol) { _abs_tol = tol; }
   bool solve(double const *const b, double *const x);
 
 protected:
   mkl_sparse_mat *_A;
   mkl_sparse_mat *_P;
 
-  int m_maxiter{1000}; // max nr of iterations
-  double m_tol{1e-8};  // residual relative tolerance
+  int _maxiter{1000};    // max nr of iterations
+  double _rel_tol{1e-8}; // residual relative tolerance
+  double _abs_tol{1e-16};
   bool m_fail_max_iters{true};
   int _print_level{1}; // output level
 };

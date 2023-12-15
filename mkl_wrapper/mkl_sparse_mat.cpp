@@ -1,5 +1,11 @@
 #include "mkl_sparse_mat.h"
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstdio>
 #include <iostream>
+#include <vector>
+
 namespace mkl_wrapper {
 
 mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
@@ -100,12 +106,7 @@ bool mkl_ilu0::factorize() {
       _ai[i] += 1;
     }
   }
-  // for (int i = 0; i < _nrow; i++) {
-  //   for (int j = _ai[i] - 1; j < _ai[i + 1] - 1; j++) {
-  //     std::cout << i + 1 << " " << _aj[j] << " " << _A->get_av()[j]
-  //               << std::endl;
-  //   }
-  // }
+
   dcsrilu0(&_nrow, _A->get_av().get(), _ai.get(), _aj.get(), _av.get(), ipar,
            dpar, &ierr);
   {
@@ -138,6 +139,141 @@ bool mkl_ilu0::solve(double const *const b, double *const x) {
 
   _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
+  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, _interm_vec.get(), x);
+  return true;
+}
+
+mkl_sparse_mat_sym::mkl_sparse_mat_sym(mkl_sparse_mat *A) : mkl_sparse_mat() {
+
+  // only take upper triangular
+
+  _nrow = A->rows();
+  _ncol = A->cols();
+
+  _ai.reset(new MKL_INT[_nrow + 1]);
+  auto ai = A->get_ai();
+  auto aj = A->get_aj();
+  auto av = A->get_av();
+  _nnz = 0;
+  _ai[0] = 0;
+  for (MKL_INT i = 0; i < _nrow; i++) {
+    MKL_INT begin = ai[i];
+    MKL_INT end = ai[i + 1];
+    auto res = std::find(aj.get() + begin, aj.get() + end, i);
+    if (res == aj.get() + end) {
+      std::cout << "Could not find diagonal!" << std::endl;
+    } else {
+      _nnz += aj.get() + end - res;
+    }
+    _ai[i + 1] = _nnz;
+  }
+  // for (MKL_INT i = 0; i < _nrow + 1; i++) {
+  //   std::cout << _ai[i] << std::endl;
+  // }
+
+  _aj.reset(new MKL_INT[_nnz]);
+  _av.reset(new double[_nnz]);
+
+  MKL_INT ind = 0;
+  for (MKL_INT i = 0; i < _nrow; i++) {
+    MKL_INT begin = ai[i];
+    MKL_INT end = ai[i + 1];
+    auto res = std::find(aj.get() + begin, aj.get() + end, i);
+    begin = res - aj.get();
+    for (auto i = begin; i != end; i++) {
+      _aj[ind] = aj[i];
+      _av[ind++] = av[i];
+    }
+  }
+  sp_fill();
+}
+
+mkl_ic0::mkl_ic0(mkl_sparse_mat *A) : mkl_sparse_mat_sym(A) {
+  _interm_vec.reset(new double[_nrow]);
+}
+
+bool mkl_ic0::factorize() {
+  MKL_INT *row = _aj.get();
+  MKL_INT *col = _ai.get();
+  double *val = _av.get();
+
+  std::vector<double> tmp(_nrow, 0.0);
+
+  // fill in the values
+  for (MKL_INT k = 0; k < _nrow; ++k) {
+    // get the values for column k
+    double *ak = val + (col[k]);
+    MKL_INT *rowk = row + (col[k]);
+    MKL_INT Lk = col[k + 1] - col[k];
+
+    // sanity check
+    if (rowk[0] != k) {
+      fprintf(stderr,
+              "Fatal error in incomplete Cholesky preconditioner:\nMatrix "
+              "format error at row %d.",
+              k);
+      return false;
+    }
+
+    // make sure the diagonal element is not zero
+    if (ak[0] == 0.0) {
+      fprintf(stderr,
+              "Fatal error in incomplete Cholesky preconditioner:\nZero "
+              "diagonal element at row %d.",
+              k);
+      return false;
+    }
+
+    // make sure the diagonal element is not negative either
+    if (ak[0] < 0.0) {
+      fprintf(stderr,
+              "Fatal error in incomplete Cholesky preconditioner:\nNegative "
+              "diagonal element at row %d (value = %lg).",
+              k, ak[0]);
+      return false;
+    }
+
+    // set the diagonal element
+    double akk = std::sqrt(ak[0]);
+    ak[0] = akk;
+    tmp[rowk[0]] = akk;
+
+    // divide column by akk
+    for (MKL_INT j = 1; j < Lk; ++j) {
+      ak[j] /= akk;
+      tmp[rowk[j]] = ak[j];
+    }
+
+    // loop over all other columns
+    for (MKL_INT _j = 1; _j < Lk; ++_j) {
+      MKL_INT j = rowk[_j];
+      double tjk = tmp[j];
+      if (tjk != 0.0) {
+        double *aj = val + col[j];
+        MKL_INT Lj = col[j + 1] - col[j];
+        MKL_INT *rowj = row + col[j];
+
+        for (MKL_INT i = 0; i < Lj; i++)
+          aj[i] -= tmp[rowj[i]] * tjk;
+      }
+    }
+
+    // reset temp buffer
+    for (MKL_INT j = 0; j < Lk; ++j)
+      tmp[rowk[j]] = 0.0;
+  }
+
+  return true;
+}
+
+bool mkl_ic0::solve(double const *const b, double *const x) {
+  sparse_operation_t transA = SPARSE_OPERATION_TRANSPOSE;
+  _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
+  _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
+  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
+  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, b, _interm_vec.get());
+
+  transA = SPARSE_OPERATION_NON_TRANSPOSE;
   mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, _interm_vec.get(), x);
   return true;
 }

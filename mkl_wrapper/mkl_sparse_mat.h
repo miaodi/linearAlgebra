@@ -57,4 +57,23 @@ protected:
   double _zero_tol{1e-16};      // threshold for zero diagonal check
   double _zero_rep{1e-10};      // replacement value for zero diagonal
 };
+
+// upper triangular
+class mkl_sparse_mat_sym : public mkl_sparse_mat {
+public:
+  mkl_sparse_mat_sym(mkl_sparse_mat *A);
+};
+
+// Incomplete Cholesky ic0
+class mkl_ic0 : public mkl_sparse_mat_sym {
+public:
+  mkl_ic0(mkl_sparse_mat *A);
+  bool factorize();
+
+  virtual bool solve(double const *const b, double *const x) override;
+
+protected:
+  mkl_sparse_mat *_A{nullptr};
+  std::unique_ptr<double[]> _interm_vec{nullptr};
+};
 } // namespace mkl_wrapper

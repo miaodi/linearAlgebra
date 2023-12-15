@@ -42,6 +42,13 @@ int main() {
   mkl_wrapper::mkl_sparse_mat mkl_mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                       csr_rows_ptr, csr_cols_ptr, csr_vals_ptr);
 
+  // mkl_wrapper::mkl_sparse_mat_sym mkl_mat_sym(&mkl_mat);
+  // std::cout << mkl_mat.nnz() << " " << mkl_mat_sym.nnz() << std::endl;
+  // SpMatMap mat_sym_csr(mkl_mat_sym.rows(), mkl_mat_sym.cols(),
+  //                      mkl_mat_sym.nnz(), mkl_mat_sym.get_ai().get(),
+  //                      mkl_mat_sym.get_aj().get(), mkl_mat_sym.get_av().get());
+  // std::cout << mat_sym_csr << std::endl << std::endl;
+
   // First create an instance of an engine.
   std::random_device rnd_device;
   // Specify the engine and distribution.
@@ -61,7 +68,7 @@ int main() {
   //   std::cout << i << std::endl;
   //   mkl_mat.mult_vec(rhs.data(), x.data());
   // }
-  mkl_wrapper::mkl_ilu0 prec(&mkl_mat);
+  mkl_wrapper::mkl_ic0 prec(&mkl_mat);
   prec.factorize();
   mkl_wrapper::mkl_pcg_solver pcg(&mkl_mat, &prec);
   pcg.SetMaxIterations(1e5);
