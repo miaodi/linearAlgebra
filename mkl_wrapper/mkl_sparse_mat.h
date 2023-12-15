@@ -81,7 +81,7 @@ protected:
   // double _zero_rep{1e-10};      // replacement value for zero diagonal
 
   double _tau{1e-6};
-  MKL_INT _max_fill{10};
+  MKL_INT _max_fill{2};
 };
 
 // upper triangular

@@ -113,4 +113,5 @@ bool mkl_pcg_solver::solve(double const *const b, double *const x) {
 
   return (m_fail_max_iters ? bsuccess : true);
 }
+
 } // namespace mkl_wrapper

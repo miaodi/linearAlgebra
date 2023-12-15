@@ -185,7 +185,7 @@ bool mkl_ilut::factorize() {
   }
 
   _ai.reset(new MKL_INT[_nrow + 1]);
-  _nnz = (2 * _max_fill + 1) * _nrow - _max_fill * (_max_fill + 1) + 1;
+  _nnz = (2 * _max_fill + 1) * _nrow;
   ;
   _aj.reset(new MKL_INT[_nnz]);
   _av.reset(new double[_nnz]);
