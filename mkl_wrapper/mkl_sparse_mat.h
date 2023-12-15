@@ -28,9 +28,14 @@ public:
 
   virtual bool solve(double const *const b, double *const x) { return false; }
 
+  void to_one_based();
+
+  void to_zero_based();
+
 protected:
   sparse_matrix_t _mkl_mat;
   sparse_status_t _mkl_stat;
+  sparse_index_base_t _mkl_base{SPARSE_INDEX_BASE_ZERO};
   matrix_descr _mkl_descr;
 
   MKL_INT _nrow; // Number of Rows
@@ -56,6 +61,27 @@ protected:
   bool _check_zero_diag{false}; // check for zero diagonals
   double _zero_tol{1e-16};      // threshold for zero diagonal check
   double _zero_rep{1e-10};      // replacement value for zero diagonal
+};
+
+class mkl_ilut : public mkl_sparse_mat {
+public:
+  mkl_ilut(mkl_sparse_mat *A);
+  bool factorize();
+
+  virtual bool solve(double const *const b, double *const x) override;
+  void set_tau(const double tau) { _tau = tau; }
+  void set_max_fill(const MKL_INT fill) { _max_fill = fill; }
+
+protected:
+  mkl_sparse_mat *_A{nullptr};
+  std::unique_ptr<double[]> _interm_vec{nullptr};
+
+  bool _check_zero_diag{false}; // check for zero diagonals
+  double _zero_tol{1e-16};      // threshold for zero diagonal check
+  // double _zero_rep{1e-10};      // replacement value for zero diagonal
+
+  double _tau{1e-6};
+  MKL_INT _max_fill{10};
 };
 
 // upper triangular

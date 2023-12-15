@@ -1,4 +1,4 @@
-#include "mkl_pcg.h"
+#include "mkl_iterative.h"
 #include "mkl_sparse_mat.h"
 #include <cassert>
 #include <cstdio>

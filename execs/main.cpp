@@ -1,5 +1,5 @@
 
-#include "../mkl_wrapper/mkl_pcg.h"
+#include "../mkl_wrapper/mkl_iterative.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
 #include "../utils/utils.h"
 #include <Eigen/Sparse>
@@ -46,7 +46,8 @@ int main() {
   // std::cout << mkl_mat.nnz() << " " << mkl_mat_sym.nnz() << std::endl;
   // SpMatMap mat_sym_csr(mkl_mat_sym.rows(), mkl_mat_sym.cols(),
   //                      mkl_mat_sym.nnz(), mkl_mat_sym.get_ai().get(),
-  //                      mkl_mat_sym.get_aj().get(), mkl_mat_sym.get_av().get());
+  //                      mkl_mat_sym.get_aj().get(),
+  //                      mkl_mat_sym.get_av().get());
   // std::cout << mat_sym_csr << std::endl << std::endl;
 
   // First create an instance of an engine.
@@ -68,10 +69,13 @@ int main() {
   //   std::cout << i << std::endl;
   //   mkl_mat.mult_vec(rhs.data(), x.data());
   // }
-  mkl_wrapper::mkl_ic0 prec(&mkl_mat);
+  mkl_wrapper::mkl_ilut prec(&mkl_mat);
+  prec.set_tau(1e-10);
+  prec.set_max_fill(100);
   prec.factorize();
   mkl_wrapper::mkl_pcg_solver pcg(&mkl_mat, &prec);
   pcg.SetMaxIterations(1e5);
+  pcg.SetRelTol(1e-13);
   pcg.solve(rhs.data(), x.data());
 
   return 0;
