@@ -14,9 +14,10 @@ public:
                  const std::shared_ptr<double[]> &av);
 
   ~mkl_sparse_mat();
-  void sp_fill();
+  virtual void sp_fill();
 
   sparse_matrix_t &mkl_handler() { return _mkl_mat; }
+  matrix_descr &mkl_descr() { return _mkl_descr; }
   MKL_INT rows() const { return _nrow; }
   MKL_INT cols() const { return _ncol; }
   MKL_INT nnz() const { return _nnz; }
@@ -88,6 +89,7 @@ protected:
 class mkl_sparse_mat_sym : public mkl_sparse_mat {
 public:
   mkl_sparse_mat_sym(mkl_sparse_mat *A);
+  virtual void sp_fill();
 };
 
 // Incomplete Cholesky ic0

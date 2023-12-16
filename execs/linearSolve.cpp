@@ -9,6 +9,7 @@
 #include <ios>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <random>
 #include <vector>
 
@@ -16,7 +17,7 @@ using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
 int main() {
 
-  std::ifstream f("../../data/can___24.mtx");
+  std::ifstream f("../../data/linear_system/can___24.mtx");
 
   // SpMat mat;
   // fast_matrix_market::read_matrix_market_eigen(f, mat);
@@ -65,10 +66,7 @@ int main() {
   std::vector<double> x(mkl_mat.rows());
   std::cout << "m: " << mkl_mat.rows() << " , n: " << mkl_mat.cols()
             << std::endl;
-  // for (int i = 0; i < 100; i++) {
-  //   std::cout << i << std::endl;
-  //   mkl_mat.mult_vec(rhs.data(), x.data());
-  // }
+
   mkl_wrapper::mkl_ilut prec(&mkl_mat);
   prec.set_tau(1e-10);
   prec.set_max_fill(100);

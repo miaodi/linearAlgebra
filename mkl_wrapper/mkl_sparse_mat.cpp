@@ -96,6 +96,7 @@ void mkl_sparse_mat::sp_fill() {
   _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
   _mkl_descr.type = SPARSE_MATRIX_TYPE_GENERAL;
   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
+  _mkl_descr.mode = SPARSE_FILL_MODE_FULL;
 }
 
 mkl_sparse_mat::~mkl_sparse_mat() { mkl_sparse_destroy(_mkl_mat); }
@@ -263,6 +264,20 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(mkl_sparse_mat *A) : mkl_sparse_mat() {
     }
   }
   sp_fill();
+}
+
+void mkl_sparse_mat_sym::sp_fill() {
+  _mkl_stat =
+      mkl_sparse_d_create_csr(&_mkl_mat, _mkl_base, _nrow, _ncol, _ai.get(),
+                              _ai.get() + 1, _aj.get(), _av.get());
+  if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
+    std::cout << "Matrix is not created" << std::endl;
+  }
+
+  _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
+  _mkl_descr.type = SPARSE_MATRIX_TYPE_SYMMETRIC;
+  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
+  _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
 }
 
 mkl_ic0::mkl_ic0(mkl_sparse_mat *A) : mkl_sparse_mat_sym(A) {

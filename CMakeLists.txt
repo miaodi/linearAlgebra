@@ -8,11 +8,16 @@ FetchContent_Declare(
   GIT_TAG main
   GIT_SHALLOW TRUE
 )
-# The following will automatically forward through to FetchContent_MakeAvailable()
-# find_package(fast_matrix_market)
 FetchContent_MakeAvailable(fast_matrix_market)
 find_package (Eigen3 3.4 REQUIRED NO_MODULE)
 
+FetchContent_Declare(
+  Spectra
+  GIT_REPOSITORY https://github.com/yixuan/spectra.git
+  GIT_TAG master
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(Spectra)
 set(MKL_ARCH intel64)
 set(MKL_THREADING gnu_thread)
 set(MKL_INTERFACE ilp64)
