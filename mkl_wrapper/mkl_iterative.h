@@ -44,9 +44,9 @@ public:
 
 protected:
   mkl_sparse_mat *_A;
-  mkl_sparse_mat *_P; // left preconditioner
-  mkl_sparse_mat *_R; // right preconditioner
+  mkl_sparse_mat *_P{nullptr}; // left preconditioner
+  mkl_sparse_mat *_R{nullptr}; // right preconditioner
 
-  MKL_INT _num_restart{100};
+  MKL_INT _num_restart{0};
 };
 } // namespace mkl_wrapper
