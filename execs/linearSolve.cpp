@@ -17,7 +17,7 @@ using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
 int main() {
 
-  std::ifstream f("../../data/linear_system/bcsstk28.mtx");
+  std::ifstream f("../../data/linear_system/bcsstk26.mtx");
 
   // SpMat mat;
   // fast_matrix_market::read_matrix_market_eigen(f, mat);
@@ -69,11 +69,11 @@ int main() {
 
   mkl_wrapper::mkl_ilut prec(&mkl_mat);
   prec.set_tau(1e-10);
-  prec.set_max_fill(1000);
+  prec.set_max_fill(50);
   prec.factorize();
-  mkl_wrapper::mkl_pcg_solver pcg(&mkl_mat, nullptr);
+  mkl_wrapper::mkl_fgmres_solver pcg(&mkl_mat, &prec);
   pcg.SetMaxIterations(1e5);
-  pcg.SetRelTol(1e-8);
+  pcg.SetRelTol(1e-10);
   pcg.solve(rhs.data(), x.data());
 
   return 0;

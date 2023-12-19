@@ -5,6 +5,7 @@
 #include <iostream>
 #include <vector>
 
+#define IFORMAT "%lli"
 namespace mkl_wrapper {
 
 bool mkl_pcg_solver::solve(double *b, double *x) {
@@ -142,21 +143,6 @@ bool mkl_fgmres_solver::solve(double *b, double *x) {
   std::vector<double> rhs(n);
   cblas_dcopy(n, b, 1, rhs.data(), 1);
 
-  // set the desired parameters:
-  ipar[4] = _maxiter; // max nr of iterations
-  ipar[7] = 1;        // do the stopping test for maximal number of iterations
-  ipar[8] = 1;         // do residual stopping test
-  // ipar[9] = 0;             // do not request for the user defined stopping
-
-  ipar[9] = 0;           // use user defined stopping test
-  ipar[10] = _P ? 1 : 0; // preconditioning
-  std::cout << "ipar[10]: " << ipar[10] << std::endl;
-  ipar[14] = _num_restart != 0 ? _num_restart
-                               : _maxiter; // number of non-restarted iterations
-  dpar[0] = _rel_tol;         // set the relative tolerance
-  dpar[1] = _abs_tol;         // set the absolute tolerance
-
-
   // initialize parameters
   dfgmres_init(&n, x, rhs.data(), &rci_request, ipar, dpar, ptmp);
   if (rci_request != 0)
@@ -164,10 +150,91 @@ bool mkl_fgmres_solver::solve(double *b, double *x) {
   double residual0 = cblas_dnrm2(n, b, 1);
   double residual = 0.;
 
+  // set the desired parameters:
+  ipar[4] = _maxiter; // max nr of iterations
+  ipar[7] = 1;        // do the stopping test for maximal number of iterations
+  // ipar[8] = 1;        // do residual stopping test
+  // ipar[9] = 0;             // do not request for the user defined stopping
+
+  ipar[9] = 1;           // use user defined stopping test
+  ipar[10] = _P ? 1 : 0; // preconditioning
+  std::cout << "ipar[10]: " << ipar[10] << std::endl;
+  ipar[14] = _num_restart != 0 ? _num_restart
+                               : _maxiter; // number of non-restarted iterations
+  dpar[0] = _rel_tol;                      // set the relative tolerance
+  dpar[1] = _abs_tol;                      // set the absolute tolerance
+
   // check the consistency of the newly set parameters
   dfgmres_check(&n, x, rhs.data(), &rci_request, ipar, dpar, ptmp);
-  if (rci_request != 0)
+  if (rci_request != 0 && rci_request != -1001)
     return false;
+
+  printf("Some info about the current run of RCI FGMRES method:\n\n");
+  if (ipar[7]) {
+    printf("As ipar[7]=" IFORMAT
+           ", the automatic test for the maximal number of ",
+           ipar[7]);
+    printf("iterations will be\nperformed\n");
+  } else {
+    printf("As ipar[7]=" IFORMAT
+           ", the automatic test for the maximal number of ",
+           ipar[7]);
+    printf("iterations will be\nskipped\n");
+  }
+  printf("+++\n");
+  if (ipar[8]) {
+    printf("As ipar[8]=" IFORMAT
+           ", the automatic residual test will be performed\n",
+           ipar[8]);
+  } else {
+    printf("As ipar[8]=" IFORMAT
+           ", the automatic residual test will be skipped\n",
+           ipar[8]);
+  }
+  printf("+++\n");
+  if (ipar[9]) {
+    printf("As ipar[9]=" IFORMAT ", the user-defined stopping test will be ",
+           ipar[9]);
+    printf("requested via\nRCI_request=2\n");
+  } else {
+    printf("As ipar[9]=" IFORMAT
+           ", the user-defined stopping test will not be ",
+           ipar[9]);
+    printf("requested, thus,\nRCI_request will not take the value 2\n");
+  }
+  printf("+++\n");
+  if (ipar[10]) {
+    printf("As ipar[10]=" IFORMAT
+           ", the Preconditioned FGMRES iterations will be ",
+           ipar[10]);
+    printf(
+        "performed, thus,\nthe preconditioner action will be requested via ");
+    printf("RCI_request=3\n");
+  } else {
+    printf("As ipar[10]=" IFORMAT
+           ", the Preconditioned FGMRES iterations will not ",
+           ipar[10]);
+    printf("be performed,\nthus, RCI_request will not take the value 3\n");
+  }
+  printf("+++\n");
+  if (ipar[11]) {
+    printf("As ipar[11]=" IFORMAT
+           ", the automatic test for the norm of the next ",
+           ipar[11]);
+    printf("generated vector is\nnot equal to zero up to rounding and ");
+    printf(
+        "computational errors will be performed,\nthus, RCI_request will not ");
+    printf("take the value 4\n");
+  } else {
+    printf("As ipar[11]=" IFORMAT
+           ", the automatic test for the norm of the next ",
+           ipar[11]);
+    printf("generated vector is\nnot equal to zero up to rounding and ");
+    printf(
+        "computational errors will be skipped,\nthus, the user-defined test ");
+    printf("will be requested via RCI_request=4\n");
+  }
+  printf("+++\n\n");
 
   // loop until converged
   bool bsuccess = false;
@@ -216,7 +283,7 @@ bool mkl_fgmres_solver::solve(double *b, double *x) {
       _A->mult_vec(b, residual_vec.data());
       cblas_daxpy(n, -1., rhs.data(), 1, residual_vec.data(), 1);
       residual = cblas_dnrm2(n, residual_vec.data(), 1);
-
+      std::cout<<dpar[4]<<" "<<residual<<std::endl;
       fprintf(stderr, "%3d = %lg/%lg=%lg, %lg (%lg)\n", ipar[3], residual,
               residual0, residual / residual0, dpar[3], dpar[6], dpar[7]);
       if (residual / residual0 < _rel_tol || residual < _abs_tol) {
@@ -257,9 +324,8 @@ bool mkl_fgmres_solver::solve(double *b, double *x) {
   dfgmres_get(&n, x, rhs.data(), &rci_request, ipar, dpar, ptmp, &niter);
 
   // if (_print_level > 0) {
-    fprintf(stderr, "%3d = %lg (%lg), %lg (%lg)\n", ipar[3], dpar[4],
-    dpar[3],
-            dpar[6], dpar[7]);
+  fprintf(stderr, "%3d = %lg (%lg), %lg (%lg)\n", ipar[3], dpar[4], dpar[3],
+          dpar[6], dpar[7]);
   // }
 
   return (m_fail_max_iters ? bsuccess : true);

@@ -11,3 +11,6 @@ target_link_libraries(analysisBinary PRIVATE Utils fast_matrix_market::fast_matr
 
 add_executable(eigen eigen.cpp)
 target_link_libraries(eigen PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper Spectra)
+
+add_executable(tmp tmp.cpp)
+target_link_libraries(tmp PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper Spectra)
