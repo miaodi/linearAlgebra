@@ -7,11 +7,11 @@ class mkl_iterative_solver {
 public:
   mkl_iterative_solver() {}
 
-  void SetMaxIterations(int n) { _maxiter = n; }
-  void SetRelTol(double tol) { _rel_tol = tol; }
-  void SetAbsTol(double tol) { _abs_tol = tol; }
+  void set_max_iters(int n) { _maxiter = n; }
+  void set_rel_tol(double tol) { _rel_tol = tol; }
+  void set_abs_tol(double tol) { _abs_tol = tol; }
 
-  virtual bool solve(double *b, double *x) = 0;
+  virtual bool solve(double const *const b, double *x) = 0;
 
 protected:
   int _maxiter{1000};    // max nr of iterations
@@ -26,7 +26,7 @@ public:
   mkl_pcg_solver(mkl_sparse_mat *A, mkl_sparse_mat *P = nullptr)
       : mkl_iterative_solver(), _A(A), _P(P) {}
 
-  virtual bool solve(double *b, double *x) override;
+  virtual bool solve(double const *const b, double *x) override;
 
 protected:
   mkl_sparse_mat *_A;
@@ -39,7 +39,8 @@ public:
                     mkl_sparse_mat *R = nullptr)
       : mkl_iterative_solver(), _A(A), _P(P), _R(R) {}
 
-  virtual bool solve(double *b, double *x) override;
+  virtual bool solve(double const *const b, double *x) override;
+  void set_restart_steps(const int n) { _num_restart = n; }
 
 protected:
   mkl_sparse_mat *_A;

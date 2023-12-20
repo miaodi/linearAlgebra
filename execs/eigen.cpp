@@ -2,6 +2,7 @@
 #include "../mkl_wrapper/mkl_eigen.h"
 #include "../mkl_wrapper/mkl_iterative.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
+#include "../utils/timer.h"
 #include "../utils/utils.h"
 #include <Eigen/Sparse>
 #include <algorithm>
@@ -14,8 +15,10 @@
 #include <random>
 #include <vector>
 
+#include <Spectra/MatOp/SparseSymMatProd.h>
 #include <Spectra/MatOp/SparseSymShiftSolve.h>
 #include <Spectra/SymEigsShiftSolver.h>
+#include <Spectra/SymEigsSolver.h>
 
 using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
@@ -51,43 +54,89 @@ int main() {
   mkl_wrapper::mkl_sparse_mat m(size, size, m_csr_rows_ptr, m_csr_cols_ptr,
                                 m_csr_vals_ptr);
 
-  //   mkl_wrapper::mkl_eigen_sparse_d_gv gv(&k);
-  //   gv.set_tol(2);
-  //   gv.set_num_eigen(10);
-  //   gv.which('L');
-  //   std::vector<double> eigenvalues(10, 0);
-  //   std::vector<double> eigenvectors(10 * size, 0);
-  //   gv.eigen_solve(eigenvalues.data(), eigenvectors.data());
-  //   for (auto i : eigenvalues) {
-  //     std::cout << i << std::endl;
-  //   }
-  //   gv.which('S');
-  //   gv.eigen_solve(eigenvalues.data(), eigenvectors.data());
-  //   for (auto i : eigenvalues) {
-  //     std::cout << i << std::endl;
-  //   }
+  std::cout << "m: " << k.rows() << " , n: " << k.cols() << std::endl;
+  {
+    mkl_wrapper::mkl_eigen_sparse_d_gv gv(&k);
+    gv.set_tol(3);
+    gv.set_num_eigen(5);
+    gv.set_ncv(20);
+    gv.which('L');
+    std::vector<double> eigenvalues(5, 0);
+    std::vector<double> eigenvectors(5 * size, 0);
+    utils::Elapse<>::execute(
+        "mkl max eigen: ", [&gv, &eigenvalues, &eigenvectors]() {
+          gv.eigen_solve(eigenvalues.data(), eigenvectors.data());
+        });
+    for (auto i : eigenvalues) {
+      std::cout << i << std::endl;
+    }
+    gv.which('S');
+    utils::Elapse<>::execute(
+        "mkl min eigen: ", [&gv, &eigenvalues, &eigenvectors]() {
+          gv.eigen_solve(eigenvalues.data(), eigenvectors.data());
+        });
+    for (auto i : eigenvalues) {
+      std::cout << i << std::endl;
+    }
+  }
 
   SpMatMap mat_csr(size, size, k_csr_cols.size(), k_csr_rows.data(),
                    k_csr_cols.data(), k_csr_vals.data());
-  Spectra::SparseSymShiftSolve<double, Eigen::Lower | Eigen::Upper,
-                               Eigen::RowMajor, MKL_INT>
-      op(mat_csr);
 
-  // Construct eigen solver object, requesting the largest three eigenvalues
+  {
 
-  Spectra::SymEigsShiftSolver<Spectra::SparseSymShiftSolve<
-      double, Eigen::Lower | Eigen::Upper, Eigen::RowMajor, MKL_INT>>
-      eigs(op, 4, 12, 0);
+    Spectra::SparseSymMatProd<double, Eigen::Lower | Eigen::Upper,
+                              Eigen::RowMajor, MKL_INT>
+        op(mat_csr);
 
-  // Initialize and compute
-  eigs.init();
-  int nconv = eigs.compute(Spectra::SortRule::LargestMagn);
+    Spectra::SymEigsSolver<Spectra::SparseSymMatProd<
+        double, Eigen::Lower | Eigen::Upper, Eigen::RowMajor, MKL_INT>>
+        eigs(op, 5, 20);
 
-  // Retrieve results
-  Eigen::VectorXd evalues;
-  if (eigs.info() == Spectra::CompInfo::Successful)
-    evalues = eigs.eigenvalues();
+    eigs.init();
+    int nconv;
+    nconv = utils::Elapse<>::execute("eigen max eigen: ", [&eigs]() {
+      return eigs.compute(Spectra::SortRule::LargestMagn);
+    });
+    if (eigs.info() == Spectra::CompInfo::Successful) {
+      Eigen::VectorXd evalues = eigs.eigenvalues();
+      // Will get (10, 9, 8)
+      std::cout << "Eigenvalues found:\n" << evalues << std::endl;
+    }
 
-  std::cout << "Eigenvalues found:\n" << evalues << std::endl;
+    nconv = utils::Elapse<>::execute("eigen min eigen: ", [&eigs]() {
+      return eigs.compute(Spectra::SortRule::SmallestMagn);
+    });
+    if (eigs.info() == Spectra::CompInfo::Successful) {
+      Eigen::VectorXd evalues = eigs.eigenvalues();
+      // Will get (10, 9, 8)
+      std::cout << "Eigenvalues found:\n" << evalues << std::endl;
+    }
+  }
+  {
+    Spectra::SparseSymShiftSolve<double, Eigen::Lower | Eigen::Upper,
+                                 Eigen::RowMajor, MKL_INT>
+        op(mat_csr);
+
+    // Construct eigen solver object, requesting the largest three eigenvalues
+
+    Spectra::SymEigsShiftSolver<Spectra::SparseSymShiftSolve<
+        double, Eigen::Lower | Eigen::Upper, Eigen::RowMajor, MKL_INT>>
+        eigs(op, 5, 20, 0);
+
+    // Initialize and compute
+    eigs.init();
+    int nconv = utils::Elapse<>::execute("eigen+shift min eigen: ", [&eigs]() {
+      return eigs.compute(Spectra::SortRule::LargestMagn);
+    });
+
+    // Retrieve results
+    Eigen::VectorXd evalues;
+    if (eigs.info() == Spectra::CompInfo::Successful)
+      evalues = eigs.eigenvalues();
+
+    std::cout << "Eigenvalues found:\n" << evalues << std::endl;
+  }
+
   return 0;
 }

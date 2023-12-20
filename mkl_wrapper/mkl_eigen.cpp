@@ -14,7 +14,7 @@ bool mkl_eigen_sparse_d_gv::eigen_solve(double *eigenValues,
   _pm[2] = 0; // select Krylov-Schur method
   _pm[3] = _ncv;
   _pm[4] = _maxiter;
-  _pm[6] = eigenVectors == nullptr ? 0 : 1;
+  _pm[6] = 0;
 
   MKL_INT info;
   std::vector<double> res(_num_req, 0);

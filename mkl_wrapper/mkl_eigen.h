@@ -20,7 +20,6 @@ protected:
   MKL_INT _num_found{0};
 };
 
-
 /*
  eigenvalue solver from mkl
     standard, Ax = λx
@@ -34,8 +33,7 @@ class mkl_eigen_sparse_d_gv : public mkl_eigen {
 public:
   mkl_eigen_sparse_d_gv(mkl_sparse_mat *A, mkl_sparse_mat *B = nullptr);
 
-  virtual bool eigen_solve(double *eigenValues,
-                           double *eigenVectors = nullptr) override;
+  virtual bool eigen_solve(double *eigenValues, double *eigenVectors) override;
   void set_tol(const double tol) { _tol = tol; }
   void which(const char s) { _which = s; }
   void set_ncv(const MKL_INT ncv) { _ncv = ncv; }

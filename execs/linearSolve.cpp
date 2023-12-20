@@ -1,6 +1,7 @@
 
 #include "../mkl_wrapper/mkl_iterative.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
+#include "../utils/timer.h"
 #include "../utils/utils.h"
 #include <Eigen/Sparse>
 #include <algorithm>
@@ -17,7 +18,7 @@ using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
 int main() {
 
-  std::ifstream f("../../data/linear_system/bcsstk26.mtx");
+  std::ifstream f("../../data/linear_system/thermal2.mtx");
 
   // SpMat mat;
   // fast_matrix_market::read_matrix_market_eigen(f, mat);
@@ -68,13 +69,16 @@ int main() {
             << std::endl;
 
   mkl_wrapper::mkl_ilut prec(&mkl_mat);
-  prec.set_tau(1e-10);
-  prec.set_max_fill(50);
-  prec.factorize();
+  prec.set_tau(1e-5);
+  prec.set_max_fill(200);
+  utils::Elapse<>::execute("ilut factorize: ", [&prec]() { prec.factorize(); });
   mkl_wrapper::mkl_fgmres_solver pcg(&mkl_mat, &prec);
-  pcg.SetMaxIterations(1e5);
-  pcg.SetRelTol(1e-10);
-  pcg.solve(rhs.data(), x.data());
+  pcg.set_max_iters(1e5);
+  pcg.set_rel_tol(1e-8);
+  pcg.set_restart_steps(100);
+  utils::Elapse<>::execute("fgmres solve: ", [&pcg, &rhs, &x]() {
+    pcg.solve(rhs.data(), x.data());
+  });
 
   return 0;
 }
