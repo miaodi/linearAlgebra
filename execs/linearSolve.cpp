@@ -1,5 +1,5 @@
 
-#include "../mkl_wrapper/mkl_iterative.h"
+#include "../mkl_wrapper/mkl_solver.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
 #include "../utils/timer.h"
 #include "../utils/utils.h"

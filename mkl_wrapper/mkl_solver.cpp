@@ -1,4 +1,4 @@
-#include "mkl_iterative.h"
+#include "mkl_solver.h"
 #include "mkl_sparse_mat.h"
 #include <cassert>
 #include <cstdio>
@@ -8,7 +8,11 @@
 #define IFORMAT "%lli"
 namespace mkl_wrapper {
 
-bool mkl_pcg_solver::solve(double const *const b, double *x) {
+bool mkl_direct_solver::solve(double const *const b, double *const x) {
+  return true;
+}
+
+bool mkl_pcg_solver::solve(double const *const b, double *const x) {
   // make sure we have a matrix
   if (_A == 0)
     return false;
@@ -115,7 +119,7 @@ bool mkl_pcg_solver::solve(double const *const b, double *x) {
   return (m_fail_max_iters ? bsuccess : true);
 }
 
-bool mkl_fgmres_solver::solve(double const *const b, double *x) {
+bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
   // make sure we have a matrix
   if (_A == 0)
     return false;

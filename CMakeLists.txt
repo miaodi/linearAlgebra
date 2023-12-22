@@ -9,7 +9,7 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(fast_matrix_market)
-find_package (Eigen3 3.4 REQUIRED NO_MODULE)
+find_package (Eigen3 3.3 REQUIRED NO_MODULE)
 
 FetchContent_Declare(
   Spectra
@@ -18,10 +18,13 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(Spectra)
+
 set(MKL_ARCH intel64)
 set(MKL_THREADING gnu_thread)
 set(MKL_INTERFACE ilp64)
+
 find_package(MKL CONFIG REQUIRED)
+find_package(arpackng REQUIRED)
 
 add_subdirectory(utils)
 add_subdirectory(mkl_wrapper)
