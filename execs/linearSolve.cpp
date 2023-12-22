@@ -11,6 +11,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <mkl.h>
 #include <random>
 #include <vector>
 
@@ -18,7 +19,7 @@ using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
 int main() {
 
-  std::ifstream f("../../data/linear_system/thermal2.mtx");
+  std::ifstream f("../../data/linear_system/shipsec5.mtx");
 
   // SpMat mat;
   // fast_matrix_market::read_matrix_market_eigen(f, mat);
@@ -64,21 +65,37 @@ int main() {
 
   std::vector<double> rhs(mkl_mat.rows());
   std::generate(std::begin(rhs), std::end(rhs), gen);
-  std::vector<double> x(mkl_mat.rows());
+  std::vector<double> x_iter(mkl_mat.rows());
+  std::vector<double> x_direct(mkl_mat.rows());
   std::cout << "m: " << mkl_mat.rows() << " , n: " << mkl_mat.cols()
             << std::endl;
 
-  mkl_wrapper::mkl_ilut prec(&mkl_mat);
-  prec.set_tau(1e-5);
-  prec.set_max_fill(200);
-  utils::Elapse<>::execute("ilut factorize: ", [&prec]() { prec.factorize(); });
-  mkl_wrapper::mkl_fgmres_solver pcg(&mkl_mat, &prec);
-  pcg.set_max_iters(1e5);
-  pcg.set_rel_tol(1e-8);
-  pcg.set_restart_steps(100);
-  utils::Elapse<>::execute("fgmres solve: ", [&pcg, &rhs, &x]() {
-    pcg.solve(rhs.data(), x.data());
-  });
-
+  {
+    mkl_wrapper::mkl_ilut prec(&mkl_mat);
+    prec.set_tau(1e-13);
+    prec.set_max_fill(200);
+    utils::Elapse<>::execute("ilut factorize: ",
+                             [&prec]() { prec.factorize(); });
+    mkl_wrapper::mkl_fgmres_solver pcg(&mkl_mat, &prec);
+    pcg.set_max_iters(1e5);
+    pcg.set_rel_tol(1e-10);
+    pcg.set_restart_steps(20);
+    utils::Elapse<>::execute("fgmres solve: ", [&pcg, &rhs, &x_iter]() {
+      pcg.solve(rhs.data(), x_iter.data());
+    });
+  }
+  {
+    mkl_wrapper::mkl_direct_solver pardiso(&mkl_mat);
+    utils::Elapse<>::execute("pardiso factorize: ",
+                             [&pardiso]() { pardiso.factorize(); });
+    utils::Elapse<>::execute("pardiso solve: ", [&pardiso, &rhs, &x_direct]() {
+      pardiso.solve(rhs.data(), x_direct.data());
+    });
+  }
+  cblas_daxpy(mkl_mat.rows(), -1., x_iter.data(), 1, x_direct.data(), 1);
+  std::cout << "norm: "
+            << cblas_dnrm2(mkl_mat.rows(), x_direct.data(), 1) /
+                   cblas_dnrm2(mkl_mat.rows(), x_iter.data(), 1)
+            << std::endl;
   return 0;
 }

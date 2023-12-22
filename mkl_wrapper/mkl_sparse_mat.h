@@ -18,6 +18,8 @@ public:
 
   sparse_matrix_t &mkl_handler() { return _mkl_mat; }
   matrix_descr &mkl_descr() { return _mkl_descr; }
+  sparse_index_base_t mkl_base() const { return _mkl_base; }
+  bool positive_definite() const { return _pd; }
   MKL_INT rows() const { return _nrow; }
   MKL_INT cols() const { return _ncol; }
   MKL_INT nnz() const { return _nnz; }
@@ -38,6 +40,8 @@ protected:
   sparse_status_t _mkl_stat;
   sparse_index_base_t _mkl_base{SPARSE_INDEX_BASE_ZERO};
   matrix_descr _mkl_descr;
+
+  bool _pd{false}; // positive definite
 
   MKL_INT _nrow; // Number of Rows
   MKL_INT _ncol; // Number of Columns

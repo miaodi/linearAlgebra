@@ -8,8 +8,92 @@
 #define IFORMAT "%lli"
 namespace mkl_wrapper {
 
-bool mkl_direct_solver::solve(double const *const b, double *const x) {
+bool mkl_direct_solver::factorize() {
+  // init
+  if (_factorized)
+    return true;
+
+  /* -------------------------------------------------------------------- */
+  /* .. Setup Pardiso control parameters. */
+  /* -------------------------------------------------------------------- */
+
+  _iparm[0] = 0; // iparm[1] - iparm[63] are filled with default values.
+
+  _maxfct = 1; // Maximum number of factors with identical sparsity structure
+               // that must be kept in memory at the same time. In most
+               // applications this value is equal to 1
+
+  _mnum = 1; // Indicates the actual matrix for the solution phase. With this
+             // scalar you can define which matrix to factorize. The value must
+             // be: 1 ≤mnum≤maxfct.
+
+  _msglvl = 1; // the solver prints statistical information to the screen.
+  if (_A->mkl_descr().type == SPARSE_MATRIX_TYPE_SYMMETRIC) {
+    _mtype = _A->positive_definite() ? 2 : -2;
+  } else {
+    _mtype = 11;
+  }
+  pardisoinit(_pt, &_mtype, _iparm);
+
+  /* -------------------------------------------------------------------- */
+  /* .. Reordering and Symbolic Factorization. This step also allocates */
+  /* all memory that is necessary for the factorization. */
+  /* -------------------------------------------------------------------- */
+
+  MKL_INT phase = 12; // Analysis, numerical factorization
+  MKL_INT error = 0;
+  MKL_INT nrhs = 1; /* Number of right hand sides. */
+  MKL_INT n = _A->rows();
+
+  _iparm[34] = _A->mkl_base() == SPARSE_INDEX_BASE_ZERO ? 1 : 0;
+  pardiso(_pt, &_maxfct, &_mnum, &_mtype, &phase, &n, _A->get_av().get(),
+          _A->get_ai().get(), _A->get_aj().get(), NULL, &nrhs, _iparm, &_msglvl,
+          NULL, NULL, &error);
+
+  if (error) {
+    fprintf(stderr, "\nERROR during factorization: ");
+    std::cout << "error: " << error << std::endl;
+    return false;
+  }
+  _factorized = true;
   return true;
+}
+
+bool mkl_direct_solver::solve(double const *const b, double *const x) {
+
+  MKL_INT phase = 33;
+  MKL_INT error = 0;
+
+  _iparm[7] = _max_iter_ref; /* Maximum number of iterative refinement steps */
+
+  MKL_INT nrhs = 1; /* Number of right hand sides. */
+  MKL_INT n = _A->rows();
+
+  pardiso(_pt, &_maxfct, &_mnum, &_mtype, &phase, &n, _A->get_av().get(),
+          _A->get_ai().get(), _A->get_aj().get(), NULL, &nrhs, _iparm, &_msglvl,
+          const_cast<double *const>(b), x, &error);
+
+  if (error) {
+    fprintf(stderr, "\nERROR during solution: ");
+    std::cout << "error: " << error << std::endl;
+    return false;
+  }
+  return true;
+}
+
+mkl_direct_solver::~mkl_direct_solver() {
+
+  if (_factorized) {
+
+    MKL_INT phase = -1;
+    MKL_INT error = 0;
+    MKL_INT nrhs = 1; /* Number of right hand sides. */
+    MKL_INT n = _A->rows();
+
+    pardiso(_pt, &_maxfct, &_mnum, &_mtype, &phase, &n, _A->get_av().get(),
+            _A->get_ai().get(), _A->get_aj().get(), NULL, &nrhs, _iparm,
+            &_msglvl, NULL, NULL, &error);
+  }
 }
 
 bool mkl_pcg_solver::solve(double const *const b, double *const x) {

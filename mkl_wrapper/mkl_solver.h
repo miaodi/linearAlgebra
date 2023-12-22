@@ -5,7 +5,9 @@ class mkl_sparse_mat;
 
 class mkl_solver {
 public:
+  mkl_solver() = default;
   virtual bool solve(double const *const b, double *const x) = 0;
+  virtual ~mkl_solver() {}
 
 protected:
   int _print_level{1}; // output level
@@ -14,13 +16,25 @@ protected:
 class mkl_direct_solver : public mkl_solver {
 public:
   virtual bool solve(double const *const b, double *const x) override;
+  mkl_direct_solver(mkl_sparse_mat *A) : mkl_solver(), _A(A) {}
+  bool factorize();
+  void set_max_iter_ref(int n) { _max_iter_ref = n; }
+  virtual ~mkl_direct_solver() override;
 
 protected:
   bool _factorized{false};
+  mkl_sparse_mat *_A;
+  MKL_INT _iparm[64];
+  MKL_INT _maxfct;
+  MKL_INT _mnum;
+  MKL_INT _mtype;
+  MKL_INT _msglvl;
+  void *_pt[64];
+  MKL_INT _max_iter_ref{1};
 };
 class mkl_iterative_solver : public mkl_solver {
 public:
-  mkl_iterative_solver() {}
+  mkl_iterative_solver() : mkl_solver() {}
 
   void set_max_iters(int n) { _maxiter = n; }
   void set_rel_tol(double tol) { _rel_tol = tol; }
