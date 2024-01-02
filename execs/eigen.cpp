@@ -24,8 +24,8 @@ using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
 int main() {
 
-  std::ifstream fm("../../data/eigenvalue/thermal2.mtx");
-  std::ifstream fk("../../data/eigenvalue/thermal2.mtx");
+  std::ifstream fm("../../data/eigenvalue/bcsstk36.mtx");
+  std::ifstream fk("../../data/eigenvalue/bcsstk36.mtx");
 
   std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   std::vector<double> k_csr_vals;
@@ -55,14 +55,36 @@ int main() {
                                 m_csr_vals_ptr);
 
   std::cout << "m: " << k.rows() << " , n: " << k.cols() << std::endl;
+  // {
+  //   mkl_wrapper::mkl_eigen_sparse_d_gv gv(&k);
+  //   gv.set_tol(3);
+  //   gv.set_num_eigen(5);
+  //   gv.set_ncv(20);
+  //   gv.which('L');
+  //   std::vector<double> eigenvalues(5, 0);
+  //   std::vector<double> eigenvectors(5 * size, 0);
+  //   utils::Elapse<>::execute(
+  //       "mkl max eigen: ", [&gv, &eigenvalues, &eigenvectors]() {
+  //         gv.eigen_solve(eigenvalues.data(), eigenvectors.data());
+  //       });
+  //   for (auto i : eigenvalues) {
+  //     std::cout << i << std::endl;
+  //   }
+  //   gv.which('S');
+  //   utils::Elapse<>::execute(
+  //       "mkl min eigen: ", [&gv, &eigenvalues, &eigenvectors]() {
+  //         gv.eigen_solve(eigenvalues.data(), eigenvectors.data());
+  //       });
+  //   for (auto i : eigenvalues) {
+  //     std::cout << i << std::endl;
+  //   }
+  // }
   {
-    mkl_wrapper::mkl_eigen_sparse_d_gv gv(&k);
-    gv.set_tol(3);
-    gv.set_num_eigen(5);
-    gv.set_ncv(20);
+    mkl_wrapper::power_sparse_gv gv(&k);
+    gv.set_tol(1e-5);
     gv.which('L');
-    std::vector<double> eigenvalues(5, 0);
-    std::vector<double> eigenvectors(5 * size, 0);
+    std::vector<double> eigenvalues(1, 0);
+    std::vector<double> eigenvectors(1 * size, 0);
     utils::Elapse<>::execute(
         "mkl max eigen: ", [&gv, &eigenvalues, &eigenvectors]() {
           gv.eigen_solve(eigenvalues.data(), eigenvectors.data());
@@ -91,7 +113,7 @@ int main() {
 
     Spectra::SymEigsSolver<Spectra::SparseSymMatProd<
         double, Eigen::Lower | Eigen::Upper, Eigen::RowMajor, MKL_INT>>
-        eigs(op, 5, 20);
+        eigs(op, 1, 2);
 
     eigs.init();
     int nconv;
@@ -122,7 +144,7 @@ int main() {
 
     Spectra::SymEigsShiftSolver<Spectra::SparseSymShiftSolve<
         double, Eigen::Lower | Eigen::Upper, Eigen::RowMajor, MKL_INT>>
-        eigs(op, 5, 20, 0);
+        eigs(op, 1, 2, 0);
 
     // Initialize and compute
     eigs.init();

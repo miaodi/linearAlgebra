@@ -27,7 +27,7 @@ bool mkl_direct_solver::factorize() {
              // scalar you can define which matrix to factorize. The value must
              // be: 1 ≤mnum≤maxfct.
 
-  _msglvl = 1; // the solver prints statistical information to the screen.
+  _msglvl = 0; // the solver prints statistical information to the screen.
   if (_A->mkl_descr().type == SPARSE_MATRIX_TYPE_SYMMETRIC) {
     _mtype = _A->positive_definite() ? 2 : -2;
   } else {

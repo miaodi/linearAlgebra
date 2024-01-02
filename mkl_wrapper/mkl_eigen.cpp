@@ -1,5 +1,8 @@
 #include "mkl_eigen.h"
+#include "../utils/utils.h"
+#include "mkl_solver.h"
 #include "mkl_sparse_mat.h"
+#include <cmath>
 #include <iostream>
 #include <vector>
 
@@ -40,6 +43,61 @@ bool mkl_eigen_sparse_d_gv::eigen_solve(double *eigenValues,
     std::cout << "mkl_sparse_d_gv output info: " << info << std::endl;
     return false;
   }
+  return true;
+}
+
+power_sparse_gv::power_sparse_gv(mkl_sparse_mat *A, mkl_sparse_mat *B)
+    : mkl_eigen(A, B) {}
+
+void power_sparse_gv::set_num_eigen(const MKL_INT num) { _num_req = 1; }
+
+bool power_sparse_gv::eigen_solve(double *eigenValues, double *eigenVectors) {
+  MKL_INT size = _A->rows();
+  mkl_sparse_mat *mat{nullptr};
+  mkl_direct_solver *solver{nullptr};
+  if (_which == 'L') {
+    mat = _A;
+    if (_B) {
+      solver = new mkl_direct_solver(_B);
+      solver->factorize();
+    }
+  } else {
+    solver = new mkl_direct_solver(_A);
+    solver->factorize();
+    if (_B) {
+      mat = _B;
+    }
+  }
+  std::vector<double> cur(size), prev(size), tmp(size);
+  double norm2;
+  for (int i = 0; i < size; i++) {
+    cur[i] = utils::random<double>(-1.0, 1.0);
+  }
+  norm2 = cblas_dnrm2(size, cur.data(), 1);
+  cblas_dscal(size, 1. / norm2, cur.data(), 1);
+  for (int i = 0; i < _maxiter; i++) {
+    std::swap(cur, prev);
+    if (mat) {
+      mat->mult_vec(prev.data(), tmp.data());
+    }
+    if (solver) {
+      if (mat)
+        solver->solve(tmp.data(), cur.data());
+      else
+        solver->solve(prev.data(), cur.data());
+    } else if (mat) {
+      std::swap(tmp, cur);
+    }
+
+    norm2 = cblas_dnrm2(size, cur.data(), 1);
+    cblas_dscal(size, 1. / norm2, cur.data(), 1);
+    double angle = std::acos(cblas_ddot(size, cur.data(), 1, prev.data(), 1));
+    if (angle < _tol)
+      break;
+  }
+  eigenValues[0] = _which == 'L' ? norm2 : 1. / norm2;
+  if (solver)
+    delete solver;
   return true;
 }
 } // namespace mkl_wrapper

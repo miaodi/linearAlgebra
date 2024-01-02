@@ -32,6 +32,7 @@ protected:
   void *_pt[64];
   MKL_INT _max_iter_ref{1};
 };
+
 class mkl_iterative_solver : public mkl_solver {
 public:
   mkl_iterative_solver() : mkl_solver() {}

@@ -1,12 +1,15 @@
 #pragma once
-#include <Eigen/Sparse>
 #include <fast_matrix_market/fast_matrix_market.hpp>
 #include <iostream>
+#include <random>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+namespace Eigen {
+template <typename T, typename ind> class Triplet;
+}
 namespace utils {
 std::pair<int32_t, int32_t>
 ReadFromBinary(const std::string &filename,
@@ -52,4 +55,19 @@ void read_matrix_market_csr(
     rows[i + 1] += rows[i];
   }
 }
+
+template <typename Numeric, typename Generator = std::mt19937>
+Numeric random(Numeric from, Numeric to) {
+  thread_local static Generator gen(std::random_device{}());
+
+  using dist_type =
+      typename std::conditional<std::is_integral<Numeric>::value,
+                                std::uniform_int_distribution<Numeric>,
+                                std::uniform_real_distribution<Numeric>>::type;
+
+  thread_local static dist_type dist;
+
+  return dist(gen, typename dist_type::param_type{from, to});
+}
+
 } // namespace utils

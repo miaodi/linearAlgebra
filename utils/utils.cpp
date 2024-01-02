@@ -1,5 +1,6 @@
 #include "utils.h"
 #include <fstream>
+#include <Eigen/Sparse>
 namespace utils {
 std::pair<int32_t, int32_t>
 ReadFromBinary(const std::string &filename,

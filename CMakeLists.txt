@@ -13,9 +13,7 @@ find_package (Eigen3 3.3 REQUIRED NO_MODULE)
 
 FetchContent_Declare(
   Spectra
-  GIT_REPOSITORY https://github.com/yixuan/spectra.git
-  GIT_TAG master
-  GIT_SHALLOW TRUE
+  URL https://codeload.github.com/yixuan/spectra/tar.gz/refs/tags/v1.0.1
 )
 FetchContent_MakeAvailable(Spectra)
 
