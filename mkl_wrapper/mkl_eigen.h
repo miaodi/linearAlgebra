@@ -1,7 +1,5 @@
 #pragma once
-
-#include <memory>
-#include <mkl.h>
+#include <mkl_types.h>
 
 namespace mkl_wrapper {
 class mkl_sparse_mat;
@@ -14,8 +12,8 @@ public:
   virtual void set_num_eigen(const MKL_INT num) { _num_req = num; }
 
 protected:
-  mkl_sparse_mat *_A;
-  mkl_sparse_mat *_B;
+  mkl_sparse_mat *_A{nullptr};
+  mkl_sparse_mat *_B{nullptr};
 
   MKL_INT _num_req{1};
   MKL_INT _num_found{0};

@@ -3,7 +3,7 @@ project(tests)
 
 add_executable(linearSolve linearSolve.cpp)
 # target_include_directories(test1 PRIVATE Utils)
-target_link_libraries(linearSolve PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper)
+target_link_libraries(linearSolve PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper TBB::tbb)
 
 add_executable(analysisBinary analysisBinary.cpp)
 # target_include_directories(analysisBinary PRIVATE Utils)

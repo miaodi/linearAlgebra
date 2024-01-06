@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <iostream>
 #include <vector>
+#include <mkl.h>
 
 #define IFORMAT "%lli"
 namespace mkl_wrapper {
@@ -62,6 +63,52 @@ bool mkl_direct_solver::factorize() {
 bool mkl_direct_solver::solve(double const *const b, double *const x) {
 
   MKL_INT phase = 33;
+  MKL_INT error = 0;
+
+  _iparm[7] = _max_iter_ref; /* Maximum number of iterative refinement steps */
+
+  MKL_INT nrhs = 1; /* Number of right hand sides. */
+  MKL_INT n = _A->rows();
+
+  pardiso(_pt, &_maxfct, &_mnum, &_mtype, &phase, &n, _A->get_av().get(),
+          _A->get_ai().get(), _A->get_aj().get(), NULL, &nrhs, _iparm, &_msglvl,
+          const_cast<double *const>(b), x, &error);
+
+  if (error) {
+    fprintf(stderr, "\nERROR during solution: ");
+    std::cout << "error: " << error << std::endl;
+    return false;
+  }
+  return true;
+}
+
+bool mkl_direct_solver::forward_substitution(double const *const b,
+                                             double *const x) {
+
+  MKL_INT phase = 331;
+  MKL_INT error = 0;
+
+  _iparm[7] = _max_iter_ref; /* Maximum number of iterative refinement steps */
+
+  MKL_INT nrhs = 1; /* Number of right hand sides. */
+  MKL_INT n = _A->rows();
+
+  pardiso(_pt, &_maxfct, &_mnum, &_mtype, &phase, &n, _A->get_av().get(),
+          _A->get_ai().get(), _A->get_aj().get(), NULL, &nrhs, _iparm, &_msglvl,
+          const_cast<double *const>(b), x, &error);
+
+  if (error) {
+    fprintf(stderr, "\nERROR during solution: ");
+    std::cout << "error: " << error << std::endl;
+    return false;
+  }
+  return true;
+}
+
+bool mkl_direct_solver::backward_substitution(double const *const b,
+                                              double *const x) {
+
+  MKL_INT phase = 333;
   MKL_INT error = 0;
 
   _iparm[7] = _max_iter_ref; /* Maximum number of iterative refinement steps */

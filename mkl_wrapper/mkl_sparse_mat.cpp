@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <iostream>
 #include <vector>
+#include <mkl_rci.h>
 
 namespace mkl_wrapper {
 
@@ -29,14 +30,50 @@ mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
   sp_fill();
 }
 
+mkl_sparse_mat::mkl_sparse_mat(sparse_matrix_t mkl_mat) {
+  _mkl_mat = mkl_mat;
+
+  if (_mkl_mat == nullptr) {
+    std::cerr << "sparse_matrix_t is an empty pointer, failed to create "
+                 "mkl_sparse_mat."
+              << std::endl;
+    return;
+  }
+  MKL_INT *rows_start;
+  MKL_INT *rows_end;
+  MKL_INT *col_index;
+  double *values;
+
+  _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
+  if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
+    std::cout << "mkl reorder CSR failed, code: " << _mkl_stat << "\n";
+  }
+  _mkl_descr.type = SPARSE_MATRIX_TYPE_GENERAL;
+  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
+  _mkl_descr.mode = SPARSE_FILL_MODE_FULL;
+  _mkl_stat =
+      mkl_sparse_d_export_csr(_mkl_mat, &_mkl_base, &_nrow, &_ncol, &rows_start,
+                              &rows_end, &col_index, &values);
+
+  _nnz = rows_start[_nrow];
+  _ai = std::shared_ptr<MKL_INT[]>(rows_start, [](MKL_INT[]) {});
+  _aj = std::shared_ptr<MKL_INT[]>(col_index, [](MKL_INT[]) {});
+  _av = std::shared_ptr<double[]>(values, [](double[]) {});
+  if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
+    std::cout << "MKL EXPORT CSR FAILED, CODE: " << _mkl_stat << "\n";
+  }
+}
+
 mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
                                const std::shared_ptr<MKL_INT[]> &ai,
                                const std::shared_ptr<MKL_INT[]> &aj,
-                               const std::shared_ptr<double[]> &av) {
+                               const std::shared_ptr<double[]> &av,
+                               const sparse_index_base_t base) {
   _nrow = row;
   _ncol = col;
 
-  _nnz = ai[_nrow];
+  _mkl_base = base;
+  _nnz = _mkl_base == SPARSE_INDEX_BASE_ZERO ? ai[_nrow] : ai[_nrow] - 1;
 
   _ai = ai;
   _aj = aj;
@@ -90,7 +127,7 @@ void mkl_sparse_mat::sp_fill() {
       mkl_sparse_d_create_csr(&_mkl_mat, _mkl_base, _nrow, _ncol, _ai.get(),
                               _ai.get() + 1, _aj.get(), _av.get());
   if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
-    std::cout << "Matrix is not created" << std::endl;
+    std::cerr << "Matrix is not created" << std::endl;
   }
 
   _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
@@ -106,6 +143,34 @@ void mkl_sparse_mat::mult_vec(double const *const b, double *const x) {
                               _mkl_descr, b, 0.0, x);
 }
 
+mkl_sparse_mat mkl_sparse_sum(mkl_sparse_mat &A, mkl_sparse_mat &B, double c) {
+  A.to_zero_based();
+  B.to_zero_based();
+  sparse_matrix_t result;
+  auto status = mkl_sparse_d_add(SPARSE_OPERATION_NON_TRANSPOSE,
+                                 A.mkl_handler(), c, B.mkl_handler(), &result);
+  if (status != SPARSE_STATUS_SUCCESS) {
+
+    std::cerr << "mkl sparse sum failed, code: " << status << std::endl;
+    return mkl_sparse_mat();
+  }
+  return mkl_sparse_mat(result);
+}
+
+// opA(A)*B
+mkl_sparse_mat mkl_sparse_mult(mkl_sparse_mat &A, mkl_sparse_mat &B,
+                               const sparse_operation_t opA) {
+  A.to_zero_based();
+  B.to_zero_based();
+  sparse_matrix_t result;
+  auto status = mkl_sparse_spmm(opA, A.mkl_handler(), B.mkl_handler(), &result);
+  if (status != SPARSE_STATUS_SUCCESS) {
+
+    std::cerr << "mkl sparse multiply failed, code: " << status << std::endl;
+    return mkl_sparse_mat();
+  }
+  return mkl_sparse_mat(result);
+}
 mkl_ilu0::mkl_ilu0(mkl_sparse_mat *A) : mkl_sparse_mat(), _A(A) {
 
   _nrow = _A->rows();

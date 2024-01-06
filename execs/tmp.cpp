@@ -4,7 +4,7 @@
 #include "../mkl_wrapper/mkl_sparse_mat.h"
 #include "../utils/timer.h"
 #include "../utils/utils.h"
-#include <arpack.h>
+#include "arpack.h"
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -19,8 +19,8 @@
 */
 int main(int argc, char **argv) {
 
-  std::ifstream fm("../../data/eigenvalue/bcsstk36.mtx");
-  std::ifstream fk("../../data/eigenvalue/bcsstk36.mtx");
+  std::ifstream fm("../../data/eigenvalue/parabolic_fem.mtx");
+  std::ifstream fk("../../data/eigenvalue/parabolic_fem.mtx");
 
   std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   std::vector<double> k_csr_vals;
@@ -54,9 +54,9 @@ int main(int argc, char **argv) {
   char which[2] = {'L', 'A'};
   char bMat = 'I';
   a_int nev = 1;
-  double tol = 1e-8;
+  double tol = 1e-2;
   std::vector<double> resid(n);
-  a_int ncv = 3;
+  a_int ncv = 2;
   a_int ldv = n;
   std::vector<double> v(ldv * ncv);
   std::vector<a_int> iparam(11, 0);
@@ -91,6 +91,7 @@ int main(int argc, char **argv) {
   /* create solver for y = inv(K)*x*/
   mkl_wrapper::mkl_direct_solver pardiso(&k);
   pardiso.factorize();
+  // Implicitly Restarted Arnoldi Iteration
   do {
     dsaupd_c(&ido, &bMat, n, which, nev, tol, resid.data(), ncv, v.data(), ldv,
              iparam.data(), ipntr.data(), workd.data(), workl.data(), lworkl,
@@ -107,7 +108,7 @@ int main(int argc, char **argv) {
     double *X = workd.data() + x_idx; // Arpack provides X.
     double *Y = workd.data() + y_idx; // Arpack provides Y.
 
-    std::cout << "ido: " << ido << std::endl;
+    // std::cout << "ido: " << ido << std::endl;
     if (ido == -1) {
       pardiso.solve(X, Y);
     } else if (ido == 1) {
@@ -121,10 +122,27 @@ int main(int argc, char **argv) {
 
   } while (ido != 99);
 
+  // Extract eigen pairs
   std::cout << "nconv: " << iparam[4] << std::endl;
   std::cout << "niter: " << iparam[2] << std::endl;
 
-  a_int rvec = 1;
+  a_int rvec = 0;
   char howmny = 'A';
+  std::vector<a_int> select(ncv, 1);
+  std::vector<double> dr(
+      nev + 1,
+      0.); // D contains the Ritz value approximations to the eigenvalues
+  std::vector<double> di(nev + 1, 0.);
+
+  std::vector<double> z(n * (nev + 1), 0.); // Caution: nev+1 for dneupd.
+
+  double sigma_real{0.}, sigma_image{0.};
+  dseupd_c(rvec, &howmny, select.data(), dr.data(), z.data(), z.size(),
+           sigma_real, &bMat, n, which, nev, tol, resid.data(), ncv, v.data(),
+           v.size(), iparam.data(), ipntr.data(), workd.data(), workl.data(),
+           lworkl, &info);
+  for (int i = 0; i < nev; i++) {
+    std::cout << dr[i] << std::endl;
+  }
   return 0;
 }

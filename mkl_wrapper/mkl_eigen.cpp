@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include <mkl.h>
 
 namespace mkl_wrapper {
 mkl_eigen_sparse_d_gv::mkl_eigen_sparse_d_gv(mkl_sparse_mat *A,
@@ -75,7 +76,8 @@ bool power_sparse_gv::eigen_solve(double *eigenValues, double *eigenVectors) {
   }
   norm2 = cblas_dnrm2(size, cur.data(), 1);
   cblas_dscal(size, 1. / norm2, cur.data(), 1);
-  for (int i = 0; i < _maxiter; i++) {
+  int iter;
+  for (iter = 0; iter < _maxiter; iter++) {
     std::swap(cur, prev);
     if (mat) {
       mat->mult_vec(prev.data(), tmp.data());
@@ -95,6 +97,7 @@ bool power_sparse_gv::eigen_solve(double *eigenValues, double *eigenVectors) {
     if (angle < _tol)
       break;
   }
+  std::cout << "niter: " << iter + 1 << std::endl;
   eigenValues[0] = _which == 'L' ? norm2 : 1. / norm2;
   if (solver)
     delete solver;

@@ -6,7 +6,7 @@
 
 int main() {
   std::vector<Eigen::Triplet<double, int32_t>> tuples;
-  auto mn = utils::ReadFromBinary(
+  auto mn = utils::ReadFromBinaryEigen(
       "/u/dimiao/dimiao/work/vinay/mopt_tcase5/n92_Kr_40_16", tuples);
   std::cout << "m: " << mn.first << " n: " << mn.second << std::endl;
 

@@ -1,17 +1,21 @@
 #pragma once
 #include <memory>
-#include <mkl.h>
+#include <mkl_spblas.h>
 namespace mkl_wrapper {
 
 // Derived Class for storing Matrices in CSR Form with MKL Matrix Datatype
 class mkl_sparse_mat {
+
 public:
   mkl_sparse_mat() = default;
   mkl_sparse_mat(const MKL_INT row, const MKL_INT col, const MKL_INT nnz);
   mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
                  const std::shared_ptr<MKL_INT[]> &ai,
                  const std::shared_ptr<MKL_INT[]> &aj,
-                 const std::shared_ptr<double[]> &av);
+                 const std::shared_ptr<double[]> &av,
+                 const sparse_index_base_t base = SPARSE_INDEX_BASE_ZERO);
+
+  mkl_sparse_mat(sparse_matrix_t mkl_mat);
 
   ~mkl_sparse_mat();
   virtual void sp_fill();
@@ -51,6 +55,15 @@ protected:
   std::shared_ptr<MKL_INT[]> _aj{nullptr}; // Column Index
   std::shared_ptr<double[]> _av{nullptr};  // Value Array
 };
+
+// c*A+B
+mkl_sparse_mat mkl_sparse_sum(mkl_sparse_mat &A, mkl_sparse_mat &B,
+                              double c = 1.);
+
+// opA(A)*B
+mkl_sparse_mat
+mkl_sparse_mult(mkl_sparse_mat &A, mkl_sparse_mat &B,
+                const sparse_operation_t opA = SPARSE_OPERATION_NON_TRANSPOSE);
 
 class mkl_ilu0 : public mkl_sparse_mat {
 public:

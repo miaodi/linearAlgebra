@@ -1,5 +1,5 @@
 #pragma once
-#include <mkl.h>
+#include <mkl_types.h>
 namespace mkl_wrapper {
 class mkl_sparse_mat;
 
@@ -16,6 +16,8 @@ protected:
 class mkl_direct_solver : public mkl_solver {
 public:
   virtual bool solve(double const *const b, double *const x) override;
+  bool forward_substitution(double const *const b, double *const x);
+  bool backward_substitution(double const *const b, double *const x);
   mkl_direct_solver(mkl_sparse_mat *A) : mkl_solver(), _A(A) {}
   bool factorize();
   void set_max_iter_ref(int n) { _max_iter_ref = n; }
@@ -76,4 +78,5 @@ protected:
 
   MKL_INT _num_restart{0};
 };
+
 } // namespace mkl_wrapper

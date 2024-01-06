@@ -5,6 +5,7 @@
 #include "../utils/utils.h"
 #include <Eigen/Sparse>
 #include <algorithm>
+#include <execution>
 #include <fast_matrix_market/app/Eigen.hpp>
 #include <fstream>
 #include <ios>
@@ -18,8 +19,36 @@
 using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
 int main() {
+  {
 
-  std::ifstream f("../../data/linear_system/shipsec5.mtx");
+    std::string m_mat("../../data/eigenvalue/M_sparse.bin");
+
+    std::vector<MKL_INT> csr_rows, csr_cols;
+    std::vector<double> csr_vals;
+    utils::ReadFromBinaryCSR(m_mat, csr_rows, csr_cols, csr_vals, SPARSE_INDEX_BASE_ONE);
+
+    std::shared_ptr<double[]> csr_vals_ptr(new double[csr_vals.size()]);
+
+    utils::Elapse<>::execute("par_unseq: ", [&csr_vals_ptr, &csr_vals]() {
+      for (int i = 0; i < 1000; i++)
+        std::copy(std::execution::par_unseq, csr_vals.begin(), csr_vals.end(),
+                  csr_vals_ptr.get());
+    });
+
+    utils::Elapse<>::execute("seq: ", [&csr_vals_ptr, &csr_vals]() {
+      for (int i = 0; i < 1000; i++)
+        std::copy(std::execution::seq, csr_vals.begin(), csr_vals.end(),
+                  csr_vals_ptr.get());
+    });
+
+    utils::Elapse<>::execute("par: ", [&csr_vals_ptr, &csr_vals]() {
+      for (int i = 0; i < 1000; i++)
+        std::copy(std::execution::par, csr_vals.begin(), csr_vals.end(),
+                  csr_vals_ptr.get());
+    });
+  }
+
+  std::ifstream f("../../data/linear_system/thermal2.mtx");
 
   // SpMat mat;
   // fast_matrix_market::read_matrix_market_eigen(f, mat);
@@ -32,6 +61,7 @@ int main() {
   utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
   SpMatMap mat_csr(csr_rows.size() - 1, csr_rows.size() - 1, csr_cols.size(),
                    csr_rows.data(), csr_cols.data(), csr_vals.data());
+
   // std::cout << mat_csr.rows() << " , " << mat_csr.cols() << std::endl;
   // std::cout << mat_csr << std::endl << std::endl;
   // SpMat res = mat_csr - mat;
