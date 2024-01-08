@@ -3,8 +3,8 @@
 #include <cassert>
 #include <cstdio>
 #include <iostream>
-#include <vector>
 #include <mkl.h>
+#include <vector>
 
 #define IFORMAT "%lli"
 namespace mkl_wrapper {
@@ -382,5 +382,23 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
   // }
 
   return (m_fail_max_iters ? bsuccess : true);
+}
+
+solver_factory::solver_factory() {
+  _methods["direct"] = [](mkl_sparse_mat &m) {
+    return std::make_unique<mkl_direct_solver>(&m);
+  };
+
+  _methods["gmres"] = [](mkl_sparse_mat &m) {
+    return std::make_unique<mkl_fgmres_solver>(&m);
+  };
+}
+
+bool solver_factory::reg(const std::string &name, create_method func) {
+  if (auto it = _methods.find(name); it == _methods.end()) {
+    _methods[name] = func;
+    return true;
+  }
+  return false;
 }
 } // namespace mkl_wrapper

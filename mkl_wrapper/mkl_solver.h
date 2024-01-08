@@ -1,5 +1,9 @@
 #pragma once
+#include <functional>
+#include <map>
+#include <memory>
 #include <mkl_types.h>
+#include <string>
 namespace mkl_wrapper {
 class mkl_sparse_mat;
 
@@ -79,4 +83,17 @@ protected:
   MKL_INT _num_restart{0};
 };
 
+class solver_factory {
+public:
+  using solver_ptr = std::unique_ptr<mkl_solver>;
+  using create_method = std::function<solver_ptr(mkl_sparse_mat &)>;
+
+public:
+  solver_factory();
+  bool reg(const std::string &name, create_method func);
+  solver_ptr create(const std::string &name, mkl_sparse_mat &);
+
+private:
+  std::map<std::string, create_method> _methods;
+};
 } // namespace mkl_wrapper

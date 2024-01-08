@@ -138,4 +138,18 @@ Numeric random(Numeric from, Numeric to) {
   return dist(gen, typename dist_type::param_type{from, to});
 }
 
+template <typename T> class singleton {
+private:
+  singleton(); // Disallow instantiation outside of the class.
+public:
+  singleton(const singleton &) = delete;
+  singleton &operator=(const singleton &) = delete;
+  singleton(singleton &&) = delete;
+  singleton &operator=(singleton &&) = delete;
+
+  static T &instance() {
+    static T inst;
+    return inst;
+  }
+};
 } // namespace utils

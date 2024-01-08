@@ -11,12 +11,15 @@ public:
   virtual bool eigen_solve(double *eigenValues, double *eigenVectors) = 0;
   virtual void set_num_eigen(const MKL_INT num) { _num_req = num; }
 
+  void set_max_iter(const MKL_INT iters) { _maxiter = iters; }
+
 protected:
   mkl_sparse_mat *_A{nullptr};
   mkl_sparse_mat *_B{nullptr};
 
   MKL_INT _num_req{1};
   MKL_INT _num_found{0};
+  MKL_INT _maxiter{10000}; // max num of iterations
 };
 
 /*
@@ -41,7 +44,6 @@ protected:
   MKL_INT _pm[128] = {0};
   double _tol{6}; // 1e-{_tol}+1
   MKL_INT _ncv{10};
-  MKL_INT _maxiter{10000}; // max num of iterations
   char _which{'S'};
 };
 
@@ -58,8 +60,10 @@ public:
 
 protected:
   double _tol{1e-7};
-  MKL_INT _maxiter{1000}; // max num of iterations
   char _which{'S'};
   // mkl_solver *_solver;
 };
+
+// arpack wrapper
+class arpack_gv : public mkl_eigen {};
 } // namespace mkl_wrapper
