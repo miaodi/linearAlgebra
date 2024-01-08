@@ -8,6 +8,23 @@ class mkl_sparse_mat {
 
 public:
   mkl_sparse_mat() = default;
+
+  mkl_sparse_mat(const mkl_sparse_mat &) = delete; // non construction-copyable
+  mkl_sparse_mat &operator=(const mkl_sparse_mat &) = delete; // non copyable
+
+  // move constructor
+  mkl_sparse_mat(mkl_sparse_mat &&src) {
+    // just swap the array pointers...
+    src.swap(*this);
+  }
+
+  // move assignment operator
+  mkl_sparse_mat &operator=(mkl_sparse_mat &&rhs) {
+    mkl_sparse_mat temp(std::move(rhs)); // moves the array
+    temp.swap(*this);
+    return *this;
+  }
+
   mkl_sparse_mat(const MKL_INT row, const MKL_INT col, const MKL_INT nnz);
   mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
                  const std::shared_ptr<MKL_INT[]> &ai,
@@ -27,7 +44,7 @@ public:
   MKL_INT rows() const { return _nrow; }
   MKL_INT cols() const { return _ncol; }
   MKL_INT nnz() const { return _nnz; }
-  void mult_vec(double const *const b, double *const x);
+  bool mult_vec(double const *const b, double *const x);
 
   std::shared_ptr<MKL_INT[]> get_ai() { return _ai; }
   std::shared_ptr<MKL_INT[]> get_aj() { return _aj; }
@@ -38,6 +55,22 @@ public:
   void to_one_based();
 
   void to_zero_based();
+
+  void swap(mkl_sparse_mat &other) {
+    
+    std::swap(_mkl_mat, other._mkl_mat);
+    std::swap(_mkl_stat, other._mkl_stat);
+    std::swap(_mkl_base, other._mkl_base);
+    std::swap(_mkl_descr, other._mkl_descr);
+    std::swap(_mkl_descr, other._mkl_descr);
+    std::swap(_pd, other._pd);
+    std::swap(_nrow, other._nrow);
+    std::swap(_ncol, other._ncol);
+    std::swap(_nnz, other._nnz);
+    std::swap(_ai, other._ai);
+    std::swap(_aj, other._aj);
+    std::swap(_av, other._av);
+  }
 
 protected:
   sparse_matrix_t _mkl_mat;
@@ -107,6 +140,11 @@ class mkl_sparse_mat_sym : public mkl_sparse_mat {
 public:
   mkl_sparse_mat_sym(mkl_sparse_mat *A);
   virtual void sp_fill();
+};
+
+class mkl_sparse_mat_diag : public mkl_sparse_mat {
+public:
+  mkl_sparse_mat_diag(const MKL_INT size, const double val);
 };
 
 // Incomplete Cholesky ic0

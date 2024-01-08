@@ -4,8 +4,8 @@
 #include <cmath>
 #include <cstdio>
 #include <iostream>
-#include <vector>
 #include <mkl_rci.h>
+#include <vector>
 
 namespace mkl_wrapper {
 
@@ -138,9 +138,10 @@ void mkl_sparse_mat::sp_fill() {
 
 mkl_sparse_mat::~mkl_sparse_mat() { mkl_sparse_destroy(_mkl_mat); }
 
-void mkl_sparse_mat::mult_vec(double const *const b, double *const x) {
+bool mkl_sparse_mat::mult_vec(double const *const b, double *const x) {
   _mkl_stat = mkl_sparse_d_mv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, _mkl_mat,
                               _mkl_descr, b, 0.0, x);
+  return _mkl_stat == SPARSE_STATUS_SUCCESS;
 }
 
 mkl_sparse_mat mkl_sparse_sum(mkl_sparse_mat &A, mkl_sparse_mat &B, double c) {
@@ -343,6 +344,28 @@ void mkl_sparse_mat_sym::sp_fill() {
   _mkl_descr.type = SPARSE_MATRIX_TYPE_SYMMETRIC;
   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
   _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
+}
+
+mkl_sparse_mat_diag::mkl_sparse_mat_diag(const MKL_INT size, const double val)
+    : mkl_sparse_mat() {
+
+  _nrow = size;
+  _ncol = size;
+  _nnz = size;
+
+  _ai.reset(new MKL_INT[_nrow + 1]);
+  _aj.reset(new MKL_INT[_nnz]);
+  _av.reset(new double[_nnz]);
+
+  for (MKL_INT i = 0; i < _nnz; i++) {
+    _aj[i] = i;
+    _av[i] = val;
+  }
+  _ai[0] = 0;
+  for (MKL_INT i = 1; i < _nrow + 1; i++) {
+    _ai[i] = _ai[i - 1] + 1;
+  }
+  sp_fill();
 }
 
 mkl_ic0::mkl_ic0(mkl_sparse_mat *A) : mkl_sparse_mat_sym(A) {

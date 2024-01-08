@@ -386,7 +386,9 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
 
 solver_factory::solver_factory() {
   _methods["direct"] = [](mkl_sparse_mat &m) {
-    return std::make_unique<mkl_direct_solver>(&m);
+    auto solver = std::make_unique<mkl_direct_solver>(&m);
+    solver->factorize();
+    return std::move(solver);
   };
 
   _methods["gmres"] = [](mkl_sparse_mat &m) {
@@ -400,5 +402,12 @@ bool solver_factory::reg(const std::string &name, create_method func) {
     return true;
   }
   return false;
+}
+
+solver_factory::solver_ptr solver_factory::create(const std::string &name,
+                                                  mkl_sparse_mat &m) {
+  if (auto it = _methods.find(name); it != _methods.end())
+    return it->second(m);
+  return nullptr;
 }
 } // namespace mkl_wrapper
