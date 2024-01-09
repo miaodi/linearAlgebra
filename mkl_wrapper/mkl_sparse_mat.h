@@ -26,6 +26,8 @@ public:
                  const std::shared_ptr<double[]> &av,
                  const sparse_index_base_t base = SPARSE_INDEX_BASE_ZERO);
 
+  // make a deep copy of mkl_mat so that mkl_sparse_mat will always keep the
+  // ownership of csr data
   mkl_sparse_mat(sparse_matrix_t mkl_mat);
 
   ~mkl_sparse_mat();

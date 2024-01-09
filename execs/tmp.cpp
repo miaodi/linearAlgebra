@@ -18,10 +18,11 @@ void register_solvers() {
   using create_method = typename mkl_wrapper::solver_factory::create_method;
   create_method func = [](mkl_wrapper::mkl_sparse_mat &A) {
     auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&A);
-    prec->set_tau(1e-8);
-    prec->set_max_fill(std::min(A.max_nz() * 3, A.cols()));
+    prec->set_tau(1e-12);
+    prec->set_max_fill(std::min(A.avg_nz() * 3, A.cols()));
+    prec->factorize();
     auto solver = std::make_unique<mkl_wrapper::mkl_fgmres_solver>(&A, prec);
-
+    // prec->print();
     solver->set_max_iters(1e5);
     solver->set_rel_tol(1e-10);
     solver->set_restart_steps(20);
@@ -124,7 +125,7 @@ int main(int argc, char **argv) {
   }
   register_solvers();
 
-  int freq_size = 2;
+  int freq_size = 10;
   std::vector<double> frequencies(freq_size);
   for (int i = 0; i < freq_size; i++) {
     frequencies[i] = min + i * (max - min) / (freq_size - 1);
@@ -140,11 +141,11 @@ int main(int argc, char **argv) {
           utils::singleton<mkl_wrapper::solver_factory>::instance().create(
               "gmres+ilut", mat);
       solver->solve(rhs.data(), res.data());
-      for(auto i:res){
-        std::cout<<i<<" ";
+      for (auto i : res) {
+        std::cout << i << " ";
       }
-      std::cout<<std::endl;
-      std::cout<<std::endl;
+      std::cout << std::endl;
+      std::cout << std::endl;
     }
   }
   return 0;

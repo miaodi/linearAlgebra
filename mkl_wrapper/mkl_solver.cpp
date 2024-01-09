@@ -285,7 +285,11 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
 
   // set the desired parameters:
   ipar[4] = _maxiter; // max nr of iterations
-  ipar[7] = 1;        // do the stopping test for maximal number of iterations
+  ipar[6] =
+      0; // do not output warning message. Note dfgmres_check generate false
+         // warnings
+         // https://community.intel.com/t5/Intel-oneAPI-Math-Kernel-Library/False-warnings-from-dfgmres-check/td-p/1276972
+  ipar[7] = 1; // do the stopping test for maximal number of iterations
   // ipar[8] = 1;        // do residual stopping test
   // ipar[9] = 0;             // do not request for the user defined stopping
 
