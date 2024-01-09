@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
   }
   register_solvers();
 
-  int freq_size = 10;
+  int freq_size = 2;
   std::vector<double> frequencies(freq_size);
   for (int i = 0; i < freq_size; i++) {
     frequencies[i] = min + i * (max - min) / (freq_size - 1);

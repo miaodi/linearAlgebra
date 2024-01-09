@@ -304,7 +304,6 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
   dfgmres_check(&n, x, b, &rci_request, ipar, dpar, ptmp);
   if (rci_request != 0 && rci_request != -1001)
     return false;
-
   // loop until converged
   bool bsuccess = false;
   bool bdone = false;
@@ -312,6 +311,7 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
     // compute the solution by RCI
     dfgmres(&n, x, const_cast<double *const>(b), &rci_request, ipar, dpar,
             ptmp);
+
     switch (rci_request) {
     case 0: // solution converged!
     {
@@ -359,9 +359,11 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
        * If RCI_request=4, then check if the norm of the next generated vector
        *is not zero up to rounding and computational errors. The norm is
        *contained in dpar[6] parameter
+       *this parameter is the coefficient hk+1,k of the Hessenberg matrix.
        *---------------------------------------------------------------------------*/
       // std::cout<<"dpar[6]: "<<dpar[6]<<std::endl;
       if (dpar[6] < 1.0E-13) {
+        std::cout << "dpar[6] < 1.0E-13 finished the gmres process\n";
         bsuccess = true;
         bdone = true;
       }
@@ -379,7 +381,6 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
   ipar[12] = 0;
   dfgmres_get(&n, x, const_cast<double *const>(b), &rci_request, ipar, dpar,
               ptmp, &niter);
-
   // if (_print_level > 0) {
   // fprintf(stderr, "%3d = %lg (%lg), %lg (%lg)\n", ipar[3], dpar[4], dpar[3],
   //         dpar[6], dpar[7]);

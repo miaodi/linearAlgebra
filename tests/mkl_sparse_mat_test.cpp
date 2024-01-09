@@ -47,7 +47,7 @@ A = 1 2 3      B = 1 0 0
     0 4 5          2 4 0
     0 0 6          3 5 6
 */
-TEST(sparse_matrix, mult) {
+TEST(sparse_matrix, mult_mat) {
   std::shared_ptr<MKL_INT[]> aiA(new MKL_INT[4]{0, 3, 5, 6});
   std::shared_ptr<MKL_INT[]> ajA(new MKL_INT[6]{0, 1, 2, 1, 2, 2});
   std::shared_ptr<double[]> avA(new double[6]{1, 2, 3, 4, 5, 6});
@@ -87,5 +87,30 @@ TEST(sparse_matrix, mult) {
   for (int i = 0; i < 6; i++) {
     EXPECT_EQ(ajCT[i], CT.get_aj()[i]);
     EXPECT_EQ(avCT[i], CT.get_av()[i]);
+  }
+}
+
+/*
+A = 1 2 3     
+    0 4 5    
+    0 0 6    
+*/
+TEST(sparse_matrix, mult_vec) {
+  std::shared_ptr<MKL_INT[]> aiA(new MKL_INT[4]{0, 3, 5, 6});
+  std::shared_ptr<MKL_INT[]> ajA(new MKL_INT[6]{0, 1, 2, 1, 2, 2});
+  std::shared_ptr<double[]> avA(new double[6]{1, 2, 3, 4, 5, 6});
+
+  mkl_wrapper::mkl_sparse_mat A(3, 3, aiA, ajA, avA);
+
+  std::vector<double> rhs{1, 2, 3};
+  std::vector<double> x(3);
+  A.mult_vec(rhs.data(), x.data());
+  for(auto i:x){
+    std::cout<<i<<std::endl;
+  }
+  A.to_one_based();
+  A.mult_vec(rhs.data(), x.data());
+  for(auto i:x){
+    std::cout<<i<<std::endl;
   }
 }

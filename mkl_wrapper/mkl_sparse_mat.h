@@ -59,6 +59,8 @@ public:
 
   void print() const;
 
+  void check() const;
+
 protected:
   sparse_matrix_t _mkl_mat{nullptr};
   sparse_status_t _mkl_stat;

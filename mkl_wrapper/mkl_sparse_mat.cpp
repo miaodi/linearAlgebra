@@ -5,8 +5,14 @@
 #include <cstdio>
 #include <iostream>
 #include <mkl_rci.h>
+#include <mkl_sparse_handle.h>
 #include <vector>
 
+#if !defined(MKL_ILP64)
+#define IFORMAT "%i"
+#else
+#define IFORMAT "%lli"
+#endif
 namespace mkl_wrapper {
 
 mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
@@ -31,7 +37,6 @@ mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
 }
 
 mkl_sparse_mat::mkl_sparse_mat(const mkl_sparse_mat &other) {
-
   _nrow = other._nrow;
   _ncol = other._ncol;
   _nnz = other._nnz;
@@ -71,11 +76,9 @@ mkl_sparse_mat &mkl_sparse_mat::operator=(mkl_sparse_mat &&rhs) {
 }
 
 void mkl_sparse_mat::swap(mkl_sparse_mat &other) {
-
   std::swap(_mkl_mat, other._mkl_mat);
   std::swap(_mkl_stat, other._mkl_stat);
   std::swap(_mkl_base, other._mkl_base);
-  std::swap(_mkl_descr, other._mkl_descr);
   std::swap(_mkl_descr, other._mkl_descr);
   std::swap(_pd, other._pd);
   std::swap(_nrow, other._nrow);
@@ -102,9 +105,7 @@ mkl_sparse_mat::mkl_sparse_mat(sparse_matrix_t mkl_mat) {
   if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
     std::cout << "mkl reorder CSR failed, code: " << _mkl_stat << "\n";
   }
-  _mkl_descr.type = SPARSE_MATRIX_TYPE_GENERAL;
-  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
-  _mkl_descr.mode = SPARSE_FILL_MODE_FULL;
+
   _mkl_stat =
       mkl_sparse_d_export_csr(mkl_mat, &_mkl_base, &_nrow, &_ncol, &rows_start,
                               &rows_end, &col_index, &values);
@@ -113,7 +114,7 @@ mkl_sparse_mat::mkl_sparse_mat(sparse_matrix_t mkl_mat) {
     std::cout << "MKL EXPORT CSR FAILED, CODE: " << _mkl_stat << "\n";
   }
 
-  _nnz = rows_start[_nrow];
+  _nnz = rows_start[_nrow] - _mkl_base;
 
   _ai.reset(new MKL_INT[_nrow + 1]);
   std::copy(rows_start, rows_start + _nrow + 1, _ai.get());
@@ -209,11 +210,13 @@ bool mkl_sparse_mat::mult_vec(double const *const b, double *const x) {
 }
 
 void mkl_sparse_mat::print() const {
+  std::cout << "sparse_index_base_t: " << _mkl_base << std::endl;
   std::cout << "ai: ";
   for (MKL_INT i = 0; i <= _nrow; i++) {
     std::cout << _ai[i] << " ";
   }
   std::cout << std::endl;
+  std::cout << "nnz: " << _nnz << std::endl;
   std::cout << "aj: ";
   for (MKL_INT i = 0; i < _nnz; i++) {
     std::cout << _aj[i] << " ";
@@ -227,6 +230,58 @@ void mkl_sparse_mat::print() const {
   std::cout << std::endl;
 }
 
+void mkl_sparse_mat::check() const {
+  sparse_checker_error_values check_err_val;
+  sparse_struct pt;
+  int error = 0;
+
+  sparse_matrix_checker_init(&pt);
+  pt.n = _nrow;
+  pt.csr_ia = _ai.get();
+  pt.csr_ja = _aj.get();
+  if (_mkl_base == SPARSE_INDEX_BASE_ZERO)
+    pt.indexing = MKL_ZERO_BASED;
+  else
+    pt.indexing = MKL_ONE_BASED;
+  if (_mkl_descr.type == SPARSE_MATRIX_TYPE_GENERAL) {
+    pt.matrix_structure = MKL_GENERAL_STRUCTURE;
+  } else if (_mkl_descr.type == SPARSE_MATRIX_TYPE_SYMMETRIC) {
+    pt.matrix_structure = MKL_STRUCTURAL_SYMMETRIC;
+  } else if (_mkl_descr.type == SPARSE_MATRIX_TYPE_TRIANGULAR) {
+    if (_mkl_descr.mode == SPARSE_FILL_MODE_LOWER) {
+      pt.matrix_structure = MKL_LOWER_TRIANGULAR;
+    } else {
+      pt.matrix_structure = MKL_UPPER_TRIANGULAR;
+    }
+  }
+  pt.print_style = MKL_C_STYLE;
+  pt.message_level = MKL_PRINT;
+
+  check_err_val = sparse_matrix_checker(&pt);
+
+  printf("Matrix check details: (" IFORMAT ", " IFORMAT ", " IFORMAT ")\n",
+         pt.check_result[0], pt.check_result[1], pt.check_result[2]);
+
+  if (check_err_val == MKL_SPARSE_CHECKER_NONTRIANGULAR) {
+    printf("Matrix check result: MKL_SPARSE_CHECKER_NONTRIANGULAR\n");
+    error = 0;
+  } else {
+    if (check_err_val == MKL_SPARSE_CHECKER_SUCCESS) {
+      printf("Matrix check result: MKL_SPARSE_CHECKER_SUCCESS\n");
+    }
+    if (check_err_val == MKL_SPARSE_CHECKER_NON_MONOTONIC) {
+      printf("Matrix check result: MKL_SPARSE_CHECKER_NON_MONOTONIC\n");
+    }
+    if (check_err_val == MKL_SPARSE_CHECKER_OUT_OF_RANGE) {
+      printf("Matrix check result: MKL_SPARSE_CHECKER_OUT_OF_RANGE\n");
+    }
+    if (check_err_val == MKL_SPARSE_CHECKER_NONORDERED) {
+      printf("Matrix check result: MKL_SPARSE_CHECKER_NONORDERED\n");
+    }
+    error = 1;
+  }
+} // namespace mkl_wrapper
+
 MKL_INT mkl_sparse_mat::max_nz() const {
   MKL_INT res = 0;
   for (MKL_INT i = 0; i < _nrow; i++) {
@@ -236,8 +291,12 @@ MKL_INT mkl_sparse_mat::max_nz() const {
 }
 
 mkl_sparse_mat mkl_sparse_sum(mkl_sparse_mat &A, mkl_sparse_mat &B, double c) {
-  A.to_zero_based();
-  B.to_zero_based();
+  if (A.mkl_base() != B.mkl_base()) {
+    std::cout << "A and B are in different index base! Will change them to "
+                 "zero based\n";
+    A.to_zero_based();
+    B.to_zero_based();
+  }
   sparse_matrix_t result;
   auto status = mkl_sparse_d_add(SPARSE_OPERATION_NON_TRANSPOSE,
                                  A.mkl_handler(), c, B.mkl_handler(), &result);
