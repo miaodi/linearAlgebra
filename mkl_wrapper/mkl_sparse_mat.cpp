@@ -30,6 +30,62 @@ mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
   sp_fill();
 }
 
+mkl_sparse_mat::mkl_sparse_mat(const mkl_sparse_mat &other) {
+
+  _nrow = other._nrow;
+  _ncol = other._ncol;
+  _nnz = other._nnz;
+
+  _ai.reset(new MKL_INT[_nrow + 1]);
+  _aj.reset(new MKL_INT[_nnz]);
+  _av.reset(new double[_nnz]);
+
+  for (MKL_INT i = 0; i < _nnz; i++) {
+    _aj[i] = other._aj[i];
+    _av[i] = other._av[i];
+  }
+
+  for (MKL_INT i = 0; i < _nrow + 1; i++) {
+    _ai[i] = other._ai[i];
+  }
+
+  sp_fill();
+}
+
+mkl_sparse_mat &mkl_sparse_mat::operator=(const mkl_sparse_mat &other) {
+  mkl_sparse_mat tmp(other);
+  this->swap(tmp);
+  return *this;
+}
+
+mkl_sparse_mat::mkl_sparse_mat(mkl_sparse_mat &&src) {
+  // just swap the array pointers...
+  src.swap(*this);
+}
+
+// move assignment operator
+mkl_sparse_mat &mkl_sparse_mat::operator=(mkl_sparse_mat &&rhs) {
+  mkl_sparse_mat temp(std::move(rhs)); // moves the array
+  temp.swap(*this);
+  return *this;
+}
+
+void mkl_sparse_mat::swap(mkl_sparse_mat &other) {
+
+  std::swap(_mkl_mat, other._mkl_mat);
+  std::swap(_mkl_stat, other._mkl_stat);
+  std::swap(_mkl_base, other._mkl_base);
+  std::swap(_mkl_descr, other._mkl_descr);
+  std::swap(_mkl_descr, other._mkl_descr);
+  std::swap(_pd, other._pd);
+  std::swap(_nrow, other._nrow);
+  std::swap(_ncol, other._ncol);
+  std::swap(_nnz, other._nnz);
+  std::swap(_ai, other._ai);
+  std::swap(_aj, other._aj);
+  std::swap(_av, other._av);
+}
+
 mkl_sparse_mat::mkl_sparse_mat(sparse_matrix_t mkl_mat) {
   _mkl_mat = mkl_mat;
 
@@ -172,6 +228,7 @@ mkl_sparse_mat mkl_sparse_mult(mkl_sparse_mat &A, mkl_sparse_mat &B,
   }
   return mkl_sparse_mat(result);
 }
+
 mkl_ilu0::mkl_ilu0(mkl_sparse_mat *A) : mkl_sparse_mat(), _A(A) {
 
   _nrow = _A->rows();

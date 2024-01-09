@@ -10,7 +10,10 @@
 namespace mkl_wrapper {
 mkl_eigen_sparse_d_gv::mkl_eigen_sparse_d_gv(mkl_sparse_mat *A,
                                              mkl_sparse_mat *B)
-    : mkl_eigen(A, B) {}
+    : mkl_eigen(A, B) {
+  _tol = 6; // tolerance = 1e-{_tol}+1
+}
+
 bool mkl_eigen_sparse_d_gv::eigen_solve(double *eigenValues,
                                         double *eigenVectors) {
 
@@ -21,22 +24,22 @@ bool mkl_eigen_sparse_d_gv::eigen_solve(double *eigenValues,
   _pm[6] = 0;
 
   MKL_INT info;
-  std::vector<double> res(_num_req, 0);
+  std::vector<double> res(_nev, 0);
 
   /* Step 1. Call mkl_sparse_ee_init to define default input values */
   mkl_sparse_ee_init(_pm);
   if (_B) {
     _A->to_one_based();
     _B->to_one_based();
-    info = mkl_sparse_d_gv(&_which, _pm, _A->mkl_handler(), _A->mkl_descr(),
-                           _B->mkl_handler(), _B->mkl_descr(), _num_req,
+    info = mkl_sparse_d_gv(&_which[0], _pm, _A->mkl_handler(), _A->mkl_descr(),
+                           _B->mkl_handler(), _B->mkl_descr(), _nev,
                            &_num_found, eigenValues, eigenVectors, res.data());
     _A->to_zero_based();
     _B->to_zero_based();
   } else {
     _A->to_one_based();
-    info = mkl_sparse_d_ev(&_which, _pm, _A->mkl_handler(), _A->mkl_descr(),
-                           _num_req, &_num_found, eigenValues, eigenVectors,
+    info = mkl_sparse_d_ev(&_which[0], _pm, _A->mkl_handler(), _A->mkl_descr(),
+                           _nev, &_num_found, eigenValues, eigenVectors,
                            res.data());
     _A->to_zero_based();
   }
@@ -50,13 +53,11 @@ bool mkl_eigen_sparse_d_gv::eigen_solve(double *eigenValues,
 power_sparse_gv::power_sparse_gv(mkl_sparse_mat *A, mkl_sparse_mat *B)
     : mkl_eigen(A, B) {}
 
-void power_sparse_gv::set_num_eigen(const MKL_INT num) { _num_req = 1; }
-
 bool power_sparse_gv::eigen_solve(double *eigenValues, double *eigenVectors) {
   MKL_INT size = _A->rows();
   mkl_sparse_mat *mat{nullptr};
   mkl_direct_solver *solver{nullptr};
-  if (_which == 'L') {
+  if (_which[0] == 'L') {
     mat = _A;
     if (_B) {
       solver = new mkl_direct_solver(_B);
@@ -98,7 +99,7 @@ bool power_sparse_gv::eigen_solve(double *eigenValues, double *eigenVectors) {
       break;
   }
   std::cout << "niter: " << iter + 1 << std::endl;
-  eigenValues[0] = _which == 'L' ? norm2 : 1. / norm2;
+  eigenValues[0] = _which[0] == 'L' ? norm2 : 1. / norm2;
   if (solver)
     delete solver;
   return true;
@@ -118,20 +119,24 @@ int arpack_gv::mode() const {
   }
 }
 
-std::function<bool(double const *const b, double *const x)>
+std::function<bool(double *const b, double *const x)>
 arpack_gv::op(const int mode) {
+  // https://help.scilab.org/docs/6.1.0/en_US/dnaupd.html
   switch (mode) {
   case 1: {
-    return [this](double const *const b, double *const x) -> bool {
+    return [this](double *const b, double *const x) -> bool {
       return this->_A->mult_vec(b, x);
     };
   }
   case 2: {
     _solver =
-        utils::singleton<solver_factory>::instance().create("direct", *_A);
-    return [this](double const *const b, double *const x) -> bool {
-      this->_B->mult_vec(b, tmp.data());
-      return this->_solver->solve(tmp.data(), x);
+        utils::singleton<solver_factory>::instance().create("direct", *_B);
+    tmp.resize(_A->rows());
+    return [this](double *const b, double *const x) -> bool {
+      this->_A->mult_vec(b, this->tmp.data());
+
+      std::copy(tmp.begin(), tmp.end(), b);
+      return this->_solver->solve(this->tmp.data(), x);
     };
   }
   case 3: {
@@ -139,13 +144,14 @@ arpack_gv::op(const int mode) {
     _solver =
         utils::singleton<solver_factory>::instance().create("direct", _op);
     tmp.resize(_A->rows());
-    return [this](double const *const b, double *const x) -> bool {
-      this->_B->mult_vec(b, tmp.data());
-      return this->_solver->solve(tmp.data(), x);
+    return [this](double *const b, double *const x) -> bool {
+      this->_B->mult_vec(b, this->tmp.data());
+      return this->_solver->solve(this->tmp.data(), x);
     };
   }
   default:
-    return [](double const *const b, double *const x) -> bool { return false; };
+    std::cerr << "incorrect mode type" << std::endl;
+    return [](double *const b, double *const x) -> bool { return false; };
   }
 }
 
@@ -156,7 +162,6 @@ bool arpack_gv::eigen_solve(double *eigenValues, double *eigenVectors) {
   // arpack params
   a_int ido{0};
   a_int n = size;
-  char which[2] = {'L', 'A'};
   char bMat = _B == nullptr ? 'I' : 'G';
 
   std::vector<double> resid(n);
@@ -193,7 +198,69 @@ bool arpack_gv::eigen_solve(double *eigenValues, double *eigenVectors) {
   a_int info = 0;
 
   /* prepare op*/
+  auto op_func = this->op(mode);
+  do {
+    dsaupd_c(&ido, &bMat, n, _which.c_str(), _nev, _tol, resid.data(), _ncv,
+             v.data(), ldv, iparam.data(), ipntr.data(), workd.data(),
+             workl.data(), lworkl, &info);
 
+    if (info == 1)
+      std::cerr << "Error: dsaupd: maximum number of iterations taken. "
+                   "Increase --maxIt..."
+                << std::endl;
+    if (info == 3)
+      std::cerr << "Error: dsaupd: no shifts could be applied. Increase "
+                   "--nbCV..."
+                << std::endl;
+    if (info == -9)
+      std::cerr << "Error: dsaupd: starting vector is zero. Retry: play "
+                   "with shift..."
+                << std::endl;
+    if (info < 0) {
+      std::cerr << "Error: dsaupd with info " << info << ", nbIt " << iparam[2]
+                << std::endl;
+      return false;
+    }
+
+    a_int x_idx = ipntr[0] - 1; // 0-based (Fortran is 1-based).
+    a_int y_idx = ipntr[1] - 1; // 0-based (Fortran is 1-based).
+
+    double *X = workd.data() + x_idx; // Arpack provides X.
+    double *Y = workd.data() + y_idx; // Arpack provides Y.
+
+    // std::cout << "ido: " << ido << std::endl;
+    if (ido == -1) {
+      op_func(X, Y);
+    } else if (ido == 1) {
+      op_func(X, Y);
+    } else if (ido == 2) {
+      if (iparam[6] == 1)
+        std::copy(X, X + n, Y);
+      else if (iparam[6] == 2)
+        this->_B->mult_vec(X, Y); // Y = B * X.
+      else if (iparam[6] == 3)
+        this->_B->mult_vec(X, Y); // Y = B * X.
+    } else if (ido != 99) {
+      std::cerr << "Error: unexpected ido " << ido << std::endl;
+      return false;
+    }
+
+  } while (ido != 99);
+
+  // Get arpack results (computed eigen values and vectors).
+
+  // Extract eigen pairs
+  std::cout << "nconv: " << iparam[4] << std::endl;
+  std::cout << "niter: " << iparam[2] << std::endl;
+
+  a_int rvec = 0;
+  char howmny = 'A';
+  std::vector<a_int> select(_ncv, 1);
+
+  dseupd_c(rvec, &howmny, select.data(), eigenValues, eigenVectors, n * _nev,
+           _shift, &bMat, n, _which.c_str(), _nev, _tol, resid.data(), _ncv,
+           v.data(), v.size(), iparam.data(), ipntr.data(), workd.data(),
+           workl.data(), lworkl, &info);
   return true;
 }
 } // namespace mkl_wrapper

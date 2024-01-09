@@ -1,4 +1,5 @@
 /build
 /.vscode
-/data
+/data/linear_system
+/data/eigenvalue
 /release

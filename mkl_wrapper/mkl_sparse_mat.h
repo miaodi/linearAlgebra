@@ -9,21 +9,15 @@ class mkl_sparse_mat {
 public:
   mkl_sparse_mat() = default;
 
-  mkl_sparse_mat(const mkl_sparse_mat &) = delete; // non construction-copyable
-  mkl_sparse_mat &operator=(const mkl_sparse_mat &) = delete; // non copyable
+  // copy constructor
+  mkl_sparse_mat(const mkl_sparse_mat &);
+  // assignment operator
+  mkl_sparse_mat &operator=(const mkl_sparse_mat &);
 
   // move constructor
-  mkl_sparse_mat(mkl_sparse_mat &&src) {
-    // just swap the array pointers...
-    src.swap(*this);
-  }
-
+  mkl_sparse_mat(mkl_sparse_mat &&src);
   // move assignment operator
-  mkl_sparse_mat &operator=(mkl_sparse_mat &&rhs) {
-    mkl_sparse_mat temp(std::move(rhs)); // moves the array
-    temp.swap(*this);
-    return *this;
-  }
+  mkl_sparse_mat &operator=(mkl_sparse_mat &&rhs);
 
   mkl_sparse_mat(const MKL_INT row, const MKL_INT col, const MKL_INT nnz);
   mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
@@ -56,21 +50,7 @@ public:
 
   void to_zero_based();
 
-  void swap(mkl_sparse_mat &other) {
-    
-    std::swap(_mkl_mat, other._mkl_mat);
-    std::swap(_mkl_stat, other._mkl_stat);
-    std::swap(_mkl_base, other._mkl_base);
-    std::swap(_mkl_descr, other._mkl_descr);
-    std::swap(_mkl_descr, other._mkl_descr);
-    std::swap(_pd, other._pd);
-    std::swap(_nrow, other._nrow);
-    std::swap(_ncol, other._ncol);
-    std::swap(_nnz, other._nnz);
-    std::swap(_ai, other._ai);
-    std::swap(_aj, other._aj);
-    std::swap(_av, other._av);
-  }
+  void swap(mkl_sparse_mat &other);
 
 protected:
   sparse_matrix_t _mkl_mat;
