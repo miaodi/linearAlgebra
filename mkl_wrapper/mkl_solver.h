@@ -56,20 +56,21 @@ protected:
 
 class mkl_pcg_solver : public mkl_iterative_solver {
 public:
-  mkl_pcg_solver(mkl_sparse_mat *A, mkl_sparse_mat *P = nullptr)
+  mkl_pcg_solver(mkl_sparse_mat *A, std::shared_ptr<mkl_sparse_mat> P = nullptr)
       : mkl_iterative_solver(), _A(A), _P(P) {}
 
   virtual bool solve(double const *const b, double *const x) override;
 
 protected:
   mkl_sparse_mat *_A;
-  mkl_sparse_mat *_P;
+  std::shared_ptr<mkl_sparse_mat> _P;
 };
 
 class mkl_fgmres_solver : public mkl_iterative_solver {
 public:
-  mkl_fgmres_solver(mkl_sparse_mat *A, mkl_sparse_mat *P = nullptr,
-                    mkl_sparse_mat *R = nullptr)
+  mkl_fgmres_solver(mkl_sparse_mat *A,
+                    std::shared_ptr<mkl_sparse_mat> P = nullptr,
+                    std::shared_ptr<mkl_sparse_mat> R = nullptr)
       : mkl_iterative_solver(), _A(A), _P(P), _R(R) {}
 
   virtual bool solve(double const *const b, double *const x) override;
@@ -77,8 +78,8 @@ public:
 
 protected:
   mkl_sparse_mat *_A;
-  mkl_sparse_mat *_P{nullptr}; // left preconditioner
-  mkl_sparse_mat *_R{nullptr}; // right preconditioner
+  std::shared_ptr<mkl_sparse_mat> _P{nullptr}; // left preconditioner
+  std::shared_ptr<mkl_sparse_mat> _R{nullptr}; // right preconditioner
 
   MKL_INT _num_restart{0};
 };

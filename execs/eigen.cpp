@@ -23,8 +23,8 @@
 using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
 int main() {
-  std::string m_mat("../../data/eigenvalue/M_sparse.bin");
-  std::string k_mat("../../data/eigenvalue/K_sparse.bin");
+  std::string m_mat("../../data/shared/M.bin");
+  std::string k_mat("../../data/shared/K.bin");
   std::ifstream fm(m_mat);
   std::ifstream fk(k_mat);
 
@@ -104,7 +104,7 @@ int main() {
 {{mkl_wrapper::mkl_eigen_sparse_d_gv gv(&k, &m);
 gv.set_tol(1);
 gv.set_num_eigen(1);
-gv.set_ncv(10);
+gv.set_ncv(3);
 gv.which("L");
 std::vector<double> eigenvalues(1, 0);
 std::vector<double> eigenvectors(1 * size, 0);
@@ -121,7 +121,7 @@ for (auto i : eigenvalues) {
   mkl_wrapper::mkl_eigen_sparse_d_gv gv(&m, &k);
   gv.set_tol(1);
   gv.set_num_eigen(1);
-  gv.set_ncv(10);
+  gv.set_ncv(3);
   gv.which("L");
   std::vector<double> eigenvalues(1, 0);
   std::vector<double> eigenvectors(1 * size, 0);
@@ -156,6 +156,7 @@ for (auto i : eigenvalues) {
     std::cout << i << std::endl;
   }
 }
+
 
 // SpMatMap mat_csr(size, size, k_csr_cols.size(), k_csr_rows.data(),
 //                  k_csr_cols.data(), k_csr_vals.data());

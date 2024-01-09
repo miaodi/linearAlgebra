@@ -192,12 +192,42 @@ void mkl_sparse_mat::sp_fill() {
   _mkl_descr.mode = SPARSE_FILL_MODE_FULL;
 }
 
-mkl_sparse_mat::~mkl_sparse_mat() { mkl_sparse_destroy(_mkl_mat); }
+mkl_sparse_mat::~mkl_sparse_mat() {
+  if (_mkl_mat)
+    mkl_sparse_destroy(_mkl_mat);
+}
 
 bool mkl_sparse_mat::mult_vec(double const *const b, double *const x) {
   _mkl_stat = mkl_sparse_d_mv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, _mkl_mat,
                               _mkl_descr, b, 0.0, x);
   return _mkl_stat == SPARSE_STATUS_SUCCESS;
+}
+
+void mkl_sparse_mat::print() const {
+  std::cout << "ai: ";
+  for (MKL_INT i = 0; i <= _nrow; i++) {
+    std::cout << _ai[i] << " ";
+  }
+  std::cout << std::endl;
+  std::cout << "aj: ";
+  for (MKL_INT i = 0; i < _nnz; i++) {
+    std::cout << _aj[i] << " ";
+  }
+  std::cout << std::endl;
+  std::cout << "av: ";
+  for (MKL_INT i = 0; i < _nnz; i++) {
+    std::cout << _av[i] << " ";
+  }
+  std::cout << std::endl;
+  std::cout << std::endl;
+}
+
+MKL_INT mkl_sparse_mat::max_nz() const {
+  MKL_INT res = 0;
+  for (MKL_INT i = 0; i < _nrow; i++) {
+    res = std::max(res, _ai[i + 1] - _ai[i]);
+  }
+  return res;
 }
 
 mkl_sparse_mat mkl_sparse_sum(mkl_sparse_mat &A, mkl_sparse_mat &B, double c) {

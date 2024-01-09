@@ -19,34 +19,35 @@
 using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
 int main() {
-  {
+  // {
 
-    std::string m_mat("../../data/eigenvalue/M_sparse.bin");
+  //   std::string m_mat("../../data/eigenvalue/M_sparse.bin");
 
-    std::vector<MKL_INT> csr_rows, csr_cols;
-    std::vector<double> csr_vals;
-    utils::ReadFromBinaryCSR(m_mat, csr_rows, csr_cols, csr_vals, SPARSE_INDEX_BASE_ONE);
+  //   std::vector<MKL_INT> csr_rows, csr_cols;
+  //   std::vector<double> csr_vals;
+  //   utils::ReadFromBinaryCSR(m_mat, csr_rows, csr_cols, csr_vals,
+  //                            SPARSE_INDEX_BASE_ONE);
 
-    std::shared_ptr<double[]> csr_vals_ptr(new double[csr_vals.size()]);
+  //   std::shared_ptr<double[]> csr_vals_ptr(new double[csr_vals.size()]);
 
-    utils::Elapse<>::execute("par_unseq: ", [&csr_vals_ptr, &csr_vals]() {
-      for (int i = 0; i < 1000; i++)
-        std::copy(std::execution::par_unseq, csr_vals.begin(), csr_vals.end(),
-                  csr_vals_ptr.get());
-    });
+  //   utils::Elapse<>::execute("par_unseq: ", [&csr_vals_ptr, &csr_vals]() {
+  //     for (int i = 0; i < 1000; i++)
+  //       std::copy(std::execution::par_unseq, csr_vals.begin(), csr_vals.end(),
+  //                 csr_vals_ptr.get());
+  //   });
 
-    utils::Elapse<>::execute("seq: ", [&csr_vals_ptr, &csr_vals]() {
-      for (int i = 0; i < 1000; i++)
-        std::copy(std::execution::seq, csr_vals.begin(), csr_vals.end(),
-                  csr_vals_ptr.get());
-    });
+  //   utils::Elapse<>::execute("seq: ", [&csr_vals_ptr, &csr_vals]() {
+  //     for (int i = 0; i < 1000; i++)
+  //       std::copy(std::execution::seq, csr_vals.begin(), csr_vals.end(),
+  //                 csr_vals_ptr.get());
+  //   });
 
-    utils::Elapse<>::execute("par: ", [&csr_vals_ptr, &csr_vals]() {
-      for (int i = 0; i < 1000; i++)
-        std::copy(std::execution::par, csr_vals.begin(), csr_vals.end(),
-                  csr_vals_ptr.get());
-    });
-  }
+  //   utils::Elapse<>::execute("par: ", [&csr_vals_ptr, &csr_vals]() {
+  //     for (int i = 0; i < 1000; i++)
+  //       std::copy(std::execution::par, csr_vals.begin(), csr_vals.end(),
+  //                 csr_vals_ptr.get());
+  //   });
+  // }
 
   std::ifstream f("../../data/linear_system/thermal2.mtx");
 
@@ -101,12 +102,12 @@ int main() {
             << std::endl;
 
   {
-    mkl_wrapper::mkl_ilut prec(&mkl_mat);
-    prec.set_tau(1e-13);
-    prec.set_max_fill(200);
+    auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&mkl_mat);
+    prec->set_tau(1e-8);
+    prec->set_max_fill(200);
     utils::Elapse<>::execute("ilut factorize: ",
-                             [&prec]() { prec.factorize(); });
-    mkl_wrapper::mkl_fgmres_solver pcg(&mkl_mat, &prec);
+                             [&prec]() { prec->factorize(); });
+    mkl_wrapper::mkl_fgmres_solver pcg(&mkl_mat, prec);
     pcg.set_max_iters(1e5);
     pcg.set_rel_tol(1e-10);
     pcg.set_restart_steps(20);

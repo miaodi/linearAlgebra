@@ -12,19 +12,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
-/*Mode 3: K * x = lambda * M * x, K symmetric, M symmetric positive
-   semi-definite ===> OP = (inv[K - sigma * M]) * M and B = M. ===>
-   Shift-and-Invert mode
 
-*/
+void register_solvers() {
+  using solver_ptr = typename mkl_wrapper::solver_factory::solver_ptr;
+  using create_method = typename mkl_wrapper::solver_factory::create_method;
+  create_method func = [](mkl_wrapper::mkl_sparse_mat &A) {
+    auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&A);
+    prec->set_tau(1e-8);
+    prec->set_max_fill(std::min(A.max_nz() * 3, A.cols()));
+    auto solver = std::make_unique<mkl_wrapper::mkl_fgmres_solver>(&A, prec);
+
+    solver->set_max_iters(1e5);
+    solver->set_rel_tol(1e-10);
+    solver->set_restart_steps(20);
+    return std::move(solver);
+  };
+  utils::singleton<mkl_wrapper::solver_factory>::instance().reg("gmres+ilut",
+                                                                func);
+}
+
 int main(int argc, char **argv) {
-
-  std::ifstream fm("../../data/eigenvalue/parabolic_fem.mtx");
-  std::ifstream fk("../../data/eigenvalue/parabolic_fem.mtx");
+  std::string m_mat("../../data/shared/M.bin");
+  std::string k_mat("../../data/shared/K.bin");
+  std::string g_mat("../../data/shared/G.bin");
 
   std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   std::vector<double> k_csr_vals;
-  utils::read_matrix_market_csr(fk, k_csr_rows, k_csr_cols, k_csr_vals);
+  utils::ReadFromBinaryCSR(k_mat, k_csr_rows, k_csr_cols, k_csr_vals,
+                           SPARSE_INDEX_BASE_ONE);
   std::shared_ptr<MKL_INT[]> k_csr_rows_ptr(k_csr_rows.data(),
                                             [](MKL_INT[]) {});
   std::shared_ptr<MKL_INT[]> k_csr_cols_ptr(k_csr_cols.data(),
@@ -33,116 +48,104 @@ int main(int argc, char **argv) {
 
   std::vector<MKL_INT> m_csr_rows, m_csr_cols;
   std::vector<double> m_csr_vals;
-  utils::read_matrix_market_csr(fm, m_csr_rows, m_csr_cols, m_csr_vals);
+  utils::ReadFromBinaryCSR(m_mat, m_csr_rows, m_csr_cols, m_csr_vals,
+                           SPARSE_INDEX_BASE_ONE);
   std::shared_ptr<MKL_INT[]> m_csr_rows_ptr(m_csr_rows.data(),
                                             [](MKL_INT[]) {});
   std::shared_ptr<MKL_INT[]> m_csr_cols_ptr(m_csr_cols.data(),
                                             [](MKL_INT[]) {});
   std::shared_ptr<double[]> m_csr_vals_ptr(m_csr_vals.data(), [](double[]) {});
 
+  std::vector<MKL_INT> g_csr_rows, g_csr_cols;
+  std::vector<double> g_csr_vals;
+  utils::ReadFromBinaryCSR(g_mat, g_csr_rows, g_csr_cols, g_csr_vals,
+                           SPARSE_INDEX_BASE_ONE);
+
+  for (int i = g_csr_rows.size(); i < m_csr_rows.size(); i++) {
+    g_csr_rows.push_back(g_csr_rows.back());
+  }
+  // g_csr_rows.back() += 1;
+  // g_csr_cols.push_back(2);
+  // g_csr_vals.push_back(0);
+
+  std::shared_ptr<MKL_INT[]> g_csr_rows_ptr(g_csr_rows.data(),
+                                            [](MKL_INT[]) {});
+  std::shared_ptr<MKL_INT[]> g_csr_cols_ptr(g_csr_cols.data(),
+                                            [](MKL_INT[]) {});
+  std::shared_ptr<double[]> g_csr_vals_ptr(g_csr_vals.data(), [](double[]) {});
+
   const MKL_INT size = m_csr_rows.size() - 1;
 
   mkl_wrapper::mkl_sparse_mat k(size, size, k_csr_rows_ptr, k_csr_cols_ptr,
-                                k_csr_vals_ptr);
+                                k_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
   mkl_wrapper::mkl_sparse_mat m(size, size, m_csr_rows_ptr, m_csr_cols_ptr,
-                                m_csr_vals_ptr);
+                                m_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
 
-  std::cout << "m: " << k.rows() << " , n: " << k.cols() << std::endl;
-  // arpack params
-  a_int ido{0};
-  a_int n = size;
-  char which[2] = {'L', 'A'};
-  char bMat = 'I';
-  a_int nev = 1;
-  double tol = 1e-2;
-  std::vector<double> resid(n);
-  a_int ncv = 2;
-  a_int ldv = n;
-  std::vector<double> v(ldv * ncv);
-  std::vector<a_int> iparam(11, 0);
-  iparam[0] =
-      1; // exact shifts with respect to the reduced tridiagonal matrix T.
+  mkl_wrapper::mkl_sparse_mat g(size, 2, g_csr_rows_ptr, g_csr_cols_ptr,
+                                g_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
+  std::vector<double> rhs(size);
+  std::vector<double> select(2, 0);
+  std::vector<double> res(size);
+  select[1] = 1;
+  g.mult_vec(select.data(), rhs.data());
 
-  /*iparam[1] No longer referenced.*/
-  int max_it = 1000;
-  int mode = 3;
-  iparam[2] = max_it;
-  iparam[3] = 1; // NB: blocksize to be used in the recurrence. The code
-                 // currently works only for NB = 1.
-  iparam[4] = 0; // NCONV: number of "converged" Ritz values.
-  /*iparam[5] IUPD No longer referenced. Implicit restarting is ALWAYS used. */
-  iparam[6] = mode; // MODE On INPUT determines what type of eigenproblem is
-                    // being solved. Must be 1,2,3,4,5;
+  double max, min;
+  {
 
-  /*rest iparam are output*/
+    mkl_wrapper::arpack_gv ar_gv(&k, &m);
 
-  std::vector<a_int> ipntr(11, 0);
-
-  std::vector<double> workd(
-      3 * n, 0.); // Distributed array to be used in the basic Arnoldi iteration
-  // for reverse communication. The user should not use WORKD as
-  // temporary workspace during the iteration.
-  a_int lworkl = ncv * ncv + 8 * ncv;
-  std::vector<double> workl(lworkl); // Private (replicated) array on each PE
-                                     // or array allocated on the front end.
-
-  a_int info = 0;
-
-  /* create solver for y = inv(K)*x*/
-  mkl_wrapper::mkl_direct_solver pardiso(&k);
-  pardiso.factorize();
-  // Implicitly Restarted Arnoldi Iteration
-  do {
-    dsaupd_c(&ido, &bMat, n, which, nev, tol, resid.data(), ncv, v.data(), ldv,
-             iparam.data(), ipntr.data(), workd.data(), workl.data(), lworkl,
-             &info);
-
-    if (info != 0) {
-      std::cerr << "fucked!" << std::endl;
-      return 1;
+    std::vector<double> eigenvalues(1, 0);
+    std::vector<double> eigenvectors(1 * size, 0);
+    ar_gv.which("LM");
+    utils::Elapse<>::execute(
+        "arpack max eigen: ", [&ar_gv, &eigenvalues, &eigenvectors]() {
+          ar_gv.eigen_solve(eigenvalues.data(), eigenvectors.data());
+        });
+    for (auto i : eigenvalues) {
+      std::cout << i << std::endl;
     }
+    max = eigenvalues[0];
+  }
+  {
 
-    a_int x_idx = ipntr[0] - 1; // 0-based (Fortran is 1-based).
-    a_int y_idx = ipntr[1] - 1; // 0-based (Fortran is 1-based).
+    mkl_wrapper::arpack_gv ar_gv(&m, &k);
 
-    double *X = workd.data() + x_idx; // Arpack provides X.
-    double *Y = workd.data() + y_idx; // Arpack provides Y.
-
-    // std::cout << "ido: " << ido << std::endl;
-    if (ido == -1) {
-      pardiso.solve(X, Y);
-    } else if (ido == 1) {
-      pardiso.solve(X, Y);
-    } else if (ido == 2) {
-      break;
-    } else if (ido != 99) {
-      std::cerr << "Error: unexpected ido " << ido << " - KO" << std::endl;
-      return 1;
+    std::vector<double> eigenvalues(1, 0);
+    std::vector<double> eigenvectors(1 * size, 0);
+    ar_gv.which("LM");
+    utils::Elapse<>::execute(
+        "arpack min eigen: ", [&ar_gv, &eigenvalues, &eigenvectors]() {
+          ar_gv.eigen_solve(eigenvalues.data(), eigenvectors.data());
+        });
+    for (auto i : eigenvalues) {
+      std::cout << 1. / i << std::endl;
     }
+    min = 1. / eigenvalues[0];
+  }
+  register_solvers();
 
-  } while (ido != 99);
-
-  // Extract eigen pairs
-  std::cout << "nconv: " << iparam[4] << std::endl;
-  std::cout << "niter: " << iparam[2] << std::endl;
-
-  a_int rvec = 0;
-  char howmny = 'A';
-  std::vector<a_int> select(ncv, 1);
-  std::vector<double> dr(
-      nev + 1,
-      0.); // D contains the Ritz value approximations to the eigenvalues
-  std::vector<double> di(nev + 1, 0.);
-
-  std::vector<double> z(n * (nev + 1), 0.); // Caution: nev+1 for dneupd.
-
-  double sigma_real{0.}, sigma_image{0.};
-  dseupd_c(rvec, &howmny, select.data(), dr.data(), z.data(), z.size(),
-           sigma_real, &bMat, n, which, nev, tol, resid.data(), ncv, v.data(),
-           v.size(), iparam.data(), ipntr.data(), workd.data(), workl.data(),
-           lworkl, &info);
-  for (int i = 0; i < nev; i++) {
-    std::cout << dr[i] << std::endl;
+  int freq_size = 2;
+  std::vector<double> frequencies(freq_size);
+  for (int i = 0; i < freq_size; i++) {
+    frequencies[i] = min + i * (max - min) / (freq_size - 1);
+  }
+  for (int i = 0; i < select.size(); i++) {
+    if (i - 1 >= 0)
+      select[i - 1] = 0;
+    select[i] = 1;
+    g.mult_vec(select.data(), rhs.data());
+    for (auto freq : frequencies) {
+      auto mat = mkl_wrapper::mkl_sparse_sum(k, m, freq);
+      auto solver =
+          utils::singleton<mkl_wrapper::solver_factory>::instance().create(
+              "gmres+ilut", mat);
+      solver->solve(rhs.data(), res.data());
+      for(auto i:res){
+        std::cout<<i<<" ";
+      }
+      std::cout<<std::endl;
+      std::cout<<std::endl;
+    }
   }
   return 0;
 }

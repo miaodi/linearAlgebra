@@ -40,6 +40,9 @@ public:
   MKL_INT nnz() const { return _nnz; }
   bool mult_vec(double const *const b, double *const x);
 
+  MKL_INT avg_nz() const { return _nnz / _nrow; }
+  MKL_INT max_nz() const;
+
   std::shared_ptr<MKL_INT[]> get_ai() { return _ai; }
   std::shared_ptr<MKL_INT[]> get_aj() { return _aj; }
   std::shared_ptr<double[]> get_av() { return _av; }
@@ -52,8 +55,10 @@ public:
 
   void swap(mkl_sparse_mat &other);
 
+  void print() const;
+
 protected:
-  sparse_matrix_t _mkl_mat;
+  sparse_matrix_t _mkl_mat{nullptr};
   sparse_status_t _mkl_stat;
   sparse_index_base_t _mkl_base{SPARSE_INDEX_BASE_ZERO};
   matrix_descr _mkl_descr;
