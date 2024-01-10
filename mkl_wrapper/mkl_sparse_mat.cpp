@@ -144,6 +144,27 @@ mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
   sp_fill();
 }
 
+mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
+                               const std::vector<MKL_INT> &ai,
+                               const std::vector<MKL_INT> &aj,
+                               const std::vector<double> &av,
+                               const sparse_index_base_t base) {
+  _nrow = row;
+  _ncol = col;
+
+  _mkl_base = base;
+  _nnz = _mkl_base == SPARSE_INDEX_BASE_ZERO ? ai[_nrow] : ai[_nrow] - 1;
+
+  _ai.reset(new MKL_INT[_nrow + 1]);
+  std::copy(ai.begin(), ai.end(), _ai.get());
+  _aj.reset(new MKL_INT[_nnz]);
+  std::copy(aj.begin(), aj.end(), _aj.get());
+  _av.reset(new double[_nnz]);
+  std::copy(av.begin(), av.end(), _av.get());
+
+  sp_fill();
+}
+
 void mkl_sparse_mat::to_one_based() {
   if (_mkl_base == SPARSE_INDEX_BASE_ZERO) {
     mkl_sparse_destroy(_mkl_mat);

@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <mkl_spblas.h>
+#include <vector>
 namespace mkl_wrapper {
 
 // Derived Class for storing Matrices in CSR Form with MKL Matrix Datatype
@@ -20,10 +21,17 @@ public:
   mkl_sparse_mat &operator=(mkl_sparse_mat &&rhs);
 
   mkl_sparse_mat(const MKL_INT row, const MKL_INT col, const MKL_INT nnz);
+
   mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
                  const std::shared_ptr<MKL_INT[]> &ai,
                  const std::shared_ptr<MKL_INT[]> &aj,
                  const std::shared_ptr<double[]> &av,
+                 const sparse_index_base_t base = SPARSE_INDEX_BASE_ZERO);
+
+  // copy vector csr data to internal data member
+  mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
+                 const std::vector<MKL_INT> &ai, const std::vector<MKL_INT> &aj,
+                 const std::vector<double> &av,
                  const sparse_index_base_t base = SPARSE_INDEX_BASE_ZERO);
 
   // make a deep copy of mkl_mat so that mkl_sparse_mat will always keep the

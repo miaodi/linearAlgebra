@@ -60,6 +60,7 @@ int main() {
                                 m_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
   std::cout << "m: " << k.rows() << " , n: " << k.cols()
             << " , nnz: " << k.nnz() << std::endl;
+  k.print();
 
   // std::cout << "sparse sum ...";
   // mkl_wrapper::mkl_sparse_mat sum = mkl_wrapper::mkl_sparse_sum(k, m);
@@ -156,7 +157,6 @@ for (auto i : eigenvalues) {
     std::cout << i << std::endl;
   }
 }
-
 
 // SpMatMap mat_csr(size, size, k_csr_cols.size(), k_csr_rows.data(),
 //                  k_csr_cols.data(), k_csr_vals.data());
