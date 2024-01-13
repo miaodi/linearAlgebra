@@ -27,6 +27,7 @@ set(MKL_INTERFACE ilp64)
 find_package(MKL CONFIG REQUIRED)
 find_package(TBB REQUIRED)
 find_package(arpackng REQUIRED)
+find_package(OpenMP)
 
 add_subdirectory(utils)
 add_subdirectory(mkl_wrapper)

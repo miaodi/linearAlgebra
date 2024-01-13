@@ -41,8 +41,14 @@ public:
   ~mkl_sparse_mat();
   virtual void sp_fill();
 
+  void optimize();
+
+  void prune(const double tol = 1e-16);
+
   sparse_matrix_t &mkl_handler() { return _mkl_mat; }
+  const sparse_matrix_t &mkl_handler() const { return _mkl_mat; }
   matrix_descr &mkl_descr() { return _mkl_descr; }
+  const matrix_descr &mkl_descr() const { return _mkl_descr; }
   sparse_index_base_t mkl_base() const { return _mkl_base; }
   bool positive_definite() const { return _pd; }
   MKL_INT rows() const { return _nrow; }
@@ -53,9 +59,14 @@ public:
   MKL_INT avg_nz() const { return _nnz / _nrow; }
   MKL_INT max_nz() const;
 
+  std::shared_ptr<double[]> get_diag() const;
   std::shared_ptr<MKL_INT[]> get_ai() { return _ai; }
   std::shared_ptr<MKL_INT[]> get_aj() { return _aj; }
   std::shared_ptr<double[]> get_av() { return _av; }
+
+  std::shared_ptr<const MKL_INT[]> get_ai() const { return _ai; }
+  std::shared_ptr<const MKL_INT[]> get_aj() const { return _aj; }
+  std::shared_ptr<const double[]> get_av() const { return _av; }
 
   virtual bool solve(double const *const b, double *const x) { return false; }
 
@@ -68,6 +79,8 @@ public:
   void print() const;
 
   void check() const;
+
+  void transpose();
 
 protected:
   sparse_matrix_t _mkl_mat{nullptr};
@@ -87,13 +100,20 @@ protected:
 };
 
 // c*A+B
-mkl_sparse_mat mkl_sparse_sum(mkl_sparse_mat &A, mkl_sparse_mat &B,
+mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                               double c = 1.);
 
 // opA(A)*B
 mkl_sparse_mat
-mkl_sparse_mult(mkl_sparse_mat &A, mkl_sparse_mat &B,
-                const sparse_operation_t opA = SPARSE_OPERATION_NON_TRANSPOSE);
+mkl_sparse_mult(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
+                const sparse_operation_t opA = SPARSE_OPERATION_NON_TRANSPOSE,
+                const sparse_operation_t opB = SPARSE_OPERATION_NON_TRANSPOSE);
+
+// PT*A*P
+mkl_sparse_mat mkl_sparse_mult_ptap(mkl_sparse_mat &A, mkl_sparse_mat &P);
+
+// P*A*PT
+mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat &A, mkl_sparse_mat &P);
 
 class mkl_ilu0 : public mkl_sparse_mat {
 public:
@@ -135,7 +155,7 @@ protected:
 // upper triangular
 class mkl_sparse_mat_sym : public mkl_sparse_mat {
 public:
-  mkl_sparse_mat_sym(mkl_sparse_mat *A);
+  explicit mkl_sparse_mat_sym(const mkl_sparse_mat &A);
   virtual void sp_fill();
 };
 
@@ -147,13 +167,13 @@ public:
 // Incomplete Cholesky ic0
 class mkl_ic0 : public mkl_sparse_mat_sym {
 public:
-  mkl_ic0(mkl_sparse_mat *A);
+  mkl_ic0(const mkl_sparse_mat &A);
+
   bool factorize();
 
   virtual bool solve(double const *const b, double *const x) override;
 
 protected:
-  mkl_sparse_mat *_A{nullptr};
   std::unique_ptr<double[]> _interm_vec{nullptr};
 };
 } // namespace mkl_wrapper

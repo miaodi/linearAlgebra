@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <execution>
 #include <iostream>
 #include <mkl_rci.h>
 #include <mkl_sparse_handle.h>
@@ -117,11 +118,12 @@ mkl_sparse_mat::mkl_sparse_mat(sparse_matrix_t mkl_mat) {
   _nnz = rows_start[_nrow] - _mkl_base;
 
   _ai.reset(new MKL_INT[_nrow + 1]);
-  std::copy(rows_start, rows_start + _nrow + 1, _ai.get());
+  std::copy(std::execution::par_unseq, rows_start, rows_start + _nrow + 1,
+            _ai.get());
   _aj.reset(new MKL_INT[_nnz]);
-  std::copy(col_index, col_index + _nnz, _aj.get());
+  std::copy(std::execution::par_unseq, col_index, col_index + _nnz, _aj.get());
   _av.reset(new double[_nnz]);
-  std::copy(values, values + _nnz, _av.get());
+  std::copy(std::execution::par_unseq, values, values + _nnz, _av.get());
 
   sp_fill();
 }
@@ -165,17 +167,32 @@ mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
   sp_fill();
 }
 
+std::shared_ptr<double[]> mkl_sparse_mat::get_diag() const {
+  auto res = std::shared_ptr<double[]>(new double[rows()]);
+
+#pragma omp parallel for
+  for (MKL_INT i = 0; i < rows(); i++) {
+    auto begin = _ai[i] - _mkl_base;
+    auto end = _ai[i + 1] - _mkl_base;
+    auto mid = std::find(_aj.get() + begin, _aj.get() + end, i + _mkl_base);
+    if (mid == _aj.get() + end) {
+      res[i] = 0.;
+    } else {
+      res[i] = *mid;
+    }
+  }
+  return res;
+}
+
 void mkl_sparse_mat::to_one_based() {
   if (_mkl_base == SPARSE_INDEX_BASE_ZERO) {
     mkl_sparse_destroy(_mkl_mat);
     {
-#pragma omp parallel
-#pragma omp for nowait
+#pragma omp parallel for
       for (MKL_INT i = 0; i < _nnz; i++) {
         _aj[i] += 1;
       }
-#pragma omp parallel
-#pragma omp for nowait
+#pragma omp parallel for
       for (MKL_INT i = 0; i < _nrow + 1; i++) {
         _ai[i] += 1;
       }
@@ -189,13 +206,11 @@ void mkl_sparse_mat::to_zero_based() {
   if (_mkl_base == SPARSE_INDEX_BASE_ONE) {
     mkl_sparse_destroy(_mkl_mat);
     {
-#pragma omp parallel
-#pragma omp for nowait
+#pragma omp parallel for
       for (MKL_INT i = 0; i < _nnz; i++) {
         _aj[i] -= 1;
       }
-#pragma omp parallel
-#pragma omp for nowait
+#pragma omp parallel for
       for (MKL_INT i = 0; i < _nrow + 1; i++) {
         _ai[i] -= 1;
       }
@@ -217,6 +232,37 @@ void mkl_sparse_mat::sp_fill() {
   _mkl_descr.type = SPARSE_MATRIX_TYPE_GENERAL;
   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
   _mkl_descr.mode = SPARSE_FILL_MODE_FULL;
+  optimize();
+}
+
+void mkl_sparse_mat::optimize() {
+  mkl_sparse_set_mv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _mkl_descr,
+                         1000);
+  mkl_sparse_set_memory_hint(_mkl_mat, SPARSE_MEMORY_AGGRESSIVE);
+  // mkl_sparse_optimize(_mkl_mat);
+}
+
+void mkl_sparse_mat::prune(const double tol) {
+  auto base = _mkl_base;
+  if (base == SPARSE_INDEX_BASE_ONE)
+    to_zero_based();
+  MKL_INT k = 0;
+  for (MKL_INT j = 0; j < _nrow; ++j) {
+    MKL_INT previousStart = _ai[j];
+    _ai[j] = k;
+    MKL_INT end = _ai[j + 1];
+    for (MKL_INT i = previousStart; i < end; ++i) {
+      if (std::abs(_av[i]) > tol) {
+        _aj[k] = _aj[i];
+        _av[k] = _av[i];
+        ++k;
+      }
+    }
+  }
+  _ai[_nrow] = k;
+  _nnz = k;
+  if (base == SPARSE_INDEX_BASE_ONE)
+    to_one_based();
 }
 
 mkl_sparse_mat::~mkl_sparse_mat() {
@@ -231,13 +277,14 @@ bool mkl_sparse_mat::mult_vec(double const *const b, double *const x) {
 }
 
 void mkl_sparse_mat::print() const {
+  std::cout << "nrow: " << _nrow << " ncol: " << _ncol << " nnz: " << _nnz
+            << std::endl;
   std::cout << "sparse_index_base_t: " << _mkl_base << std::endl;
   std::cout << "ai: ";
   for (MKL_INT i = 0; i <= _nrow; i++) {
     std::cout << _ai[i] << " ";
   }
   std::cout << std::endl;
-  std::cout << "nnz: " << _nnz << std::endl;
   std::cout << "aj: ";
   for (MKL_INT i = 0; i < _nnz; i++) {
     std::cout << _aj[i] << " ";
@@ -301,7 +348,36 @@ void mkl_sparse_mat::check() const {
     }
     error = 1;
   }
-} // namespace mkl_wrapper
+}
+
+// https://stackoverflow.com/questions/49395986/compressed-sparse-row-transpose
+void mkl_sparse_mat::transpose() {
+  mkl_sparse_mat tmp(_ncol + 1, _nrow, _nnz);
+  tmp._nrow--;
+  // count per column
+  for (MKL_INT i = 0; i < _nnz; ++i) {
+    ++tmp._ai[_aj[i] + 2];
+  }
+
+  // from count per column generate new rowPtr (but shifted)
+  for (MKL_INT i = 2; i <= tmp._nrow; ++i) {
+    // create incremental sum
+    tmp._ai[i] += tmp._ai[i - 1];
+  }
+
+  // perform the main part
+  for (MKL_INT i = 0; i < _nrow; ++i) {
+    for (MKL_INT j = _ai[i]; j < _ai[i + 1]; ++j) {
+      // calculate index to transposed matrix at which we should place current
+      // element, and at the same time build final rowPtr
+      const size_t new_index = tmp._ai[_aj[j] + 1]++;
+      tmp._av[new_index] = _av[j];
+      tmp._aj[new_index] = i;
+    }
+  }
+  tmp.sp_fill();
+  this->swap(tmp);
+}
 
 MKL_INT mkl_sparse_mat::max_nz() const {
   MKL_INT res = 0;
@@ -311,12 +387,11 @@ MKL_INT mkl_sparse_mat::max_nz() const {
   return res;
 }
 
-mkl_sparse_mat mkl_sparse_sum(mkl_sparse_mat &A, mkl_sparse_mat &B, double c) {
+mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
+                              double c) {
   if (A.mkl_base() != B.mkl_base()) {
-    std::cout << "A and B are in different index base! Will change them to "
-                 "zero based\n";
-    A.to_zero_based();
-    B.to_zero_based();
+    std::cerr << "two inputs of mkl_sparse_sum has different index base\n";
+    return mkl_sparse_mat();
   }
   sparse_matrix_t result;
   auto status = mkl_sparse_d_add(SPARSE_OPERATION_NON_TRANSPOSE,
@@ -332,20 +407,52 @@ mkl_sparse_mat mkl_sparse_sum(mkl_sparse_mat &A, mkl_sparse_mat &B, double c) {
 }
 
 // opA(A)*B
-mkl_sparse_mat mkl_sparse_mult(mkl_sparse_mat &A, mkl_sparse_mat &B,
-                               const sparse_operation_t opA) {
-  A.to_zero_based();
-  B.to_zero_based();
+mkl_sparse_mat mkl_sparse_mult(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
+                               const sparse_operation_t opA,
+                               const sparse_operation_t opB) {
+  if (A.mkl_base() != B.mkl_base()) {
+    std::cerr << "two inputs of mkl_sparse_sum has different index base\n";
+    return mkl_sparse_mat();
+  }
   sparse_matrix_t result;
-  auto status = mkl_sparse_spmm(opA, A.mkl_handler(), B.mkl_handler(), &result);
+  auto status =
+      mkl_sparse_sp2m(opA, A.mkl_descr(), A.mkl_handler(), opB, B.mkl_descr(),
+                      B.mkl_handler(), SPARSE_STAGE_NNZ_COUNT, &result);
   if (status != SPARSE_STATUS_SUCCESS) {
-
-    std::cerr << "mkl sparse multiply failed, code: " << status << std::endl;
+    std::cerr << "mkl_sparse_sp2m symbolic failed, code: " << status
+              << std::endl;
+    return mkl_sparse_mat();
+  }
+  status =
+      mkl_sparse_sp2m(opA, A.mkl_descr(), A.mkl_handler(), opB, B.mkl_descr(),
+                      B.mkl_handler(), SPARSE_STAGE_FINALIZE_MULT, &result);
+  if (status != SPARSE_STATUS_SUCCESS) {
+    std::cerr << "mkl_sparse_sp2m numeric failed, code: " << status
+              << std::endl;
+    return mkl_sparse_mat();
+  }
+  status = mkl_sparse_order(result);
+  if (status != SPARSE_STATUS_SUCCESS) {
+    std::cerr << "mkl_sparse_sp2m mkl_sparse_order failed, code: " << status
+              << std::endl;
     return mkl_sparse_mat();
   }
   auto res = mkl_sparse_mat(result);
   mkl_sparse_destroy(result);
   return res;
+}
+
+// PT*A*P
+mkl_sparse_mat mkl_sparse_mult_ptap(mkl_sparse_mat &A, mkl_sparse_mat &P) {
+  auto PTA = mkl_sparse_mult(P, A, SPARSE_OPERATION_TRANSPOSE);
+  return mkl_sparse_mult(PTA, P);
+}
+
+// P*A*PT
+mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat &A, mkl_sparse_mat &P) {
+  auto PA = mkl_sparse_mult(P, A);
+  return mkl_sparse_mult(PA, P, SPARSE_OPERATION_NON_TRANSPOSE,
+                         SPARSE_OPERATION_TRANSPOSE);
 }
 
 mkl_ilu0::mkl_ilu0(mkl_sparse_mat *A) : mkl_sparse_mat(), _A(A) {
@@ -463,47 +570,52 @@ bool mkl_ilut::solve(double const *const b, double *const x) {
   return true;
 }
 
-mkl_sparse_mat_sym::mkl_sparse_mat_sym(mkl_sparse_mat *A) : mkl_sparse_mat() {
+mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
+    : mkl_sparse_mat() {
 
   // only take upper triangular
 
-  _nrow = A->rows();
-  _ncol = A->cols();
+  _nrow = A.rows();
+  _ncol = A.cols();
+  _mkl_base = A.mkl_base();
 
   _ai.reset(new MKL_INT[_nrow + 1]);
-  auto ai = A->get_ai();
-  auto aj = A->get_aj();
-  auto av = A->get_av();
+  auto ai = A.get_ai();
+  auto aj = A.get_aj();
+  auto av = A.get_av();
   _nnz = 0;
-  _ai[0] = 0;
+  _ai[0] = _mkl_base;
+
+  std::vector<MKL_INT> diag_pos(_nrow); // record the diag pos
+
+#pragma omp parallel for
   for (MKL_INT i = 0; i < _nrow; i++) {
-    MKL_INT begin = ai[i];
-    MKL_INT end = ai[i + 1];
-    auto res = std::find(aj.get() + begin, aj.get() + end, i);
-    if (res == aj.get() + end) {
-      std::cout << "Could not find diagonal!" << std::endl;
+    auto begin = ai[i] - _mkl_base;
+    auto end = ai[i + 1] - _mkl_base;
+    auto mid = std::find(aj.get() + begin, aj.get() + end, i + _mkl_base);
+    if (mid == aj.get() + end) {
+      std::cerr << "Could not find diagonal!" << std::endl;
     } else {
-      _nnz += aj.get() + end - res;
+      diag_pos[i] = mid - aj.get();
+      _ai[i + 1] = end - diag_pos[i];
     }
-    _ai[i + 1] = _nnz;
   }
-  // for (MKL_INT i = 0; i < _nrow + 1; i++) {
-  //   std::cout << _ai[i] << std::endl;
-  // }
+  for (size_t i = 1; i <= _nrow; i++) {
+    _ai[i] += _ai[i - 1];
+  }
+  _nnz = _ai[_nrow] - _mkl_base;
 
   _aj.reset(new MKL_INT[_nnz]);
   _av.reset(new double[_nnz]);
 
   MKL_INT ind = 0;
+
+#pragma omp parallel for
   for (MKL_INT i = 0; i < _nrow; i++) {
-    MKL_INT begin = ai[i];
-    MKL_INT end = ai[i + 1];
-    auto res = std::find(aj.get() + begin, aj.get() + end, i);
-    begin = res - aj.get();
-    for (auto i = begin; i != end; i++) {
-      _aj[ind] = aj[i];
-      _av[ind++] = av[i];
-    }
+    std::copy(std::execution::unseq, aj.get() + diag_pos[i],
+              aj.get() + ai[i + 1] - _mkl_base, _aj.get() + _ai[i] - _mkl_base);
+    std::copy(std::execution::unseq, av.get() + diag_pos[i],
+              av.get() + ai[i + 1] - _mkl_base, _av.get() + _ai[i] - _mkl_base);
   }
   sp_fill();
 }
@@ -520,6 +632,8 @@ void mkl_sparse_mat_sym::sp_fill() {
   _mkl_descr.type = SPARSE_MATRIX_TYPE_SYMMETRIC;
   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
   _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
+
+  optimize();
 }
 
 mkl_sparse_mat_diag::mkl_sparse_mat_diag(const MKL_INT size, const double val)
@@ -544,7 +658,7 @@ mkl_sparse_mat_diag::mkl_sparse_mat_diag(const MKL_INT size, const double val)
   sp_fill();
 }
 
-mkl_ic0::mkl_ic0(mkl_sparse_mat *A) : mkl_sparse_mat_sym(A) {
+mkl_ic0::mkl_ic0(const mkl_sparse_mat &A) : mkl_sparse_mat_sym(A) {
   _interm_vec.reset(new double[_nrow]);
 }
 

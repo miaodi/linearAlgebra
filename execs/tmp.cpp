@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <omp.h>
 #include <random>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,29 +17,46 @@
 void register_solvers() {
   using solver_ptr = typename mkl_wrapper::solver_factory::solver_ptr;
   using create_method = typename mkl_wrapper::solver_factory::create_method;
-  create_method func = [](mkl_wrapper::mkl_sparse_mat &A) {
+
+  create_method gmres_ilut = [](mkl_wrapper::mkl_sparse_mat &A) {
     auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&A);
-    prec->set_tau(1e-12);
-    prec->set_max_fill(std::min(A.avg_nz() * 3, A.cols()));
+    prec->set_tau(1e-4);
+    prec->set_max_fill(std::min((MKL_INT)(A.avg_nz() * 2), A.cols()));
     prec->factorize();
     auto solver = std::make_unique<mkl_wrapper::mkl_fgmres_solver>(&A, prec);
     // prec->print();
     solver->set_max_iters(1e5);
-    solver->set_rel_tol(1e-10);
-    solver->set_restart_steps(20);
+    solver->set_rel_tol(1e-8);
+    solver->set_restart_steps(10);
     return std::move(solver);
   };
   utils::singleton<mkl_wrapper::solver_factory>::instance().reg("gmres+ilut",
-                                                                func);
+                                                                gmres_ilut);
+
+  create_method cg_ic0 = [](mkl_wrapper::mkl_sparse_mat &A) {
+    auto prec = std::make_shared<mkl_wrapper::mkl_ic0>(A);
+    prec->factorize();
+    auto solver = std::make_unique<mkl_wrapper::mkl_pcg_solver>(&A, prec);
+    // prec->print();
+    solver->set_max_iters(1e5);
+    solver->set_rel_tol(1e-8);
+    return std::move(solver);
+  };
+  utils::singleton<mkl_wrapper::solver_factory>::instance().reg("cg+ic0",
+                                                                gmres_ilut);
 }
 
 int main(int argc, char **argv) {
-  std::string m_mat("../../data/shared/M.bin");
-  std::string k_mat("../../data/shared/K.bin");
-  std::string g_mat("../../data/shared/G.bin");
+  std::cout << sizeof(MKL_INT) << std::endl;
+
+  std::string m_mat("../../data/shared/M2.bin");
+  std::string k_mat("../../data/shared/K2.bin");
+  std::string g_mat("../../data/shared/G2.bin");
+  // std::string v_mat("../../data/shared/V_sparse.bin");
 
   std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   std::vector<double> k_csr_vals;
+  std::cout << "read K\n";
   utils::ReadFromBinaryCSR(k_mat, k_csr_rows, k_csr_cols, k_csr_vals,
                            SPARSE_INDEX_BASE_ONE);
   std::shared_ptr<MKL_INT[]> k_csr_rows_ptr(k_csr_rows.data(),
@@ -47,54 +65,68 @@ int main(int argc, char **argv) {
                                             [](MKL_INT[]) {});
   std::shared_ptr<double[]> k_csr_vals_ptr(k_csr_vals.data(), [](double[]) {});
 
+  std::cout << "read M\n";
   std::vector<MKL_INT> m_csr_rows, m_csr_cols;
   std::vector<double> m_csr_vals;
   utils::ReadFromBinaryCSR(m_mat, m_csr_rows, m_csr_cols, m_csr_vals,
                            SPARSE_INDEX_BASE_ONE);
-  std::shared_ptr<MKL_INT[]> m_csr_rows_ptr(m_csr_rows.data(),
-                                            [](MKL_INT[]) {});
-  std::shared_ptr<MKL_INT[]> m_csr_cols_ptr(m_csr_cols.data(),
-                                            [](MKL_INT[]) {});
-  std::shared_ptr<double[]> m_csr_vals_ptr(m_csr_vals.data(), [](double[]) {});
 
+  std::cout << "read G\n";
   std::vector<MKL_INT> g_csr_rows, g_csr_cols;
   std::vector<double> g_csr_vals;
   utils::ReadFromBinaryCSR(g_mat, g_csr_rows, g_csr_cols, g_csr_vals,
                            SPARSE_INDEX_BASE_ONE);
-
   for (int i = g_csr_rows.size(); i < m_csr_rows.size(); i++) {
     g_csr_rows.push_back(g_csr_rows.back());
   }
-  // g_csr_rows.back() += 1;
-  // g_csr_cols.push_back(2);
-  // g_csr_vals.push_back(0);
 
-  std::shared_ptr<MKL_INT[]> g_csr_rows_ptr(g_csr_rows.data(),
-                                            [](MKL_INT[]) {});
-  std::shared_ptr<MKL_INT[]> g_csr_cols_ptr(g_csr_cols.data(),
-                                            [](MKL_INT[]) {});
-  std::shared_ptr<double[]> g_csr_vals_ptr(g_csr_vals.data(), [](double[]) {});
+  // std::cout << "read V\n";
+  // std::vector<MKL_INT> v_csr_rows, v_csr_cols;
+  // std::vector<double> v_csr_vals;
+  // utils::ReadFromBinaryCSR(v_mat, v_csr_rows, v_csr_cols, v_csr_vals,
+  //                          SPARSE_INDEX_BASE_ONE);
+  // for (int i = v_csr_rows.size(); i < m_csr_rows.size(); i++) {
+  //   v_csr_rows.push_back(v_csr_rows.back());
+  // }
+  // std::shared_ptr<MKL_INT[]> v_csr_rows_ptr(v_csr_rows.data(),
+  //                                           [](MKL_INT[]) {});
+  // std::shared_ptr<MKL_INT[]> v_csr_cols_ptr(v_csr_cols.data(),
+  //                                           [](MKL_INT[]) {});
+  // std::shared_ptr<double[]> v_csr_vals_ptr(v_csr_vals.data(), [](double[])
+  // {});
 
   const MKL_INT size = m_csr_rows.size() - 1;
 
-  mkl_wrapper::mkl_sparse_mat k(size, size, k_csr_rows_ptr, k_csr_cols_ptr,
-                                k_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
-  mkl_wrapper::mkl_sparse_mat m(size, size, m_csr_rows_ptr, m_csr_cols_ptr,
-                                m_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
+  mkl_wrapper::mkl_sparse_mat k(size, size, k_csr_rows, k_csr_cols, k_csr_vals,
+                                SPARSE_INDEX_BASE_ONE);
+  mkl_wrapper::mkl_sparse_mat m(size, size, m_csr_rows, m_csr_cols, m_csr_vals,
+                                SPARSE_INDEX_BASE_ONE);
+  // {
+  //   mkl_wrapper::mkl_sparse_mat v(size, 4500, v_csr_rows_ptr, v_csr_cols_ptr,
+  //                                 v_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
 
-  mkl_wrapper::mkl_sparse_mat g(size, 2, g_csr_rows_ptr, g_csr_cols_ptr,
-                                g_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
-  std::vector<double> rhs(size);
-  std::vector<double> select(2, 0);
-  std::vector<double> res(size);
-  select[1] = 1;
-  g.mult_vec(select.data(), rhs.data());
+  //   v.check();
+  //   std::cout<<v.nnz()<<std::endl;
+  // }
 
-  double max, min;
+  mkl_wrapper::mkl_sparse_mat_sym sym_k(k);
+  mkl_wrapper::mkl_sparse_mat_sym sym_m(m);
+
+  const int num_ports = 900;
+  mkl_wrapper::mkl_sparse_mat g(size, num_ports, g_csr_rows, g_csr_cols,
+                                g_csr_vals, SPARSE_INDEX_BASE_ONE);
+
+  omp_set_max_active_levels(2);
+  std::cout << "compute eigenvalues\n";
+  double max{0.}, min{0.};
   {
 
+    mkl_set_num_threads_local(10);
     mkl_wrapper::arpack_gv ar_gv(&k, &m);
 
+    ar_gv.set_tol(1e-2);
+    ar_gv.set_num_eigen(1);
+    ar_gv.set_ncv(10);
     std::vector<double> eigenvalues(1, 0);
     std::vector<double> eigenvectors(1 * size, 0);
     ar_gv.which("LM");
@@ -109,8 +141,12 @@ int main(int argc, char **argv) {
   }
   {
 
+    mkl_set_num_threads_local(10);
     mkl_wrapper::arpack_gv ar_gv(&m, &k);
 
+    ar_gv.set_tol(1e-2);
+    ar_gv.set_num_eigen(1);
+    ar_gv.set_ncv(10);
     std::vector<double> eigenvalues(1, 0);
     std::vector<double> eigenvectors(1 * size, 0);
     ar_gv.which("LM");
@@ -125,28 +161,119 @@ int main(int argc, char **argv) {
   }
   register_solvers();
 
-  int freq_size = 2;
+  int freq_size = 5;
   std::vector<double> frequencies(freq_size);
   for (int i = 0; i < freq_size; i++) {
     frequencies[i] = min + i * (max - min) / (freq_size - 1);
   }
-  for (int i = 0; i < select.size(); i++) {
-    if (i - 1 >= 0)
-      select[i - 1] = 0;
-    select[i] = 1;
-    g.mult_vec(select.data(), rhs.data());
+
+  // csr data for the V^T  matrix
+  std::shared_ptr<MKL_INT[]> vTAI;
+  std::shared_ptr<MKL_INT[]> vTAJ;
+  std::shared_ptr<double[]> vTAV;
+
+  omp_set_num_threads(1);
+  std::vector<MKL_INT> ai_map;
+  std::vector<MKL_INT> aj_map;
+#pragma omp parallel
+  {
+    mkl_set_num_threads_local(10);
+    // mkl_set_dynamic(0);
+    std::vector<MKL_INT> vTAI_local;
+    std::vector<MKL_INT> vTAJ_local;
+    std::vector<double> vTAV_local;
+    vTAI_local.push_back(0);
+    const int total_omp_threads = omp_get_num_threads();
+    const int local_port_size = num_ports / total_omp_threads;
+    const int rank = omp_get_thread_num();
+    const int start = local_port_size * rank;
+    const int end = std::min(local_port_size * (rank + 1), (int)num_ports);
+#pragma omp single
+    {
+      ai_map = std::move(std::vector<MKL_INT>(total_omp_threads + 1, 0));
+      aj_map = std::move(std::vector<MKL_INT>(total_omp_threads + 1, 0));
+    }
+#pragma omp critical
+    {
+      std::cout << "omp_get_thread_num: " << omp_get_thread_num()
+                << " mkl_max: " << mkl_get_max_threads()
+                << " omp_get_num_threads: " << omp_get_num_threads()
+                << std::endl;
+    }
+
+    std::vector<double> rhs(size);
+    std::vector<double> select(num_ports, 0);
+    std::vector<double> res(size);
+    double norm = 0;
     for (auto freq : frequencies) {
-      auto mat = mkl_wrapper::mkl_sparse_sum(k, m, freq);
+      auto mat = mkl_wrapper::mkl_sparse_sum(m, k, freq);
       auto solver =
           utils::singleton<mkl_wrapper::solver_factory>::instance().create(
-              "gmres+ilut", mat);
-      solver->solve(rhs.data(), res.data());
-      for (auto i : res) {
-        std::cout << i << " ";
+              "direct", mat);
+      for (int i = start; i < end; i++) {
+        select[(select.size() - 1 + i) % select.size()] = 0;
+        select[i] = 1;
+        g.mult_vec(select.data(), rhs.data());
+
+#pragma omp critical
+        {
+          std::cout << "port : " << i << " freq: " << freq
+                    << " mkl_max: " << mkl_get_max_threads() << std::endl;
+        }
+        solver->solve(rhs.data(), res.data());
+        norm = 0.;
+        // #pragma omp parallel for reduction(max : norm)
+        for (MKL_INT col = 0; col < size; col++) {
+          norm = std::abs(res[col]) > norm ? std::abs(res[col]) : norm;
+        }
+
+        for (MKL_INT col = 0; col < size; col++) {
+          res[col] /= norm;
+          if (std::abs(res[col]) > 1e-3) {
+            vTAJ_local.push_back(col);
+            vTAV_local.push_back(res[col]);
+          }
+        }
+        vTAI_local.push_back(vTAV_local.size());
       }
-      std::cout << std::endl;
-      std::cout << std::endl;
     }
+
+    ai_map[rank + 1] = (end - start) * frequencies.size();
+    aj_map[rank + 1] = vTAI_local.back();
+    // One thread indicates that the barrier is complete.
+#pragma omp barrier
+#pragma omp single
+    {
+      for (size_t i = 1; i < ai_map.size(); i++) {
+        ai_map[i] += ai_map[i - 1];
+      }
+      for (size_t i = 1; i < aj_map.size(); i++) {
+        aj_map[i] += aj_map[i - 1];
+      }
+      std::cout << "nnz: " << aj_map.back() << std::endl;
+      vTAI.reset(new MKL_INT[freq_size * num_ports + 1]);
+      vTAJ.reset(new MKL_INT[aj_map.back()]);
+      vTAV.reset(new double[aj_map.back()]);
+      vTAI[0] = 0;
+    }
+#pragma omp barrier
+    for (size_t i = 1; i < vTAI_local.size(); i++) {
+      vTAI[i + ai_map[rank]] = vTAI_local[i] + aj_map[rank];
+    }
+    for (size_t i = 0; i < vTAJ_local.size(); i++) {
+      vTAJ[i + aj_map[rank]] = vTAJ_local[i];
+    }
+    for (size_t i = 0; i < vTAV_local.size(); i++) {
+      vTAV[i + aj_map[rank]] = vTAV_local[i];
+    }
+  }
+
+  mkl_wrapper::mkl_sparse_mat vt(freq_size * num_ports, size, vTAI, vTAJ, vTAV);
+  {
+    mkl_set_num_threads_local(10);
+    auto m_red = mkl_sparse_mult_papt(m, vt);
+    auto k_red = mkl_sparse_mult_papt(k, vt);
+    auto g_red = mkl_sparse_mult(vt, g);
   }
   return 0;
 }

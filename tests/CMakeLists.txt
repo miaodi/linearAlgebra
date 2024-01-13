@@ -15,5 +15,7 @@ target_link_libraries(
   mkl_sparse_mat PUBLIC GTest::gtest_main mkl_wrapper
 )
 
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/ex5.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ex5.mtx COPYONLY)
+
 include(GoogleTest)
 gtest_discover_tests(mkl_sparse_mat)
