@@ -22,14 +22,14 @@ public:
   virtual bool solve(double const *const b, double *const x) override;
   bool forward_substitution(double const *const b, double *const x);
   bool backward_substitution(double const *const b, double *const x);
-  mkl_direct_solver(mkl_sparse_mat *A) : mkl_solver(), _A(A) {}
+  mkl_direct_solver(mkl_sparse_mat const *A) : mkl_solver(), _A(A) {}
   bool factorize();
   void set_max_iter_ref(int n) { _max_iter_ref = n; }
   virtual ~mkl_direct_solver() override;
 
 protected:
   bool _factorized{false};
-  mkl_sparse_mat *_A;
+  mkl_sparse_mat const *_A;
   MKL_INT _iparm[64];
   MKL_INT _maxfct;
   MKL_INT _mnum;

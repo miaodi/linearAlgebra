@@ -45,7 +45,11 @@ bool mkl_direct_solver::factorize() {
   MKL_INT error = 0;
   MKL_INT nrhs = 1; /* Number of right hand sides. */
   MKL_INT n = _A->rows();
+  _iparm[1] = 2; // The nested dissection algorithm from the METIS package
 
+  // _iparm[7] = 10;       /* the maximum number of iterative refinement steps
+  // that
+  //                          the solver performs.*/
   _iparm[34] = _A->mkl_base() == SPARSE_INDEX_BASE_ZERO ? 1 : 0;
   pardiso(_pt, &_maxfct, &_mnum, &_mtype, &phase, &n, _A->get_av().get(),
           _A->get_ai().get(), _A->get_aj().get(), NULL, &nrhs, _iparm, &_msglvl,
@@ -393,11 +397,14 @@ solver_factory::solver_factory() {
   _methods["direct"] = [](mkl_sparse_mat &m) {
     auto solver = std::make_unique<mkl_direct_solver>(&m);
     solver->factorize();
-    return std::move(solver);
+    return solver;
   };
 
   _methods["gmres"] = [](mkl_sparse_mat &m) {
-    return std::make_unique<mkl_fgmres_solver>(&m);
+    auto solver = std::make_unique<mkl_fgmres_solver>(&m);
+    solver->set_rel_tol(1e-12);
+    solver->set_abs_tol(1e-15);
+    return solver;
   };
 }
 

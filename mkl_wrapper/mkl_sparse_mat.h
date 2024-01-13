@@ -51,6 +51,7 @@ public:
   const matrix_descr &mkl_descr() const { return _mkl_descr; }
   sparse_index_base_t mkl_base() const { return _mkl_base; }
   bool positive_definite() const { return _pd; }
+  void set_positive_definite(bool pd) { _pd = pd; }
   MKL_INT rows() const { return _nrow; }
   MKL_INT cols() const { return _ncol; }
   MKL_INT nnz() const { return _nnz; }

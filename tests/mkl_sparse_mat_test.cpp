@@ -1,4 +1,5 @@
 #include "../utils/utils.h"
+#include "mkl_solver.h"
 #include "mkl_sparse_mat.h"
 #include <gtest/gtest.h>
 #include <memory>
@@ -173,5 +174,34 @@ TEST(sparse_matrix, sym) {
 
   for (size_t i = 0; i < diff2.rows(); i++) {
     EXPECT_EQ(diag_diff2[i], diag_sym[i]);
+  }
+}
+
+TEST(pardiso, full_vs_sym) {
+
+  std::ifstream f("data/ex5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
+  std::vector<MKL_INT> csr_rows, csr_cols;
+  std::vector<double> csr_vals;
+  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+
+  mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                  csr_rows, csr_cols, csr_vals);
+  mat.set_positive_definite(true);
+  std::vector<double> rhs(mat.rows(), 1.), x0(mat.rows()), x1(mat.rows());
+  // for (int i = 0; i < mat.rows(); i++) {
+  //   rhs[i] = utils::random<double>(-1.0, 1.0);
+  // }
+  auto solver0 =
+      utils::singleton<mkl_wrapper::solver_factory>::instance().create("direct",
+                                                                       mat);
+  solver0->solve(rhs.data(), x0.data());
+  mkl_wrapper::mkl_sparse_mat_sym sym(mat);
+  auto solver1 =
+      utils::singleton<mkl_wrapper::solver_factory>::instance().create("direct",
+                                                                       sym);
+  solver1->solve(rhs.data(), x1.data());
+
+  for (size_t i = 0; i < x0.size(); i++) {
+    EXPECT_NEAR(x0[i], x1[i], 1e-7);
   }
 }

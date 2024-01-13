@@ -578,6 +578,7 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
   _nrow = A.rows();
   _ncol = A.cols();
   _mkl_base = A.mkl_base();
+  _pd = A.positive_definite();
 
   _ai.reset(new MKL_INT[_nrow + 1]);
   auto ai = A.get_ai();
@@ -610,11 +611,10 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
 
   MKL_INT ind = 0;
 
-#pragma omp parallel for
   for (MKL_INT i = 0; i < _nrow; i++) {
-    std::copy(std::execution::unseq, aj.get() + diag_pos[i],
+    std::copy(std::execution::par_unseq, aj.get() + diag_pos[i],
               aj.get() + ai[i + 1] - _mkl_base, _aj.get() + _ai[i] - _mkl_base);
-    std::copy(std::execution::unseq, av.get() + diag_pos[i],
+    std::copy(std::execution::par_unseq, av.get() + diag_pos[i],
               av.get() + ai[i + 1] - _mkl_base, _av.get() + _ai[i] - _mkl_base);
   }
   sp_fill();

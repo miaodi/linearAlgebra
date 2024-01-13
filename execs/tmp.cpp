@@ -5,6 +5,7 @@
 #include "../utils/timer.h"
 #include "../utils/utils.h"
 #include "arpack.h"
+#include <execution>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -108,14 +109,20 @@ int main(int argc, char **argv) {
   //   v.check();
   //   std::cout<<v.nnz()<<std::endl;
   // }
-
   mkl_wrapper::mkl_sparse_mat_sym sym_k(k);
   mkl_wrapper::mkl_sparse_mat_sym sym_m(m);
 
-  const int num_ports = 900;
+  const int num_ports = 76;
   mkl_wrapper::mkl_sparse_mat g(size, num_ports, g_csr_rows, g_csr_cols,
                                 g_csr_vals, SPARSE_INDEX_BASE_ONE);
 
+  std::cout << *std::max_element(g_csr_cols.data(),
+                                 g_csr_cols.data() + g_csr_rows[size])
+            << std::endl;
+
+  k.to_zero_based();
+  m.to_zero_based();
+  g.to_zero_based();
   omp_set_max_active_levels(2);
   std::cout << "compute eigenvalues\n";
   double max{0.}, min{0.};
@@ -168,31 +175,27 @@ int main(int argc, char **argv) {
   }
 
   // csr data for the V^T  matrix
-  std::shared_ptr<MKL_INT[]> vTAI;
+  auto vTAI =
+      std::shared_ptr<MKL_INT[]>(new MKL_INT[freq_size * num_ports + 1]);
+  vTAI[0] = 0;
   std::shared_ptr<MKL_INT[]> vTAJ;
   std::shared_ptr<double[]> vTAV;
 
-  omp_set_num_threads(1);
-  std::vector<MKL_INT> ai_map;
-  std::vector<MKL_INT> aj_map;
+  omp_set_num_threads(3);
 #pragma omp parallel
   {
-    mkl_set_num_threads_local(10);
+    mkl_set_num_threads_local(2);
     // mkl_set_dynamic(0);
-    std::vector<MKL_INT> vTAI_local;
-    std::vector<MKL_INT> vTAJ_local;
-    std::vector<double> vTAV_local;
-    vTAI_local.push_back(0);
     const int total_omp_threads = omp_get_num_threads();
     const int local_port_size = num_ports / total_omp_threads;
     const int rank = omp_get_thread_num();
     const int start = local_port_size * rank;
     const int end = std::min(local_port_size * (rank + 1), (int)num_ports);
-#pragma omp single
-    {
-      ai_map = std::move(std::vector<MKL_INT>(total_omp_threads + 1, 0));
-      aj_map = std::move(std::vector<MKL_INT>(total_omp_threads + 1, 0));
-    }
+    std::vector<MKL_INT> vTAI_local;
+    vTAI_local.push_back(0);
+    std::vector<MKL_INT> vTAJ_local;
+    std::vector<double> vTAV_local;
+    std::vector<MKL_INT> local_to_global;
 #pragma omp critical
     {
       std::cout << "omp_get_thread_num: " << omp_get_thread_num()
@@ -202,22 +205,23 @@ int main(int argc, char **argv) {
     }
 
     std::vector<double> rhs(size);
-    std::vector<double> select(num_ports, 0);
     std::vector<double> res(size);
     double norm = 0;
-    for (auto freq : frequencies) {
-      auto mat = mkl_wrapper::mkl_sparse_sum(m, k, freq);
+    for (size_t f = 0; f < frequencies.size(); f++) {
+      auto mat = mkl_wrapper::mkl_sparse_sum(m, k, frequencies[f]);
+      mat.set_positive_definite(true);
       auto solver =
           utils::singleton<mkl_wrapper::solver_factory>::instance().create(
               "direct", mat);
+      std::vector<double> select(num_ports, 0);
       for (int i = start; i < end; i++) {
+        local_to_global.push_back(i * frequencies.size() + f);
         select[(select.size() - 1 + i) % select.size()] = 0;
         select[i] = 1;
         g.mult_vec(select.data(), rhs.data());
-
 #pragma omp critical
         {
-          std::cout << "port : " << i << " freq: " << freq
+          std::cout << "port : " << i << " freq: " << frequencies[f]
                     << " mkl_max: " << mkl_get_max_threads() << std::endl;
         }
         solver->solve(rhs.data(), res.data());
@@ -226,7 +230,6 @@ int main(int argc, char **argv) {
         for (MKL_INT col = 0; col < size; col++) {
           norm = std::abs(res[col]) > norm ? std::abs(res[col]) : norm;
         }
-
         for (MKL_INT col = 0; col < size; col++) {
           res[col] /= norm;
           if (std::abs(res[col]) > 1e-3) {
@@ -235,45 +238,40 @@ int main(int argc, char **argv) {
           }
         }
         vTAI_local.push_back(vTAV_local.size());
+
+        vTAI[local_to_global.back() + 1] =
+            *vTAI_local.crbegin() - *(vTAI_local.crbegin() + 1);
       }
     }
-
-    ai_map[rank + 1] = (end - start) * frequencies.size();
-    aj_map[rank + 1] = vTAI_local.back();
     // One thread indicates that the barrier is complete.
 #pragma omp barrier
 #pragma omp single
     {
-      for (size_t i = 1; i < ai_map.size(); i++) {
-        ai_map[i] += ai_map[i - 1];
+      for (MKL_INT i = 1; i <= freq_size * num_ports; i++) {
+        vTAI[i] += vTAI[i - 1];
       }
-      for (size_t i = 1; i < aj_map.size(); i++) {
-        aj_map[i] += aj_map[i - 1];
-      }
-      std::cout << "nnz: " << aj_map.back() << std::endl;
-      vTAI.reset(new MKL_INT[freq_size * num_ports + 1]);
-      vTAJ.reset(new MKL_INT[aj_map.back()]);
-      vTAV.reset(new double[aj_map.back()]);
-      vTAI[0] = 0;
+      std::cout << "nnz: " << vTAI[freq_size * num_ports] << std::endl;
+      vTAJ.reset(new MKL_INT[vTAI[freq_size * num_ports]]);
+      vTAV.reset(new double[vTAI[freq_size * num_ports]]);
     }
 #pragma omp barrier
-    for (size_t i = 1; i < vTAI_local.size(); i++) {
-      vTAI[i + ai_map[rank]] = vTAI_local[i] + aj_map[rank];
-    }
-    for (size_t i = 0; i < vTAJ_local.size(); i++) {
-      vTAJ[i + aj_map[rank]] = vTAJ_local[i];
-    }
-    for (size_t i = 0; i < vTAV_local.size(); i++) {
-      vTAV[i + aj_map[rank]] = vTAV_local[i];
+    for (size_t i = 0; i < local_to_global.size(); i++) {
+      std::copy(std::execution::seq, vTAJ_local.cbegin() + vTAI_local[i],
+                vTAJ_local.cbegin() + vTAI_local[i + 1],
+                vTAJ.get() + vTAI[local_to_global[i]]);
+      std::copy(std::execution::seq, vTAV_local.cbegin() + vTAI_local[i],
+                vTAV_local.cbegin() + vTAI_local[i + 1],
+                vTAV.get() + vTAI[local_to_global[i]]);
     }
   }
 
-  mkl_wrapper::mkl_sparse_mat vt(freq_size * num_ports, size, vTAI, vTAJ, vTAV);
-  {
-    mkl_set_num_threads_local(10);
-    auto m_red = mkl_sparse_mult_papt(m, vt);
-    auto k_red = mkl_sparse_mult_papt(k, vt);
-    auto g_red = mkl_sparse_mult(vt, g);
-  }
+  // mkl_wrapper::mkl_sparse_mat vt(freq_size * num_ports, size, vTAI, vTAJ,
+  // vTAV);
+  // {
+  //   mkl_set_num_threads_local(10);
+  //   auto m_red = mkl_sparse_mult_papt(m, vt);
+  //   auto k_red = mkl_sparse_mult_papt(k, vt);
+  //   auto g_red = mkl_sparse_mult(vt, g);
+  // }
   return 0;
 }
