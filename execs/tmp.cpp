@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
   mkl_wrapper::mkl_sparse_mat_sym sym_k(k);
   mkl_wrapper::mkl_sparse_mat_sym sym_m(m);
 
-  const int num_ports = 76;
+  const int num_ports = 900;
   mkl_wrapper::mkl_sparse_mat g(size, num_ports, g_csr_rows, g_csr_cols,
                                 g_csr_vals, SPARSE_INDEX_BASE_ONE);
 
@@ -128,7 +128,7 @@ int main(int argc, char **argv) {
   double max{0.}, min{0.};
   {
 
-    mkl_set_num_threads_local(10);
+    mkl_set_num_threads_local(48);
     mkl_wrapper::arpack_gv ar_gv(&k, &m);
 
     ar_gv.set_tol(1e-2);
@@ -148,7 +148,7 @@ int main(int argc, char **argv) {
   }
   {
 
-    mkl_set_num_threads_local(10);
+    mkl_set_num_threads_local(48);
     mkl_wrapper::arpack_gv ar_gv(&m, &k);
 
     ar_gv.set_tol(1e-2);
@@ -181,16 +181,20 @@ int main(int argc, char **argv) {
   std::shared_ptr<MKL_INT[]> vTAJ;
   std::shared_ptr<double[]> vTAV;
 
-  omp_set_num_threads(3);
+  omp_set_num_threads(2);
+
+  const int total_work = num_ports * freq_size;
+  int count = 0;
 #pragma omp parallel
   {
-    mkl_set_num_threads_local(2);
+    mkl_set_num_threads_local(24);
     // mkl_set_dynamic(0);
     const int total_omp_threads = omp_get_num_threads();
-    const int local_port_size = num_ports / total_omp_threads;
+    const int local_port_size = num_ports / total_omp_threads + 1;
     const int rank = omp_get_thread_num();
-    const int start = local_port_size * rank;
-    const int end = std::min(local_port_size * (rank + 1), (int)num_ports);
+    std::vector<double> select(num_ports, 0);
+    auto [start, end] = utils::LoadBalancedPartition(
+        select.begin(), select.end(), rank, total_omp_threads);
     std::vector<MKL_INT> vTAI_local;
     vTAI_local.push_back(0);
     std::vector<MKL_INT> vTAJ_local;
@@ -213,17 +217,11 @@ int main(int argc, char **argv) {
       auto solver =
           utils::singleton<mkl_wrapper::solver_factory>::instance().create(
               "direct", mat);
-      std::vector<double> select(num_ports, 0);
-      for (int i = start; i < end; i++) {
-        local_to_global.push_back(i * frequencies.size() + f);
-        select[(select.size() - 1 + i) % select.size()] = 0;
-        select[i] = 1;
+      for (auto it = start; it < end; it++) {
+        local_to_global.push_back((it - select.begin()) * frequencies.size() +
+                                  f);
+        *it = 1;
         g.mult_vec(select.data(), rhs.data());
-#pragma omp critical
-        {
-          std::cout << "port : " << i << " freq: " << frequencies[f]
-                    << " mkl_max: " << mkl_get_max_threads() << std::endl;
-        }
         solver->solve(rhs.data(), res.data());
         norm = 0.;
         // #pragma omp parallel for reduction(max : norm)
@@ -241,18 +239,23 @@ int main(int argc, char **argv) {
 
         vTAI[local_to_global.back() + 1] =
             *vTAI_local.crbegin() - *(vTAI_local.crbegin() + 1);
+        *it = 0;
       }
+#pragma omp critical
+      { count += std::distance(start, end); }
+      // #pragma omp single
+      { utils::printProgress(count * 1. / total_work); }
     }
     // One thread indicates that the barrier is complete.
 #pragma omp barrier
-#pragma omp single
+#pragma omp master
     {
-      for (MKL_INT i = 1; i <= freq_size * num_ports; i++) {
+      for (MKL_INT i = 1; i <= total_work; i++) {
         vTAI[i] += vTAI[i - 1];
       }
-      std::cout << "nnz: " << vTAI[freq_size * num_ports] << std::endl;
-      vTAJ.reset(new MKL_INT[vTAI[freq_size * num_ports]]);
-      vTAV.reset(new double[vTAI[freq_size * num_ports]]);
+      std::cout << "\nnnz: " << vTAI[total_work] << std::endl;
+      vTAJ.reset(new MKL_INT[vTAI[total_work]]);
+      vTAV.reset(new double[vTAI[total_work]]);
     }
 #pragma omp barrier
     for (size_t i = 0; i < local_to_global.size(); i++) {
@@ -265,13 +268,12 @@ int main(int argc, char **argv) {
     }
   }
 
-  // mkl_wrapper::mkl_sparse_mat vt(freq_size * num_ports, size, vTAI, vTAJ,
-  // vTAV);
-  // {
-  //   mkl_set_num_threads_local(10);
-  //   auto m_red = mkl_sparse_mult_papt(m, vt);
-  //   auto k_red = mkl_sparse_mult_papt(k, vt);
-  //   auto g_red = mkl_sparse_mult(vt, g);
-  // }
+  mkl_wrapper::mkl_sparse_mat vt(freq_size * num_ports, size, vTAI, vTAJ, vTAV);
+  {
+    mkl_set_num_threads_local(48);
+    auto m_red = mkl_sparse_mult_papt(m, vt);
+    auto k_red = mkl_sparse_mult_papt(k, vt);
+    auto g_red = mkl_sparse_mult(vt, g);
+  }
   return 0;
 }

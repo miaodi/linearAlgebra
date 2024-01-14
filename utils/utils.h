@@ -152,4 +152,19 @@ public:
     return inst;
   }
 };
+
+template <typename Iter>
+std::pair<Iter, Iter> LoadBalancedPartition(Iter begin, Iter end, int tid,
+                                            int nthreads) {
+  const size_t total_work = std::distance(begin, end);
+  const size_t work_per_thread = total_work / nthreads;
+  const size_t resid = total_work % nthreads;
+  return tid >= resid
+             ? std::make_pair(begin + tid * work_per_thread + resid,
+                              begin + (tid + 1) * work_per_thread + resid)
+             : std::make_pair(begin + tid * (work_per_thread + 1),
+                              begin + (tid + 1) * (work_per_thread + 1));
+}
+
+void printProgress(double percentage);
 } // namespace utils

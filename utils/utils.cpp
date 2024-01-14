@@ -1,9 +1,12 @@
 #include "utils.h"
 #include <Eigen/Sparse>
+#define PBSTR "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+#define PBWIDTH 60
+
 namespace utils {
 std::pair<int32_t, int32_t>
 ReadFromBinaryEigen(const std::string &filename,
-               std::vector<Eigen::Triplet<double, int32_t>> &coo) {
+                    std::vector<Eigen::Triplet<double, int32_t>> &coo) {
 
   std::ifstream file(filename, std::ios::binary);
   int64_t size;
@@ -19,6 +22,14 @@ ReadFromBinaryEigen(const std::string &filename,
     n = std::max(n, coo[i].col());
   }
   return std::make_pair(m + 1, n + 1);
+}
+
+void printProgress(double percentage) {
+  int val = (int)(percentage * 100);
+  int lpad = (int)(percentage * PBWIDTH);
+  int rpad = PBWIDTH - lpad;
+  printf("\r%3d%% [%.*s%*s]", val, lpad, PBSTR, rpad, "");
+  fflush(stdout);
 }
 
 // std::pair<int32_t, int32_t> ReadFromBinaryCSR(const std::string &filename,
