@@ -2,6 +2,7 @@
 #include "mkl_solver.h"
 #include "mkl_sparse_mat.h"
 #include <gtest/gtest.h>
+#include <iomanip>
 #include <memory>
 // Demonstrate some basic assertions.
 TEST(HelloTest, BasicAssertions) {
@@ -203,5 +204,47 @@ TEST(pardiso, full_vs_sym) {
 
   for (size_t i = 0; i < x0.size(); i++) {
     EXPECT_NEAR(x0[i], x1[i], 1e-7);
+  }
+}
+
+TEST(sparse_matrix, mult_full_vs_sym) {
+
+  std::shared_ptr<MKL_INT[]> ai(new MKL_INT[6]{0, 2, 5, 6, 9, 11});
+  std::shared_ptr<MKL_INT[]> aj(
+      new MKL_INT[11]{0, 1, 0, 1, 3, 2, 3, 4, 1, 3, 4});
+  std::shared_ptr<double[]> av(new double[11]{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1});
+
+  mkl_wrapper::mkl_sparse_mat mat(5, 5, ai, aj, av);
+  mat.set_positive_definite(true);
+  std::vector<double> rhs(mat.rows(), 1.), x0(mat.rows()), x1(mat.rows());
+  // for (int i = 0; i < mat.rows(); i++) {
+  //   rhs[i] = utils::random<double>(-1.0, 1.0);
+  // }
+
+  mat.mult_vec(rhs.data(), x0.data());
+  mkl_wrapper::mkl_sparse_mat_sym sym(mat);
+  sym.mult_vec(rhs.data(), x1.data());
+  for (size_t i = 0; i < x0.size(); i++) {
+    EXPECT_EQ(x0[i], x1[i]);
+  }
+}
+
+TEST(sparse_matrix, mult_full_vs_sym2) {
+
+  std::ifstream f("data/ex5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
+  std::vector<MKL_INT> csr_rows, csr_cols;
+  std::vector<double> csr_vals;
+  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+
+  mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                  csr_rows, csr_cols, csr_vals);
+  mkl_wrapper::mkl_sparse_mat_sym sym(mat);
+
+  std::vector<double> rhs(mat.rows(), 1.), x0(mat.rows()), x1(mat.rows());
+  mat.mult_vec(rhs.data(), x0.data());
+  sym.mult_vec(rhs.data(), x1.data());
+
+  for (size_t i = 0; i < x0.size(); i++) {
+    EXPECT_NEAR(x0[i], x1[i], 1e-9);
   }
 }

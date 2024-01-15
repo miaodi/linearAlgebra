@@ -12,6 +12,7 @@ public:
   mkl_solver() = default;
   virtual bool solve(double const *const b, double *const x) = 0;
   virtual ~mkl_solver() {}
+  void set_print_level(int pl) { _print_level = pl; }
 
 protected:
   int _print_level{1}; // output level

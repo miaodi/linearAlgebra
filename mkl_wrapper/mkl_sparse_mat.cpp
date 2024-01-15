@@ -178,7 +178,7 @@ std::shared_ptr<double[]> mkl_sparse_mat::get_diag() const {
     if (mid == _aj.get() + end) {
       res[i] = 0.;
     } else {
-      res[i] = *mid;
+      res[i] = _av[std::distance(_aj.get(), mid)];
     }
   }
   return res;
@@ -186,7 +186,6 @@ std::shared_ptr<double[]> mkl_sparse_mat::get_diag() const {
 
 void mkl_sparse_mat::to_one_based() {
   if (_mkl_base == SPARSE_INDEX_BASE_ZERO) {
-    mkl_sparse_destroy(_mkl_mat);
     {
 #pragma omp parallel for
       for (MKL_INT i = 0; i < _nnz; i++) {
@@ -204,7 +203,6 @@ void mkl_sparse_mat::to_one_based() {
 
 void mkl_sparse_mat::to_zero_based() {
   if (_mkl_base == SPARSE_INDEX_BASE_ONE) {
-    mkl_sparse_destroy(_mkl_mat);
     {
 #pragma omp parallel for
       for (MKL_INT i = 0; i < _nnz; i++) {
@@ -221,6 +219,11 @@ void mkl_sparse_mat::to_zero_based() {
 }
 
 void mkl_sparse_mat::sp_fill() {
+  if (_mkl_mat) {
+    mkl_sparse_destroy(_mkl_mat);
+    _mkl_mat = nullptr;
+  }
+
   _mkl_stat =
       mkl_sparse_d_create_csr(&_mkl_mat, _mkl_base, _nrow, _ncol, _ai.get(),
                               _ai.get() + 1, _aj.get(), _av.get());
@@ -417,18 +420,9 @@ mkl_sparse_mat mkl_sparse_mult(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
   sparse_matrix_t result;
   auto status =
       mkl_sparse_sp2m(opA, A.mkl_descr(), A.mkl_handler(), opB, B.mkl_descr(),
-                      B.mkl_handler(), SPARSE_STAGE_NNZ_COUNT, &result);
+                      B.mkl_handler(), SPARSE_STAGE_FULL_MULT, &result);
   if (status != SPARSE_STATUS_SUCCESS) {
-    std::cerr << "mkl_sparse_sp2m symbolic failed, code: " << status
-              << std::endl;
-    return mkl_sparse_mat();
-  }
-  status =
-      mkl_sparse_sp2m(opA, A.mkl_descr(), A.mkl_handler(), opB, B.mkl_descr(),
-                      B.mkl_handler(), SPARSE_STAGE_FINALIZE_MULT, &result);
-  if (status != SPARSE_STATUS_SUCCESS) {
-    std::cerr << "mkl_sparse_sp2m numeric failed, code: " << status
-              << std::endl;
+    std::cerr << "mkl_sparse_sp2m  failed, code: " << status << std::endl;
     return mkl_sparse_mat();
   }
   status = mkl_sparse_order(result);
@@ -453,6 +447,41 @@ mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat &A, mkl_sparse_mat &P) {
   auto PA = mkl_sparse_mult(P, A);
   return mkl_sparse_mult(PA, P, SPARSE_OPERATION_NON_TRANSPOSE,
                          SPARSE_OPERATION_TRANSPOSE);
+}
+
+// PT*A*P
+mkl_sparse_mat_sym mkl_sparse_mult_ptap(mkl_sparse_mat_sym &A,
+                                        mkl_sparse_mat &P) {
+
+  sparse_matrix_t result;
+  auto status = mkl_sparse_sypr(SPARSE_OPERATION_TRANSPOSE, P.mkl_handler(),
+                                A.mkl_handler(), A.mkl_descr(), &result,
+                                SPARSE_STAGE_FULL_MULT);
+
+  if (status != SPARSE_STATUS_SUCCESS) {
+    std::cerr << "mkl_sparse_sypr failed, code: " << status << std::endl;
+    return mkl_sparse_mat_sym();
+  }
+  auto res = mkl_sparse_mat_sym(result);
+  mkl_sparse_destroy(result);
+  return res;
+}
+
+// P*A*PT
+mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat_sym &A, mkl_sparse_mat &P) {
+
+  sparse_matrix_t result;
+  auto status = mkl_sparse_sypr(SPARSE_OPERATION_NON_TRANSPOSE, P.mkl_handler(),
+                                A.mkl_handler(), A.mkl_descr(), &result,
+                                SPARSE_STAGE_FULL_MULT);
+
+  if (status != SPARSE_STATUS_SUCCESS) {
+    std::cerr << "mkl_sparse_sypr failed, code: " << status << std::endl;
+    return mkl_sparse_mat_sym();
+  }
+  auto res = mkl_sparse_mat_sym(result);
+  mkl_sparse_destroy(result);
+  return res;
 }
 
 mkl_ilu0::mkl_ilu0(mkl_sparse_mat *A) : mkl_sparse_mat(), _A(A) {
@@ -620,7 +649,16 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
   sp_fill();
 }
 
+mkl_sparse_mat_sym::mkl_sparse_mat_sym(sparse_matrix_t mkl_mat)
+    : mkl_sparse_mat(mkl_mat) {
+  sp_fill();
+}
+
 void mkl_sparse_mat_sym::sp_fill() {
+  if (_mkl_mat) {
+    mkl_sparse_destroy(_mkl_mat);
+    _mkl_mat = nullptr;
+  }
   _mkl_stat =
       mkl_sparse_d_create_csr(&_mkl_mat, _mkl_base, _nrow, _ncol, _ai.get(),
                               _ai.get() + 1, _aj.get(), _av.get());

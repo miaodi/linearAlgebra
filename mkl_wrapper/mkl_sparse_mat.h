@@ -156,7 +156,13 @@ protected:
 // upper triangular
 class mkl_sparse_mat_sym : public mkl_sparse_mat {
 public:
+  mkl_sparse_mat_sym() : mkl_sparse_mat() {}
   explicit mkl_sparse_mat_sym(const mkl_sparse_mat &A);
+
+  // make a deep copy of mkl_mat so that mkl_sparse_mat will always keep the
+  // ownership of csr data
+  mkl_sparse_mat_sym(sparse_matrix_t mkl_mat);
+
   virtual void sp_fill();
 };
 
@@ -164,6 +170,14 @@ class mkl_sparse_mat_diag : public mkl_sparse_mat {
 public:
   mkl_sparse_mat_diag(const MKL_INT size, const double val);
 };
+
+// PT*A*P
+mkl_sparse_mat_sym mkl_sparse_mult_ptap(mkl_sparse_mat_sym &A,
+                                        mkl_sparse_mat &P);
+
+// P*A*PT
+// mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat_sym &A, mkl_sparse_mat
+// &P);
 
 // Incomplete Cholesky ic0
 class mkl_ic0 : public mkl_sparse_mat_sym {
