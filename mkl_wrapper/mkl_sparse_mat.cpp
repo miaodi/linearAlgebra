@@ -414,7 +414,7 @@ mkl_sparse_mat mkl_sparse_mult(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                                const sparse_operation_t opA,
                                const sparse_operation_t opB) {
   if (A.mkl_base() != B.mkl_base()) {
-    std::cerr << "two inputs of mkl_sparse_sum has different index base\n";
+    std::cerr << "two inputs of mkl_sparse_mult has different index base\n";
     return mkl_sparse_mat();
   }
   sparse_matrix_t result;
@@ -447,6 +447,17 @@ mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat &A, mkl_sparse_mat &P) {
   auto PA = mkl_sparse_mult(P, A);
   return mkl_sparse_mult(PA, P, SPARSE_OPERATION_NON_TRANSPOSE,
                          SPARSE_OPERATION_TRANSPOSE);
+}
+
+// c*A+B
+mkl_sparse_mat_sym mkl_sparse_sum(const mkl_sparse_mat_sym &A,
+                                  const mkl_sparse_mat_sym &B, double c) {
+
+  auto sum =
+      mkl_sparse_sum((const mkl_sparse_mat &)A, (const mkl_sparse_mat &)B, c);
+  auto res = mkl_sparse_mat_sym(sum.rows(), sum.cols(), sum.get_ai(),
+                                sum.get_aj(), sum.get_av(), sum.mkl_base());
+  return res;
 }
 
 // PT*A*P
@@ -651,6 +662,15 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
 
 mkl_sparse_mat_sym::mkl_sparse_mat_sym(sparse_matrix_t mkl_mat)
     : mkl_sparse_mat(mkl_mat) {
+  sp_fill();
+}
+
+mkl_sparse_mat_sym::mkl_sparse_mat_sym(const MKL_INT row, const MKL_INT col,
+                                       const std::shared_ptr<MKL_INT[]> &ai,
+                                       const std::shared_ptr<MKL_INT[]> &aj,
+                                       const std::shared_ptr<double[]> &av,
+                                       const sparse_index_base_t base)
+    : mkl_sparse_mat(row, col, ai, aj, av, base) {
   sp_fill();
 }
 

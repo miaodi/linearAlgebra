@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
   mkl_wrapper::mkl_sparse_mat_sym sym_k(k);
   mkl_wrapper::mkl_sparse_mat_sym sym_m(m);
 
-  const int num_ports = 151;
+  const int num_ports = 900;
   mkl_wrapper::mkl_sparse_mat g(size, num_ports, g_csr_rows, g_csr_cols,
                                 g_csr_vals, SPARSE_INDEX_BASE_ONE);
 
@@ -128,8 +128,8 @@ int main(int argc, char **argv) {
   double max{0.}, min{0.};
   {
 
-    mkl_set_num_threads_local(10);
-    mkl_wrapper::arpack_gv ar_gv(&k, &m);
+    mkl_set_num_threads_local(48);
+    mkl_wrapper::arpack_gv ar_gv(&sym_k, &sym_m);
 
     ar_gv.set_tol(1e-2);
     ar_gv.set_num_eigen(1);
@@ -148,8 +148,8 @@ int main(int argc, char **argv) {
   }
   {
 
-    mkl_set_num_threads_local(10);
-    mkl_wrapper::arpack_gv ar_gv(&m, &k);
+    mkl_set_num_threads_local(48);
+    mkl_wrapper::arpack_gv ar_gv(&sym_m, &sym_k);
 
     ar_gv.set_tol(1e-2);
     ar_gv.set_num_eigen(1);
@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
   int count = 0;
 #pragma omp parallel
   {
-    mkl_set_num_threads_local(5);
+    mkl_set_num_threads_local(24);
     // mkl_set_dynamic(0);
     const int total_omp_threads = omp_get_num_threads();
     const int local_port_size = num_ports / total_omp_threads + 1;
@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
     std::vector<double> res(size);
     double norm = 0;
     for (size_t f = 0; f < frequencies.size(); f++) {
-      auto mat = mkl_wrapper::mkl_sparse_sum(m, k, frequencies[f]);
+      auto mat = mkl_wrapper::mkl_sparse_sum(sym_m, sym_k, frequencies[f]);
       mat.set_positive_definite(true);
       auto solver =
           utils::singleton<mkl_wrapper::solver_factory>::instance().create(
@@ -241,9 +241,9 @@ int main(int argc, char **argv) {
             *vTAI_local.crbegin() - *(vTAI_local.crbegin() + 1);
         *it = 0;
 #pragma omp critical
-      { count += 1; }
-      // #pragma omp single
-      { utils::printProgress(count * 1. / total_work); }
+        { count += 1; }
+        // #pragma omp single
+        { utils::printProgress(count * 1. / total_work); }
       }
     }
     // One thread indicates that the barrier is complete.
@@ -270,9 +270,9 @@ int main(int argc, char **argv) {
 
   mkl_wrapper::mkl_sparse_mat vt(freq_size * num_ports, size, vTAI, vTAJ, vTAV);
   {
-    mkl_set_num_threads_local(10);
-    auto m_red = mkl_sparse_mult_papt(m, vt);
-    auto k_red = mkl_sparse_mult_papt(k, vt);
+    mkl_set_num_threads_local(48);
+    auto m_red = mkl_sparse_mult_papt(sym_m, vt);
+    auto k_red = mkl_sparse_mult_papt(sym_k, vt);
     auto g_red = mkl_sparse_mult(vt, g);
   }
   return 0;
