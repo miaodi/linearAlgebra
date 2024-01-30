@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <mkl_cblas.h>
 #include <mkl_spblas.h>
 #include <vector>
 namespace mkl_wrapper {
@@ -56,6 +57,7 @@ public:
   MKL_INT cols() const { return _ncol; }
   MKL_INT nnz() const { return _nnz; }
   bool mult_vec(double const *const b, double *const x);
+  bool transpose_mult_vec(double const *const b, double *const x);
 
   MKL_INT avg_nz() const { return _nnz / _nrow; }
   MKL_INT max_nz() const;
@@ -83,6 +85,8 @@ public:
 
   void transpose();
 
+  void clear();
+
 protected:
   sparse_matrix_t _mkl_mat{nullptr};
   sparse_status_t _mkl_stat;
@@ -103,6 +107,8 @@ protected:
 // c*A+B
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                               double c = 1.);
+
+bool mkl_sparse_dense_prod(const mkl_sparse_mat &A, double const *B, double *C);
 
 // opA(A)*B
 mkl_sparse_mat
@@ -159,6 +165,14 @@ public:
   mkl_sparse_mat_sym() : mkl_sparse_mat() {}
   explicit mkl_sparse_mat_sym(const mkl_sparse_mat &A);
 
+  mkl_sparse_mat_sym(const mkl_sparse_mat_sym &A);
+
+  // user guarantee the data is upper triangular
+  mkl_sparse_mat_sym(const MKL_INT row, const MKL_INT col,
+                     const std::shared_ptr<MKL_INT[]> &ai,
+                     const std::shared_ptr<MKL_INT[]> &aj,
+                     const std::shared_ptr<double[]> &av,
+                     const sparse_index_base_t base = SPARSE_INDEX_BASE_ZERO);
   // make a deep copy of mkl_mat so that mkl_sparse_mat will always keep the
   // ownership of csr data
   mkl_sparse_mat_sym(sparse_matrix_t mkl_mat);
@@ -171,13 +185,16 @@ public:
   mkl_sparse_mat_diag(const MKL_INT size, const double val);
 };
 
+// c*A+B
+mkl_sparse_mat_sym mkl_sparse_sum(const mkl_sparse_mat_sym &A,
+                                  const mkl_sparse_mat_sym &B, double c = 1.);
+
 // PT*A*P
 mkl_sparse_mat_sym mkl_sparse_mult_ptap(mkl_sparse_mat_sym &A,
                                         mkl_sparse_mat &P);
 
 // P*A*PT
-// mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat_sym &A, mkl_sparse_mat
-// &P);
+mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat_sym &A, mkl_sparse_mat &P);
 
 // Incomplete Cholesky ic0
 class mkl_ic0 : public mkl_sparse_mat_sym {
@@ -191,4 +208,47 @@ public:
 protected:
   std::unique_ptr<double[]> _interm_vec{nullptr};
 };
+
+// col major
+class dense_mat {
+public:
+  dense_mat() = default;
+  dense_mat(MKL_INT m, MKL_INT n) : _m(m), _n(n) {
+    _av.reset(new double[_m * _n]);
+  }
+
+  void resize(MKL_INT m, MKL_INT n) {
+    _m = m;
+    _n = n;
+    _av.reset(new double[_m * _n]);
+  }
+
+  mkl_sparse_mat to_sparse_trans() const;
+
+  MKL_INT rows() const { return _m; }
+  MKL_INT cols() const { return _n; }
+
+  std::shared_ptr<double[]> get_av() { return _av; }
+  std::shared_ptr<const double[]> get_av() const { return _av; }
+  double *col(int i) { return _av.get() + i * _m; }
+
+protected:
+  MKL_INT _m{0};
+  MKL_INT _n{0};
+  std::shared_ptr<double[]> _av{nullptr}; // Value Array
+};
+
+bool mkl_sparse_dense_mat_prod(
+    const mkl_sparse_mat &A, const dense_mat &B, dense_mat &C,
+    const sparse_operation_t opA = SPARSE_OPERATION_NON_TRANSPOSE);
+
+bool dense_product(const dense_mat &A, const dense_mat &B, dense_mat &C,
+                   const CBLAS_TRANSPOSE opA = CblasNoTrans,
+                   const CBLAS_TRANSPOSE opB = CblasNoTrans);
+
+// PT*A*P
+dense_mat mkl_sparse_mult_ptap(const mkl_sparse_mat &A, const dense_mat &P);
+
+// P*A*PT
+dense_mat mkl_sparse_mult_papt(const mkl_sparse_mat &A, const dense_mat &P);
 } // namespace mkl_wrapper

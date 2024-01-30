@@ -15,7 +15,7 @@ public:
   void set_print_level(int pl) { _print_level = pl; }
 
 protected:
-  int _print_level{1}; // output level
+  int _print_level{0}; // output level
 };
 
 class mkl_direct_solver : public mkl_solver {

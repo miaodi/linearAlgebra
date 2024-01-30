@@ -8,6 +8,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <atomic>
+
 namespace Eigen {
 template <typename T, typename ind> class Triplet;
 }
@@ -167,4 +169,21 @@ std::pair<Iter, Iter> LoadBalancedPartition(Iter begin, Iter end, int tid,
 }
 
 void printProgress(double percentage);
+
+struct bar_t {
+  unsigned const count;
+  std::atomic<unsigned> spaces;
+  std::atomic<unsigned> generation;
+  bar_t(unsigned count_) : count(count_), spaces(count_), generation(0) {}
+  void wait() {
+    unsigned const my_generation = generation;
+    if (!--spaces) {
+      spaces = count;
+      ++generation;
+    } else {
+      while (generation == my_generation)
+        ;
+    }
+  }
+};
 } // namespace utils

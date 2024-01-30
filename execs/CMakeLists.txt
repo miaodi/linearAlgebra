@@ -15,3 +15,7 @@ target_link_libraries(eigen PRIVATE Utils fast_matrix_market::fast_matrix_market
 add_executable(tmp tmp.cpp)
 target_include_directories(tmp PRIVATE ARPACK::ARPACK)
 target_link_libraries(tmp PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper Spectra ARPACK::ARPACK OpenMP::OpenMP_CXX)
+
+add_executable(test1 test1.cpp)
+# target_include_directories(test1 PRIVATE Utils)
+target_link_libraries(test1 PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper TBB::tbb)

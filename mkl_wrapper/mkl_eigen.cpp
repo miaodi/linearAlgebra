@@ -18,7 +18,7 @@ bool mkl_eigen_sparse_d_gv::eigen_solve(double *eigenValues,
                                         double *eigenVectors) {
 
   _pm[1] = _tol;
-  _pm[2] = 0; // select Krylov-Schur method
+  _pm[2] = 1; // select Krylov-Schur method
   _pm[3] = _ncv;
   _pm[4] = _maxiter;
   _pm[6] = 0;
@@ -29,19 +29,13 @@ bool mkl_eigen_sparse_d_gv::eigen_solve(double *eigenValues,
   /* Step 1. Call mkl_sparse_ee_init to define default input values */
   mkl_sparse_ee_init(_pm);
   if (_B) {
-    _A->to_one_based();
-    _B->to_one_based();
     info = mkl_sparse_d_gv(&_which[0], _pm, _A->mkl_handler(), _A->mkl_descr(),
                            _B->mkl_handler(), _B->mkl_descr(), _nev,
                            &_num_found, eigenValues, eigenVectors, res.data());
-    _A->to_zero_based();
-    _B->to_zero_based();
   } else {
-    _A->to_one_based();
     info = mkl_sparse_d_ev(&_which[0], _pm, _A->mkl_handler(), _A->mkl_descr(),
                            _nev, &_num_found, eigenValues, eigenVectors,
                            res.data());
-    _A->to_zero_based();
   }
   if (info != 0) {
     std::cout << "mkl_sparse_d_gv output info: " << info << std::endl;

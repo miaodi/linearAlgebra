@@ -228,7 +228,8 @@ void mkl_sparse_mat::sp_fill() {
       mkl_sparse_d_create_csr(&_mkl_mat, _mkl_base, _nrow, _ncol, _ai.get(),
                               _ai.get() + 1, _aj.get(), _av.get());
   if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
-    std::cerr << "Matrix is not created" << std::endl;
+    std::cerr << "mkl_sparse_mat::sp_fill(): Matrix is not created, state:"
+              << _mkl_stat << std::endl;
   }
 
   _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
@@ -275,6 +276,13 @@ mkl_sparse_mat::~mkl_sparse_mat() {
 
 bool mkl_sparse_mat::mult_vec(double const *const b, double *const x) {
   _mkl_stat = mkl_sparse_d_mv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, _mkl_mat,
+                              _mkl_descr, b, 0.0, x);
+  return _mkl_stat == SPARSE_STATUS_SUCCESS;
+}
+
+bool mkl_sparse_mat::transpose_mult_vec(double const *const b,
+                                        double *const x) {
+  _mkl_stat = mkl_sparse_d_mv(SPARSE_OPERATION_TRANSPOSE, 1.0, _mkl_mat,
                               _mkl_descr, b, 0.0, x);
   return _mkl_stat == SPARSE_STATUS_SUCCESS;
 }
@@ -382,6 +390,19 @@ void mkl_sparse_mat::transpose() {
   this->swap(tmp);
 }
 
+void mkl_sparse_mat::clear() {
+  _ai = nullptr;
+  _aj = nullptr;
+  _av = nullptr;
+  _nrow = -1;
+  _ncol = -1;
+  _nnz = -1;
+  if (_mkl_mat) {
+    mkl_sparse_destroy(_mkl_mat);
+    _mkl_mat = nullptr;
+  }
+}
+
 MKL_INT mkl_sparse_mat::max_nz() const {
   MKL_INT res = 0;
   for (MKL_INT i = 0; i < _nrow; i++) {
@@ -414,7 +435,7 @@ mkl_sparse_mat mkl_sparse_mult(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                                const sparse_operation_t opA,
                                const sparse_operation_t opB) {
   if (A.mkl_base() != B.mkl_base()) {
-    std::cerr << "two inputs of mkl_sparse_sum has different index base\n";
+    std::cerr << "two inputs of mkl_sparse_mult has different index base\n";
     return mkl_sparse_mat();
   }
   sparse_matrix_t result;
@@ -447,6 +468,16 @@ mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat &A, mkl_sparse_mat &P) {
   auto PA = mkl_sparse_mult(P, A);
   return mkl_sparse_mult(PA, P, SPARSE_OPERATION_NON_TRANSPOSE,
                          SPARSE_OPERATION_TRANSPOSE);
+}
+
+// c*A+B
+mkl_sparse_mat_sym mkl_sparse_sum(const mkl_sparse_mat_sym &A,
+                                  const mkl_sparse_mat_sym &B, double c) {
+
+  auto sum =
+      mkl_sparse_sum((const mkl_sparse_mat &)A, (const mkl_sparse_mat &)B, c);
+  return mkl_sparse_mat_sym(sum.rows(), sum.cols(), sum.get_ai(), sum.get_aj(),
+                            sum.get_av(), sum.mkl_base());
 }
 
 // PT*A*P
@@ -630,9 +661,8 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
       _ai[i + 1] = end - diag_pos[i];
     }
   }
-  for (size_t i = 1; i <= _nrow; i++) {
-    _ai[i] += _ai[i - 1];
-  }
+  std::inclusive_scan(std::execution::par, _ai.get(), _ai.get() + _nrow + 1,
+                      _ai.get(), std::plus<>());
   _nnz = _ai[_nrow] - _mkl_base;
 
   _aj.reset(new MKL_INT[_nnz]);
@@ -649,8 +679,22 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
   sp_fill();
 }
 
+mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat_sym &A)
+    : mkl_sparse_mat(A) {
+  sp_fill();
+}
+
 mkl_sparse_mat_sym::mkl_sparse_mat_sym(sparse_matrix_t mkl_mat)
     : mkl_sparse_mat(mkl_mat) {
+  sp_fill();
+}
+
+mkl_sparse_mat_sym::mkl_sparse_mat_sym(const MKL_INT row, const MKL_INT col,
+                                       const std::shared_ptr<MKL_INT[]> &ai,
+                                       const std::shared_ptr<MKL_INT[]> &aj,
+                                       const std::shared_ptr<double[]> &av,
+                                       const sparse_index_base_t base)
+    : mkl_sparse_mat(row, col, ai, aj, av, base) {
   sp_fill();
 }
 
@@ -663,7 +707,7 @@ void mkl_sparse_mat_sym::sp_fill() {
       mkl_sparse_d_create_csr(&_mkl_mat, _mkl_base, _nrow, _ncol, _ai.get(),
                               _ai.get() + 1, _aj.get(), _av.get());
   if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
-    std::cout << "Matrix is not created" << std::endl;
+    std::cerr << "Matrix is not created, state: " << _mkl_stat << std::endl;
   }
 
   _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
@@ -710,12 +754,12 @@ bool mkl_ic0::factorize() {
   // fill in the values
   for (MKL_INT k = 0; k < _nrow; ++k) {
     // get the values for column k
-    double *ak = val + (col[k]);
-    MKL_INT *rowk = row + (col[k]);
+    double *ak = val + (col[k] - _mkl_base);
+    MKL_INT *rowk = row + (col[k] - _mkl_base);
     MKL_INT Lk = col[k + 1] - col[k];
 
     // sanity check
-    if (rowk[0] != k) {
+    if (rowk[0] - _mkl_base != k) {
       fprintf(stderr,
               "Fatal error in incomplete Cholesky preconditioner:\nMatrix "
               "format error at row %d.",
@@ -744,31 +788,31 @@ bool mkl_ic0::factorize() {
     // set the diagonal element
     double akk = std::sqrt(ak[0]);
     ak[0] = akk;
-    tmp[rowk[0]] = akk;
+    tmp[rowk[0] - _mkl_base] = akk;
 
     // divide column by akk
     for (MKL_INT j = 1; j < Lk; ++j) {
       ak[j] /= akk;
-      tmp[rowk[j]] = ak[j];
+      tmp[rowk[j] - _mkl_base] = ak[j];
     }
 
     // loop over all other columns
     for (MKL_INT _j = 1; _j < Lk; ++_j) {
-      MKL_INT j = rowk[_j];
+      MKL_INT j = rowk[_j] - _mkl_base;
       double tjk = tmp[j];
       if (tjk != 0.0) {
-        double *aj = val + col[j];
+        double *aj = val + col[j] - _mkl_base;
         MKL_INT Lj = col[j + 1] - col[j];
-        MKL_INT *rowj = row + col[j];
+        MKL_INT *rowj = row + col[j] - _mkl_base;
 
         for (MKL_INT i = 0; i < Lj; i++)
-          aj[i] -= tmp[rowj[i]] * tjk;
+          aj[i] -= tmp[rowj[i] - _mkl_base] * tjk;
       }
     }
 
     // reset temp buffer
     for (MKL_INT j = 0; j < Lk; ++j)
-      tmp[rowk[j]] = 0.0;
+      tmp[rowk[j] - _mkl_base] = 0.0;
   }
 
   return true;
@@ -784,5 +828,117 @@ bool mkl_ic0::solve(double const *const b, double *const x) {
   transA = SPARSE_OPERATION_NON_TRANSPOSE;
   mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, _interm_vec.get(), x);
   return true;
+}
+
+mkl_sparse_mat dense_mat::to_sparse_trans() const {
+  std::shared_ptr<MKL_INT[]> ai(new MKL_INT[_n + 1]);
+  std::shared_ptr<MKL_INT[]> aj(new MKL_INT[_m * _n]);
+  ai[0] = 0;
+  for (MKL_INT i = 1; i <= _n; i++) {
+    ai[i] = ai[i - 1] + _m;
+  }
+  for (MKL_INT i = 0; i < _m * _n; i++) {
+    aj[i] = i % _m;
+  }
+  return mkl_sparse_mat(_n, _m, ai, aj, _av);
+}
+
+bool dense_product(const dense_mat &A, const dense_mat &B, dense_mat &C,
+                   const CBLAS_TRANSPOSE opA, const CBLAS_TRANSPOSE opB) {
+  if (opA == CblasNoTrans) {
+    if (opB == CblasNoTrans) {
+      if (A.cols() != B.rows()) {
+        std::cerr << "matrix size inconsistency in product" << std::endl;
+        return false;
+      }
+      C.resize(A.rows(), B.cols());
+    } else {
+      if (A.cols() != B.cols()) {
+        std::cerr << "matrix size inconsistency in product" << std::endl;
+        return false;
+      }
+      C.resize(A.rows(), B.rows());
+    }
+  } else {
+    if (opB == CblasNoTrans) {
+      if (A.rows() != B.rows()) {
+        std::cerr << "matrix size inconsistency in product" << std::endl;
+        return false;
+      }
+      C.resize(A.cols(), B.cols());
+    } else {
+      if (A.rows() != B.cols()) {
+        std::cerr << "matrix size inconsistency in product" << std::endl;
+        return false;
+      }
+      C.resize(A.cols(), B.rows());
+    }
+  }
+
+  cblas_dgemm(CblasColMajor, opA, opB, C.rows(), C.cols(),
+              opA == CblasNoTrans ? A.cols() : A.rows(), 1., A.get_av().get(),
+              A.rows(), B.get_av().get(), B.rows(), 0., C.get_av().get(),
+              C.rows());
+  return true;
+}
+
+bool mkl_sparse_dense_mat_prod(const mkl_sparse_mat &A, const dense_mat &B,
+                               dense_mat &C, const sparse_operation_t opA) {
+  if (opA == SPARSE_OPERATION_NON_TRANSPOSE) {
+    if (A.cols() != B.rows()) {
+      std::cerr << "matrix size inconsistent." << std::endl;
+      return false;
+    }
+  } else {
+    if (A.rows() != B.rows()) {
+      std::cerr << "matrix size inconsistent." << std::endl;
+      return false;
+    }
+  }
+
+  C.resize(opA == SPARSE_OPERATION_NON_TRANSPOSE ? A.rows() : A.cols(),
+           B.cols());
+  auto state = mkl_sparse_d_mm(
+      opA, 1., A.mkl_handler(), A.mkl_descr(), SPARSE_LAYOUT_COLUMN_MAJOR,
+      B.get_av().get(), B.cols(), B.rows(), 0., C.get_av().get(), C.rows());
+  if (state != SPARSE_STATUS_SUCCESS) {
+    std::cerr << "fail to compute mkl_sparse_d_mm." << std::endl;
+    return false;
+  }
+  return true;
+}
+
+// PT*A*P
+dense_mat mkl_sparse_mult_ptap(const mkl_sparse_mat &A, const dense_mat &P) {
+  dense_mat ATP;
+  if (!mkl_sparse_dense_mat_prod(A, P, ATP, SPARSE_OPERATION_TRANSPOSE)) {
+    std::cerr << "mkl_sparse_mult_ptap( const mkl_sparse_mat& A, const "
+                 "dense_mat& P ) fails\n";
+    return dense_mat();
+  }
+  dense_mat PTAP;
+  if (!dense_product(ATP, P, PTAP, CblasTrans)) {
+    std::cerr << "mkl_sparse_mult_ptap( const mkl_sparse_mat& A, const "
+                 "dense_mat& P ) fails\n";
+    return dense_mat();
+  }
+  return PTAP;
+}
+
+// P*A*PT
+dense_mat mkl_sparse_mult_papt(const mkl_sparse_mat &A, const dense_mat &P) {
+  dense_mat ATP;
+  if (!mkl_sparse_dense_mat_prod(A, P, ATP, SPARSE_OPERATION_TRANSPOSE)) {
+    std::cerr << "mkl_sparse_mult_papt( const mkl_sparse_mat& A, const "
+                 "dense_mat& P ) fails\n";
+    return dense_mat();
+  }
+  dense_mat PAPT;
+  if (!dense_product(ATP, P, PAPT, CblasTrans, CblasTrans)) {
+    std::cerr << "mkl_sparse_mult_papt( const mkl_sparse_mat& A, const "
+                 "dense_mat& P ) fails\n";
+    return dense_mat();
+  }
+  return PAPT;
 }
 } // namespace mkl_wrapper

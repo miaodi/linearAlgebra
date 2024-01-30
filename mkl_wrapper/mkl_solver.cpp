@@ -155,11 +155,6 @@ bool mkl_pcg_solver::solve(double const *const b, double *const x) {
   // get number of equations
   MKL_INT n = _A->rows();
 
-  // zero solution vector
-#pragma omp parallel for
-  for (int i = 0; i < n; ++i)
-    x[i] = 0.0;
-
   // output parameters
   MKL_INT rci_request;
   MKL_INT ipar[128] = {0};
@@ -219,8 +214,9 @@ bool mkl_pcg_solver::solve(double const *const b, double *const x) {
       cblas_daxpy(n, -1., b, 1, temp.data(), 1);
       residual = cblas_dnrm2(n, temp.data(), 1);
 
-      fprintf(stderr, "%3d = %lg/%lg=%lg, %lg (%lg)\n", ipar[3], residual,
-              residual0, residual / residual0, dpar[3], dpar[6], dpar[7]);
+      if (_print_level == 1)
+        fprintf(stderr, "%3d = %lg/%lg=%lg, %lg (%lg)\n", ipar[3], residual,
+                residual0, residual / residual0, dpar[3], dpar[6], dpar[7]);
       if (residual / residual0 < _rel_tol || residual < _abs_tol) {
         bsuccess = true;
         bdone = true;
@@ -261,11 +257,6 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
 
   // get number of equations
   MKL_INT n = _A->rows();
-
-  // zero solution vector
-#pragma omp parallel for
-  for (int i = 0; i < n; ++i)
-    x[i] = 0.0;
 
   MKL_INT niter;
 
@@ -344,8 +335,9 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
     case 2: // then do the user-defined stopping test
     {
       residual = dpar[4];
-      fprintf(stderr, "%3d = %lg/%lg=%lg\n", ipar[3], residual, residual0,
-              residual / residual0);
+      if (_print_level == 1)
+        fprintf(stderr, "%3d = %lg/%lg=%lg\n", ipar[3], residual, residual0,
+                residual / residual0);
       if (residual / residual0 < _rel_tol || residual < _abs_tol) {
         bsuccess = true;
         bdone = true;

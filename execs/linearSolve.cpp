@@ -102,8 +102,10 @@ int main() {
             << std::endl;
 
   {
+    
+    mkl_set_num_threads_local(10);
     auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&mkl_mat);
-    prec->set_tau(1e-8);
+    prec->set_tau(1e-6);
     prec->set_max_fill(200);
     utils::Elapse<>::execute("ilut factorize: ",
                              [&prec]() { prec->factorize(); });
@@ -116,6 +118,7 @@ int main() {
     });
   }
   {
+    mkl_set_num_threads_local(10);
     mkl_wrapper::mkl_direct_solver pardiso(&mkl_mat);
     utils::Elapse<>::execute("pardiso factorize: ",
                              [&pardiso]() { pardiso.factorize(); });
