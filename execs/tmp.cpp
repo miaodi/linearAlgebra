@@ -135,6 +135,7 @@ int main(int argc, char **argv) {
   k.clear();
 
   const int num_ports = 900;
+
   mkl_wrapper::mkl_sparse_mat g(size, num_ports, g_csr_rows_ptr, g_csr_cols_ptr,
                                 g_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
 
@@ -205,9 +206,8 @@ int main(int argc, char **argv) {
   omp_set_max_active_levels(2);
 #pragma omp parallel num_threads(1)
   {
-    // omp_set_num_threads(10);
     mkl_set_num_threads_local(10);
-    mkl_set_dynamic(0);
+    // mkl_set_dynamic(0);
     const int total_omp_threads = omp_get_num_threads();
     const int local_port_size = num_ports / total_omp_threads + 1;
     const int rank = omp_get_thread_num();

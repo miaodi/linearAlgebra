@@ -166,7 +166,6 @@ public:
   explicit mkl_sparse_mat_sym(const mkl_sparse_mat &A);
 
   mkl_sparse_mat_sym(const mkl_sparse_mat_sym &A);
-
   // user guarantee the data is upper triangular
   mkl_sparse_mat_sym(const MKL_INT row, const MKL_INT col,
                      const std::shared_ptr<MKL_INT[]> &ai,
