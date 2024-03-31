@@ -21,13 +21,20 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Spectra)
 
 set(MKL_ARCH intel64)
-set(MKL_THREADING gnu_thread)
-set(MKL_INTERFACE ilp64)
-
+set(MKL_THREADING intel_thread)
+set(MKL_INTERFACE lp64)
+set(ARPACKNG_DIR)
 find_package(MKL CONFIG REQUIRED)
 find_package(TBB REQUIRED)
-find_package(arpackng REQUIRED)
-find_package(OpenMP)
+find_package(arpackng REQUIRED PATHS ${ARPACKNG_DIR})
+find_package(OpenMP REQUIRED)
+
+find_package(LAPACK REQUIRED)
+set(MUMPS_DIR)
+find_package(MUMPS REQUIRED PATHS ${MUMPS_DIR})
+message("MUMPS_mpiseq_FOUND: ${MUMPS_mpiseq_FOUND}")
+message("MUMPS::MUMPS: MUMPS::MUMPS")
+message("MUMPS_LIBRARIES: ${MUMPS_LIBRARIES}")
 
 add_subdirectory(utils)
 add_subdirectory(mkl_wrapper)

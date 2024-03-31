@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
   std::cout << "compute eigenvalues\n";
   double max{1.28061e+09}, min{26141.9};
   {
-    mkl_set_num_threads_local(10);
+    mkl_set_num_threads(10);
     mkl_wrapper::mkl_eigen_sparse_d_gv ar_gv(&sym_k, &sym_m);
 
     ar_gv.set_tol(3);
@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
     max = eigenvalues[0];
   }
   {
-    mkl_set_num_threads_local(10);
+    mkl_set_num_threads(10);
     mkl_wrapper::mkl_eigen_sparse_d_gv ar_gv(&sym_m, &sym_k);
 
     ar_gv.set_tol(3);
@@ -207,7 +207,7 @@ int main(int argc, char **argv) {
 #pragma omp parallel num_threads(1)
   {
     mkl_set_num_threads_local(10);
-    // mkl_set_dynamic(0);
+    mkl_set_dynamic(0);
     const int total_omp_threads = omp_get_num_threads();
     const int local_port_size = num_ports / total_omp_threads + 1;
     const int rank = omp_get_thread_num();
@@ -290,7 +290,7 @@ int main(int argc, char **argv) {
   mkl_wrapper::mkl_sparse_mat vt(freq_size * num_ports, size, vTAI, vTAJ, vTAV);
   vt.to_one_based();
   {
-    mkl_set_num_threads_local(10);
+    mkl_set_num_threads(10);
     auto m_red = mkl_sparse_mult_papt(sym_m, vt);
     auto k_red = mkl_sparse_mult_papt(sym_k, vt);
     auto g_red = mkl_sparse_mult(vt, g);

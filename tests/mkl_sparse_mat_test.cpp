@@ -248,3 +248,27 @@ TEST(sparse_matrix, mult_full_vs_sym2) {
     EXPECT_NEAR(x0[i], x1[i], 1e-9);
   }
 }
+
+TEST(dense_matrix, orthogonalize) {
+  mkl_wrapper::dense_mat mat(3, 3);
+  auto av = mat.get_av();
+  av[0] = 1;
+  av[1] = 0;
+  av[2] = 0;
+  av[3] = 1;
+  av[4] = 1;
+  av[5] = 0;
+  av[6] = 1;
+  av[7] = 1;
+  av[8] = 1;
+  mat.orthogonalize();
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 3; j++) {
+      if (i == j)
+        EXPECT_NEAR(av[i + 3 * j], 1, 1e-14);
+      else {
+        EXPECT_NEAR(av[i + 3 * j], 0, 1e-14);
+      }
+    }
+  }
+}

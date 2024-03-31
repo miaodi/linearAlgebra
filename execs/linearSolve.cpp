@@ -1,6 +1,7 @@
 
 #include "../mkl_wrapper/mkl_solver.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
+#include "../mkl_wrapper/mumps_solver.h"
 #include "../utils/timer.h"
 #include "../utils/utils.h"
 #include <Eigen/Sparse>
@@ -15,6 +16,7 @@
 #include <mkl.h>
 #include <random>
 #include <vector>
+#include <omp.h>
 
 using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
@@ -32,7 +34,8 @@ int main() {
 
   //   utils::Elapse<>::execute("par_unseq: ", [&csr_vals_ptr, &csr_vals]() {
   //     for (int i = 0; i < 1000; i++)
-  //       std::copy(std::execution::par_unseq, csr_vals.begin(), csr_vals.end(),
+  //       std::copy(std::execution::par_unseq, csr_vals.begin(),
+  //       csr_vals.end(),
   //                 csr_vals_ptr.get());
   //   });
 
@@ -98,27 +101,41 @@ int main() {
   std::generate(std::begin(rhs), std::end(rhs), gen);
   std::vector<double> x_iter(mkl_mat.rows());
   std::vector<double> x_direct(mkl_mat.rows());
+  std::vector<double> x_direct2(mkl_mat.rows());
   std::cout << "m: " << mkl_mat.rows() << " , n: " << mkl_mat.cols()
             << std::endl;
 
+  // {
+
+  //   mkl_set_num_threads_local(10);
+  //   auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&mkl_mat);
+  //   prec->set_tau(1e-6);
+  //   prec->set_max_fill(200);
+  //   utils::Elapse<>::execute("ilut factorize: ",
+  //                            [&prec]() { prec->factorize(); });
+  //   mkl_wrapper::mkl_fgmres_solver pcg(&mkl_mat, prec);
+  //   pcg.set_max_iters(1e5);
+  //   pcg.set_rel_tol(1e-10);
+  //   pcg.set_restart_steps(20);
+  //   utils::Elapse<>::execute("fgmres solve: ", [&pcg, &rhs, &x_iter]() {
+  //     pcg.solve(rhs.data(), x_iter.data());
+  //   });
+  // }
+
   {
-    
-    mkl_set_num_threads_local(10);
-    auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&mkl_mat);
-    prec->set_tau(1e-6);
-    prec->set_max_fill(200);
-    utils::Elapse<>::execute("ilut factorize: ",
-                             [&prec]() { prec->factorize(); });
-    mkl_wrapper::mkl_fgmres_solver pcg(&mkl_mat, prec);
-    pcg.set_max_iters(1e5);
-    pcg.set_rel_tol(1e-10);
-    pcg.set_restart_steps(20);
-    utils::Elapse<>::execute("fgmres solve: ", [&pcg, &rhs, &x_iter]() {
-      pcg.solve(rhs.data(), x_iter.data());
+    omp_set_num_threads(2);
+    mkl_wrapper::mkl_sparse_mat_sym mkl_mat_sym(mkl_mat);
+    mkl_mat_sym.set_positive_definite(true);
+    mkl_wrapper::mumps_solver mumps(&mkl_mat_sym);
+    utils::Elapse<>::execute("mumps factorize: ",
+                             [&mumps]() { mumps.factorize(); });
+    utils::Elapse<>::execute("mumps solve: ", [&mumps, &rhs, &x_direct2]() {
+      mumps.solve(rhs.data(), x_direct2.data());
     });
   }
+
   {
-    mkl_set_num_threads_local(10);
+    mkl_set_num_threads_local(2);
     mkl_wrapper::mkl_direct_solver pardiso(&mkl_mat);
     utils::Elapse<>::execute("pardiso factorize: ",
                              [&pardiso]() { pardiso.factorize(); });
@@ -126,10 +143,17 @@ int main() {
       pardiso.solve(rhs.data(), x_direct.data());
     });
   }
-  cblas_daxpy(mkl_mat.rows(), -1., x_iter.data(), 1, x_direct.data(), 1);
+  // cblas_daxpy(mkl_mat.rows(), -1., x_direct.data(), 1, x_iter.data(), 1);
+  // std::cout << "norm: "
+  //           << cblas_dnrm2(mkl_mat.rows(), x_iter.data(), 1) /
+  //                  cblas_dnrm2(mkl_mat.rows(), x_direct.data(), 1)
+  //           << std::endl;
+
+  cblas_daxpy(mkl_mat.rows(), -1., x_direct2.data(), 1, x_direct.data(), 1);
   std::cout << "norm: "
             << cblas_dnrm2(mkl_mat.rows(), x_direct.data(), 1) /
-                   cblas_dnrm2(mkl_mat.rows(), x_iter.data(), 1)
+                   cblas_dnrm2(mkl_mat.rows(), x_direct2.data(), 1)
             << std::endl;
+
   return 0;
 }

@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <execution>
 #include <iostream>
+#include <mkl_lapack.h>
+#include <mkl_lapacke.h>
 #include <mkl_rci.h>
 #include <mkl_sparse_handle.h>
 #include <vector>
@@ -118,8 +120,7 @@ mkl_sparse_mat::mkl_sparse_mat(sparse_matrix_t mkl_mat) {
   _nnz = rows_start[_nrow] - _mkl_base;
 
   _ai.reset(new MKL_INT[_nrow + 1]);
-  std::copy(std::execution::par_unseq, rows_start, rows_start + _nrow + 1,
-            _ai.get());
+  std::copy(std::execution::par_unseq, rows_start, rows_start + _nrow + 1, _ai.get());
   _aj.reset(new MKL_INT[_nnz]);
   std::copy(std::execution::par_unseq, col_index, col_index + _nnz, _aj.get());
   _av.reset(new double[_nnz]);
@@ -170,7 +171,7 @@ mkl_sparse_mat::mkl_sparse_mat(const MKL_INT row, const MKL_INT col,
 std::shared_ptr<double[]> mkl_sparse_mat::get_diag() const {
   auto res = std::shared_ptr<double[]>(new double[rows()]);
 
-#pragma omp parallel for
+  #pragma omp parallel for
   for (MKL_INT i = 0; i < rows(); i++) {
     auto begin = _ai[i] - _mkl_base;
     auto end = _ai[i + 1] - _mkl_base;
@@ -187,11 +188,11 @@ std::shared_ptr<double[]> mkl_sparse_mat::get_diag() const {
 void mkl_sparse_mat::to_one_based() {
   if (_mkl_base == SPARSE_INDEX_BASE_ZERO) {
     {
-#pragma omp parallel for
+      #pragma omp parallel for
       for (MKL_INT i = 0; i < _nnz; i++) {
         _aj[i] += 1;
       }
-#pragma omp parallel for
+      #pragma omp parallel for
       for (MKL_INT i = 0; i < _nrow + 1; i++) {
         _ai[i] += 1;
       }
@@ -204,11 +205,11 @@ void mkl_sparse_mat::to_one_based() {
 void mkl_sparse_mat::to_zero_based() {
   if (_mkl_base == SPARSE_INDEX_BASE_ONE) {
     {
-#pragma omp parallel for
+      #pragma omp parallel for
       for (MKL_INT i = 0; i < _nnz; i++) {
         _aj[i] -= 1;
       }
-#pragma omp parallel for
+      #pragma omp parallel for
       for (MKL_INT i = 0; i < _nrow + 1; i++) {
         _ai[i] -= 1;
       }
@@ -499,7 +500,8 @@ mkl_sparse_mat_sym mkl_sparse_mult_ptap(mkl_sparse_mat_sym &A,
 }
 
 // P*A*PT
-mkl_sparse_mat mkl_sparse_mult_papt(mkl_sparse_mat_sym &A, mkl_sparse_mat &P) {
+mkl_sparse_mat_sym mkl_sparse_mult_papt(mkl_sparse_mat_sym &A,
+                                        mkl_sparse_mat &P) {
 
   sparse_matrix_t result;
   auto status = mkl_sparse_sypr(SPARSE_OPERATION_NON_TRANSPOSE, P.mkl_handler(),
@@ -649,7 +651,7 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
 
   std::vector<MKL_INT> diag_pos(_nrow); // record the diag pos
 
-#pragma omp parallel for
+  #pragma omp parallel for
   for (MKL_INT i = 0; i < _nrow; i++) {
     auto begin = ai[i] - _mkl_base;
     auto end = ai[i + 1] - _mkl_base;
@@ -827,6 +829,18 @@ bool mkl_ic0::solve(double const *const b, double *const x) {
 
   transA = SPARSE_OPERATION_NON_TRANSPOSE;
   mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, _interm_vec.get(), x);
+  return true;
+}
+
+bool dense_mat::orthogonalize() {
+  std::vector<double> tau(std::min(_m, _n), 0);
+  int info = 0;
+  info = LAPACKE_dgeqrf(LAPACK_COL_MAJOR, _m, _n, _av.get(), _m, tau.data());
+  if (info)
+    return false;
+  info = LAPACKE_dorgqr(LAPACK_COL_MAJOR, _m, _n, _n, _av.get(), _m, tau.data());
+  if (info)
+    return false;
   return true;
 }
 
