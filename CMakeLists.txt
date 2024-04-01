@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.5...3.20)
-project(Linear_Algebra)
+
+project(Linear_Algebra CXX Fortran)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules" )
+# Include the init module
+include(MorseInit)
+
 
 include(FetchContent)
 FetchContent_Declare(
@@ -21,7 +27,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Spectra)
 
 set(MKL_ARCH intel64)
-set(MKL_THREADING intel_thread)
+set(MKL_THREADING gnu_thread)
 set(MKL_INTERFACE lp64)
 set(ARPACKNG_DIR)
 find_package(MKL CONFIG REQUIRED)
@@ -31,9 +37,8 @@ find_package(OpenMP REQUIRED)
 
 find_package(LAPACK REQUIRED)
 set(MUMPS_DIR)
-find_package(MUMPS REQUIRED PATHS ${MUMPS_DIR})
-message("MUMPS_mpiseq_FOUND: ${MUMPS_mpiseq_FOUND}")
-message("MUMPS::MUMPS: MUMPS::MUMPS")
+find_package(MUMPS REQUIRED COMPONENTS SEQ METIS OPENMP)
+
 message("MUMPS_LIBRARIES: ${MUMPS_LIBRARIES}")
 
 add_subdirectory(utils)

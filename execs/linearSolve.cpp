@@ -14,9 +14,9 @@
 #include <iterator>
 #include <memory>
 #include <mkl.h>
+#include <omp.h>
 #include <random>
 #include <vector>
-#include <omp.h>
 
 using SpMat = typename Eigen::SparseMatrix<double, Eigen::RowMajor, MKL_INT>;
 using SpMatMap = typename Eigen::Map<const SpMat>;
@@ -52,7 +52,7 @@ int main() {
   //   });
   // }
 
-  std::ifstream f("../../data/linear_system/thermal2.mtx");
+  std::ifstream f("../../data/linear_system/inline_1.mtx");
 
   // SpMat mat;
   // fast_matrix_market::read_matrix_market_eigen(f, mat);
@@ -122,10 +122,10 @@ int main() {
   //   });
   // }
 
-  {
-    omp_set_num_threads(2);
-    mkl_wrapper::mkl_sparse_mat_sym mkl_mat_sym(mkl_mat);
+  mkl_wrapper::mkl_sparse_mat_sym mkl_mat_sym(mkl_mat);
     mkl_mat_sym.set_positive_definite(true);
+  {
+    omp_set_num_threads(1);
     mkl_wrapper::mumps_solver mumps(&mkl_mat_sym);
     utils::Elapse<>::execute("mumps factorize: ",
                              [&mumps]() { mumps.factorize(); });
@@ -135,7 +135,7 @@ int main() {
   }
 
   {
-    mkl_set_num_threads_local(2);
+    mkl_set_num_threads_local(1);
     mkl_wrapper::mkl_direct_solver pardiso(&mkl_mat);
     utils::Elapse<>::execute("pardiso factorize: ",
                              [&pardiso]() { pardiso.factorize(); });
