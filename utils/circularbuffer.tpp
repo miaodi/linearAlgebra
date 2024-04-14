@@ -19,18 +19,18 @@
 namespace utils {
 template <typename T>
 constexpr CircularBuffer<T>::CircularBuffer(const size_t S)
-    : _capacity(S), _buffer(S), _head(_buffer.begin()), _tail(_buffer.begin()),
-      _count(0) {}
+    : _buffer(S), _head(_buffer.begin()), _tail(_buffer.begin()), _count(0) {}
 
 template <typename T> bool CircularBuffer<T>::unshift(const T &value) {
   if (_head == _buffer.begin()) {
     _head = _buffer.end();
   }
   *--_head = value;
-  if (_count == _capacity) {
+  if (_count == _buffer.size()) {
     if (_tail == _buffer.begin()) {
-      _tail = _buffer.end() - 1;
+      _tail = _buffer.end();
     }
+    _tail--;
     return false;
   } else {
     if (_count++ == 0) {
@@ -58,27 +58,28 @@ template <typename T> bool CircularBuffer<T>::push(const T &value) {
   }
 }
 
-// template <typename T, size_t S> const T &CircularBuffer<T, S>::shift() {
-//   if (count == 0)
-//     return *head;
-//   const T &result = *head++;
-//   if (head >= buffer + capacity) {
-//     head = buffer;
-//   }
-//   count--;
-//   return result;
-// }
+template <typename T> const T &CircularBuffer<T>::shift() {
+  if (_count == 0)
+    return *_head;
+  const T &result = *_head++;
+  if (_head == _buffer.end()) {
+    _head = _buffer.begin();
+  }
+  _count--;
+  return result;
+}
 
-// template <typename T, size_t S> const T &CircularBuffer<T, S>::pop() {
-//   if (count == 0)
-//     return *tail;
-//   const T &result = *tail--;
-//   if (tail < buffer) {
-//     tail = buffer + capacity - 1;
-//   }
-//   count--;
-//   return result;
-// }
+template <typename T> const T &CircularBuffer<T>::pop() {
+  if (_count == 0)
+    return *_tail;
+  const T &result = *_tail;
+  if (_tail == _buffer) {
+    _tail = _buffer.end();
+  }
+  _tail--;
+  _count--;
+  return result;
+}
 
 template <typename T> const T &CircularBuffer<T>::first() const {
   return *_head;
@@ -128,9 +129,13 @@ bool CircularBuffer<T>::copyToVector(std::vector<T> &dest) const {
   if (_head <= _tail) {
     std::copy(_head, _head + _count, dest.begin());
   } else {
-
-    auto it = std::copy(_head, _buffer.end(), dest.begin());
-    std::copy(_buffer.begin(), _tail + 1, it);
+    auto it = std::copy(
+        static_cast<typename std::vector<T>::const_iterator>(_head),
+        static_cast<typename std::vector<T>::const_iterator>(_buffer.end()),
+        dest.begin());
+    std::copy(
+        static_cast<typename std::vector<T>::const_iterator>(_buffer.begin()),
+        static_cast<typename std::vector<T>::const_iterator>(_tail + 1), it);
   }
   return true;
 }
@@ -150,4 +155,15 @@ bool CircularBuffer<T>::copyToVector(std::vector<T> &dest) const {
 //     *dest = convertFn(*current);
 //   }
 // }
+
+template <typename T> bool CircularBuffer<T>::resize(const size_t size) {
+  if (size < _buffer.size() || size == 0)
+    return false;
+  std::vector<T> tmp(size);
+  copyToVector(tmp);
+  std::swap(_buffer, tmp);
+  _head = _buffer.begin();
+  _tail = _buffer.begin() + _count - 1;
+  return true;
+}
 } // namespace utils

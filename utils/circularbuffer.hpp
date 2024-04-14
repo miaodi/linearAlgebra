@@ -72,21 +72,21 @@ public:
    */
   bool push(const T &value);
 
-  // /**
-  //  * @brief Removes an element from the beginning of the buffer.
-  //  *
-  //  * @warning Calling this operation on an empty buffer has an unpredictable
-  //  behaviour.
-  //  */
-  // const T& shift();
+  /**
+   * @brief Removes an element from the beginning of the buffer.
+   *
+   * @warning Calling this operation on an empty buffer has an unpredictable
+   behaviour.
+   */
+  const T &shift();
 
-  // /**
-  //  * @brief Removes an element from the end of the buffer.
-  //  *
-  //  * @warning Calling this operation on an empty buffer has an unpredictable
-  //  behaviour.
-  //  */
-  // const T& pop();
+  /**
+   * @brief Removes an element from the end of the buffer.
+   *
+   * @warning Calling this operation on an empty buffer has an unpredictable
+   behaviour.
+   */
+  const T& pop();
 
   /**
    * @brief Returns the element at the beginning of the buffer.
@@ -184,8 +184,9 @@ public:
   // template <typename R>
   // void copyToArray( R* dest, R ( &convertFn )( const T& ) ) const;
 
+  bool resize(const size_t size);
+
 private:
-  size_t _capacity;
   std::vector<T> _buffer;
   typename std::vector<T>::iterator _head;
   typename std::vector<T>::iterator _tail;

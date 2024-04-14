@@ -21,7 +21,16 @@ add_executable(
 )
 
 target_link_libraries(
-  circular_buffer PUBLIC GTest::gtest_main mkl_wrapper
+  circular_buffer PUBLIC GTest::gtest_main GTest::gmock_main mkl_wrapper
+)
+
+add_executable(
+  bfs
+  bfs_test.cpp
+)
+
+target_link_libraries(
+  bfs PUBLIC GTest::gtest_main GTest::gmock_main reordering
 )
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/ex5.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ex5.mtx COPYONLY)
@@ -29,3 +38,4 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/ex5.mtx ${CMAKE_CURRENT_BINARY_D
 include(GoogleTest)
 gtest_discover_tests(mkl_sparse_mat)
 gtest_discover_tests(circular_buffer)
+gtest_discover_tests(bfs)

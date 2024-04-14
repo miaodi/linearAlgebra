@@ -1,6 +1,9 @@
 #include "../utils/circularbuffer.hpp"
 #include "../utils/utils.h"
+#include <algorithm>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
 // Demonstrate some basic assertions.
 TEST(circular_buffer, BasicAssertions) {
   // Expect two strings not to be equal.
@@ -76,25 +79,36 @@ TEST(circular_buffer, random_access) {
   EXPECT_EQ(cb.last(), 8);
 }
 
-// TEST(circular_buffer, copy) {
-//   utils::CircularBuffer<int> cb(5);
-//   cb.unshift(5);
-//   cb.unshift(4);
-//   cb.unshift(3);
-//   EXPECT_EQ(cb[0], 3);
-//   EXPECT_EQ(cb[1], 4);
-//   EXPECT_EQ(cb[2], 5);
-//   EXPECT_EQ(cb.first(), 3);
-//   EXPECT_EQ(cb.last(), 5);
-//   EXPECT_EQ(cb[3], 5);
+TEST(circular_buffer, copy) {
+  utils::CircularBuffer<int> cb(5);
+  cb.unshift(5);
+  cb.unshift(4);
+  cb.unshift(3);
+  cb.push(6);
+  cb.push(7);
+  cb.push(8);
+  std::vector<int> cp(5);
+  cb.copyToVector(cp);
+  ASSERT_THAT(cp, testing::ElementsAre(4, 5, 6, 7, 8));
+  cb.unshift(2);
+  cb.copyToVector(cp);
+  ASSERT_THAT(cp, testing::ElementsAre(2, 4, 5, 6, 7));
+}
 
-//   cb.push(6);
-//   EXPECT_EQ(cb.first(), 3);
-//   EXPECT_EQ(cb.last(), 6);
-//   cb.push(7);
-//   EXPECT_EQ(cb.first(), 3);
-//   EXPECT_EQ(cb.last(), 7);
-//   cb.push(8);
-//   EXPECT_EQ(cb.first(), 4);
-//   EXPECT_EQ(cb.last(), 8);
-// }
+TEST(circular_buffer, resize) {
+  utils::CircularBuffer<int> cb(5);
+  cb.unshift(5);
+  cb.unshift(4);
+  cb.unshift(3);
+  cb.push(6);
+  cb.push(7);
+  cb.push(8);
+  cb.resize(6);
+  std::vector<int> cp(6, -1);
+  cb.copyToVector(cp);
+  // std::copy(cp.begin(), cp.end(), std::ostream_iterator<int>(std::cout, " "));
+  ASSERT_THAT(cp, testing::ElementsAre(4, 5, 6, 7, 8, -1));
+  // cb.unshift(2);
+  // cb.copyToVector(cp);
+  // ASSERT_THAT(cp, testing::ElementsAre(2, 4, 5, 6, 7));
+}
