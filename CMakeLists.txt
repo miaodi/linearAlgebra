@@ -43,6 +43,7 @@ message("MUMPS_LIBRARIES: ${MUMPS_LIBRARIES}")
 
 add_subdirectory(utils)
 add_subdirectory(mkl_wrapper)
+add_subdirectory(reordering)
 
 add_subdirectory(execs)
 enable_testing()
