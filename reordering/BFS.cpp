@@ -47,12 +47,86 @@ std::shared_ptr<MKL_INT[]> PBFS(mkl_wrapper::mkl_sparse_mat const *const mat,
   auto aj = mat->get_aj();
 
   int max_threads = omp_get_max_threads();
-  // std::vector<int> 
-  // #pragma omp parallel
-  //   {
-  //     int nthreads = omp_get_num_threads();
-  //     std::cout << nthreads << std::endl;
-  //   }
+  std::vector<std::vector<MKL_INT>> bvc(max_threads);
+  std::vector<std::vector<MKL_INT>> bvn(max_threads);
+
+  std::vector<bool> visited(mat->rows(), false);
+  std::vector<MKL_INT> count_per_thread(max_threads + 1, 0);
+
+  bvn[0].push_back(source - mat->mkl_base());
+  level = 0;
+  res[source - mat->mkl_base()] = level;
+  visited[source - mat->mkl_base()] = true;
+  count_per_thread[1] = 1;
+  MKL_INT total_work;
+  int nthreads;
+  std::vector<std::pair<int, int>> chunck_pos_pairs(max_threads + 1);
+  chunck_pos_pairs[0] = std::make_pair(0, 0);
+#pragma omp parallel shared(total_work, nthreads)
+  {
+    nthreads = omp_get_num_threads();
+    const int tid = omp_get_thread_num();
+
+#pragma omp master
+    { std::cout << "nthreads: " << nthreads << " tid: " << tid << std::endl; }
+    while (true) {
+#pragma omp barrier
+#pragma omp master
+      {
+        std::swap(bvn, bvc);
+
+        std::inclusive_scan(count_per_thread.begin(), count_per_thread.end(),
+                            count_per_thread.begin());
+        total_work = count_per_thread[nthreads];
+        std::cout << "total work: " << total_work << std::endl;
+        int pos = 0;
+        MKL_INT target = 0;
+        for (int i = 1; i <= nthreads; i++) {
+          target +=
+              total_work / nthreads + ((total_work % nthreads) > tid ? 1 : 0);
+          while (count_per_thread[pos + 1] < target)
+            pos++;
+          std::cout << "pos: " << pos << " target: " << target << std::endl;
+          chunck_pos_pairs[i] =
+              std::make_pair(pos, target - count_per_thread[pos]);
+        }
+        level++;
+      }
+#pragma omp barrier
+      if (total_work == 0)
+        break;
+      for (auto i : chunck_pos_pairs) {
+        std::cout << i.first << " " << i.second << std::endl;
+      }
+      bvn[tid].clear();
+      for (int i = chunck_pos_pairs[tid].first;
+           i <= chunck_pos_pairs[tid + 1].first; i++) {
+        int start = (i == chunck_pos_pairs[tid].first)
+                        ? chunck_pos_pairs[tid].second
+                        : 0;
+        int end = (i == chunck_pos_pairs[tid + 1].first)
+                      ? chunck_pos_pairs[tid + 1].second
+                      : bvc[chunck_pos_pairs[tid + 1].first].size();
+        if (tid == 0)
+          std::cout << "local range: " << start << " " << end << std::endl;
+        for (int j = start; j < end; j++) {
+          std::cout << "cur: " << i << " " << j << std::endl;
+          for (MKL_INT k = ai[bvc[i][j]]; k < ai[bvc[i][j] + 1]; k++) {
+            auto v = aj[k] - mat->mkl_base();
+            if (!visited[v]) {
+              visited[v] = true;
+              if (res[v] == -1) {
+                res[v] = level;
+                bvn[tid].push_back(v);
+                std::cout << "push: " << level << " " << v << std::endl;
+              }
+            }
+          }
+        }
+      }
+      count_per_thread[tid + 1] = bvn[tid].size();
+    }
+  }
   return res;
-} // namespace reordering
+}
 } // namespace reordering
