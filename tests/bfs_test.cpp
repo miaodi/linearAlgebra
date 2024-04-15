@@ -21,7 +21,7 @@ TEST(bfs, serial) {
 
   mkl_wrapper::mkl_sparse_mat A(9, 9, aiA, ajA, avA);
   MKL_INT level;
-  auto levels = reordering::BFS_serial(&A, 0, level);
+  auto levels = reordering::BFS(&A, 0, level);
   EXPECT_EQ(level, 5);
   std::vector<MKL_INT> ref{0, 1, 1, 1, 2, 2, 3, 3, 4};
   for (size_t i = 0; i < ref.size(); i++) {

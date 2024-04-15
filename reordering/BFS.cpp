@@ -2,13 +2,14 @@
 #include "circularbuffer.hpp"
 #include "mkl_sparse_mat.h"
 #include <algorithm>
+#include <execution>
 #include <iostream>
+#include <omp.h>
 
 namespace reordering {
 // return levels
-std::shared_ptr<MKL_INT[]>
-BFS_serial(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
-           MKL_INT &level) {
+std::shared_ptr<MKL_INT[]> BFS(mkl_wrapper::mkl_sparse_mat const *const mat,
+                               int source, MKL_INT &level) {
   auto res = std::shared_ptr<MKL_INT[]>(new MKL_INT[mat->rows()]);
   std::fill_n(res.get(), mat->rows(), -1);
   auto ai = mat->get_ai();
@@ -35,4 +36,23 @@ BFS_serial(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
   }
   return res;
 }
+
+// return levels
+std::shared_ptr<MKL_INT[]> PBFS(mkl_wrapper::mkl_sparse_mat const *const mat,
+                                int source, MKL_INT &level) {
+
+  auto res = std::shared_ptr<MKL_INT[]>(new MKL_INT[mat->rows()]);
+  std::fill_n(std::execution::par_unseq, res.get(), mat->rows(), -1);
+  auto ai = mat->get_ai();
+  auto aj = mat->get_aj();
+
+  int max_threads = omp_get_max_threads();
+  // std::vector<int> 
+  // #pragma omp parallel
+  //   {
+  //     int nthreads = omp_get_num_threads();
+  //     std::cout << nthreads << std::endl;
+  //   }
+  return res;
+} // namespace reordering
 } // namespace reordering
