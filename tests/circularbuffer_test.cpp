@@ -1,5 +1,5 @@
-#include "../utils/circularbuffer.hpp"
-#include "../utils/utils.h"
+#include "circularbuffer.hpp"
+#include "utils.h"
 #include <algorithm>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
