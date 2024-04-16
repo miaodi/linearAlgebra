@@ -19,21 +19,35 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
    target_link_libraries(${TARGET_NAME} PRIVATE benchmark::benchmark reordering)
    add_test(${TARGET_NAME} ${ONE_BENCH_EXEC})
 endforeach()
-
-# download_file( https://suitesparse-collection-website.herokuapp.com/MM/VLSI/nv2.tar.gz
-#                2abe5e50db8eab756d2f3eb47267c983a8c83948ac02da7c896b2620729edb5c
-# )
-
-# download_file( 
-#    https://suitesparse-collection-website.herokuapp.com/MM/HB/mcfe.tar.gz
-#    b6f8b4c00a331befabe53f007bda8142ea450d6c6d26f922289e72f797f4ee36
-#    mcfe
-# )
-download_file( 
-   https://math.nist.gov/pub/MatrixMarket2/Harwell-Boeing/bcsstruc4/bcsstk26.mtx.gz
-   ff4b1aed3d5ae52d7b7959363c195ac9e3413882f6be1fbb8ccccbcf99d0b5b4
-   bcsstk26
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/data)
+download_file( https://suitesparse-collection-website.herokuapp.com/MM/VLSI/nv2.tar.gz
+               b393f2abcb55732da1259c8c53b0a213e49f0c619511db68fa91f24104827cb0
+               nv2
 )
+
+FetchContent_GetProperties(nv2 SOURCE_DIR NV2_SOURCE_DIR)
+message(STATUS "NV2_SOURCE_DIR: ${NV2_SOURCE_DIR}")
+file(CREATE_LINK ${NV2_SOURCE_DIR}/nv2/nv2.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/nv2.mtx SYMBOLIC)
+
+# find_file(EX5_MTX NAMES ex5.mtx PATHS ${CMAKE_BINARY_DIR}/tests NO_DEFAULT_PATH NO_CACHE REQUIRED)
+# message(STATUS "EX5_MTX: ${EX5_MTX}")
+
+# find_file(NV2_MTX NAMES nv2.mtx PATHS ${NV2_SOURCE_DIR} NO_DEFAULT_PATH)
+# message(STATUS "NV2_MTX: ${NV2_MTX}")
+
+# find_file(EX5_MTX NAMES ex5.mtx PATHS ${CMAKE_SOURCE_DIR}/tests NO_DEFAULT_PATH REQUIRED)
+# message(${CMAKE_SOURCE_DIR}/tests/data)
+# message(STATUS "EX5_MTX: ${EX5_MTX}")
+download_file( 
+   https://suitesparse-collection-website.herokuapp.com/MM/HB/mcfe.tar.gz
+   70bde8afe35f5c1e1d822e5a1aa7a2a2a17da0a8622b1427af37a9b2be924970
+   mcfe
+)
+# download_file( 
+#    https://math.nist.gov/pub/MatrixMarket2/Harwell-Boeing/bcsstruc4/bcsstk26.mtx.gz
+#    ff4b1aed3d5ae52d7b7959363c195ac9e3413882f6be1fbb8ccccbcf99d0b5b4
+#    bcsstk26
+# )
 
 
 # # === example

@@ -12,9 +12,10 @@ DOWNLOAD_NO_EXTRACT true
 
 if(NOT ${filename}_POPULATED)
     FetchContent_MakeAvailable(${filename})
+    file(ARCHIVE_EXTRACT INPUT ${${filename}_SOURCE_DIR}/${filename}.tar.gz DESTINATION ${${filename}_SOURCE_DIR})
 endif()
-message("src_folder: ${${filename}_SOURCE_DIR}")
-file(ARCHIVE_EXTRACT INPUT ${bcsstk26_SOURCE_DIR}/bcsstk26.mtx.gz)
+# message("src_folder: ${${filename}_SOURCE_DIR}")
+
 endfunction(download_file)
 
 # # === example

@@ -3,51 +3,16 @@
 #include "utils.h"
 #include <benchmark/benchmark.h>
 #include <memory>
+#include <omp.h>
 
-// static void BM_BFS(benchmark::State &state) {
-//   std::shared_ptr<MKL_INT[]> aiA(
-//       new MKL_INT[10]{0, 3, 5, 8, 12, 16, 20, 24, 27, 28});
-//   std::shared_ptr<MKL_INT[]> ajA(new MKL_INT[28]{1, 2, 3, 0, 2, 0, 1, 3, 0,
-//   2,
-//                                                  4, 5, 3, 5, 6, 7, 3, 4, 6,
-//                                                  7, 4, 5, 7, 8, 4, 5, 6, 6});
-//   std::shared_ptr<double[]> avA(new double[28]);
-
-//   mkl_wrapper::mkl_sparse_mat A(9, 9, aiA, ajA, avA);
-//   MKL_INT level;
-//   for (auto _ : state) {
-//     auto levels = reordering::BFS(&A, 0, level);
-//   }
-// }
-// // Register the function as a benchmark
-// BENCHMARK(BM_BFS);
-
-// static void BM_PBFS(benchmark::State &state) {
-//   std::shared_ptr<MKL_INT[]> aiA(
-//       new MKL_INT[10]{0, 3, 5, 8, 12, 16, 20, 24, 27, 28});
-//   std::shared_ptr<MKL_INT[]> ajA(new MKL_INT[28]{1, 2, 3, 0, 2, 0, 1, 3, 0,
-//   2,
-//                                                  4, 5, 3, 5, 6, 7, 3, 4, 6,
-//                                                  7, 4, 5, 7, 8, 4, 5, 6, 6});
-//   std::shared_ptr<double[]> avA(new double[28]);
-
-//   mkl_wrapper::mkl_sparse_mat A(9, 9, aiA, ajA, avA);
-//   MKL_INT level;
-//   for (auto _ : state) {
-//     auto levels = reordering::PBFS(&A, 0, level);
-//   }
-// }
-// // Register the function as a benchmark
-// BENCHMARK(BM_PBFS);
-
-static std::unique_ptr<mkl_wrapper::mkl_sparse_mat> ptr;
+static std::unique_ptr<mkl_wrapper::mkl_sparse_mat> ptr{nullptr};
 class MyFixture : public benchmark::Fixture {
 
 public:
   // add members as needed
 
   MyFixture() {
-    std::ifstream f("../../data/linear_system/parabolic_fem.mtx");
+    std::ifstream f("data/nv2.mtx");
     f.clear();
     f.seekg(0, std::ios::beg);
     std::vector<MKL_INT> csr_rows, csr_cols;
@@ -62,8 +27,33 @@ public:
   }
 };
 
-BENCHMARK_F(MyFixture, BM_PBFS)(benchmark::State &state) {
+BENCHMARK_F(MyFixture, BM_PBFS_2)(benchmark::State &state) {
   MKL_INT level;
+  omp_set_num_threads(2);
+  for (auto _ : state) {
+    auto levels = reordering::PBFS(ptr.get(), 0, level);
+  }
+}
+
+BENCHMARK_F(MyFixture, BM_PBFS_4)(benchmark::State &state) {
+  MKL_INT level;
+  omp_set_num_threads(4);
+  for (auto _ : state) {
+    auto levels = reordering::PBFS(ptr.get(), 0, level);
+  }
+}
+
+BENCHMARK_F(MyFixture, BM_PBFS_8)(benchmark::State &state) {
+  MKL_INT level;
+  omp_set_num_threads(8);
+  for (auto _ : state) {
+    auto levels = reordering::PBFS(ptr.get(), 0, level);
+  }
+}
+
+BENCHMARK_F(MyFixture, BM_PBFS_16)(benchmark::State &state) {
+  MKL_INT level;
+  omp_set_num_threads(16);
   for (auto _ : state) {
     auto levels = reordering::PBFS(ptr.get(), 0, level);
   }
