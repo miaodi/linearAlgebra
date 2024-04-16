@@ -1,4 +1,5 @@
 #include "BFS.h"
+#include "BitVector.h"
 #include "circularbuffer.hpp"
 #include "mkl_sparse_mat.h"
 #include <algorithm>
@@ -50,13 +51,15 @@ std::shared_ptr<MKL_INT[]> PBFS(mkl_wrapper::mkl_sparse_mat const *const mat,
   std::vector<std::vector<MKL_INT>> bvc(max_threads);
   std::vector<std::vector<MKL_INT>> bvn(max_threads);
 
-  std::vector<bool> visited(mat->rows(), false);
+  // std::vector<bool> visited(mat->rows(), false);
+  utils::BitVector visited(mat->rows());
   std::vector<MKL_INT> count_per_thread(max_threads + 1, 0);
 
   bvn[0].push_back(source - mat->mkl_base());
   level = 0;
   res[source - mat->mkl_base()] = level;
-  visited[source - mat->mkl_base()] = true;
+  // visited[source - mat->mkl_base()] = true;
+  visited.set(source - mat->mkl_base());
   count_per_thread[1] = 1;
   MKL_INT total_work;
   int nthreads;
@@ -66,9 +69,6 @@ std::shared_ptr<MKL_INT[]> PBFS(mkl_wrapper::mkl_sparse_mat const *const mat,
   {
     nthreads = omp_get_num_threads();
     const int tid = omp_get_thread_num();
-
-#pragma omp master
-    { std::cout << "nthreads: " << nthreads << " tid: " << tid << std::endl; }
     while (true) {
 #pragma omp barrier
 #pragma omp master
@@ -78,27 +78,25 @@ std::shared_ptr<MKL_INT[]> PBFS(mkl_wrapper::mkl_sparse_mat const *const mat,
         std::inclusive_scan(count_per_thread.begin(), count_per_thread.end(),
                             count_per_thread.begin());
         total_work = count_per_thread[nthreads];
-        std::cout << "total work: " << total_work << std::endl;
         int pos = 0;
         MKL_INT target = 0;
-        for (int i = 1; i <= nthreads; i++) {
+        for (int i = 0; i < nthreads; i++) {
           target +=
-              total_work / nthreads + ((total_work % nthreads) > tid ? 1 : 0);
+              total_work / nthreads + ((total_work % nthreads) > i ? 1 : 0);
           while (count_per_thread[pos + 1] < target)
             pos++;
-          std::cout << "pos: " << pos << " target: " << target << std::endl;
-          chunck_pos_pairs[i] =
+          chunck_pos_pairs[i + 1] =
               std::make_pair(pos, target - count_per_thread[pos]);
         }
         level++;
+        // std::cout << level << " " << total_work << std::endl;
       }
 #pragma omp barrier
       if (total_work == 0)
         break;
-      for (auto i : chunck_pos_pairs) {
-        std::cout << i.first << " " << i.second << std::endl;
-      }
-      bvn[tid].clear();
+      bvn[tid].resize(0);
+      // bvn[tid].clear();
+
       for (int i = chunck_pos_pairs[tid].first;
            i <= chunck_pos_pairs[tid + 1].first; i++) {
         int start = (i == chunck_pos_pairs[tid].first)
@@ -106,19 +104,16 @@ std::shared_ptr<MKL_INT[]> PBFS(mkl_wrapper::mkl_sparse_mat const *const mat,
                         : 0;
         int end = (i == chunck_pos_pairs[tid + 1].first)
                       ? chunck_pos_pairs[tid + 1].second
-                      : bvc[chunck_pos_pairs[tid + 1].first].size();
-        if (tid == 0)
-          std::cout << "local range: " << start << " " << end << std::endl;
+                      : bvc[i].size();
         for (int j = start; j < end; j++) {
-          std::cout << "cur: " << i << " " << j << std::endl;
           for (MKL_INT k = ai[bvc[i][j]]; k < ai[bvc[i][j] + 1]; k++) {
             auto v = aj[k] - mat->mkl_base();
-            if (!visited[v]) {
-              visited[v] = true;
+            if (!visited.get(v)) {
+              // visited[v] = true;
+              visited.set(v);
               if (res[v] == -1) {
                 res[v] = level;
                 bvn[tid].push_back(v);
-                std::cout << "push: " << level << " " << v << std::endl;
               }
             }
           }
@@ -127,6 +122,7 @@ std::shared_ptr<MKL_INT[]> PBFS(mkl_wrapper::mkl_sparse_mat const *const mat,
       count_per_thread[tid + 1] = bvn[tid].size();
     }
   }
+  level--;
   return res;
 }
 } // namespace reordering
