@@ -156,7 +156,8 @@ bool CircularBuffer<T>::copyToVector(std::vector<T> &dest) const {
 //   }
 // }
 
-template <typename T> bool CircularBuffer<T>::resize(const size_t size) {
+template <typename T>
+bool CircularBuffer<T>::resizePreserve(const size_t size) {
   if (size < _buffer.size() || size == 0)
     return false;
   std::vector<T> tmp(size);
@@ -164,6 +165,14 @@ template <typename T> bool CircularBuffer<T>::resize(const size_t size) {
   std::swap(_buffer, tmp);
   _head = _buffer.begin();
   _tail = _buffer.begin() + _count - 1;
+  return true;
+}
+
+template <typename T> bool CircularBuffer<T>::resize(const size_t size) {
+  _buffer.resize(size);
+  _head = _buffer.begin();
+  _tail = _buffer.begin();
+  _count = 0;
   return true;
 }
 } // namespace utils

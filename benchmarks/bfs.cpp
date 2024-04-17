@@ -27,43 +27,21 @@ public:
   }
 };
 
-BENCHMARK_F(MyFixture, BM_PBFS_2)(benchmark::State &state) {
-  MKL_INT level;
-  omp_set_num_threads(2);
-  for (auto _ : state) {
-    auto levels = reordering::PBFS(ptr.get(), 0, level);
-  }
-}
-
-BENCHMARK_F(MyFixture, BM_PBFS_4)(benchmark::State &state) {
-  MKL_INT level;
-  omp_set_num_threads(4);
-  for (auto _ : state) {
-    auto levels = reordering::PBFS(ptr.get(), 0, level);
-  }
-}
-
-BENCHMARK_F(MyFixture, BM_PBFS_8)(benchmark::State &state) {
-  MKL_INT level;
-  omp_set_num_threads(8);
-  for (auto _ : state) {
-    auto levels = reordering::PBFS(ptr.get(), 0, level);
-  }
-}
-
-BENCHMARK_F(MyFixture, BM_PBFS_16)(benchmark::State &state) {
-  MKL_INT level;
-  omp_set_num_threads(16);
-  for (auto _ : state) {
-    auto levels = reordering::PBFS(ptr.get(), 0, level);
-  }
-}
-
 BENCHMARK_F(MyFixture, BM_BFS)(benchmark::State &state) {
   MKL_INT level;
+  reordering::BFS bfs(reordering::BFS_Fn<false>);
   for (auto _ : state) {
-    auto levels = reordering::BFS(ptr.get(), 0, level);
+    bfs(ptr.get(), 0);
   }
 }
+
+BENCHMARK_DEFINE_F(MyFixture, BM_PBFS)(benchmark::State &state) {
+  omp_set_num_threads(state.range(0));
+  reordering::BFS bfs(reordering::PBFS_Fn<false, true>);
+  for (auto _ : state) {
+    bfs(ptr.get(), 0);
+  }
+}
+BENCHMARK_REGISTER_F(MyFixture, BM_PBFS)->RangeMultiplier(2)->Range(1, 1 << 4);
 
 BENCHMARK_MAIN();

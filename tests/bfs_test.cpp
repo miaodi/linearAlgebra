@@ -23,13 +23,20 @@ TEST(bfs, serial) {
   std::shared_ptr<double[]> avA(new double[28]);
 
   mkl_wrapper::mkl_sparse_mat A(9, 9, aiA, ajA, avA);
-  MKL_INT level;
-  auto levels = reordering::BFS(&A, 0, level);
-  EXPECT_EQ(level, 5);
+
+  reordering::BFS bfs(reordering::BFS_Fn<false>);
+  bfs(&A, 0);
+  EXPECT_EQ(bfs.getLevel(), 5);
   std::vector<MKL_INT> ref{0, 1, 1, 1, 2, 2, 3, 3, 4};
   for (size_t i = 0; i < ref.size(); i++) {
-    EXPECT_EQ(levels[i], ref[i]);
+    EXPECT_EQ(bfs.getLevels()[i], ref[i]);
   }
+
+  reordering::BFS bfs2(reordering::BFS_Fn<true>);
+  bfs2(&A, 0);
+
+  EXPECT_EQ(bfs2.getLastLevel().size(), 1);
+  EXPECT_EQ(bfs2.getLastLevel()[0], 8);
 }
 
 TEST(bfs, parallel) {
@@ -43,14 +50,15 @@ TEST(bfs, parallel) {
 
   mkl_wrapper::mkl_sparse_mat A(9, 9, aiA, ajA, avA);
   MKL_INT level;
-  auto levels = reordering::PBFS(&A, 0, level);
+  reordering::BFS bfs(reordering::PBFS_Fn<false, true>);
+  bfs(&A, 0);
 
   // std::copy(levels.get(), levels.get() + 9,
   //           std::ostream_iterator<int>(std::cout, " "));
-  EXPECT_EQ(level, 5);
+  EXPECT_EQ(bfs.getLevel(), 5);
   std::vector<MKL_INT> ref{0, 1, 1, 1, 2, 2, 3, 3, 4};
   for (size_t i = 0; i < ref.size(); i++) {
-    EXPECT_EQ(levels[i], ref[i]);
+    EXPECT_EQ(bfs.getLevels()[i], ref[i]);
   }
 }
 
@@ -66,17 +74,21 @@ TEST(bfs, serial_vs_parallel) {
     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                     csr_rows, csr_cols, csr_vals);
 
-    // std::default_random_engine generator;
-    // std::uniform_int_distribution<int> distribution(0, mat.rows() - 1);
-    MKL_INT level_serial, level_parallel;
-    for (int t = 1; t <= 8; t++) {
-      omp_set_num_threads(t);
-      for (int s = 0; s < mat.rows(); s++) {
-        auto levels_serial = reordering::BFS(&mat, s, level_serial);
-        auto levels_parallel = reordering::PBFS(&mat, s, level_parallel);
-        EXPECT_EQ(level_serial, level_parallel);
+    for (int s = 0; s < mat.rows(); s++) {
+      reordering::BFS bfs(reordering::BFS_Fn<true>);
+      bfs(&mat, s);
+      reordering::BFS pbfs(reordering::PBFS_Fn<true, true>);
+      for (int t = 1; t <= 8; t++) {
+        omp_set_num_threads(t);
+        pbfs(&mat, s);
+        EXPECT_EQ(pbfs.getLevel(), bfs.getLevel());
         for (size_t i = 0; i < mat.rows(); i++)
-          EXPECT_EQ(levels_serial[i], levels_parallel[i]);
+          EXPECT_EQ(pbfs.getLevels()[i], bfs.getLevels()[i]);
+
+        // EXPECT_EQ(pbfs.getLastLevel().size(), bfs.getLastLevel().size());
+        // for (size_t i = 0; i < pbfs.getLastLevel().size(); i++) {
+        //   EXPECT_EQ(pbfs.getLastLevel()[i], bfs.getLastLevel()[i]);
+        // }
       }
     }
   }

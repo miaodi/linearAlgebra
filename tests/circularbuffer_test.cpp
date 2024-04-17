@@ -103,10 +103,11 @@ TEST(circular_buffer, resize) {
   cb.push(6);
   cb.push(7);
   cb.push(8);
-  cb.resize(6);
+  cb.resizePreserve(6);
   std::vector<int> cp(6, -1);
   cb.copyToVector(cp);
-  // std::copy(cp.begin(), cp.end(), std::ostream_iterator<int>(std::cout, " "));
+  // std::copy(cp.begin(), cp.end(), std::ostream_iterator<int>(std::cout, "
+  // "));
   ASSERT_THAT(cp, testing::ElementsAre(4, 5, 6, 7, 8, -1));
   // cb.unshift(2);
   // cb.copyToVector(cp);

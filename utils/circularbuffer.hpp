@@ -183,6 +183,8 @@ public:
   //  */
   // template <typename R>
   // void copyToArray( R* dest, R ( &convertFn )( const T& ) ) const;
+  
+  bool resizePreserve(const size_t size);
 
   bool resize(const size_t size);
 
