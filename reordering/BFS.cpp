@@ -46,7 +46,7 @@ void BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
   level++;
 }
 
-template <bool LASTLEVEL = false, bool RECORDLEVEL = true>
+template <bool LASTLEVEL, bool RECORDLEVEL>
 void PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
              MKL_INT &level, std::vector<MKL_INT> &levels,
              std::vector<MKL_INT> &lastLevel) {
@@ -143,7 +143,7 @@ void PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
                 }
               }
             } else {
-              if (!visited.testAndSet(v)) {
+              if (visited.testAndSet(v)) {
                 bvn[tid].push_back(v);
               }
             }

@@ -1,4 +1,5 @@
 #include "BFS.h"
+#include "Reordering.h"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
 #include <algorithm>
@@ -60,6 +61,10 @@ TEST(bfs, parallel) {
   for (size_t i = 0; i < ref.size(); i++) {
     EXPECT_EQ(bfs.getLevels()[i], ref[i]);
   }
+
+  reordering::BFS bfs2(reordering::PBFS_Fn<false, false>);
+  bfs2(&A, 0);
+  EXPECT_EQ(bfs2.getLevel(), 5);
 }
 
 TEST(bfs, serial_vs_parallel) {
@@ -78,18 +83,43 @@ TEST(bfs, serial_vs_parallel) {
       reordering::BFS bfs(reordering::BFS_Fn<true>);
       bfs(&mat, s);
       reordering::BFS pbfs(reordering::PBFS_Fn<true, true>);
+      reordering::BFS pbfs2(reordering::PBFS_Fn<false, false>);
       for (int t = 1; t <= 8; t++) {
         omp_set_num_threads(t);
         pbfs(&mat, s);
+        pbfs2(&mat, s);
         EXPECT_EQ(pbfs.getLevel(), bfs.getLevel());
         for (size_t i = 0; i < mat.rows(); i++)
           EXPECT_EQ(pbfs.getLevels()[i], bfs.getLevels()[i]);
 
+        EXPECT_EQ(pbfs.getLevel(), pbfs2.getLevel());
         // EXPECT_EQ(pbfs.getLastLevel().size(), bfs.getLastLevel().size());
         // for (size_t i = 0; i < pbfs.getLastLevel().size(); i++) {
         //   EXPECT_EQ(pbfs.getLastLevel()[i], bfs.getLastLevel()[i]);
         // }
       }
+    }
+  }
+}
+
+TEST(reordering, min_degree_node) {
+  std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
+  for (const auto &fn : files) {
+    std::ifstream f(fn);
+    f.clear();
+    f.seekg(0, std::ios::beg);
+    std::vector<MKL_INT> csr_rows, csr_cols;
+    std::vector<double> csr_vals;
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                    csr_rows, csr_cols, csr_vals);
+    auto res = reordering::MinDegreeNode(&mat);
+
+    for (int t = 1; t <= 8; t++) {
+      omp_set_num_threads(t);
+      auto res2 = reordering::PMinDegreeNode(&mat);
+      EXPECT_EQ(res.first, res2.first);
+      EXPECT_EQ(res.second, res2.second);
     }
   }
 }

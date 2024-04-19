@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(reordering CXX)
 
-set(REORDERING_SRC BFS.cpp)
+set(REORDERING_SRC BFS.cpp Reordering.cpp)
 
 add_library(${PROJECT_NAME} SHARED ${REORDERING_SRC})
 

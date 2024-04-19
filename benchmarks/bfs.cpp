@@ -1,4 +1,5 @@
 #include "BFS.h"
+#include "Reordering.h"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
 #include <benchmark/benchmark.h>
@@ -12,18 +13,20 @@ public:
   // add members as needed
 
   MyFixture() {
-    std::ifstream f("data/nv2.mtx");
-    f.clear();
-    f.seekg(0, std::ios::beg);
-    std::vector<MKL_INT> csr_rows, csr_cols;
-    std::vector<double> csr_vals;
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    if (ptr == nullptr) {
+      std::ifstream f("data/nv2.mtx");
+      f.clear();
+      f.seekg(0, std::ios::beg);
+      std::vector<MKL_INT> csr_rows, csr_cols;
+      std::vector<double> csr_vals;
+      utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
 
-    ptr.reset(new mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
-                                              csr_rows.size() - 1, csr_rows,
-                                              csr_cols, csr_vals));
-    std::cout << "rows: " << ptr->rows() << ", nnz: " << ptr->nnz()
-              << std::endl;
+      ptr.reset(new mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
+                                                csr_rows.size() - 1, csr_rows,
+                                                csr_cols, csr_vals));
+      std::cout << "rows: " << ptr->rows() << ", nnz: " << ptr->nnz()
+                << std::endl;
+    }
   }
 };
 
@@ -42,6 +45,34 @@ BENCHMARK_DEFINE_F(MyFixture, BM_PBFS)(benchmark::State &state) {
     bfs(ptr.get(), 0);
   }
 }
-BENCHMARK_REGISTER_F(MyFixture, BM_PBFS)->RangeMultiplier(2)->Range(1, 1 << 4);
+BENCHMARK_REGISTER_F(MyFixture, BM_PBFS)->RangeMultiplier(2)->Range(1, 1 << 5);
 
+BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_NOLEVELS)(benchmark::State &state) {
+  omp_set_num_threads(state.range(0));
+  reordering::BFS bfs(reordering::PBFS_Fn<false, false>);
+  for (auto _ : state) {
+    bfs(ptr.get(), 0);
+  }
+}
+
+BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_NOLEVELS)
+    ->RangeMultiplier(2)
+    ->Range(1, 1 << 5);
+
+BENCHMARK_F(MyFixture, BM_MinDegNode)(benchmark::State &state) {
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(reordering::MinDegreeNode(ptr.get()));
+  }
+}
+
+BENCHMARK_DEFINE_F(MyFixture, BM_PMinDegNode)(benchmark::State &state) {
+  omp_set_num_threads(state.range(0));
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(reordering::PMinDegreeNode(ptr.get()));
+  }
+}
+
+BENCHMARK_REGISTER_F(MyFixture, BM_PMinDegNode)
+    ->RangeMultiplier(2)
+    ->Range(1, 1 << 5);
 BENCHMARK_MAIN();
