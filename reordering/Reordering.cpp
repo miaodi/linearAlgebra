@@ -48,4 +48,13 @@ PMinDegreeNode(mkl_wrapper::mkl_sparse_mat const *const mat) {
   }
   return res;
 }
+
+void PseudoDiameter(mkl_wrapper::mkl_sparse_mat const *const mat,
+                    MKL_INT &source, MKL_INT &target) {
+  source = -1;
+  target = -1;
+  MKL_INT max_distance = 0;
+  auto ai = mat->get_ai();
+  auto aj = mat->get_aj();
+}
 } // namespace reordering
