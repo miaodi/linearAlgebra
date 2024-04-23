@@ -8,12 +8,12 @@
 
 namespace reordering {
 template <bool LASTLEVEL>
-void BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
-            MKL_INT &level, std::vector<MKL_INT> &levels,
-            std::vector<MKL_INT> &lastLevel) {
+bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
+            int shortCutWidth, MKL_INT &height, MKL_INT &width,
+            std::vector<MKL_INT> &levels, std::vector<MKL_INT> &lastLevel) {
   levels.resize(mat->rows());
   lastLevel.resize(0);
-  level = 0;
+  height = 0;
   std::fill_n(levels.begin(), levels.size(), -1);
   auto ai = mat->get_ai();
   auto aj = mat->get_aj();
@@ -22,41 +22,50 @@ void BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
       std::max(1, static_cast<MKL_INT>(mat->rows() * .2)));
   cb.push(source - mat->mkl_base());
   levels[source - mat->mkl_base()] = 0;
+  if constexpr (LASTLEVEL)
+    lastLevel.push_back(source);
+  int widthCounter = 1;
   while (!cb.isEmpty()) {
     auto u = cb.first();
     cb.shift();
     for (MKL_INT i = ai[u]; i < ai[u + 1]; i++) {
       auto v = aj[i] - mat->mkl_base();
       if (levels[v] == -1) {
-        if (level < levels[u] + 1) {
-          level = levels[u] + 1;
+        if (height < levels[u] + 1) {
+          height = levels[u] + 1;
+          width = std::max(width, widthCounter);
+          widthCounter = 0;
           if constexpr (LASTLEVEL) {
             lastLevel.resize(0);
           }
         }
-        levels[v] = level;
+        levels[v] = height;
         if constexpr (LASTLEVEL)
-          lastLevel.push_back(v);
+          lastLevel.push_back(v + mat->mkl_base());
         if (!cb.available())
           cb.resizePreserve(cb.size() * 2);
         cb.push(v);
+        if (++widthCounter >= shortCutWidth)
+          return false;
+        ;
       }
     }
   }
-  level++;
+  height++;
+  return true;
 }
 
 template <bool LASTLEVEL, bool RECORDLEVEL>
-void PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
-             MKL_INT &level, std::vector<MKL_INT> &levels,
-             std::vector<MKL_INT> &lastLevel) {
+bool PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
+             int shortCutWidth, MKL_INT &height, MKL_INT &width,
+             std::vector<MKL_INT> &levels, std::vector<MKL_INT> &lastLevel) {
   if constexpr (RECORDLEVEL) {
     levels.resize(mat->rows());
     std::fill_n(std::execution::par_unseq, levels.begin(), levels.size(), -1);
   }
   auto ai = mat->get_ai();
   auto aj = mat->get_aj();
-
+  bool stat = true;
   int max_threads = omp_get_max_threads();
   static std::vector<std::vector<MKL_INT>> bvc;
   static std::vector<std::vector<MKL_INT>> bvn;
@@ -67,7 +76,7 @@ void PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
   utils::BitVector visited(mat->rows());
   std::vector<MKL_INT> count_per_thread(max_threads + 1, 0);
   std::vector<MKL_INT> count_per_thread_prev(max_threads + 1, 0);
-  level = 0;
+  height = 0;
   if constexpr (RECORDLEVEL) {
     levels[source - mat->mkl_base()] = 0;
   }
@@ -95,6 +104,7 @@ void PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
           total_work_prev = total_work;
         }
         total_work = count_per_thread[nthreads];
+        width = std::max(width, total_work);
         int pos = 0;
         MKL_INT target = 0;
         for (int i = 0; i < nthreads; i++) {
@@ -106,17 +116,26 @@ void PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
               std::make_pair(pos, target - count_per_thread[pos]);
         }
         if constexpr (LASTLEVEL) {
-          std::swap(count_per_thread, count_per_thread_prev);
-          lastLevel.resize(total_work_prev);
+          if (total_work == 0) {
+            lastLevel.resize(total_work_prev);
+          } else {
+            std::swap(count_per_thread, count_per_thread_prev);
+          }
         }
-        level++;
+        height++;
       }
 #pragma omp barrier
       if (total_work == 0) {
         if constexpr (LASTLEVEL) {
-          std::copy(bvn[tid].begin(), bvn[tid].end(),
-                    lastLevel.data() + count_per_thread_prev[tid]);
+          for (size_t i = 0; i < bvn[tid].size(); i++) {
+            *(lastLevel.data() + count_per_thread_prev[tid] + i) =
+                bvn[tid][i] + mat->mkl_base();
+          }
         }
+        bvn[tid].resize(0);
+        break;
+      } else if (total_work >= shortCutWidth) {
+        stat = false;
         bvn[tid].resize(0);
         break;
       }
@@ -138,7 +157,7 @@ void PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
                 // visited[v] = true;
                 visited.set(v);
                 if (levels[v] == -1) {
-                  levels[v] = level;
+                  levels[v] = height;
                   bvn[tid].push_back(v);
                 }
               }
@@ -153,36 +172,38 @@ void PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
       count_per_thread[tid + 1] = bvn[tid].size();
     }
   }
-  level--;
+  height--;
+  return stat;
 }
 
-template void BFS_Fn<true>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                           int source, MKL_INT &level,
-                           std::vector<MKL_INT> &levels,
+template bool BFS_Fn<true>(mkl_wrapper::mkl_sparse_mat const *const mat,
+                           int source, int shortCut, MKL_INT &level,
+                           MKL_INT &width, std::vector<MKL_INT> &levels,
                            std::vector<MKL_INT> &lastLevel);
 
-template void BFS_Fn<false>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                            int source, MKL_INT &level,
-                            std::vector<MKL_INT> &levels,
+template bool BFS_Fn<false>(mkl_wrapper::mkl_sparse_mat const *const mat,
+                            int source, int shortCut, MKL_INT &level,
+                            MKL_INT &width, std::vector<MKL_INT> &levels,
                             std::vector<MKL_INT> &lastLevel);
 
-template void PBFS_Fn<true, true>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                                  int source, MKL_INT &level,
-                                  std::vector<MKL_INT> &levels,
+template bool PBFS_Fn<true, true>(mkl_wrapper::mkl_sparse_mat const *const mat,
+                                  int source, int shortCut, MKL_INT &level,
+                                  MKL_INT &width, std::vector<MKL_INT> &levels,
                                   std::vector<MKL_INT> &lastLevel);
 
-template void PBFS_Fn<true, false>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                                   int source, MKL_INT &level,
-                                   std::vector<MKL_INT> &levels,
+template bool PBFS_Fn<true, false>(mkl_wrapper::mkl_sparse_mat const *const mat,
+                                   int source, int shortCut, MKL_INT &level,
+                                   MKL_INT &width, std::vector<MKL_INT> &levels,
                                    std::vector<MKL_INT> &lastLevel);
 
-template void PBFS_Fn<false, true>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                                   int source, MKL_INT &level,
-                                   std::vector<MKL_INT> &levels,
+template bool PBFS_Fn<false, true>(mkl_wrapper::mkl_sparse_mat const *const mat,
+                                   int source, int shortCut, MKL_INT &level,
+                                   MKL_INT &width, std::vector<MKL_INT> &levels,
                                    std::vector<MKL_INT> &lastLevel);
 
-template void
+template bool
 PBFS_Fn<false, false>(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
-                      MKL_INT &level, std::vector<MKL_INT> &levels,
+                      int shortCut, MKL_INT &level, MKL_INT &width,
+                      std::vector<MKL_INT> &levels,
                       std::vector<MKL_INT> &lastLevel);
 } // namespace reordering

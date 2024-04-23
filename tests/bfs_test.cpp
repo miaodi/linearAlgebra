@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <omp.h>
 #include <random>
+#include <unordered_set>
 
 // Demonstrate some basic assertions.
 TEST(bfs, BasicAssertions) {
@@ -27,7 +28,7 @@ TEST(bfs, serial) {
 
   reordering::BFS bfs(reordering::BFS_Fn<false>);
   bfs(&A, 0);
-  EXPECT_EQ(bfs.getLevel(), 5);
+  EXPECT_EQ(bfs.getHeight(), 5);
   std::vector<MKL_INT> ref{0, 1, 1, 1, 2, 2, 3, 3, 4};
   for (size_t i = 0; i < ref.size(); i++) {
     EXPECT_EQ(bfs.getLevels()[i], ref[i]);
@@ -56,7 +57,7 @@ TEST(bfs, parallel) {
 
   // std::copy(levels.get(), levels.get() + 9,
   //           std::ostream_iterator<int>(std::cout, " "));
-  EXPECT_EQ(bfs.getLevel(), 5);
+  EXPECT_EQ(bfs.getHeight(), 5);
   std::vector<MKL_INT> ref{0, 1, 1, 1, 2, 2, 3, 3, 4};
   for (size_t i = 0; i < ref.size(); i++) {
     EXPECT_EQ(bfs.getLevels()[i], ref[i]);
@@ -64,7 +65,7 @@ TEST(bfs, parallel) {
 
   reordering::BFS bfs2(reordering::PBFS_Fn<false, false>);
   bfs2(&A, 0);
-  EXPECT_EQ(bfs2.getLevel(), 5);
+  EXPECT_EQ(bfs2.getHeight(), 5);
 }
 
 TEST(bfs, serial_vs_parallel) {
@@ -82,21 +83,27 @@ TEST(bfs, serial_vs_parallel) {
     for (int s = 0; s < mat.rows(); s++) {
       reordering::BFS bfs(reordering::BFS_Fn<true>);
       bfs(&mat, s);
+      const auto &bfs_lastLevel = bfs.getLastLevel();
+      std::unordered_set<MKL_INT> bfs_set(bfs_lastLevel.begin(),
+                                          bfs_lastLevel.end());
       reordering::BFS pbfs(reordering::PBFS_Fn<true, true>);
-      reordering::BFS pbfs2(reordering::PBFS_Fn<false, false>);
-      for (int t = 1; t <= 8; t++) {
+      reordering::BFS pbfs2(reordering::PBFS_Fn<true, false>);
+      for (int t = 1; t <= 7; t++) {
         omp_set_num_threads(t);
         pbfs(&mat, s);
         pbfs2(&mat, s);
-        EXPECT_EQ(pbfs.getLevel(), bfs.getLevel());
+        EXPECT_EQ(pbfs.getHeight(), bfs.getHeight());
         for (size_t i = 0; i < mat.rows(); i++)
           EXPECT_EQ(pbfs.getLevels()[i], bfs.getLevels()[i]);
 
-        EXPECT_EQ(pbfs.getLevel(), pbfs2.getLevel());
-        // EXPECT_EQ(pbfs.getLastLevel().size(), bfs.getLastLevel().size());
-        // for (size_t i = 0; i < pbfs.getLastLevel().size(); i++) {
-        //   EXPECT_EQ(pbfs.getLastLevel()[i], bfs.getLastLevel()[i]);
-        // }
+        const auto &pbfs_lastLevel = pbfs.getLastLevel();
+        std::unordered_set<MKL_INT> pbfs_set(pbfs_lastLevel.begin(),
+                                             pbfs_lastLevel.end());
+        EXPECT_EQ(bfs_set, pbfs_set);
+
+        EXPECT_EQ(pbfs.getHeight(), pbfs2.getHeight());
+
+        EXPECT_EQ(pbfs2.getLastLevel().size(), bfs.getLastLevel().size());
       }
     }
   }
@@ -121,5 +128,22 @@ TEST(reordering, min_degree_node) {
       EXPECT_EQ(res.first, res2.first);
       EXPECT_EQ(res.second, res2.second);
     }
+  }
+}
+
+TEST(reordering, pseudoDiameter) {
+  std::vector<std::string> files{"../benchmarks/data/nv2.mtx"};
+  for (const auto &fn : files) {
+    std::ifstream f(fn);
+    f.clear();
+    f.seekg(0, std::ios::beg);
+    std::vector<MKL_INT> csr_rows, csr_cols;
+    std::vector<double> csr_vals;
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                    csr_rows, csr_cols, csr_vals);
+    MKL_INT source, target;
+    reordering::PseudoDiameter(&mat, source, target);
+    std::cout << source << " " << target << std::endl;
   }
 }
