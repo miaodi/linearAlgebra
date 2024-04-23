@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <fast_matrix_market/fast_matrix_market.hpp>
 #include <fstream>
 #include <iostream>
@@ -8,7 +9,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-#include <atomic>
 
 namespace Eigen {
 template <typename T, typename ind> class Triplet;
@@ -170,20 +170,31 @@ std::pair<Iter, Iter> LoadBalancedPartition(Iter begin, Iter end, int tid,
 
 void printProgress(double percentage);
 
-struct bar_t {
-  unsigned const count;
-  std::atomic<unsigned> spaces;
-  std::atomic<unsigned> generation;
-  bar_t(unsigned count_) : count(count_), spaces(count_), generation(0) {}
-  void wait() {
-    unsigned const my_generation = generation;
-    if (!--spaces) {
-      spaces = count;
-      ++generation;
-    } else {
-      while (generation == my_generation)
-        ;
+// Programming Pearls column 11.2
+// Knuth's algorithm S (3.4.2)
+// output M integers (in order) in range [start, end)
+// https://stackoverflow.com/questions/33081856/randomly-generated-sorted-arrays-search-performances-comparison
+class knuth_s {
+public:
+  knuth_s() {
+    static std::random_device rd;
+    static std::mt19937 eng{rd()};
+    static std::uniform_real_distribution<> dist; // [0,1)
+    my_rand = []() { return dist(eng); };
+  }
+  template <typename T, typename Iter>
+  void operator()(T M, T start, T end, Iter dest) const {
+    double select = M, remaining = end - start;
+    for (T i = start; i < end; ++i) {
+      if (my_rand() < select / remaining) {
+        *dest++ = i;
+        --select;
+      }
+      --remaining;
     }
   }
+
+protected:
+  std::function<double()> my_rand;
 };
 } // namespace utils
