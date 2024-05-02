@@ -81,7 +81,7 @@ public:
 
   void print() const;
 
-  void check() const;
+  int check() const;
 
   void transpose();
 
@@ -251,4 +251,7 @@ dense_mat mkl_sparse_mult_ptap(const mkl_sparse_mat &A, const dense_mat &P);
 
 // P*A*PT
 dense_mat mkl_sparse_mult_papt(const mkl_sparse_mat &A, const dense_mat &P);
+
+// return a square random sparse matrix
+mkl_sparse_mat random_sparse(const MKL_INT row, const MKL_INT nnzRow);
 } // namespace mkl_wrapper

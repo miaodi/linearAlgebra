@@ -19,12 +19,12 @@ TEST(Utils, knuth_s) {
   size_t size = dist1(rng);
   size_t lower_bound = dist1(rng);
   std::uniform_int_distribution<std::mt19937::result_type> dist2(
-      100000000, 10000000000); // distribution in range [1, 100000000]
+      100000000, 10000000000); // distribution in range [100000000, 10000000000]
 
   size_t upper_bound = std::max(size + lower_bound, dist1(rng));
 
   std::vector<int> randVec(size, 0);
-  
+
   utils::knuth_s rand;
   for (int i = 0; i < 10; i++) {
     rand(size, lower_bound, upper_bound, randVec.begin());

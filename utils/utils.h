@@ -176,17 +176,12 @@ void printProgress(double percentage);
 // https://stackoverflow.com/questions/33081856/randomly-generated-sorted-arrays-search-performances-comparison
 class knuth_s {
 public:
-  knuth_s() {
-    static std::random_device rd;
-    static std::mt19937 eng{rd()};
-    static std::uniform_real_distribution<> dist; // [0,1)
-    my_rand = []() { return dist(eng); };
-  }
+  knuth_s() : eng(rd()) {}
   template <typename T, typename Iter>
   void operator()(T M, T start, T end, Iter dest) const {
     double select = M, remaining = end - start;
     for (T i = start; i < end; ++i) {
-      if (my_rand() < select / remaining) {
+      if (dist(eng) < select / remaining) {
         *dest++ = i;
         --select;
       }
@@ -195,6 +190,8 @@ public:
   }
 
 protected:
-  std::function<double()> my_rand;
+  mutable std::random_device rd;
+  mutable std::mt19937 eng;
+  mutable std::uniform_real_distribution<> dist; // [0,1)
 };
 } // namespace utils

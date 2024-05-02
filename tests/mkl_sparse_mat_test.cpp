@@ -272,3 +272,18 @@ TEST(dense_matrix, orthogonalize) {
     }
   }
 }
+
+TEST(sparsifier, random) {
+  auto spm = mkl_wrapper::random_sparse(5, 5);
+  auto ai = spm.get_ai();
+  auto aj = spm.get_aj();
+  for (int i = 0; i <= 5; i++) {
+    EXPECT_EQ(ai[i], i * 5);
+  }
+  for (int i = 0; i < 25; i++) {
+    EXPECT_EQ(aj[i], i % 5);
+  }
+
+  auto spm1 = mkl_wrapper::random_sparse(1000, 23);
+  EXPECT_EQ(0, spm1.check());
+}
