@@ -6,41 +6,21 @@ include(FetchContent)
 # Add Google Test
 include(../cmake/GoogleTest.cmake)
 
-add_executable(
-  mkl_sparse_mat
-  mkl_sparse_mat_test.cpp
-)
+include(GoogleTest)
 
-target_link_libraries(
-  mkl_sparse_mat PUBLIC GTest::gtest_main mkl_wrapper
-)
+file(GLOB_RECURSE ALL_TEST_CPP *.cpp)
 
-add_executable(
-  circular_buffer
-  circularbuffer_test.cpp
-)
+foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
+   get_filename_component(ONE_TEST_EXEC ${ONE_TEST_CPP} NAME_WE)
 
-target_link_libraries(
-  circular_buffer PUBLIC GTest::gtest_main GTest::gmock_main mkl_wrapper
-)
+   # Avoid name collision 
+   set(TARGET_NAME TEST_${ONE_TEST_EXEC})
 
-add_executable(
-  bfs
-  bfs_test.cpp
-)
-
-target_link_libraries(
-  bfs PUBLIC GTest::gtest_main GTest::gmock_main reordering
-)
-
-add_executable(
-  utils
-  utils_test.cpp
-)
-
-target_link_libraries(
-  utils PUBLIC GTest::gtest_main GTest::gmock_main Utils
-)
+   add_executable(${TARGET_NAME} ${ONE_TEST_CPP})
+   set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_TEST_EXEC}) 
+   target_link_libraries(${TARGET_NAME} PRIVATE GTest::gtest_main GTest::gmock_main mkl_wrapper Utils reordering  OpenMP::OpenMP_CXX)
+   gtest_discover_tests(${TARGET_NAME})
+endforeach()
 
 # configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/ex5.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ex5.mtx COPYONLY)
 # configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/rdist1.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/rdist1.mtx COPYONLY)
@@ -48,8 +28,3 @@ target_link_libraries(
 
 file(CREATE_LINK ${CMAKE_CURRENT_SOURCE_DIR}/data/ex5.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ex5.mtx SYMBOLIC)
 file(CREATE_LINK ${CMAKE_CURRENT_SOURCE_DIR}/data/rdist1.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/rdist1.mtx SYMBOLIC)
-
-include(GoogleTest)
-gtest_discover_tests(mkl_sparse_mat)
-gtest_discover_tests(circular_buffer)
-gtest_discover_tests(bfs)
