@@ -2,12 +2,14 @@ cmake_minimum_required(VERSION 3.5...3.20)
 
 project(Linear_Algebra CXX Fortran)
 
+option(USE_AMGCL_LIB "Use the amg library amgcl" OFF) 
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules" )
 # Include the init module
 include(MorseInit)
 
-
 include(FetchContent)
+
 FetchContent_Declare(
   fast_matrix_market
   GIT_REPOSITORY https://github.com/alugowski/fast_matrix_market.git
@@ -25,6 +27,17 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(Spectra)
+
+FetchContent_Declare(
+  AMGCL
+  GIT_REPOSITORY https://github.com/ddemidov/amgcl.git
+  GIT_TAG master
+  GIT_SHALLOW TRUE
+)
+
+if (USE_AMGCL_LIB)
+  FetchContent_MakeAvailable(AMGCL)
+endif(USE_AMGCL_LIB)
 
 set(MKL_ARCH intel64)
 set(MKL_THREADING gnu_thread)
