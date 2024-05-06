@@ -981,7 +981,7 @@ std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
                                       MKL_INT const *const pinv) {
   const auto &ai = A.get_ai();
 
-  const auto base = A.mkl_base();
+  const MKL_INT base = A.mkl_base();
   const auto rows = A.rows();
 
   std::shared_ptr<MKL_INT[]> new_ai(new MKL_INT[rows + 1]);
@@ -999,7 +999,7 @@ std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
     auto [start, end] = utils::LoadBalancedPartition(
         new_ai.get(), new_ai.get() + rows, tid, nthreads);
     for (auto i = start; i < end; i++) {
-      size_t rowInd = pinv[i - new_ai.get()];
+      size_t rowInd = pinv[i - new_ai.get()] - base;
       MKL_INT nz = ai[rowInd + 1] - ai[rowInd];
       *(i + 1) = (i == start ? 0 : *i) + nz;
       localNNZ[tid + 1] += nz;
@@ -1023,45 +1023,6 @@ std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
 
 std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
            std::shared_ptr<double[]>>
-permuteRow(const mkl_sparse_mat &A, MKL_INT const *const pinv) {
-  auto new_ai = permutedAI(A, pinv);
-
-  const auto &ai = A.get_ai();
-  const auto &aj = A.get_aj();
-  const auto &av = A.get_av();
-
-  const auto base = A.mkl_base();
-  const auto rows = A.rows();
-  const auto nnz = A.nnz();
-
-  std::shared_ptr<MKL_INT[]> new_aj{new MKL_INT[nnz]};
-  std::shared_ptr<double[]> new_av{new double[nnz]};
-
-  if (pinv == nullptr) {
-    std::copy(std::execution::par, aj.get(), aj.get() + nnz, new_aj.get());
-    std::copy(std::execution::par, av.get(), av.get() + nnz, new_av.get());
-    return std::make_tuple(new_ai, new_aj, new_av);
-  }
-#pragma omp parallel
-  {
-    const int tid = omp_get_thread_num();
-    const int nthreads = omp_get_num_threads();
-    auto [start, end] = utils::LoadPrefixBalancedPartition(
-        new_ai.get(), new_ai.get() + rows, tid, nthreads);
-
-    for (auto i = start; i < end; i++) {
-      size_t rowInd = pinv ? pinv[i - new_ai.get()] : (i - new_ai.get());
-      std::copy(std::execution::seq, aj.get() + ai[rowInd] - base,
-                aj.get() + ai[rowInd + 1] - base, new_aj.get() + *i);
-      std::copy(std::execution::seq, av.get() + ai[rowInd] - base,
-                av.get() + ai[rowInd + 1] - base, new_av.get() + *i);
-    }
-  }
-  return std::make_tuple(new_ai, new_aj, new_av);
-}
-
-std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
-           std::shared_ptr<double[]>>
 permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
         MKL_INT const *const q) {
   auto new_ai = permutedAI(A, pinv);
@@ -1070,18 +1031,13 @@ permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
   const auto &aj = A.get_aj();
   const auto &av = A.get_av();
 
-  const auto base = A.mkl_base();
+  const MKL_INT base = A.mkl_base();
   const auto rows = A.rows();
   const auto nnz = A.nnz();
 
   std::shared_ptr<MKL_INT[]> new_aj{new MKL_INT[nnz]};
   std::shared_ptr<double[]> new_av{new double[nnz]};
 
-  if (q == nullptr) {
-    std::copy(std::execution::par, aj.get(), aj.get() + nnz, new_aj.get());
-    std::copy(std::execution::par, av.get(), av.get() + nnz, new_av.get());
-    return std::make_tuple(new_ai, new_aj, new_av);
-  }
 #pragma omp parallel
   {
     const int tid = omp_get_thread_num();
@@ -1090,17 +1046,36 @@ permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
         new_ai.get(), new_ai.get() + rows, tid, nthreads);
 
     for (auto i = start; i < end; i++) {
-      size_t rowInd = pinv ? pinv[i - new_ai.get()] : (i - new_ai.get());
-      // std::copy(std::execution::seq, aj.get() + ai[rowInd] - base,
-      //           aj.get() + ai[rowInd + 1] - base, new_aj.get() + *i);
-
-      std::transform(aj.get() + ai[rowInd] - base,
-                     aj.get() + ai[rowInd + 1] - base, new_aj.get() + *i,
-                     [q, base](MKL_INT ind) { return q[ind - base]; });
+      // copy and convert aj and av
+      size_t rowInd = pinv ? pinv[i - new_ai.get()] - base : (i - new_ai.get());
+      std::transform(
+          aj.get() + ai[rowInd] - base, aj.get() + ai[rowInd + 1] - base,
+          new_aj.get() + *i - base,
+          [q, base](MKL_INT ind) { return q ? q[ind - base] : (ind - base); });
       std::copy(std::execution::seq, av.get() + ai[rowInd] - base,
-                av.get() + ai[rowInd + 1] - base, new_av.get() + *i);
+                av.get() + ai[rowInd + 1] - base, new_av.get() + *i - base);
+
+      if (q == nullptr)
+        continue;
+      // intersion sort aj and av based on the column index
+      auto pos = new_aj.get() + *(i + 1) - base - 1;
+      while (pos >= new_aj.get() + *i - base) {
+        for (auto j = new_aj.get() + *i - base; j < pos; j++) {
+          if (*j > *pos) {
+            std::swap(*j, *pos);
+            std::swap(new_av[j - new_aj.get()], new_av[pos - new_aj.get()]);
+          }
+        }
+        pos--;
+      }
     }
   }
   return std::make_tuple(new_ai, new_aj, new_av);
+}
+
+std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
+           std::shared_ptr<double[]>>
+permuteRow(const mkl_sparse_mat &A, MKL_INT const *const pinv) {
+  return permute(A, pinv, nullptr);
 }
 } // namespace mkl_wrapper

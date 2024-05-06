@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <memory>
+#include <omp.h>
 
 using namespace mkl_wrapper;
 
@@ -305,16 +306,50 @@ TEST_F(sparse_matrix_Test, sparsifier_random) {
   EXPECT_EQ(0, spm1.check());
 }
 
-TEST_F(sparse_matrix_Test, permutedAI) {
+TEST_F(sparse_matrix_Test, permute) {
+  omp_set_num_threads(3);
   mkl_wrapper::mkl_sparse_mat A(3, 3, aiA, ajA, avA);
+  mkl_wrapper::mkl_sparse_mat A1(A);
+  A1.to_one_based();
+  for (int it = 0; it < 100; it++) {
+    // test zero based
+    std::vector<MKL_INT> perm0 = utils::randomPermute(3, A.mkl_base());
+    auto [aiB, ajB, avB] = mkl_wrapper::permute(A, perm0.data(), perm0.data());
+    mkl_wrapper::mkl_sparse_mat B(3, 3, aiB, ajB, avB);
 
-  for (int i = 0; i < 4; i++) {
-    std::cout << A.get_ai()[i] << std::endl;
+    auto inv_perm = utils::inversePermute(perm0, A.mkl_base());
+    auto [aiC, ajC, avC] =
+        mkl_wrapper::permute(B, inv_perm.data(), inv_perm.data());
+    mkl_wrapper::mkl_sparse_mat C(3, 3, aiC, ajC, avC);
+
+    for (size_t i = 0; i < 4; i++) {
+      EXPECT_EQ(A.get_ai()[i], C.get_ai()[i]);
+    }
+    for (size_t i = 0; i < A.nnz(); i++) {
+      EXPECT_EQ(A.get_aj()[i], C.get_aj()[i]);
+      EXPECT_EQ(A.get_av()[i], C.get_av()[i]);
+    }
+    // test one based
+    {
+      std::vector<MKL_INT> perm1(perm0.size());
+      std::transform(perm0.cbegin(), perm0.cend(), perm1.begin(),
+                     [](MKL_INT ind) { return ind + 1; });
+      auto [aiB, ajB, avB] =
+          mkl_wrapper::permute(A1, perm1.data(), perm1.data());
+      mkl_wrapper::mkl_sparse_mat B(3, 3, aiB, ajB, avB, SPARSE_INDEX_BASE_ONE);
+
+      auto inv_perm = utils::inversePermute(perm1, A1.mkl_base());
+      auto [aiC, ajC, avC] =
+          mkl_wrapper::permute(B, inv_perm.data(), inv_perm.data());
+      mkl_wrapper::mkl_sparse_mat C(3, 3, aiC, ajC, avC, SPARSE_INDEX_BASE_ONE);
+
+      for (size_t i = 0; i < 4; i++) {
+        EXPECT_EQ(A1.get_ai()[i], C.get_ai()[i]);
+      }
+      for (size_t i = 0; i < A.nnz(); i++) {
+        EXPECT_EQ(A1.get_aj()[i], C.get_aj()[i]);
+        EXPECT_EQ(A1.get_av()[i], C.get_av()[i]);
+      }
+    }
   }
-  std::cout << std::endl;
-
-  std::vector<MKL_INT> perm{2, 0, 1};
-  auto [ai, aj, av] = mkl_wrapper::permute(A, perm.data(), perm.data());
-  mkl_wrapper::mkl_sparse_mat B(3, 3, ai, aj, av);
-  B.print();
 }

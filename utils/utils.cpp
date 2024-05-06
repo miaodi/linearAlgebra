@@ -74,4 +74,23 @@ void printProgress(double percentage) {
 //   }
 // return res;
 // }
+
+std::vector<MKL_INT> randomPermute(const MKL_INT n, const MKL_INT base) {
+  std::vector<MKL_INT> perm(n);
+  std::iota(perm.begin(), perm.end(), base);
+
+  std::random_device rd;
+  std::mt19937 g(rd());
+  std::shuffle(perm.begin(), perm.end(), g);
+  return perm;
+}
+
+std::vector<MKL_INT> inversePermute(const std::vector<MKL_INT> &perm,
+                                    const MKL_INT base) {
+  std::vector<MKL_INT> inv_perm(perm.size());
+  for (MKL_INT i = 0; i < perm.size(); i++) {
+    inv_perm[perm[i] - base] = i + base;
+  }
+  return inv_perm;
+}
 } // namespace utils
