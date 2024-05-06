@@ -104,6 +104,18 @@ protected:
   std::shared_ptr<double[]> _av{nullptr};  // Value Array
 };
 
+std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
+                                      MKL_INT const *const pinv);
+
+std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
+           std::shared_ptr<double[]>>
+permuteRow(const mkl_sparse_mat &A, MKL_INT const *const pinv);
+
+std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
+           std::shared_ptr<double[]>>
+permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
+        MKL_INT const *const q);
+
 // c*A+B
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                               double c = 1.);
@@ -193,7 +205,8 @@ mkl_sparse_mat_sym mkl_sparse_mult_ptap(mkl_sparse_mat_sym &A,
                                         mkl_sparse_mat &P);
 
 // P*A*PT
-mkl_sparse_mat_sym mkl_sparse_mult_papt(mkl_sparse_mat_sym &A, mkl_sparse_mat &P);
+mkl_sparse_mat_sym mkl_sparse_mult_papt(mkl_sparse_mat_sym &A,
+                                        mkl_sparse_mat &P);
 
 // Incomplete Cholesky ic0
 class mkl_ic0 : public mkl_sparse_mat_sym {
@@ -230,8 +243,9 @@ public:
   std::shared_ptr<double[]> get_av() { return _av; }
   std::shared_ptr<const double[]> get_av() const { return _av; }
   double *col(int i) { return _av.get() + i * _m; }
-  
+
   bool orthogonalize();
+
 protected:
   MKL_INT _m{0};
   MKL_INT _n{0};

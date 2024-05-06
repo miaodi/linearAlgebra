@@ -75,7 +75,6 @@ void PseudoDiameter(mkl_wrapper::mkl_sparse_mat const *const mat,
   while (target == -1) {
     choosen.resize(0);
     BFS bfs(reordering::PBFS_Fn<true, false>);
-
     bfs(mat, source);
     diameter = bfs.getHeight();
     forwardWidth = bfs.getHeight();

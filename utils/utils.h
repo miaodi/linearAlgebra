@@ -168,6 +168,29 @@ std::pair<Iter, Iter> LoadBalancedPartition(Iter begin, Iter end, int tid,
                               begin + (tid + 1) * (work_per_thread + 1));
 }
 
+template <typename Iter>
+std::pair<Iter, Iter> LoadPrefixBalancedPartition(Iter begin, Iter end, int tid,
+                                                  int nthreads) {
+  const size_t total_work = *end - *begin;
+  const size_t work_per_thread = total_work / nthreads;
+  const size_t resid = total_work % nthreads;
+  Iter lb =
+      tid == 0
+          ? begin
+          : std::lower_bound(begin, end,
+                             (tid >= resid ? (tid * work_per_thread + resid)
+                                           : (tid * (work_per_thread + 1))) +
+                                 *begin);
+  Iter le = tid == nthreads - 1
+                ? end
+                : std::lower_bound(begin, end,
+                                   (tid >= resid
+                                        ? ((tid + 1) * work_per_thread + resid)
+                                        : ((tid + 1) * (work_per_thread + 1))) +
+                                       *begin);
+  return std::make_pair(lb, le);
+}
+
 void printProgress(double percentage);
 
 // Programming Pearls column 11.2

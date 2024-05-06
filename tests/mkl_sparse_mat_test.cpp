@@ -4,29 +4,74 @@
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <memory>
-// Demonstrate some basic assertions.
-TEST(HelloTest, BasicAssertions) {
-  // Expect two strings not to be equal.
-  EXPECT_STRNE("hello", "world");
-  // Expect equality.
-  EXPECT_EQ(7 * 6, 42);
-}
+
 using namespace mkl_wrapper;
+
+// The fixture for testing class Foo.
+class sparse_matrix_Test : public testing::Test {
+protected:
+  std::shared_ptr<MKL_INT[]> aiA;
+  std::shared_ptr<MKL_INT[]> ajA;
+  std::shared_ptr<double[]> avA;
+
+  std::shared_ptr<MKL_INT[]> aiB;
+  std::shared_ptr<MKL_INT[]> ajB;
+  std::shared_ptr<double[]> avB;
+
+  std::vector<MKL_INT> csr_rows;
+  std::vector<MKL_INT> csr_cols;
+  std::vector<double> csr_vals;
+
+  sparse_matrix_Test() {
+    /*
+    A = 1 2 3      B = 1 0 0
+        0 4 5          2 4 0
+        0 0 6          3 5 6
+    */
+    aiA.reset(new MKL_INT[4]{0, 3, 5, 6});
+    ajA.reset(new MKL_INT[6]{0, 1, 2, 1, 2, 2});
+    avA.reset(new double[6]{1, 2, 3, 4, 5, 6});
+
+    aiB.reset(new MKL_INT[4]{0, 1, 3, 6});
+    ajB.reset(new MKL_INT[6]{0, 0, 1, 0, 1, 2});
+    avB.reset(new double[6]{1, 2, 4, 3, 5, 6});
+
+    std::ifstream f("data/ex5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+  }
+
+  ~sparse_matrix_Test() override {
+    // You can do clean-up work that doesn't throw exceptions here.
+  }
+
+  // If the constructor and destructor are not enough for setting up
+  // and cleaning up each test, you can define the following methods:
+
+  void SetUp() override {
+    // Code here will be called immediately after the constructor (right
+    // before each test).
+  }
+
+  void TearDown() override {
+    // Code here will be called immediately after each test (right
+    // before the destructor).
+  }
+
+  // Class members declared here can be used by all tests in the test suite
+  // for Foo.
+};
+
+int main(int argc, char **argv) {
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
 
 /*
 A = 1 2 3      B = 1 0 0
     0 4 5          2 4 0
     0 0 6          3 5 6
 */
-TEST(sparse_matrix, add) {
-  std::shared_ptr<MKL_INT[]> aiA(new MKL_INT[4]{0, 3, 5, 6});
-  std::shared_ptr<MKL_INT[]> ajA(new MKL_INT[6]{0, 1, 2, 1, 2, 2});
-  std::shared_ptr<double[]> avA(new double[6]{1, 2, 3, 4, 5, 6});
-
-  std::shared_ptr<MKL_INT[]> aiB(new MKL_INT[4]{0, 1, 3, 6});
-  std::shared_ptr<MKL_INT[]> ajB(new MKL_INT[6]{0, 0, 1, 0, 1, 2});
-  std::shared_ptr<double[]> avB(new double[6]{1, 2, 4, 3, 5, 6});
-
+TEST_F(sparse_matrix_Test, add) {
   std::shared_ptr<MKL_INT[]> aiC(new MKL_INT[4]{0, 3, 6, 9});
   std::shared_ptr<MKL_INT[]> ajC(new MKL_INT[9]{0, 1, 2, 0, 1, 2, 0, 1, 2});
   std::shared_ptr<double[]> avC(new double[9]{2, 2, 3, 2, 8, 5, 3, 5, 12});
@@ -50,14 +95,7 @@ A = 1 2 3      B = 1 0 0
     0 4 5          2 4 0
     0 0 6          3 5 6
 */
-TEST(sparse_matrix, mult_mat) {
-  std::shared_ptr<MKL_INT[]> aiA(new MKL_INT[4]{0, 3, 5, 6});
-  std::shared_ptr<MKL_INT[]> ajA(new MKL_INT[6]{0, 1, 2, 1, 2, 2});
-  std::shared_ptr<double[]> avA(new double[6]{1, 2, 3, 4, 5, 6});
-
-  std::shared_ptr<MKL_INT[]> aiB(new MKL_INT[4]{0, 1, 3, 6});
-  std::shared_ptr<MKL_INT[]> ajB(new MKL_INT[6]{0, 0, 1, 0, 1, 2});
-  std::shared_ptr<double[]> avB(new double[6]{1, 2, 4, 3, 5, 6});
+TEST_F(sparse_matrix_Test, mult_mat) {
 
   std::shared_ptr<MKL_INT[]> aiC(new MKL_INT[4]{0, 3, 6, 9});
   std::shared_ptr<MKL_INT[]> ajC(new MKL_INT[9]{0, 1, 2, 0, 1, 2, 0, 1, 2});
@@ -98,11 +136,7 @@ A = 1 2 3
     0 4 5
     0 0 6
 */
-TEST(sparse_matrix, mult_vec) {
-  std::shared_ptr<MKL_INT[]> aiA(new MKL_INT[4]{0, 3, 5, 6});
-  std::shared_ptr<MKL_INT[]> ajA(new MKL_INT[6]{0, 1, 2, 1, 2, 2});
-  std::shared_ptr<double[]> avA(new double[6]{1, 2, 3, 4, 5, 6});
-
+TEST_F(sparse_matrix_Test, mult_vec) {
   mkl_wrapper::mkl_sparse_mat A(3, 3, aiA, ajA, avA);
 
   std::vector<double> rhs{1, 2, 3};
@@ -118,7 +152,7 @@ TEST(sparse_matrix, mult_vec) {
   }
 }
 
-// TEST(sparse_matrix, check) {
+// TEST_F(sparse_matrix_Test, check) {
 //   std::shared_ptr<MKL_INT[]> aiA(
 //       new MKL_INT[4]{0, 1, 2, 3});
 //   std::shared_ptr<MKL_INT[]> ajA(new MKL_INT[3]{1, 2, 3});
@@ -129,12 +163,7 @@ TEST(sparse_matrix, mult_vec) {
 //   A.check();
 // }
 
-TEST(sparse_matrix, sym) {
-
-  std::ifstream f("data/ex5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
-  std::vector<MKL_INT> csr_rows, csr_cols;
-  std::vector<double> csr_vals;
-  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+TEST_F(sparse_matrix_Test, sym) {
 
   mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                   csr_rows, csr_cols, csr_vals);
@@ -178,13 +207,7 @@ TEST(sparse_matrix, sym) {
   }
 }
 
-TEST(pardiso, full_vs_sym) {
-
-  std::ifstream f("data/ex5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
-  std::vector<MKL_INT> csr_rows, csr_cols;
-  std::vector<double> csr_vals;
-  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
-
+TEST_F(sparse_matrix_Test, pardiso_full_vs_sym) {
   mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                   csr_rows, csr_cols, csr_vals);
   mat.set_positive_definite(true);
@@ -207,7 +230,7 @@ TEST(pardiso, full_vs_sym) {
   }
 }
 
-TEST(sparse_matrix, mult_full_vs_sym) {
+TEST_F(sparse_matrix_Test, mult_full_vs_sym) {
 
   std::shared_ptr<MKL_INT[]> ai(new MKL_INT[6]{0, 2, 5, 6, 9, 11});
   std::shared_ptr<MKL_INT[]> aj(
@@ -229,13 +252,7 @@ TEST(sparse_matrix, mult_full_vs_sym) {
   }
 }
 
-TEST(sparse_matrix, mult_full_vs_sym2) {
-
-  std::ifstream f("data/ex5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
-  std::vector<MKL_INT> csr_rows, csr_cols;
-  std::vector<double> csr_vals;
-  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
-
+TEST_F(sparse_matrix_Test, mult_full_vs_sym2) {
   mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                   csr_rows, csr_cols, csr_vals);
   mkl_wrapper::mkl_sparse_mat_sym sym(mat);
@@ -249,7 +266,7 @@ TEST(sparse_matrix, mult_full_vs_sym2) {
   }
 }
 
-TEST(dense_matrix, orthogonalize) {
+TEST_F(sparse_matrix_Test, dense_matrix_orthogonalize) {
   mkl_wrapper::dense_mat mat(3, 3);
   auto av = mat.get_av();
   av[0] = 1;
@@ -273,7 +290,7 @@ TEST(dense_matrix, orthogonalize) {
   }
 }
 
-TEST(sparsifier, random) {
+TEST_F(sparse_matrix_Test, sparsifier_random) {
   auto spm = mkl_wrapper::random_sparse(5, 5);
   auto ai = spm.get_ai();
   auto aj = spm.get_aj();
@@ -286,4 +303,18 @@ TEST(sparsifier, random) {
 
   auto spm1 = mkl_wrapper::random_sparse(1000, 23);
   EXPECT_EQ(0, spm1.check());
+}
+
+TEST_F(sparse_matrix_Test, permutedAI) {
+  mkl_wrapper::mkl_sparse_mat A(3, 3, aiA, ajA, avA);
+
+  for (int i = 0; i < 4; i++) {
+    std::cout << A.get_ai()[i] << std::endl;
+  }
+  std::cout << std::endl;
+
+  std::vector<MKL_INT> perm{2, 0, 1};
+  auto [ai, aj, av] = mkl_wrapper::permute(A, perm.data(), perm.data());
+  mkl_wrapper::mkl_sparse_mat B(3, 3, ai, aj, av);
+  B.print();
 }
