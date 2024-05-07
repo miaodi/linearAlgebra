@@ -74,25 +74,27 @@ UnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat) {
 }
 
 // Multi-core Spanning Forest Algorithms using the Disjoint-set Data Structure
-std::vector<std::atomic<MKL_INT>>
+std::vector<MKL_INT>
 ParUnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat) {
-  std::vector<std::atomic<MKL_INT>> parents(mat->rows());
+  std::vector<MKL_INT> parents(mat->rows());
   std::iota(parents.begin(), parents.end(), 0);
 
   auto unite = [&parents](MKL_INT x, MKL_INT y) {
-    while (parents[x] != parents[y]) {
+    while (true) {
       MKL_INT px = parents[x];
       MKL_INT py = parents[y];
       if (px < py) {
-        if (x == px && parents[x].compare_exchange_strong(px, py))
+        if (x == px &&
+            __sync_bool_compare_and_swap(&parents[x], px, parents[y]))
           break;
-        parents[x] = py;
-        x = px;
+        if (__sync_bool_compare_and_swap(&parents[x], px, parents[y]))
+          x = px;
       } else if (px > py) {
-        if (y == py && parents[y].compare_exchange_strong(py, px))
+        if (y == py &&
+            __sync_bool_compare_and_swap(&parents[y], py, parents[x]))
           break;
-        parents[y] = px;
-        y = py;
+        if (__sync_bool_compare_and_swap(&parents[y], py, parents[x]))
+          y = py;
       } else
         break;
     }

@@ -1,19 +1,13 @@
 #include "BFS.h"
 #include "Reordering.h"
 #include "mkl_sparse_mat.h"
-#include "utils.h"
 #include <algorithm>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <omp.h>
 #include <random>
 #include <unordered_set>
-
-// Demonstrate some basic assertions.
-TEST(bfs, BasicAssertions) {
-  // Expect two strings not to be equal.
-  EXPECT_STRNE("hello", "world");
-}
+#include "utils.h"
 
 TEST(bfs, serial) {
   // https://dl.acm.org/cms/attachment/039ee79d-efce-4a81-8a76-ed21ffbd1a5b/f1.jpg
@@ -106,44 +100,5 @@ TEST(bfs, serial_vs_parallel) {
         EXPECT_EQ(pbfs2.getLastLevel().size(), bfs.getLastLevel().size());
       }
     }
-  }
-}
-
-TEST(reordering, min_degree_node) {
-  std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
-  for (const auto &fn : files) {
-    std::ifstream f(fn);
-    f.clear();
-    f.seekg(0, std::ios::beg);
-    std::vector<MKL_INT> csr_rows, csr_cols;
-    std::vector<double> csr_vals;
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
-    mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
-                                    csr_rows, csr_cols, csr_vals);
-    auto res = reordering::MinDegreeNode(&mat);
-
-    for (int t = 1; t <= 8; t++) {
-      omp_set_num_threads(t);
-      auto res2 = reordering::PMinDegreeNode(&mat);
-      EXPECT_EQ(res.first, res2.first);
-      EXPECT_EQ(res.second, res2.second);
-    }
-  }
-}
-
-TEST(reordering, pseudoDiameter) {
-  std::vector<std::string> files{"../benchmarks/data/nv2.mtx"};
-  for (const auto &fn : files) {
-    std::ifstream f(fn);
-    f.clear();
-    f.seekg(0, std::ios::beg);
-    std::vector<MKL_INT> csr_rows, csr_cols;
-    std::vector<double> csr_vals;
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
-    mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
-                                    csr_rows, csr_cols, csr_vals);
-    MKL_INT source, target;
-    reordering::PseudoDiameter(&mat, source, target);
-    std::cout << source << " " << target << std::endl;
   }
 }

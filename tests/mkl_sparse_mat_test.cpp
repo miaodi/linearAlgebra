@@ -353,3 +353,55 @@ TEST_F(sparse_matrix_Test, permute) {
     }
   }
 }
+
+TEST_F(sparse_matrix_Test, permute2) {
+  omp_set_num_threads(5);
+  mkl_wrapper::mkl_sparse_mat A = mkl_wrapper::random_sparse(10000, 100);
+  auto av = A.get_av();
+  std::iota(av.get(), av.get() + A.nnz(), 0);
+  mkl_wrapper::mkl_sparse_mat A1(A);
+  A1.to_one_based();
+  for (int it = 0; it < 10; it++) {
+    // test zero based
+    std::vector<MKL_INT> perm0 = utils::randomPermute(10000, A.mkl_base());
+    auto [aiB, ajB, avB] = mkl_wrapper::permute(A, perm0.data(), perm0.data());
+    mkl_wrapper::mkl_sparse_mat B(10000, 10000, aiB, ajB, avB);
+
+    auto inv_perm = utils::inversePermute(perm0, A.mkl_base());
+    auto [aiC, ajC, avC] =
+        mkl_wrapper::permute(B, inv_perm.data(), inv_perm.data());
+    mkl_wrapper::mkl_sparse_mat C(10000, 10000, aiC, ajC, avC);
+
+    for (size_t i = 0; i <= A.rows(); i++) {
+      EXPECT_EQ(A.get_ai()[i], C.get_ai()[i]);
+    }
+    for (size_t i = 0; i < A.nnz(); i++) {
+      EXPECT_EQ(A.get_aj()[i], C.get_aj()[i]);
+      EXPECT_EQ(A.get_av()[i], C.get_av()[i]);
+    }
+    // test one based
+    {
+      std::vector<MKL_INT> perm1(perm0.size());
+      std::transform(perm0.cbegin(), perm0.cend(), perm1.begin(),
+                     [](MKL_INT ind) { return ind + 1; });
+      auto [aiB, ajB, avB] =
+          mkl_wrapper::permute(A1, perm1.data(), perm1.data());
+      mkl_wrapper::mkl_sparse_mat B(10000, 10000, aiB, ajB, avB,
+                                    SPARSE_INDEX_BASE_ONE);
+
+      auto inv_perm = utils::inversePermute(perm1, A1.mkl_base());
+      auto [aiC, ajC, avC] =
+          mkl_wrapper::permute(B, inv_perm.data(), inv_perm.data());
+      mkl_wrapper::mkl_sparse_mat C(10000, 10000, aiC, ajC, avC,
+                                    SPARSE_INDEX_BASE_ONE);
+
+      for (size_t i = 0; i <= A.rows(); i++) {
+        EXPECT_EQ(A1.get_ai()[i], C.get_ai()[i]);
+      }
+      for (size_t i = 0; i < A.nnz(); i++) {
+        EXPECT_EQ(A1.get_aj()[i], C.get_aj()[i]);
+        EXPECT_EQ(A1.get_av()[i], C.get_av()[i]);
+      }
+    }
+  }
+}

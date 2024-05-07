@@ -20,24 +20,27 @@ template <typename T> T Find(std::vector<T> &parents, T x) {
   return x;
 };
 
-template <typename T> T Find(std::vector<std::atomic<T>> &parents, T x) {
-  while (x != parents[x]) {
-    T px = parents[x];
-    if (px != x)
-      parents[x].compare_exchange_weak(px, parents[px]);
-    x = parents[x];
-  }
-  return x;
-};
+// template <typename T> T Find(std::vector<std::atomic<T>> &parents, T x) {
+//   while (x != parents[x]) {
+//     T px = parents[x];
+//     if (px != x)
+//       parents[x].compare_exchange_weak(px, parents[px]);
+//     x = parents[x];
+//   }
+//   return x;
+// };
 
 std::vector<MKL_INT>
 UnionFindRank(mkl_wrapper::mkl_sparse_mat const *const mat);
 
 std::vector<MKL_INT> UnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat);
 
-std::vector<std::atomic<MKL_INT>>
+// Multi-core Spanning Forest Algorithms using the Disjoint-set Data Structure
+std::vector<MKL_INT>
 ParUnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat);
 
+// Wait-free parallel algorithms for the union-find problem
+// https://github.com/wjakob/dset
 class DisjointSets {
 public:
   DisjointSets(mkl_wrapper::mkl_sparse_mat const *const mat);
