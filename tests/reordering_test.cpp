@@ -39,6 +39,9 @@ TEST(reordering, pseudoDiameter) {
     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                     csr_rows, csr_cols, csr_vals);
+
+    auto parants_parrem = reordering::ParUnionFindRem(&mat);
+    std::cout << reordering::CountComponents(parants_parrem, 0) << std::endl;
     MKL_INT source, target;
     reordering::PseudoDiameter(&mat, source, target);
     std::cout << source << " " << target << std::endl;

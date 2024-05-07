@@ -83,20 +83,16 @@ ParUnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat) {
     while (true) {
       MKL_INT px = parents[x];
       MKL_INT py = parents[y];
-      if (px < py) {
-        if (x == px &&
-            __sync_bool_compare_and_swap(&parents[x], px, parents[y]))
-          break;
-        if (__sync_bool_compare_and_swap(&parents[x], px, parents[y]))
-          x = px;
-      } else if (px > py) {
-        if (y == py &&
-            __sync_bool_compare_and_swap(&parents[y], py, parents[x]))
-          break;
-        if (__sync_bool_compare_and_swap(&parents[y], py, parents[x]))
-          y = py;
-      } else
+      if (px == py)
         break;
+      if (py < px) {
+        std::swap(x, y);
+        std::swap(px, py);
+      }
+      if (x == px && __sync_bool_compare_and_swap(&parents[x], px, py))
+        break;
+      if (__sync_bool_compare_and_swap(&parents[x], px, py))
+        x = px;
     }
   };
   auto ai = mat->get_ai();
@@ -185,4 +181,13 @@ void DisjointSets::execute() {
   }
 }
 
+int CountComponents(std::vector<MKL_INT> &parents, const MKL_INT base) {
+  int sum = 0;
+#pragma omp parallel for reduction(+ : sum)
+  for (MKL_INT i = 0; i < parents.size(); i++) {
+    if (Find(parents, i) == i + base)
+      sum++;
+  }
+  return sum;
+}
 } // namespace reordering

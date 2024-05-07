@@ -62,4 +62,7 @@ public:
   mutable std::vector<std::atomic<uint64_t>> mData;
   mkl_wrapper::mkl_sparse_mat const *const mMat;
 };
+
+int CountComponents(std::vector<MKL_INT> &parents, const MKL_INT base = 0);
+
 } // namespace reordering
