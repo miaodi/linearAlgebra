@@ -6,6 +6,8 @@ option(USE_AMGCL_LIB "Use the amg library amgcl" OFF)
 
 option(USE_MUMPS_LIB "Use the linear solver library mumps. Note that only non-mpi version is supported" OFF) 
 
+option(USE_ARPACK_LIB "Use arpack for generalize eigenvalue problem" OFF) 
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules" )
 # Include the init module
 include(MorseInit)
@@ -46,11 +48,13 @@ set(MKL_THREADING gnu_thread)
 set(MKL_INTERFACE lp64)
 find_package(MKL CONFIG REQUIRED)
 find_package(TBB REQUIRED)
-find_package(arpackng REQUIRED)
 find_package(OpenMP REQUIRED)
 
 find_package(LAPACK REQUIRED)
 
+if (USE_ARPACK_LIB)
+  find_package(arpackng REQUIRED)
+endif(USE_ARPACK_LIB)
 
 if (USE_MUMPS_LIB)
   find_package(MUMPS REQUIRED COMPONENTS SEQ METIS OPENMP)

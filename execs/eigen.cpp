@@ -1,4 +1,7 @@
-
+#include "../config.h"
+#ifdef USE_ARPACK_LIB
+#include "../mkl_wrapper/arpack_wrapper.h"
+#endif
 #include "../mkl_wrapper/mkl_eigen.h"
 #include "../mkl_wrapper/mkl_solver.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
@@ -69,6 +72,7 @@ int main() {
   // std::cout << "m: " << sum.rows() << " , n: " << sum.cols()
   //           << " , nnz: " << sum.nnz() << std::endl;
 
+#ifdef USE_ARPACK_LIB
   {{
 
       mkl_wrapper::arpack_gv ar_gv(&k, &m);
@@ -101,7 +105,7 @@ int main() {
   }
 }
 }
-
+#endif
 {{mkl_wrapper::mkl_eigen_sparse_d_gv gv(&k, &m);
 gv.set_tol(1);
 gv.set_num_eigen(1);

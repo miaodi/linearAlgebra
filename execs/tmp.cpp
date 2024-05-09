@@ -4,7 +4,6 @@
 #include "../mkl_wrapper/mkl_sparse_mat.h"
 #include "../utils/timer.h"
 #include "../utils/utils.h"
-#include "arpack.h"
 #include <execution>
 #include <fstream>
 #include <iostream>
