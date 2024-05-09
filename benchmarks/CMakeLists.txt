@@ -43,12 +43,18 @@ download_file(
    70bde8afe35f5c1e1d822e5a1aa7a2a2a17da0a8622b1427af37a9b2be924970
    mcfe
 )
-# download_file( 
-#    https://math.nist.gov/pub/MatrixMarket2/Harwell-Boeing/bcsstruc4/bcsstk26.mtx.gz
-#    ff4b1aed3d5ae52d7b7959363c195ac9e3413882f6be1fbb8ccccbcf99d0b5b4
-#    bcsstk26
-# )
 
+FetchContent_GetProperties(mcfe SOURCE_DIR MCFE_SOURCE_DIR)
+message(STATUS "MCFE_SOURCE_DIR: ${MCFE_SOURCE_DIR} ${SOURCE_DIR}")
+file(CREATE_LINK ${MCFE_SOURCE_DIR}/mcfe/mcfe.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/mcfe.mtx SYMBOLIC)
+
+download_file( 
+   https://suitesparse-collection-website.herokuapp.com/MM/GHS_psdef/ldoor.tar.gz   bd50b2641d69adcda7be4f209939c5747af75b2bd7a2da8847f42ce328b2f98a
+   ldoor
+)
+
+FetchContent_GetProperties(ldoor SOURCE_DIR LDOOR_SOURCE_DIR)
+file(CREATE_LINK ${LDOOR_SOURCE_DIR}/ldoor/ldoor.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ldoor.mtx SYMBOLIC)
 
 # # === example
 # download_file(

@@ -1,4 +1,7 @@
 #include "mumps_solver.h"
+
+#ifdef USE_MUMPS_LIB
+
 #include "mkl_sparse_mat.h"
 #include <execution>
 #include <iostream>
@@ -44,9 +47,9 @@ mumps_solver::mumps_solver(mkl_sparse_mat const *A) : mkl_solver() {
       col_ptr[j] = A->get_aj()[j] + (1 - A->mkl_base());
     }
   }
-//   for (int i = 0; i < id.nz; i++) {
-//     std::cout << row_ptr[i] << " " << col_ptr[i] << std::endl;
-//   }
+  //   for (int i = 0; i < id.nz; i++) {
+  //     std::cout << row_ptr[i] << " " << col_ptr[i] << std::endl;
+  //   }
   id.irn = row_ptr.get();
   id.jcn = col_ptr.get();
   id.a = const_cast<double *>(A->get_av().get());
@@ -190,3 +193,5 @@ bool mumps_solver::solve(double const *const b, double *const x) {
 }
 mumps_solver::~mumps_solver() {}
 } // namespace mkl_wrapper
+
+#endif

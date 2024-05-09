@@ -1,4 +1,9 @@
 #pragma once
+
+#include "../config.h"
+
+#ifdef USE_MUMPS_LIB
+
 #include "mkl_solver.h"
 #include <dmumps_c.h>
 #include <memory>
@@ -19,3 +24,5 @@ protected:
   std::unique_ptr<int[]> col_ptr{nullptr};
 };
 } // namespace mkl_wrapper
+
+#endif

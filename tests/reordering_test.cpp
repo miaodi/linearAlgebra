@@ -29,7 +29,7 @@ TEST(reordering, min_degree_node) {
 }
 
 TEST(reordering, pseudoDiameter) {
-  std::vector<std::string> files{"../benchmarks/data/nv2.mtx"};
+  std::vector<std::string> files{"../benchmarks/data/ldoor.mtx"};
   for (const auto &fn : files) {
     std::ifstream f(fn);
     f.clear();

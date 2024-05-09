@@ -1,0 +1,5 @@
+#pragma once
+
+#cmakedefine USE_MUMPS_LIB
+
+#cmakedefine USE_AMGCL_LIB

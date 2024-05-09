@@ -4,6 +4,8 @@ project(Linear_Algebra CXX Fortran)
 
 option(USE_AMGCL_LIB "Use the amg library amgcl" OFF) 
 
+option(USE_MUMPS_LIB "Use the linear solver library mumps. Note that only non-mpi version is supported" OFF) 
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules" )
 # Include the init module
 include(MorseInit)
@@ -42,17 +44,24 @@ endif(USE_AMGCL_LIB)
 set(MKL_ARCH intel64)
 set(MKL_THREADING gnu_thread)
 set(MKL_INTERFACE lp64)
-set(ARPACKNG_DIR)
 find_package(MKL CONFIG REQUIRED)
 find_package(TBB REQUIRED)
-find_package(arpackng REQUIRED PATHS ${ARPACKNG_DIR})
+find_package(arpackng REQUIRED)
 find_package(OpenMP REQUIRED)
 
 find_package(LAPACK REQUIRED)
-set(MUMPS_DIR)
-find_package(MUMPS REQUIRED COMPONENTS SEQ METIS OPENMP)
 
-message("MUMPS_LIBRARIES: ${MUMPS_LIBRARIES}")
+
+if (USE_MUMPS_LIB)
+  find_package(MUMPS REQUIRED COMPONENTS SEQ METIS OPENMP)
+  message("MUMPS_LIBRARIES: ${MUMPS_LIBRARIES}")
+endif(USE_MUMPS_LIB)
+
+configure_file(
+  "${CMAKE_SOURCE_DIR}/cmake/config.h.in"
+  "${CMAKE_BINARY_DIR}/config.h")
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+
 
 add_subdirectory(utils)
 add_subdirectory(mkl_wrapper)
