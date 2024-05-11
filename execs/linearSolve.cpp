@@ -1,7 +1,10 @@
 
+#include "../config.h"
 #include "../mkl_wrapper/mkl_solver.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
+#ifdef USE_MUMPS_LIB
 #include "../mkl_wrapper/mumps_solver.h"
+#endif
 #include "../utils/timer.h"
 #include "../utils/utils.h"
 #include <Eigen/Sparse>
@@ -123,7 +126,9 @@ int main() {
   // }
 
   mkl_wrapper::mkl_sparse_mat_sym mkl_mat_sym(mkl_mat);
-    mkl_mat_sym.set_positive_definite(true);
+  mkl_mat_sym.set_positive_definite(true);
+
+#ifdef USE_MUMPS_LIB
   {
     omp_set_num_threads(1);
     mkl_wrapper::mumps_solver mumps(&mkl_mat_sym);
@@ -133,7 +138,7 @@ int main() {
       mumps.solve(rhs.data(), x_direct2.data());
     });
   }
-
+#endif
   {
     mkl_set_num_threads_local(1);
     mkl_wrapper::mkl_direct_solver pardiso(&mkl_mat);
