@@ -219,7 +219,7 @@ std::vector<MKL_INT> SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat) {
     bfs(mat, i);
     auto &levels = bfs.getLevels();
     const auto height = bfs.getHeight();
-    std::cout << "height: " << height << std::endl;
+    // std::cout << "height: " << height << std::endl;
 
     std::vector<MKL_INT> prefix(height + 1, 0);
     for (MKL_INT p = compPrefSum[c]; p != compPrefSum[c + 1]; p++) {
@@ -236,7 +236,7 @@ std::vector<MKL_INT> SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat) {
     children.reserve(bfs.getWidth());
     MKL_INT e = offset;
     inv_perm[e++] = i;
-    std::cout << "bfs.getWidth(): " << bfs.getWidth() << std::endl;
+    // std::cout << "bfs.getWidth(): " << bfs.getWidth() << std::endl;
     for (MKL_INT l = 0; l < height; l++) {
       for (MKL_INT r = prefix[l]; r != prefix[l + 1]; r++) {
         MKL_INT u = inv_perm[r + offset];
@@ -248,7 +248,7 @@ std::vector<MKL_INT> SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat) {
           }
         }
 
-        std::cout << "children.size: " << children.size() << std::endl;
+        // std::cout << "children.size: " << children.size() << std::endl;
         std::sort(children.begin(), children.end(),
                   [&degrees, base](const MKL_INT a, const MKL_INT b) {
                     if (degrees[a - base] == degrees[b - base])
@@ -258,7 +258,7 @@ std::vector<MKL_INT> SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat) {
         // std::cout << "children size: " << children.size() << std::endl;
         for (auto i : children) {
           inv_perm[e++] = i + base;
-          std::cout << i - base << " " << degrees[i - base] << std::endl;
+          // std::cout << i - base << " " << degrees[i - base] << std::endl;
         }
         children.resize(0);
       }

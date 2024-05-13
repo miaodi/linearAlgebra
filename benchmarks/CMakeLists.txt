@@ -44,21 +44,13 @@ download_file(
    mcfe
 )
 
-FetchContent_GetProperties(mcfe SOURCE_DIR MCFE_SOURCE_DIR)
-message(STATUS "MCFE_SOURCE_DIR: ${MCFE_SOURCE_DIR} ${SOURCE_DIR}")
-file(CREATE_LINK ${MCFE_SOURCE_DIR}/mcfe/mcfe.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/mcfe.mtx SYMBOLIC)
+FetchContent_GetProperties(mcfe SOURCE_DIR FILE_SOURCE_DIR)
+file(CREATE_LINK ${FILE_SOURCE_DIR}/mcfe/mcfe.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/mcfe.mtx SYMBOLIC)
 
 download_file( 
    https://suitesparse-collection-website.herokuapp.com/MM/GHS_psdef/ldoor.tar.gz   bd50b2641d69adcda7be4f209939c5747af75b2bd7a2da8847f42ce328b2f98a
    ldoor
 )
 
-FetchContent_GetProperties(ldoor SOURCE_DIR LDOOR_SOURCE_DIR)
-file(CREATE_LINK ${LDOOR_SOURCE_DIR}/ldoor/ldoor.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ldoor.mtx SYMBOLIC)
-
-# # === example
-# download_file(
-#   https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg
-#   12794390cce7d0682ffc783c785e4282305684431b30b29ed75c224da24035b4
-#   figure
-# )
+FetchContent_GetProperties(ldoor SOURCE_DIR FILE_SOURCE_DIR)
+file(CREATE_LINK ${FILE_SOURCE_DIR}/ldoor/ldoor.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ldoor.mtx SYMBOLIC)

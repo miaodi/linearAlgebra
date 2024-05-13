@@ -152,31 +152,32 @@ TEST(UnionFind, rem_vs_parrank) {
 
 TEST(Reordering, SerialCM) {
   omp_set_num_threads(5);
-  std::string k_mat("../../data/shared/K.bin");
-  std::vector<MKL_INT> k_csr_rows, k_csr_cols;
-  std::vector<double> k_csr_vals;
-  std::cout << "read K\n";
-  utils::ReadFromBinaryCSR(k_mat, k_csr_rows, k_csr_cols, k_csr_vals,
-                           SPARSE_INDEX_BASE_ONE);
-  std::shared_ptr<MKL_INT[]> k_csr_rows_ptr(k_csr_rows.data(),
-                                            [](MKL_INT[]) {});
-  std::shared_ptr<MKL_INT[]> k_csr_cols_ptr(k_csr_cols.data(),
-                                            [](MKL_INT[]) {});
-  std::shared_ptr<double[]> k_csr_vals_ptr(k_csr_vals.data(), [](double[]) {});
+  // std::string k_mat("../../data/shared/K.bin");
+  // std::vector<MKL_INT> k_csr_rows, k_csr_cols;
+  // std::vector<double> k_csr_vals;
+  // std::cout << "read K\n";
+  // utils::ReadFromBinaryCSR(k_mat, k_csr_rows, k_csr_cols, k_csr_vals,
+  //                          SPARSE_INDEX_BASE_ONE);
+  // std::shared_ptr<MKL_INT[]> k_csr_rows_ptr(k_csr_rows.data(),
+  //                                           [](MKL_INT[]) {});
+  // std::shared_ptr<MKL_INT[]> k_csr_cols_ptr(k_csr_cols.data(),
+  //                                           [](MKL_INT[]) {});
+  // std::shared_ptr<double[]> k_csr_vals_ptr(k_csr_vals.data(), [](double[])
+  // {});
 
-  const MKL_INT size = k_csr_rows.size() - 1;
-  mkl_wrapper::mkl_sparse_mat mat(size, size, k_csr_rows_ptr, k_csr_cols_ptr,
-                                  k_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
-  mat.to_zero_based();
+  // const MKL_INT size = k_csr_rows.size() - 1;
+  // mkl_wrapper::mkl_sparse_mat mat(size, size, k_csr_rows_ptr, k_csr_cols_ptr,
+  //                                 k_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
+  // mat.to_zero_based();
 
-  // std::ifstream f("data/ex5.mtx");
-  // f.clear();
-  // f.seekg(0, std::ios::beg);
-  // std::vector<MKL_INT> csr_rows, csr_cols;
-  // std::vector<double> csr_vals;
-  // utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
-  // mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
-  //                                 csr_rows, csr_cols, csr_vals);
+  std::ifstream f("data/s3rmt3m3.mtx");
+  f.clear();
+  f.seekg(0, std::ios::beg);
+  std::vector<MKL_INT> csr_rows, csr_cols;
+  std::vector<double> csr_vals;
+  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+  mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                  csr_rows, csr_cols, csr_vals);
 
   std::ofstream myfile;
   myfile.open("mat.svg");
