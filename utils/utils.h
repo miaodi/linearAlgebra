@@ -221,4 +221,6 @@ protected:
 std::vector<MKL_INT> randomPermute(const MKL_INT n, const MKL_INT base = 0);
 
 std::vector<MKL_INT> inversePermute(const std::vector<MKL_INT>& perm, const MKL_INT base = 0);
+
+bool isPermutation(const std::vector<MKL_INT>& perm, const MKL_INT base = 0);
 } // namespace utils

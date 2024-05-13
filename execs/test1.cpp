@@ -73,7 +73,7 @@ void register_solvers() {
 int main() {
 
   mkl_set_num_threads(10);
-  std::string k_mat("../../data/shared/K_sparse.bin");
+  std::string k_mat("../../data/shared/K2.bin");
   std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   std::vector<double> k_csr_vals;
   std::cout << "read K\n";
@@ -88,6 +88,11 @@ int main() {
   const MKL_INT size = k_csr_rows.size() - 1;
   mkl_wrapper::mkl_sparse_mat k(size, size, k_csr_rows_ptr, k_csr_cols_ptr,
                                 k_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
+
+  std::ofstream myfile;
+  myfile.open("example.gnuplot");
+  k.print_gnuplot(myfile);
+  myfile.close();
   //   mkl_wrapper::mkl_sparse_mat_sym sym_k(k);
   //   k.clear();
   register_solvers();

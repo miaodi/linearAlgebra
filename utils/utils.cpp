@@ -1,5 +1,6 @@
 #include "utils.h"
 #include <Eigen/Sparse>
+#include <omp.h>
 #define PBSTR "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
 #define PBWIDTH 60
 
@@ -88,9 +89,24 @@ std::vector<MKL_INT> randomPermute(const MKL_INT n, const MKL_INT base) {
 std::vector<MKL_INT> inversePermute(const std::vector<MKL_INT> &perm,
                                     const MKL_INT base) {
   std::vector<MKL_INT> inv_perm(perm.size());
+#pragma parallel for
   for (MKL_INT i = 0; i < perm.size(); i++) {
     inv_perm[perm[i] - base] = i + base;
   }
   return inv_perm;
+}
+bool isPermutation(const std::vector<MKL_INT> &perm, const MKL_INT base) {
+  std::vector<MKL_INT> inv_perm(perm.size(), -1);
+#pragma parallel for
+  for (MKL_INT i = 0; i < perm.size(); i++) {
+    inv_perm[perm[i] - base] = i + base;
+  }
+  // Compute the logical OR of all elements in the array
+  bool all_true = true;
+#pragma omp parallel for reduction(&& : all_true)
+  for (MKL_INT i = 0; i < inv_perm.size(); i++) {
+    all_true &= (inv_perm[i] != -1);
+  }
+  return all_true;
 }
 } // namespace utils

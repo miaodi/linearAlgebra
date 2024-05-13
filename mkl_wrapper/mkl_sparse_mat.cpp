@@ -415,6 +415,49 @@ MKL_INT mkl_sparse_mat::max_nz() const {
   return res;
 }
 
+void mkl_sparse_mat::print_svg(std::ostream &out) const {
+  const auto m = this->rows();
+  const auto n = this->cols();
+  out << "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" "
+         "viewBox=\"0 0 "
+      << n + 2 << " " << m + 2
+      << " \">\n"
+         "<style type=\"text/css\" >\n"
+         "     <![CDATA[\n"
+         "      rect.pixel {\n"
+         "          fill:   #ff0000;\n"
+         "      }\n"
+         "    ]]>\n"
+         "  </style>\n\n"
+         "   <rect width=\""
+      << n + 2 << "\" height=\"" << m + 2
+      << "\" fill=\"rgb(128, 128, 128)\"/>\n"
+         "   <rect x=\"1\" y=\"1\" width=\""
+      << n + 0.1 << "\" height=\"" << m + 0.1
+      << "\" fill=\"rgb(255, 255, 255)\"/>\n\n";
+  const MKL_INT base = _mkl_base;
+  for (MKL_INT j = 0; j < _nrow; ++j) {
+    MKL_INT previousStart = _ai[j] - base;
+    MKL_INT end = _ai[j + 1] - base;
+    for (MKL_INT i = previousStart; i < end; ++i) {
+      out << "  <rect class=\"pixel\" x=\"" << _aj[i] - base + 1 << "\" y=\""
+          << j + 1 << "\" width=\".9\" height=\".9\"/>\n";
+    }
+  }
+  out << "</svg>" << std::endl;
+}
+
+void mkl_sparse_mat::print_gnuplot(std::ostream &out) const {
+  const MKL_INT base = _mkl_base;
+  for (MKL_INT j = 0; j < _nrow; ++j) {
+    MKL_INT previousStart = _ai[j] - base;
+    MKL_INT end = _ai[j + 1] - base;
+    for (MKL_INT i = previousStart; i < end; ++i) {
+      out << _aj[i] - base << " " << -j << std::endl;
+    }
+  }
+}
+
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                               double c) {
   if (A.mkl_base() != B.mkl_base()) {
@@ -601,7 +644,6 @@ bool mkl_ilut::factorize() {
 
   _ai.reset(new MKL_INT[_nrow + 1]);
   _nnz = (2 * _max_fill + 1) * _nrow;
-  ;
   _aj.reset(new MKL_INT[_nnz]);
   _av.reset(new double[_nnz]);
 
@@ -1078,4 +1120,5 @@ std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
 permuteRow(const mkl_sparse_mat &A, MKL_INT const *const pinv) {
   return permute(A, pinv, nullptr);
 }
+
 } // namespace mkl_wrapper

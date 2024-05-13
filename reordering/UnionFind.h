@@ -65,4 +65,9 @@ public:
 
 int CountComponents(std::vector<MKL_INT> &parents, const MKL_INT base = 0);
 
+void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
+                    std::vector<MKL_INT> &compRoots,
+                    std::vector<MKL_INT> &sortedComp,
+                    std::vector<MKL_INT> &compPrefSum);
+
 } // namespace reordering

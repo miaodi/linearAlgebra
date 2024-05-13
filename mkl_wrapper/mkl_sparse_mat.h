@@ -87,6 +87,10 @@ public:
 
   void clear();
 
+  void print_svg(std::ostream &out) const;
+
+  void print_gnuplot(std::ostream &out) const;
+
 protected:
   sparse_matrix_t _mkl_mat{nullptr};
   sparse_status_t _mkl_stat;

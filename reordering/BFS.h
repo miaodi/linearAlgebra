@@ -27,6 +27,8 @@ public:
 
   const std::vector<MKL_INT> &getLevels() const { return _levels; }
 
+  std::vector<MKL_INT> &getLevels() { return _levels; }
+
   MKL_INT getHeight() const { return _height; }
   MKL_INT getWidth() const { return _width; }
 
@@ -40,7 +42,7 @@ private:
   std::vector<MKL_INT> _levels;
   MKL_INT _height;
   MKL_INT _width;
-  MKL_INT _shortCut{std::numeric_limits<int>::max()};
+  MKL_INT _shortCut{std::numeric_limits<MKL_INT>::max()};
 };
 template <bool LASTLEVEL = false>
 bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
