@@ -6,6 +6,9 @@
 #include <execution>
 #include <iostream>
 #include <limits>
+#ifdef USE_METIS_LIB
+#include <metis.h>
+#endif
 #include <omp.h>
 
 namespace reordering {
@@ -228,10 +231,10 @@ std::vector<MKL_INT> SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat) {
     for (MKL_INT l = 0; l < height; l++) {
       prefix[l + 1] += prefix[l];
     }
-    for (auto p : prefix) {
-      std::cout << p << " ";
-    }
-    std::cout << std::endl;
+    // for (auto p : prefix) {
+    //   std::cout << p << " ";
+    // }
+    // std::cout << std::endl;
     std::vector<MKL_INT> children;
     children.reserve(bfs.getWidth());
     MKL_INT e = offset;
@@ -267,4 +270,24 @@ std::vector<MKL_INT> SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat) {
   std::reverse(std::execution::par_unseq, inv_perm.begin(), inv_perm.end());
   return inv_perm;
 }
+
+#ifdef USE_METIS_LIB
+std::vector<MKL_INT> Metis(mkl_wrapper::mkl_sparse_mat const *const mat) {
+
+  std::vector<MKL_INT> iperm(mat->cols());
+  std::vector<MKL_INT> perm(mat->cols());
+  std::vector<MKL_INT> xadj;
+  std::vector<MKL_INT> adjncy;
+
+  mat->get_adjacency_graph(xadj, adjncy);
+
+  std::vector<idx_t> options(METIS_NOPTIONS);
+  METIS_SetDefaultOptions(options.data());
+  options[METIS_OPTION_NUMBERING] = static_cast<MKL_INT>(mat->mkl_base());
+  MKL_INT nvtxs = mat->rows();
+  METIS_NodeND(&nvtxs, xadj.data(), adjncy.data(), NULL, options.data(),
+               perm.data(), iperm.data());
+  return perm;
+}
+#endif
 } // namespace reordering

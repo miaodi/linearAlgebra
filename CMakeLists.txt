@@ -8,6 +8,8 @@ option(USE_MUMPS_LIB "Use the linear solver library mumps. Note that only non-mp
 
 option(USE_ARPACK_LIB "Use arpack for generalize eigenvalue problem" OFF) 
 
+option(USE_METIS_LIB "Use metis for matrix reordering" OFF) 
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules" )
 # Include the init module
 include(MorseInit)
@@ -56,10 +58,13 @@ if (USE_ARPACK_LIB)
   find_package(arpackng REQUIRED)
 endif(USE_ARPACK_LIB)
 
-if (USE_MUMPS_LIB)
-  find_package(MUMPS REQUIRED COMPONENTS SEQ METIS OPENMP)
-  message("MUMPS_LIBRARIES: ${MUMPS_LIBRARIES}")
-endif(USE_MUMPS_LIB)
+if (USE_METIS_LIB)
+  find_package(METIS REQUIRED)
+endif(USE_METIS_LIB)
+
+if (USE_ARPACK_LIB)
+  find_package(arpackng REQUIRED)
+endif(USE_ARPACK_LIB)
 
 configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/config.h.in"

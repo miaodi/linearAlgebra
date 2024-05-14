@@ -152,7 +152,7 @@ TEST(UnionFind, rem_vs_parrank) {
 
 TEST(Reordering, SerialCM) {
   omp_set_num_threads(5);
-  // std::string k_mat("../../data/shared/K.bin");
+  // std::string k_mat("../../data/shared/K2.bin");
   // std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   // std::vector<double> k_csr_vals;
   // std::cout << "read K\n";
@@ -170,7 +170,7 @@ TEST(Reordering, SerialCM) {
   //                                 k_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
   // mat.to_zero_based();
 
-  std::ifstream f("data/s3rmt3m3.mtx");
+  std::ifstream f("data/ex5.mtx");
   f.clear();
   f.seekg(0, std::ios::beg);
   std::vector<MKL_INT> csr_rows, csr_cols;
@@ -179,6 +179,7 @@ TEST(Reordering, SerialCM) {
   mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                   csr_rows, csr_cols, csr_vals);
 
+  std::cout << "bandwidth before reordering: " << mat.bandwidth() << std::endl;
   std::ofstream myfile;
   myfile.open("mat.svg");
   mat.print_svg(myfile);
@@ -188,7 +189,20 @@ TEST(Reordering, SerialCM) {
   auto perm = utils::inversePermute(inv_perm, mat.mkl_base());
   auto [ai, aj, av] = mkl_wrapper::permute(mat, inv_perm.data(), perm.data());
   mkl_wrapper::mkl_sparse_mat perm_mat(mat.rows(), mat.cols(), ai, aj, av);
+  std::cout << "bandwidth after rcm reordering: " << perm_mat.bandwidth()
+            << std::endl;
   myfile.open("mat_perm.svg");
   perm_mat.print_svg(myfile);
+  myfile.close();
+  auto inv_perm1 = reordering::Metis(&mat);
+  std::cout << (utils::isPermutation(inv_perm1, mat.mkl_base())) << std::endl;
+  auto perm1 = utils::inversePermute(inv_perm1, mat.mkl_base());
+  auto [ai1, aj1, av1] =
+      mkl_wrapper::permute(mat, inv_perm1.data(), perm1.data());
+  mkl_wrapper::mkl_sparse_mat perm_mat1(mat.rows(), mat.cols(), ai1, aj1, av1);
+  std::cout << "bandwidth after metis reordering: " << perm_mat1.bandwidth()
+            << std::endl;
+  myfile.open("mat_perm_metis.svg");
+  perm_mat1.print_svg(myfile);
   myfile.close();
 }

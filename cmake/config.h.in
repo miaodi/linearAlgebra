@@ -5,3 +5,5 @@
 #cmakedefine USE_AMGCL_LIB
 
 #cmakedefine USE_ARPACK_LIB
+
+#cmakedefine USE_METIS_LIB

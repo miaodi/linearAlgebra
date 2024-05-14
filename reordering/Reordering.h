@@ -1,4 +1,5 @@
 #pragma once
+#include "../config.h"
 #include "circularbuffer.hpp"
 #include <functional>
 #include <memory>
@@ -30,4 +31,8 @@ void PseudoDiameter(mkl_wrapper::mkl_sparse_mat const *const mat,
 
 // TODO: currently only assume 1 connected region.
 std::vector<MKL_INT> SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat);
+
+#ifdef USE_METIS_LIB
+std::vector<MKL_INT> Metis(mkl_wrapper::mkl_sparse_mat const *const mat);
+#endif
 } // namespace reordering

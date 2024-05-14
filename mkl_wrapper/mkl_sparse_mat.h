@@ -62,6 +62,8 @@ public:
   MKL_INT avg_nz() const { return _nnz / _nrow; }
   MKL_INT max_nz() const;
 
+  MKL_INT bandwidth() const;
+
   std::shared_ptr<double[]> get_diag() const;
   std::shared_ptr<MKL_INT[]> get_ai() { return _ai; }
   std::shared_ptr<MKL_INT[]> get_aj() { return _aj; }
@@ -70,6 +72,10 @@ public:
   std::shared_ptr<const MKL_INT[]> get_ai() const { return _ai; }
   std::shared_ptr<const MKL_INT[]> get_aj() const { return _aj; }
   std::shared_ptr<const double[]> get_av() const { return _av; }
+
+  // get the graph representation without self-edge
+  void get_adjacency_graph(std::vector<MKL_INT> &xadj,
+                           std::vector<MKL_INT> &adjncy) const;
 
   virtual bool solve(double const *const b, double *const x) { return false; }
 
