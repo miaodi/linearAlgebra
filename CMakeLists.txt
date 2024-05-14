@@ -54,6 +54,10 @@ find_package(OpenMP REQUIRED)
 
 find_package(LAPACK REQUIRED)
 
+if (USE_MUMPS_LIB)
+  find_package(MUMPS REQUIRED COMPONENTS SEQ METIS OPENMP)
+endif(USE_MUMPS_LIB)
+
 if (USE_ARPACK_LIB)
   find_package(arpackng REQUIRED)
 endif(USE_ARPACK_LIB)
