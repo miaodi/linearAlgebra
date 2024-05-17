@@ -1,4 +1,5 @@
 #include "Reordering.h"
+#include "../config.h"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
 #include <benchmark/benchmark.h>
@@ -51,6 +52,8 @@ public:
                                                      ai, aj, av));
       std::cout << "bandwidth after reordering: " << perm_mat->bandwidth()
                 << std::endl;
+
+#ifdef USE_METIS_LIB
       auto inv_perm1 = reordering::Metis(mat.get());
       auto perm1 = utils::inversePermute(inv_perm1, mat->mkl_base());
       auto [ai1, aj1, av1] =
@@ -59,6 +62,7 @@ public:
                                                       ai1, aj1, av1));
       std::cout << "bandwidth after reordering: " << perm_mat1->bandwidth()
                 << std::endl;
+#endif
     }
   }
 };

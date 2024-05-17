@@ -1,3 +1,4 @@
+#include "../config.h"
 #include "Reordering.h"
 #include "UnionFind.h"
 #include "mkl_sparse_mat.h"
@@ -194,6 +195,7 @@ TEST(Reordering, SerialCM) {
   myfile.open("mat_perm.svg");
   perm_mat.print_svg(myfile);
   myfile.close();
+#ifdef USE_METIS_LIB
   auto inv_perm1 = reordering::Metis(&mat);
   std::cout << (utils::isPermutation(inv_perm1, mat.mkl_base())) << std::endl;
   auto perm1 = utils::inversePermute(inv_perm1, mat.mkl_base());
@@ -205,4 +207,5 @@ TEST(Reordering, SerialCM) {
   myfile.open("mat_perm_metis.svg");
   perm_mat1.print_svg(myfile);
   myfile.close();
+#endif
 }
