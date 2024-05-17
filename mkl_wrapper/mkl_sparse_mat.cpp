@@ -206,7 +206,7 @@ void mkl_sparse_mat::get_adjacency_graph(std::vector<MKL_INT> &xadj,
       const MKL_INT index = it - _ai.get();
       xadj[index + 1] = _ai[index + 1] - index - 1;
     }
-    #pragma omp barrier
+#pragma omp barrier
     auto [start1, end1] = utils::LoadPrefixBalancedPartition(
         _ai.get(), _ai.get() + rows(), tid, nthreads);
 
@@ -1175,4 +1175,93 @@ permuteRow(const mkl_sparse_mat &A, MKL_INT const *const pinv) {
   return permute(A, pinv, nullptr);
 }
 
+std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
+           std::shared_ptr<double[]>>
+permute(const mkl_sparse_mat_sym &A, MKL_INT const *const pinv) {
+  // upper triangular
+  auto ai = A.get_ai();
+  auto aj = A.get_aj();
+  auto av = A.get_av();
+  const MKL_INT n = A.rows();
+
+  const MKL_INT base = A.mkl_base();
+  const auto rows = A.rows();
+  const auto nnz = A.nnz();
+
+  std::shared_ptr<MKL_INT[]> new_ai{new MKL_INT[n + 1]};
+  std::shared_ptr<MKL_INT[]> new_aj{new MKL_INT[nnz]};
+  std::shared_ptr<double[]> new_av{new double[nnz]};
+  new_ai[0] = base;
+  std::vector<MKL_INT> ai_prefix;
+#pragma omp parallel
+  {
+    const int tid = omp_get_thread_num();
+    const int nthreads = omp_get_num_threads();
+#pragma omp master
+    { ai_prefix = std::vector<MKL_INT>(n * (nthreads + 1), 0); }
+#pragma omp barrier
+
+    auto [start, end] = utils::LoadPrefixBalancedPartition(
+        ai.get(), ai.get() + n, tid, nthreads);
+
+    for (auto i = start; i != end; i++) {
+      MKL_INT new_row = pinv ? (pinv[i - ai.get()] - base) : (i - ai.get());
+      for (auto j = *i; j != *(i + 1); j++) {
+        MKL_INT col = aj[j - base] - base;
+        MKL_INT new_col = pinv ? (pinv[col] - base) : col;
+          if (new_row > new_col)
+            std::swap(new_row, new_col);
+            // continue;
+        ai_prefix[(tid + 1) * n + new_row] += 1;
+      }
+    }
+#pragma omp barrier
+#pragma omp master
+    {
+      for (MKL_INT i = 0; i < n; i++) {
+        ai_prefix[i] = new_ai[i] - base;
+        for (int j = 0; j < nthreads; j++) {
+          ai_prefix[(j + 1) * n + i] += ai_prefix[j * n + i];
+        }
+        new_ai[i + 1] = ai_prefix[nthreads * n + i] + base;
+      }
+    }
+
+#pragma omp barrier
+
+    for (auto i = start; i != end; i++) {
+      MKL_INT new_row = pinv ? (pinv[i - ai.get()] - base) : (i - ai.get());
+      for (auto j = *i; j != *(i + 1); j++) {
+        MKL_INT col = aj[j - base] - base;
+        MKL_INT new_col = pinv ? (pinv[col] - base) : col;
+          if (new_row > new_col)
+            std::swap(new_row, new_col);
+            // continue;
+        new_aj[ai_prefix[tid * n + new_row]] = new_col + base;
+        new_av[ai_prefix[tid * n + new_row]++] = av[j - base];
+      }
+    }
+
+        // if (pinv) {
+        //   auto [start_new, end_new] = utils::LoadPrefixBalancedPartition(
+        //       new_ai.get(), new_ai.get() + n, tid, nthreads);
+
+        //   for (auto i = start_new; i < end_new; i++) {
+        //     // intersion sort aj and av based on the column index
+        //     auto pos = new_aj.get() + *(i + 1) - base - 1;
+        //     while (pos >= new_aj.get() + *i - base) {
+        //       for (auto j = new_aj.get() + *i - base; j < pos; j++) {
+        //         if (*j > *pos) {
+        //           std::swap(*j, *pos);
+        //           std::swap(new_av[j - new_aj.get()], new_av[pos -
+        //           new_aj.get()]);
+        //         }
+        //       }
+        //       pos--;
+        //     }
+        //   }
+        // }
+  }
+  return std::make_tuple(new_ai, new_aj, new_av);
+}
 } // namespace mkl_wrapper

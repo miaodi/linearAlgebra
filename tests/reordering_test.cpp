@@ -152,7 +152,7 @@ TEST(UnionFind, rem_vs_parrank) {
 }
 
 TEST(Reordering, SerialCM) {
-  omp_set_num_threads(5);
+  omp_set_num_threads(1);
   // std::string k_mat("../../data/shared/K2.bin");
   // std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   // std::vector<double> k_csr_vals;
@@ -208,4 +208,18 @@ TEST(Reordering, SerialCM) {
   perm_mat1.print_svg(myfile);
   myfile.close();
 #endif
+  auto symMat = mkl_wrapper::mkl_sparse_mat_sym(mat);
+  myfile.open("mat_sym.svg");
+  symMat.print_svg(myfile);
+  myfile.close();
+
+  auto [ai2, aj2, av2] = mkl_wrapper::permute(symMat, perm.data());
+  mkl_wrapper::mkl_sparse_mat_sym perm_mat_sym(mat.rows(), mat.cols(), ai2, aj2,
+                                               av2);
+  myfile.open("perm_mat_sym.svg");
+  perm_mat_sym.print_svg(myfile);
+  myfile.close();
+
+  symMat.print();
+  perm_mat_sym.print();
 }
