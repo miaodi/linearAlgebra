@@ -14,6 +14,8 @@ static std::unique_ptr<mkl_wrapper::mkl_sparse_mat> perm_mat;
 
 static std::unique_ptr<mkl_wrapper::mkl_sparse_mat> perm_mat1;
 
+static std::unique_ptr<mkl_wrapper::mkl_sparse_mat_sym> perm_mat_sym;
+
 class Reordering : public benchmark::Fixture {
 
 public:
@@ -22,24 +24,23 @@ public:
   Reordering() {
     omp_set_num_threads(4);
     if (mat == nullptr) {
-      std::string k_mat("../../data/shared/K2.bin");
-      std::vector<MKL_INT> k_csr_rows, k_csr_cols;
-      std::vector<double> k_csr_vals;
+      std::string k_mat("../../data/shared/K.bin");
+      std::vector<MKL_INT> csr_rows, csr_cols;
+      std::vector<double> csr_vals;
       std::cout << "read K\n";
-      utils::ReadFromBinaryCSR(k_mat, k_csr_rows, k_csr_cols, k_csr_vals,
+      utils::ReadFromBinaryCSR(k_mat, csr_rows, csr_cols, csr_vals,
                                SPARSE_INDEX_BASE_ONE);
 
-      //   std::ifstream f("../tests/data/s3rmt3m3.mtx");
-      //   f.clear();
-      //   f.seekg(0, std::ios::beg);
-      //   std::vector<MKL_INT> csr_rows, csr_cols;
-      //   std::vector<double> csr_vals;
-      //   utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+      // std::ifstream f("../tests/data/s3rmt3m3.mtx");
+      // f.clear();
+      // f.seekg(0, std::ios::beg);
+      // std::vector<MKL_INT> csr_rows, csr_cols;
+      // std::vector<double> csr_vals;
+      // utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
 
-      const MKL_INT size = k_csr_rows.size() - 1;
-      mat.reset(new mkl_wrapper::mkl_sparse_mat(size, size, k_csr_rows,
-                                                k_csr_cols, k_csr_vals,
-                                                SPARSE_INDEX_BASE_ONE));
+      const MKL_INT size = csr_rows.size() - 1;
+      mat.reset(new mkl_wrapper::mkl_sparse_mat(
+          size, size, csr_rows, csr_cols, csr_vals, SPARSE_INDEX_BASE_ONE));
       mat->to_zero_based();
 
       std::cout << "bandwidth before reordering: " << mat->bandwidth()
@@ -63,6 +64,11 @@ public:
       std::cout << "bandwidth after reordering: " << perm_mat1->bandwidth()
                 << std::endl;
 #endif
+      auto [ai2, aj2, av2] = mkl_wrapper::symPermute(*mat, perm.data());
+      perm_mat_sym.reset(new mkl_wrapper::mkl_sparse_mat_sym(
+          mat->rows(), mat->cols(), ai2, aj2, av2));
+      std::cout << "bandwidth after reordering: " << perm_mat_sym->bandwidth()
+                << std::endl;
     }
   }
 };
@@ -70,7 +76,7 @@ public:
 BENCHMARK_DEFINE_F(Reordering, Origin)(benchmark::State &state) {
   std::vector<double> x(mat->cols());
   std::vector<double> rhs(mat->rows());
-  std::iota(std::begin(rhs), std::end(rhs), 0); // Fill with 0, 1, ..., 99.
+  std::iota(std::begin(rhs), std::end(rhs), 0);
   for (auto _ : state) {
     mat->mult_vec(rhs.data(), x.data());
   }
@@ -81,7 +87,7 @@ BENCHMARK_REGISTER_F(Reordering, Origin);
 BENCHMARK_DEFINE_F(Reordering, RCM)(benchmark::State &state) {
   std::vector<double> x(mat->cols());
   std::vector<double> rhs(mat->rows());
-  std::iota(std::begin(rhs), std::end(rhs), 0); // Fill with 0, 1, ..., 99.
+  std::iota(std::begin(rhs), std::end(rhs), 0);
   for (auto _ : state) {
     perm_mat->mult_vec(rhs.data(), x.data());
   }
@@ -89,15 +95,28 @@ BENCHMARK_DEFINE_F(Reordering, RCM)(benchmark::State &state) {
 
 BENCHMARK_REGISTER_F(Reordering, RCM);
 
+#ifdef USE_METIS_LIB
 BENCHMARK_DEFINE_F(Reordering, Metis)(benchmark::State &state) {
   std::vector<double> x(mat->cols());
   std::vector<double> rhs(mat->rows());
-  std::iota(std::begin(rhs), std::end(rhs), 0); // Fill with 0, 1, ..., 99.
+  std::iota(std::begin(rhs), std::end(rhs), 0); 
   for (auto _ : state) {
     perm_mat1->mult_vec(rhs.data(), x.data());
   }
 }
 
 BENCHMARK_REGISTER_F(Reordering, Metis);
+#endif
+
+BENCHMARK_DEFINE_F(Reordering, RCM_Sym)(benchmark::State &state) {
+  std::vector<double> x(mat->cols());
+  std::vector<double> rhs(mat->rows());
+  std::iota(std::begin(rhs), std::end(rhs), 0);
+  for (auto _ : state) {
+    perm_mat_sym->mult_vec(rhs.data(), x.data());
+  }
+}
+
+BENCHMARK_REGISTER_F(Reordering, RCM_Sym);
 
 BENCHMARK_MAIN();

@@ -220,7 +220,7 @@ mkl_sparse_mat_sym mkl_sparse_mult_papt(mkl_sparse_mat_sym &A,
 
 std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
            std::shared_ptr<double[]>>
-permute(const mkl_sparse_mat_sym &A, MKL_INT const *const pinv);
+symPermute(const mkl_sparse_mat &A, MKL_INT const *const pinv);
 
 // Incomplete Cholesky ic0
 class mkl_ic0 : public mkl_sparse_mat_sym {

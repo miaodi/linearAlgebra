@@ -1155,8 +1155,8 @@ permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
         continue;
       // intersion sort aj and av based on the column index
       auto pos = new_aj.get() + *(i + 1) - base - 1;
-      while (pos >= new_aj.get() + *i - base) {
-        for (auto j = new_aj.get() + *i - base; j < pos; j++) {
+      while (pos != new_aj.get() + *i - base) {
+        for (auto j = new_aj.get() + *i - base; j != pos; j++) {
           if (*j > *pos) {
             std::swap(*j, *pos);
             std::swap(new_av[j - new_aj.get()], new_av[pos - new_aj.get()]);
@@ -1177,7 +1177,7 @@ permuteRow(const mkl_sparse_mat &A, MKL_INT const *const pinv) {
 
 std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
            std::shared_ptr<double[]>>
-permute(const mkl_sparse_mat_sym &A, MKL_INT const *const pinv) {
+symPermute(const mkl_sparse_mat &A, MKL_INT const *const pinv) {
   // upper triangular
   auto ai = A.get_ai();
   auto aj = A.get_aj();
@@ -1203,16 +1203,18 @@ permute(const mkl_sparse_mat_sym &A, MKL_INT const *const pinv) {
 
     auto [start, end] = utils::LoadPrefixBalancedPartition(
         ai.get(), ai.get() + n, tid, nthreads);
-
+    MKL_INT new_row, new_col, final_row, final_col, col;
     for (auto i = start; i != end; i++) {
-      MKL_INT new_row = pinv ? (pinv[i - ai.get()] - base) : (i - ai.get());
+      new_row = pinv ? (pinv[i - ai.get()] - base) : (i - ai.get());
       for (auto j = *i; j != *(i + 1); j++) {
-        MKL_INT col = aj[j - base] - base;
-        MKL_INT new_col = pinv ? (pinv[col] - base) : col;
-          if (new_row > new_col)
-            std::swap(new_row, new_col);
-            // continue;
-        ai_prefix[(tid + 1) * n + new_row] += 1;
+        if (i - ai.get() > j - base)
+          continue;
+        col = aj[j - base] - base;
+        new_col = pinv ? (pinv[col] - base) : col;
+        final_row = std::min(new_row, new_col);
+        final_col = std::max(new_row, new_col);
+
+        ai_prefix[(tid + 1) * n + final_row]++;
       }
     }
 #pragma omp barrier
@@ -1230,37 +1232,40 @@ permute(const mkl_sparse_mat_sym &A, MKL_INT const *const pinv) {
 #pragma omp barrier
 
     for (auto i = start; i != end; i++) {
-      MKL_INT new_row = pinv ? (pinv[i - ai.get()] - base) : (i - ai.get());
+      new_row = pinv ? (pinv[i - ai.get()] - base) : (i - ai.get());
       for (auto j = *i; j != *(i + 1); j++) {
-        MKL_INT col = aj[j - base] - base;
-        MKL_INT new_col = pinv ? (pinv[col] - base) : col;
-          if (new_row > new_col)
-            std::swap(new_row, new_col);
-            // continue;
-        new_aj[ai_prefix[tid * n + new_row]] = new_col + base;
-        new_av[ai_prefix[tid * n + new_row]++] = av[j - base];
+        if (i - ai.get() > j - base)
+          continue;
+        col = aj[j - base] - base;
+        new_col = pinv ? (pinv[col] - base) : col;
+        final_row = std::min(new_row, new_col);
+        final_col = std::max(new_row, new_col);
+        // continue;
+        new_aj[ai_prefix[tid * n + final_row]] = final_col + base;
+        new_av[ai_prefix[tid * n + final_row]++] = av[j - base];
       }
     }
+#pragma omp barrier
+    // TODO: validate if mkl will automatically sort aj
+    if (pinv) {
+      auto [start_new, end_new] = utils::LoadPrefixBalancedPartition(
+          new_ai.get(), new_ai.get() + n, tid, nthreads);
 
-        // if (pinv) {
-        //   auto [start_new, end_new] = utils::LoadPrefixBalancedPartition(
-        //       new_ai.get(), new_ai.get() + n, tid, nthreads);
-
-        //   for (auto i = start_new; i < end_new; i++) {
-        //     // intersion sort aj and av based on the column index
-        //     auto pos = new_aj.get() + *(i + 1) - base - 1;
-        //     while (pos >= new_aj.get() + *i - base) {
-        //       for (auto j = new_aj.get() + *i - base; j < pos; j++) {
-        //         if (*j > *pos) {
-        //           std::swap(*j, *pos);
-        //           std::swap(new_av[j - new_aj.get()], new_av[pos -
-        //           new_aj.get()]);
-        //         }
-        //       }
-        //       pos--;
-        //     }
-        //   }
-        // }
+      for (auto i = start_new; i < end_new; i++) {
+        // intersion sort aj and av based on the column index
+        auto pos = new_aj.get() + *(i + 1) - base - 1;
+        while (pos != new_aj.get() + *i - base) {
+          for (auto j = new_aj.get() + *i - base; j != pos; j++) {
+            if (*j > *pos) {
+              MKL_INT tmp = *j;
+              *j = *pos;
+              *pos = tmp;
+            }
+          }
+          pos--;
+        }
+      }
+    }
   }
   return std::make_tuple(new_ai, new_aj, new_av);
 }

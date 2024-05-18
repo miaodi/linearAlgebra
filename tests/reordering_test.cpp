@@ -152,8 +152,8 @@ TEST(UnionFind, rem_vs_parrank) {
 }
 
 TEST(Reordering, SerialCM) {
-  omp_set_num_threads(1);
-  // std::string k_mat("../../data/shared/K2.bin");
+  omp_set_num_threads(5);
+  // std::string k_mat("../../data/shared/K.bin");
   // std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   // std::vector<double> k_csr_vals;
   // std::cout << "read K\n";
@@ -163,8 +163,7 @@ TEST(Reordering, SerialCM) {
   //                                           [](MKL_INT[]) {});
   // std::shared_ptr<MKL_INT[]> k_csr_cols_ptr(k_csr_cols.data(),
   //                                           [](MKL_INT[]) {});
-  // std::shared_ptr<double[]> k_csr_vals_ptr(k_csr_vals.data(), [](double[])
-  // {});
+  // std::shared_ptr<double[]> k_csr_vals_ptr(k_csr_vals.data(), [](double[]) {});
 
   // const MKL_INT size = k_csr_rows.size() - 1;
   // mkl_wrapper::mkl_sparse_mat mat(size, size, k_csr_rows_ptr, k_csr_cols_ptr,
@@ -213,13 +212,10 @@ TEST(Reordering, SerialCM) {
   symMat.print_svg(myfile);
   myfile.close();
 
-  auto [ai2, aj2, av2] = mkl_wrapper::permute(symMat, perm.data());
+  auto [ai2, aj2, av2] = mkl_wrapper::symPermute(mat, perm.data());
   mkl_wrapper::mkl_sparse_mat_sym perm_mat_sym(mat.rows(), mat.cols(), ai2, aj2,
                                                av2);
   myfile.open("perm_mat_sym.svg");
   perm_mat_sym.print_svg(myfile);
   myfile.close();
-
-  symMat.print();
-  perm_mat_sym.print();
 }
