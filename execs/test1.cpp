@@ -1,4 +1,5 @@
-
+#include "../mkl_wrapper/incomplete_cholesky.h"
+#include "../mkl_wrapper/incomplete_lu.h"
 #include "../mkl_wrapper/mkl_solver.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
 #include "../utils/timer.h"
@@ -19,10 +20,15 @@ void register_solvers() {
   using create_method = typename mkl_wrapper::solver_factory::create_method;
 
   create_method gmres_ilut = [](mkl_wrapper::mkl_sparse_mat &A) {
-    auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&A);
+    auto prec = std::make_shared<mkl_wrapper::mkl_ilut>();
     prec->set_tau(1e-3);
     prec->set_max_fill(std::min((MKL_INT)(A.avg_nz() * 2), A.cols()));
-    prec->factorize();
+
+    utils::Elapse<>::execute("mkl_ilut symbolic factorization: ",
+                             [&A, &prec]() { prec->symbolic_factorize(&A); });
+
+    utils::Elapse<>::execute("mkl_ilut numeric factorization: ",
+                             [&A, &prec]() { prec->numeric_factorize(&A); });
     auto solver = std::make_unique<mkl_wrapper::mkl_fgmres_solver>(&A, prec);
     // prec->print();
     solver->set_max_iters(1e5);
@@ -33,11 +39,13 @@ void register_solvers() {
   utils::singleton<mkl_wrapper::solver_factory>::instance().reg("gmres+ilut",
                                                                 gmres_ilut);
 
-  create_method gmres_ilut2 = [](mkl_wrapper::mkl_sparse_mat &A) {
-    auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&A);
-    prec->set_tau(1e-8);
-    prec->set_max_fill(std::min((MKL_INT)(A.avg_nz() * 4), A.cols()));
-    prec->factorize();
+  create_method gmres_ilu0 = [](mkl_wrapper::mkl_sparse_mat &A) {
+    auto prec = std::make_shared<mkl_wrapper::mkl_ilu0>();
+    utils::Elapse<>::execute("mkl_ilu0 symbolic factorization: ",
+                             [&A, &prec]() { prec->symbolic_factorize(&A); });
+
+    utils::Elapse<>::execute("mkl_ilu0 numeric factorization: ",
+                             [&A, &prec]() { prec->numeric_factorize(&A); });
     auto solver = std::make_unique<mkl_wrapper::mkl_fgmres_solver>(&A, prec);
     // prec->print();
     solver->set_max_iters(1e5);
@@ -45,12 +53,32 @@ void register_solvers() {
     solver->set_restart_steps(50);
     return std::move(solver);
   };
-  utils::singleton<mkl_wrapper::solver_factory>::instance().reg("gmres+ilut2",
-                                                                gmres_ilut2);
+  utils::singleton<mkl_wrapper::solver_factory>::instance().reg("gmres+ilu0",
+                                                                gmres_ilu0);
+
+  create_method gmres_iluk = [](mkl_wrapper::mkl_sparse_mat &A) {
+    auto prec = std::make_shared<mkl_wrapper::incomplete_lu_k>();
+    prec->set_level(0);
+
+    utils::Elapse<>::execute("incomplete_lu_k symbolic factorization: ",
+                             [&A, &prec]() { prec->symbolic_factorize(&A); });
+
+    utils::Elapse<>::execute("incomplete_lu_k numeric factorization: ",
+                             [&A, &prec]() { prec->numeric_factorize(&A); });
+    auto solver = std::make_unique<mkl_wrapper::mkl_fgmres_solver>(&A, prec);
+    // prec->print();
+    solver->set_max_iters(1e5);
+    solver->set_rel_tol(1e-8);
+    solver->set_restart_steps(50);
+    return std::move(solver);
+  };
+  utils::singleton<mkl_wrapper::solver_factory>::instance().reg("gmres+iluk",
+                                                                gmres_iluk);
 
   create_method cg_ic0 = [](mkl_wrapper::mkl_sparse_mat &A) {
-    auto prec = std::make_shared<mkl_wrapper::mkl_ic0>(A);
-    prec->factorize();
+    auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>(A);
+    prec->symbolic_factorize(&A);
+    prec->numeric_factorize(&A);
     auto solver = std::make_unique<mkl_wrapper::mkl_pcg_solver>(&A, prec);
     // prec->print();
     solver->set_max_iters(1e5);
@@ -88,31 +116,38 @@ int main() {
   const MKL_INT size = k_csr_rows.size() - 1;
   mkl_wrapper::mkl_sparse_mat k(size, size, k_csr_rows_ptr, k_csr_cols_ptr,
                                 k_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
-
-  std::ofstream myfile;
-  myfile.open("example.gnuplot");
-  k.print_gnuplot(myfile);
-  myfile.close();
+  std::cout << "problem size: " << size << std::endl;
   //   mkl_wrapper::mkl_sparse_mat_sym sym_k(k);
   //   k.clear();
   register_solvers();
-  auto solver =
-      utils::singleton<mkl_wrapper::solver_factory>::instance().create("cg", k);
-
   std::vector<double> rhs(size, 1.);
-  std::vector<double> res(size);
+  std::vector<double> res(size, 0);
+  // auto solver =
+  //     utils::singleton<mkl_wrapper::solver_factory>::instance().create("cg",
+  //     k);
+
+  // solver->solve(rhs.data(), res.data());
+  // solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
+  //     "cg+ic0", k);
+  // solver->solve(rhs.data(), res.data());
+  auto solver =
+      utils::singleton<mkl_wrapper::solver_factory>::instance().create(
+          "gmres+ilut", k);
+  std::cout << "gmres+ilut: \n";
+  solver->set_print_level(1);
+  res = std::vector<double>(size, 0);
   solver->solve(rhs.data(), res.data());
   solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
-      "cg+ic0", k);
-
+      "gmres+ilu0", k);
+  std::cout << "gmres+ilu0: \n";
+  solver->set_print_level(1);
+  res = std::vector<double>(size, 0);
   solver->solve(rhs.data(), res.data());
   solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
-      "gmres+ilut", k);
-
-  solver->solve(rhs.data(), res.data());
-  solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
-      "gmres", k);
-
+      "gmres+iluk", k);
+  std::cout << "gmres+iluk: \n";
+  solver->set_print_level(1);
+  res = std::vector<double>(size, 0);
   solver->solve(rhs.data(), res.data());
   return 0;
 }

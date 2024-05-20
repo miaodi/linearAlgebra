@@ -8,7 +8,6 @@
 #include <iostream>
 #include <mkl_lapack.h>
 #include <mkl_lapacke.h>
-#include <mkl_rci.h>
 #include <mkl_sparse_handle.h>
 #include <omp.h>
 #include <vector>
@@ -101,10 +100,10 @@ mkl_sparse_mat::mkl_sparse_mat(sparse_matrix_t mkl_mat) {
               << std::endl;
     return;
   }
-  MKL_INT *rows_start;
+  MKL_INT *rows_start{nullptr};
   MKL_INT *rows_end;
-  MKL_INT *col_index;
-  double *values;
+  MKL_INT *col_index{nullptr};
+  double *values{nullptr};
 
   _mkl_stat = mkl_sparse_order(mkl_mat); // ordering in CSR format
   if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
@@ -118,15 +117,22 @@ mkl_sparse_mat::mkl_sparse_mat(sparse_matrix_t mkl_mat) {
   if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
     std::cout << "MKL EXPORT CSR FAILED, CODE: " << _mkl_stat << "\n";
   }
+  if (rows_start) {
+    _nnz = rows_start[_nrow] - _mkl_base;
+    _ai.reset(new MKL_INT[_nrow + 1]);
+    std::copy(std::execution::seq, rows_start, rows_start + _nrow + 1,
+              _ai.get());
+  }
+  
+  if (col_index) {
+    _aj.reset(new MKL_INT[_nnz]);
+    std::copy(std::execution::seq, col_index, col_index + _nnz, _aj.get());
+  }
 
-  _nnz = rows_start[_nrow] - _mkl_base;
-
-  _ai.reset(new MKL_INT[_nrow + 1]);
-  std::copy(std::execution::seq, rows_start, rows_start + _nrow + 1, _ai.get());
-  _aj.reset(new MKL_INT[_nnz]);
-  std::copy(std::execution::seq, col_index, col_index + _nnz, _aj.get());
-  _av.reset(new double[_nnz]);
-  std::copy(std::execution::seq, values, values + _nnz, _av.get());
+  if (values) {
+    _av.reset(new double[_nnz]);
+    std::copy(std::execution::seq, values, values + _nnz, _av.get());
+  }
 
   sp_fill();
 }
@@ -269,8 +275,8 @@ void mkl_sparse_mat::sp_fill() {
     std::cerr << "mkl_sparse_mat::sp_fill(): Matrix is not created, state:"
               << _mkl_stat << std::endl;
   }
-
-  _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
+  // TODO: test and verify that order is not needed
+  // _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
   _mkl_descr.type = SPARSE_MATRIX_TYPE_GENERAL;
   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
   _mkl_descr.mode = SPARSE_FILL_MODE_FULL;
@@ -617,120 +623,6 @@ mkl_sparse_mat_sym mkl_sparse_mult_papt(mkl_sparse_mat_sym &A,
   return res;
 }
 
-mkl_ilu0::mkl_ilu0(mkl_sparse_mat *A) : mkl_sparse_mat(), _A(A) {
-
-  _nrow = _A->rows();
-  _ncol = _A->cols();
-  _nnz = _A->nnz();
-  _interm_vec.reset(new double[_nrow]);
-  _ai = _A->get_ai();
-  _aj = _A->get_aj();
-}
-
-bool mkl_ilu0::factorize() {
-  if (_A == nullptr || _A->rows() != _A->cols())
-    return false;
-
-  MKL_INT ipar[128] = {0};
-  double dpar[128] = {0.0};
-
-  // parameters affecting the pre-conditioner
-  if (_check_zero_diag) {
-    ipar[30] = 1;
-    dpar[30] = _zero_tol;
-    dpar[31] = _zero_rep;
-  }
-
-  _av.reset(new double[_nnz]);
-
-  _A->to_one_based();
-
-  MKL_INT ierr = 0;
-  dcsrilu0(&_nrow, _A->get_av().get(), _ai.get(), _aj.get(), _av.get(), ipar,
-           dpar, &ierr);
-
-  _A->to_zero_based();
-
-  if (ierr != 0)
-    return false;
-
-  sp_fill();
-  return true;
-}
-
-bool mkl_ilu0::solve(double const *const b, double *const x) {
-
-  sparse_operation_t transA = SPARSE_OPERATION_NON_TRANSPOSE;
-  _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
-  _mkl_descr.mode = SPARSE_FILL_MODE_LOWER;
-  _mkl_descr.diag = SPARSE_DIAG_UNIT;
-  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, b, _interm_vec.get());
-
-  _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
-  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
-  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, _interm_vec.get(), x);
-  return true;
-}
-
-mkl_ilut::mkl_ilut(mkl_sparse_mat *A) : mkl_sparse_mat(), _A(A) {
-
-  _nrow = _A->rows();
-  _ncol = _A->cols();
-  _interm_vec.reset(new double[_nrow]);
-}
-
-bool mkl_ilut::factorize() {
-  if (_A == nullptr || _A->rows() != _A->cols())
-    return false;
-
-  MKL_INT ipar[128] = {0};
-  double dpar[128] = {0.0};
-
-  // parameters affecting the pre-conditioner
-  if (_check_zero_diag) {
-    ipar[30] = 1;
-    dpar[30] = _zero_tol;
-    // dpar[31] = _zero_rep;
-  } else {
-    // do this to avoid a warning from the preconditioner
-    dpar[30] = _tau;
-  }
-
-  _ai.reset(new MKL_INT[_nrow + 1]);
-  _nnz = (2 * _max_fill + 1) * _nrow;
-  _aj.reset(new MKL_INT[_nnz]);
-  _av.reset(new double[_nnz]);
-
-  MKL_INT ierr = 0;
-  _A->to_one_based();
-  dcsrilut(&_nrow, _A->get_av().get(), _A->get_ai().get(), _A->get_aj().get(),
-           _av.get(), _ai.get(), _aj.get(), &_tau, &_max_fill, ipar, dpar,
-           &ierr);
-  _mkl_base = SPARSE_INDEX_BASE_ONE;
-  // _A->to_zero_based();
-  // _A->print();
-  if (ierr != 0)
-    return false;
-
-  sp_fill();
-  // to_zero_based();
-  return true;
-}
-
-bool mkl_ilut::solve(double const *const b, double *const x) {
-
-  sparse_operation_t transA = SPARSE_OPERATION_NON_TRANSPOSE;
-  _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
-  _mkl_descr.mode = SPARSE_FILL_MODE_LOWER;
-  _mkl_descr.diag = SPARSE_DIAG_UNIT;
-  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, b, _interm_vec.get());
-
-  _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
-  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
-  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, _interm_vec.get(), x);
-  return true;
-}
-
 mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
     : mkl_sparse_mat() {
 
@@ -839,96 +731,6 @@ mkl_sparse_mat_diag::mkl_sparse_mat_diag(const MKL_INT size, const double val)
     _ai[i] = _ai[i - 1] + 1;
   }
   sp_fill();
-}
-
-mkl_ic0::mkl_ic0(const mkl_sparse_mat &A) : mkl_sparse_mat_sym(A) {
-  _interm_vec.reset(new double[_nrow]);
-}
-
-bool mkl_ic0::factorize() {
-  MKL_INT *row = _aj.get();
-  MKL_INT *col = _ai.get();
-  double *val = _av.get();
-
-  std::vector<double> tmp(_nrow, 0.0);
-
-  // fill in the values
-  for (MKL_INT k = 0; k < _nrow; ++k) {
-    // get the values for column k
-    double *ak = val + (col[k] - _mkl_base);
-    MKL_INT *rowk = row + (col[k] - _mkl_base);
-    MKL_INT Lk = col[k + 1] - col[k];
-
-    // sanity check
-    if (rowk[0] - _mkl_base != k) {
-      fprintf(stderr,
-              "Fatal error in incomplete Cholesky preconditioner:\nMatrix "
-              "format error at row %d.",
-              k);
-      return false;
-    }
-
-    // make sure the diagonal element is not zero
-    if (ak[0] == 0.0) {
-      fprintf(stderr,
-              "Fatal error in incomplete Cholesky preconditioner:\nZero "
-              "diagonal element at row %d.",
-              k);
-      return false;
-    }
-
-    // make sure the diagonal element is not negative either
-    if (ak[0] < 0.0) {
-      fprintf(stderr,
-              "Fatal error in incomplete Cholesky preconditioner:\nNegative "
-              "diagonal element at row %d (value = %lg).",
-              k, ak[0]);
-      return false;
-    }
-
-    // set the diagonal element
-    double akk = std::sqrt(ak[0]);
-    ak[0] = akk;
-    tmp[rowk[0] - _mkl_base] = akk;
-
-    // divide column by akk
-    for (MKL_INT j = 1; j < Lk; ++j) {
-      ak[j] /= akk;
-      tmp[rowk[j] - _mkl_base] = ak[j];
-    }
-
-    // loop over all other columns
-    for (MKL_INT _j = 1; _j < Lk; ++_j) {
-      MKL_INT j = rowk[_j] - _mkl_base;
-      double tjk = tmp[j];
-      if (tjk != 0.0) {
-        double *aj = val + col[j] - _mkl_base;
-        MKL_INT Lj = col[j + 1] - col[j];
-        MKL_INT *rowj = row + col[j] - _mkl_base;
-
-        for (MKL_INT i = 0; i < Lj; i++)
-          aj[i] -= tmp[rowj[i] - _mkl_base] * tjk;
-      }
-    }
-
-    // reset temp buffer
-    for (MKL_INT j = 0; j < Lk; ++j)
-      tmp[rowk[j] - _mkl_base] = 0.0;
-  }
-
-  return true;
-}
-
-bool mkl_ic0::solve(double const *const b, double *const x) {
-  sparse_operation_t transA = SPARSE_OPERATION_TRANSPOSE;
-  _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
-  _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
-  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
-  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, b, _interm_vec.get());
-
-  transA = SPARSE_OPERATION_NON_TRANSPOSE;
-  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, _interm_vec.get(), x);
-  return true;
 }
 
 bool dense_mat::orthogonalize() {

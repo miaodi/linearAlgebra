@@ -1,4 +1,5 @@
-
+#include "../mkl_wrapper/incomplete_lu.h"
+#include "../mkl_wrapper/incomplete_cholesky.h"
 #include "../mkl_wrapper/mkl_eigen.h"
 #include "../mkl_wrapper/mkl_solver.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
@@ -19,10 +20,11 @@ void register_solvers() {
   using create_method = typename mkl_wrapper::solver_factory::create_method;
 
   create_method gmres_ilut = [](mkl_wrapper::mkl_sparse_mat &A) {
-    auto prec = std::make_shared<mkl_wrapper::mkl_ilut>(&A);
+    auto prec = std::make_shared<mkl_wrapper::mkl_ilut>();
     prec->set_tau(1e-3);
     prec->set_max_fill(std::min((MKL_INT)(A.avg_nz() * 2), A.cols()));
-    prec->factorize();
+    prec->symbolic_factorize(&A);
+    prec->numeric_factorize(&A);
     auto solver = std::make_unique<mkl_wrapper::mkl_fgmres_solver>(&A, prec);
     // prec->print();
     solver->set_max_iters(1e5);
@@ -34,8 +36,9 @@ void register_solvers() {
                                                                 gmres_ilut);
 
   create_method cg_ic0 = [](mkl_wrapper::mkl_sparse_mat &A) {
-    auto prec = std::make_shared<mkl_wrapper::mkl_ic0>(A);
-    prec->factorize();
+    auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>(A);
+    prec->symbolic_factorize(&A);
+    prec->numeric_factorize(&A);
     auto solver = std::make_unique<mkl_wrapper::mkl_pcg_solver>(&A, prec);
     // prec->print();
     solver->set_max_iters(1e5);

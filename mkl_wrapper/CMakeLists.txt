@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(mkl_wrapper CXX)
 
-set(MKL_WRAPPER_SRC mkl_sparse_mat.cpp mkl_solver.cpp mkl_eigen.cpp mumps_solver.cpp arpack_wrapper.cpp)
+set(MKL_WRAPPER_SRC mkl_sparse_mat.cpp mkl_solver.cpp mkl_eigen.cpp mumps_solver.cpp arpack_wrapper.cpp incomplete_cholesky.cpp incomplete_lu.cpp)
 
 add_library(${PROJECT_NAME} SHARED ${MKL_WRAPPER_SRC})
 # target_sources(${PROJECT_NAME} PRIVATE  ${MKL_WRAPPER_SRC} PUBLIC ${MKL_WRAPPER_INC} )

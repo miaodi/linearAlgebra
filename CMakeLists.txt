@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.5...3.20)
 
 project(Linear_Algebra CXX Fortran)
 
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+# set(CMAKE_CXX_FLAGS "-Wall -Wextra")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+
 option(USE_AMGCL_LIB "Use the amg library amgcl" OFF) 
 
 option(USE_MUMPS_LIB "Use the linear solver library mumps. Note that only non-mpi version is supported" OFF) 
@@ -45,8 +51,15 @@ if (USE_AMGCL_LIB)
   FetchContent_MakeAvailable(AMGCL)
 endif(USE_AMGCL_LIB)
 
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # using GCC
+  set(MKL_THREADING gnu_thread)
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+  # using Intel C++
+  set(MKL_THREADING intel_thread)
+endif()
+
 set(MKL_ARCH intel64)
-set(MKL_THREADING gnu_thread)
 set(MKL_INTERFACE lp64)
 find_package(MKL CONFIG REQUIRED)
 find_package(TBB REQUIRED)

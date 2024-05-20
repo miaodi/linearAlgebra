@@ -15,6 +15,9 @@ target_link_libraries(eigen PRIVATE Utils fast_matrix_market::fast_matrix_market
 add_executable(tmp tmp.cpp)
 target_link_libraries(tmp PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper Spectra OpenMP::OpenMP_CXX)
 
+add_executable(tmp2 tmp2.cpp)
+target_link_libraries(tmp2 PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper reordering Spectra OpenMP::OpenMP_CXX)
+
 add_executable(test1 test1.cpp)
 # target_include_directories(test1 PRIVATE Utils)
 target_link_libraries(test1 PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper TBB::tbb)
