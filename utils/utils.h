@@ -41,6 +41,8 @@ auto ReadFromBinaryCOO(const std::string &filename, IVEC &rows, IVEC &cols,
   return std::make_pair(m + (1 - base), n + (1 - base));
 }
 
+void ReadFromBinaryVec(const std::string &filename, std::vector<double> &vec);
+
 template <typename IVEC, typename VVEC, typename IB>
 auto ReadFromBinaryCSR(const std::string &filename, IVEC &ai, IVEC &aj,
                        VVEC &av, const IB base) {
@@ -220,7 +222,8 @@ protected:
 
 std::vector<MKL_INT> randomPermute(const MKL_INT n, const MKL_INT base = 0);
 
-std::vector<MKL_INT> inversePermute(const std::vector<MKL_INT>& perm, const MKL_INT base = 0);
+std::vector<MKL_INT> inversePermute(const std::vector<MKL_INT> &perm,
+                                    const MKL_INT base = 0);
 
-bool isPermutation(const std::vector<MKL_INT>& perm, const MKL_INT base = 0);
+bool isPermutation(const std::vector<MKL_INT> &perm, const MKL_INT base = 0);
 } // namespace utils

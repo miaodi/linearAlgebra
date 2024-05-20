@@ -112,7 +112,7 @@ bool mkl_ilut::numeric_factorize(mkl_sparse_mat const *const A) {
     std::transform(Aai.get(), Aai.get() + _nrow + 1, tmp_ai.get(),
                    [](const MKL_INT i) { return i + 1; });
     std::shared_ptr<MKL_INT[]> tmp_aj(new MKL_INT[A->nnz()]);
-    std::transform(Aaj.get(), Aaj.get() + _nnz, tmp_aj.get(),
+    std::transform(Aaj.get(), Aaj.get() + A->nnz(), tmp_aj.get(),
                    [](const MKL_INT i) { return i + 1; });
     Aai = tmp_ai;
     Aaj = tmp_aj;

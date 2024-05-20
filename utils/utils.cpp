@@ -33,6 +33,18 @@ void printProgress(double percentage) {
   fflush(stdout);
 }
 
+void ReadFromBinaryVec(const std::string &filename, std::vector<double> &vec) {
+  std::ifstream file(filename, std::ios::binary);
+  int64_t size;
+  double tmp;
+  file.read(reinterpret_cast<char *>(&size), sizeof size);
+  vec.resize(size);
+  for (int64_t i = 0; i < size; i++) {
+    file.read(reinterpret_cast<char *>(&tmp), sizeof tmp);
+    vec[i] = tmp;
+  }
+}
+
 // std::pair<int32_t, int32_t> ReadFromBinaryCSR(const std::string &filename,
 //                                               std::vector<int32_t> &ai,
 //                                               std::vector<int32_t> &aj,
