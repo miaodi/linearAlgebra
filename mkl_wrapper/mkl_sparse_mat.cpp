@@ -341,9 +341,16 @@ void mkl_sparse_mat::print() const {
   }
   std::cout << std::endl;
   std::cout << "aj: ";
-  for (MKL_INT i = 0; i < _nnz; i++) {
-    std::cout << _aj[i] << " ";
+  
+  for (MKL_INT i = 0; i <= _nrow; i++) {
+    for (MKL_INT j = _ai[i] - (MKL_INT)_mkl_base;
+         j < _ai[i + 1] - (MKL_INT)_mkl_base; j++)
+      std::cout << _aj[j] << " ";
+    std::cout << std::endl;
   }
+  // for (MKL_INT i = 0; i < _nnz; i++) {
+  //   std::cout << _aj[i] << " ";
+  // }
   std::cout << std::endl;
   std::cout << "av: ";
   for (MKL_INT i = 0; i < _nnz; i++) {

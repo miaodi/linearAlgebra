@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <execution>
+#include <forward_list>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -136,18 +137,18 @@ bool incomplete_lu_k::symbolic_factorize(mkl_sparse_mat const *const A) {
   _interm_vec.resize(_nrow);
   const MKL_INT n = A->rows();
   _ai.reset(new MKL_INT[n + 1]);
-  if (_level == 0) {
+  // if (_level == 0) {
 
-    _nnz = A->nnz();
-    _aj.reset(new MKL_INT[_nnz]);
-    _av.reset(new double[_nnz]);
-    std::copy(std::execution::par_unseq, A->get_ai().get(),
-              A->get_ai().get() + n + 1, _ai.get());
-    std::copy(std::execution::par_unseq, A->get_aj().get(),
-              A->get_aj().get() + _nnz, _aj.get());
-  } else {
+  //   _nnz = A->nnz();
+  //   _aj.reset(new MKL_INT[_nnz]);
+  //   _av.reset(new double[_nnz]);
+  //   std::copy(std::execution::par_unseq, A->get_ai().get(),
+  //             A->get_ai().get() + n + 1, _ai.get());
+  //   std::copy(std::execution::par_unseq, A->get_aj().get(),
+  //             A->get_aj().get() + _nnz, _aj.get());
+  // } else
+  {
     const MKL_INT base = A->mkl_base();
-    std::vector<MKL_INT> rowLevels(n);
     auto ai = A->get_ai();
     auto aj = A->get_aj();
     _ai[0] = base;
@@ -155,40 +156,85 @@ bool incomplete_lu_k::symbolic_factorize(mkl_sparse_mat const *const A) {
     std::vector<MKL_INT> av_levels;
     aj_vec.reserve(A->nnz());
     av_levels.reserve(A->nnz());
+    std::forward_list<std::pair<MKL_INT, MKL_INT>> _rowLevels;
 
     for (MKL_INT i = 0; i < n; i++) {
-// initialize levels
-#pragma omp parallel for
-      for (MKL_INT k = 0; k != n; k++)
-        rowLevels[k] = std::numeric_limits<MKL_INT>::max();
-#pragma omp parallel for
-      for (MKL_INT k = ai[i] - base; k != ai[i + 1] - base; k++)
-        rowLevels[aj[k] - base] = 0;
-
-      for (MKL_INT k = 0; k < i; k++) {
-        auto cur_level = rowLevels[k];
-        if (cur_level == std::numeric_limits<MKL_INT>::max())
-          continue;
-        // #pragma omp parallel for
-        for (MKL_INT j = _ai[k] - base; j != _ai[k + 1] - base; j++) {
-          if (aj_vec[j] <= k)
-            continue;
-          if (av_levels[j] != std::numeric_limits<MKL_INT>::max()) {
-            rowLevels[aj_vec[j] - base] = std::min(
-                rowLevels[aj_vec[j] - base], cur_level + av_levels[j] + 1);
-          }
-        }
+      // initialize levels
+      auto rowIt = _rowLevels.before_begin();
+      // std::cout << "origin mat: ";
+      for (MKL_INT k = ai[i] - base; k != ai[i + 1] - base; k++) {
+        rowIt = _rowLevels.insert_after(rowIt, std::make_pair(aj[k] - base, 0));
+        // std::cout << aj[k] << " ";
       }
+      // std::cout << std::endl;
+      MKL_INT k = -1;
+      rowIt = _rowLevels.begin();
+      // std::cout << i << std::endl;
+      while (rowIt != _rowLevels.end()) {
 
+        // std::cout << "rowIt: " << rowIt->first << " " << rowIt->second
+        //           << std::endl;
+        k = rowIt->first;
+        if (k >= i)
+          break;
+        auto lik = rowIt->second;
+        auto eij = rowIt;
+        {
+          MKL_INT nextIdx = std::next(eij) == _rowLevels.end()
+                                ? std::numeric_limits<MKL_INT>::max()
+                                : std::next(eij)->first;
+          // std::cout << "eij: " << eij->first << " " << eij->second <<
+          // std::endl;
+          // std::cout << _ai[k] - base << " " << _ai[k + 1] - base <<
+          // std::endl;
+          for (MKL_INT j = _ai[k] - base; j != _ai[k + 1] - base; j++) {
+            // std::cout << j << " ";
+            if (aj_vec[j] - base <= k)
+              continue;
+            while (nextIdx <= aj_vec[j] - base) {
+              eij = std::next(eij);
+              nextIdx = std::next(eij) == _rowLevels.end()
+                            ? std::numeric_limits<MKL_INT>::max()
+                            : std::next(eij)->first;
+            }
+            if (lik + av_levels[j] + 1 <= _level) {
+              if (eij->first == aj_vec[j] - base) {
+                if (eij->second > lik + av_levels[j] + 1) {
+                  eij->second = lik + av_levels[j] + 1;
+                }
+              } else {
+                eij = _rowLevels.insert_after(
+                    eij,
+                    std::make_pair(aj_vec[j] - base, lik + av_levels[j] + 1));
+                nextIdx = std::next(eij) == _rowLevels.end()
+                              ? std::numeric_limits<MKL_INT>::max()
+                              : std::next(eij)->first;
+              }
+              // std::cout << eij->first + base << " ";
+            }
+            // std::cout << "j: " << j << std::endl;
+          }
+          // std::cout << std::endl;
+          // std::cout << std::endl;
+        }
+        rowIt++;
+      }
       // #pragma omp parallel for
       // push current row level back to aj av
-      for (MKL_INT k = 0; k != n; k++)
-        if (rowLevels[k] <= _level) {
-          aj_vec.push_back(k + base);
-          av_levels.push_back(rowLevels[k]);
-        }
+
+      rowIt = _rowLevels.begin();
+      while (rowIt != _rowLevels.end()) {
+        aj_vec.push_back(rowIt->first + base);
+        av_levels.push_back(rowIt->second);
+        // std::cout << rowIt->first + base << " ";
+        rowIt++;
+      }
+      // std::cout<<std::endl;
       _ai[i + 1] = aj_vec.size() + base;
+      _rowLevels.clear();
+      // std::cout << _ai[i + 1] << std::endl;
     }
+    // std::abort();
     _nnz = _ai[n] - base;
     _aj.reset(new MKL_INT[_nnz]);
     _av.reset(new double[_nnz]);
