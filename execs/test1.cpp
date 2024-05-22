@@ -58,7 +58,7 @@ void register_solvers() {
 
   create_method gmres_iluk = [](mkl_wrapper::mkl_sparse_mat &A) {
     auto prec = std::make_shared<mkl_wrapper::incomplete_lu_k>();
-    prec->set_level(1);
+    prec->set_level(0);
 
     utils::Elapse<>::execute("incomplete_lu_k symbolic factorization: ",
                              [&A, &prec]() { prec->symbolic_factorize(&A); });
@@ -98,8 +98,7 @@ void register_solvers() {
 }
 
 int main() {
-
-  mkl_set_num_threads(1);
+  mkl_set_num_threads(5);
   std::string k_mat("../../data/shared/K2.bin");
   std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   std::vector<double> k_csr_vals;
@@ -129,22 +128,22 @@ int main() {
   // solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
   //     "cg+ic0", k);
   // solver->solve(rhs.data(), res.data());
-  // auto solver =
-  //     utils::singleton<mkl_wrapper::solver_factory>::instance().create(
-  //         "gmres+ilut", k);
-  // std::cout << "gmres+ilut: \n";
-  // solver->set_print_level(1);
-  // res = std::vector<double>(size, 0);
-  // solver->solve(rhs.data(), res.data());
-  // solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
-  //     "gmres+ilu0", k);
-  // std::cout << "gmres+ilu0: \n";
-  // solver->set_print_level(1);
-  // res = std::vector<double>(size, 0);
-  // solver->solve(rhs.data(), res.data());
+
   auto solver =
       utils::singleton<mkl_wrapper::solver_factory>::instance().create(
-          "gmres+iluk", k);
+          "gmres+ilut", k);
+  std::cout << "gmres+ilut: \n";
+  solver->set_print_level(1);
+  res = std::vector<double>(size, 0);
+  solver->solve(rhs.data(), res.data());
+  solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
+      "gmres+ilu0", k);
+  std::cout << "gmres+ilu0: \n";
+  solver->set_print_level(1);
+  res = std::vector<double>(size, 0);
+  solver->solve(rhs.data(), res.data());
+  solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
+      "gmres+iluk", k);
   std::cout << "gmres+iluk: \n";
   solver->set_print_level(1);
   res = std::vector<double>(size, 0);

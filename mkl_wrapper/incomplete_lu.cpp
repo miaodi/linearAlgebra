@@ -138,26 +138,25 @@ bool incomplete_lu_k::symbolic_factorize(mkl_sparse_mat const *const A) {
   _interm_vec.resize(_nrow);
   const MKL_INT n = A->rows();
   _ai.reset(new MKL_INT[n + 1]);
-  // if (_level == 0) {
-
-  //   _nnz = A->nnz();
-  //   _aj.reset(new MKL_INT[_nnz]);
-  //   _av.reset(new double[_nnz]);
-  //   std::copy(std::execution::par_unseq, A->get_ai().get(),
-  //             A->get_ai().get() + n + 1, _ai.get());
-  //   std::copy(std::execution::par_unseq, A->get_aj().get(),
-  //             A->get_aj().get() + _nnz, _aj.get());
-  // } else
-  {
+  if (_level == 0) {
+    _nnz = A->nnz();
+    _aj.reset(new MKL_INT[_nnz]);
+    _av.reset(new double[_nnz]);
+    std::copy(std::execution::par_unseq, A->get_ai().get(),
+              A->get_ai().get() + n + 1, _ai.get());
+    std::copy(std::execution::par_unseq, A->get_aj().get(),
+              A->get_aj().get() + _nnz, _aj.get());
+  } else {
     const MKL_INT base = A->mkl_base();
     auto ai = A->get_ai();
     auto aj = A->get_aj();
     _ai[0] = base;
-    std::vector<MKL_INT> aj_vec;
-    std::vector<MKL_INT> av_levels;
-    aj_vec.reserve(A->nnz());
-    av_levels.reserve(A->nnz());
+    MKL_INT aj_size = A->nnz();
+    _aj.reset(new MKL_INT[aj_size]);
+    auto av_levels = std::make_unique<MKL_INT[]>(aj_size);
     std::forward_list<std::pair<MKL_INT, MKL_INT>> _rowLevels;
+    MKL_INT list_size = 0;
+    MKL_INT j;
 
     for (MKL_INT i = 0; i < n; i++) {
       // initialize levels
@@ -167,6 +166,7 @@ bool incomplete_lu_k::symbolic_factorize(mkl_sparse_mat const *const A) {
         rowIt = _rowLevels.insert_after(rowIt, std::make_pair(aj[k] - base, 0));
         // std::cout << aj[k] << " ";
       }
+      list_size = ai[i + 1] - ai[i];
       // std::cout << std::endl;
       MKL_INT k = -1;
       rowIt = _rowLevels.begin();
@@ -188,28 +188,29 @@ bool incomplete_lu_k::symbolic_factorize(mkl_sparse_mat const *const A) {
           // std::endl;
           // std::cout << _ai[k] - base << " " << _ai[k + 1] - base <<
           // std::endl;
-          for (MKL_INT j = _ai[k] - base; j != _ai[k + 1] - base; j++) {
-            // std::cout << j << " ";
-            if (aj_vec[j] - base <= k)
-              continue;
-            while (nextIdx <= aj_vec[j] - base) {
+          j = _ai[k] - base;
+          while (_aj[j] - base <= k) {
+            j++;
+          }
+          for (; j != _ai[k + 1] - base; j++) {
+            while (nextIdx <= _aj[j] - base) {
               eij = std::next(eij);
               nextIdx = std::next(eij) == _rowLevels.end()
                             ? std::numeric_limits<MKL_INT>::max()
                             : std::next(eij)->first;
             }
             if (lik + av_levels[j] + 1 <= _level) {
-              if (eij->first == aj_vec[j] - base) {
+              if (eij->first == _aj[j] - base) {
                 if (eij->second > lik + av_levels[j] + 1) {
                   eij->second = lik + av_levels[j] + 1;
                 }
               } else {
                 eij = _rowLevels.insert_after(
-                    eij,
-                    std::make_pair(aj_vec[j] - base, lik + av_levels[j] + 1));
+                    eij, std::make_pair(_aj[j] - base, lik + av_levels[j] + 1));
                 nextIdx = std::next(eij) == _rowLevels.end()
                               ? std::numeric_limits<MKL_INT>::max()
                               : std::next(eij)->first;
+                list_size++;
               }
               // std::cout << eij->first + base << " ";
             }
@@ -224,23 +225,39 @@ bool incomplete_lu_k::symbolic_factorize(mkl_sparse_mat const *const A) {
       // push current row level back to aj av
 
       rowIt = _rowLevels.begin();
+      MKL_INT pos = _ai[i] - base;
       while (rowIt != _rowLevels.end()) {
-        aj_vec.push_back(rowIt->first + base);
-        av_levels.push_back(rowIt->second);
+        if (_ai[i] + list_size - base > aj_size) {
+          MKL_INT new_aj_size;
+          if (2 * i >= n)
+            new_aj_size = 2 * aj_size;
+          else
+            new_aj_size = aj_size * std::ceil(n * 1. / i);
+          std::shared_ptr<MKL_INT[]> new_aj(new MKL_INT[new_aj_size]);
+          auto new_levels = std::make_unique<MKL_INT[]>(new_aj_size);
+
+          std::copy(std::execution::seq, _aj.get(), _aj.get() + aj_size,
+                    new_aj.get());
+          std::copy(std::execution::seq, av_levels.get(),
+                    av_levels.get() + aj_size, new_levels.get());
+          std::swap(new_aj, _aj);
+          std::swap(new_levels, av_levels);
+          std::swap(new_aj_size, aj_size);
+          // std::cout<<"copy\n";
+        }
+        _aj[pos] = rowIt->first + base;
+        av_levels[pos++] = rowIt->second;
         // std::cout << rowIt->first + base << " ";
         rowIt++;
       }
       // std::cout<<std::endl;
-      _ai[i + 1] = aj_vec.size() + base;
+      _ai[i + 1] = _ai[i] + list_size;
       _rowLevels.clear();
       // std::cout << _ai[i + 1] << std::endl;
     }
     // std::abort();
     _nnz = _ai[n] - base;
-    _aj.reset(new MKL_INT[_nnz]);
     _av.reset(new double[_nnz]);
-    std::copy(std::execution::par_unseq, aj_vec.begin(), aj_vec.end(),
-              _aj.get());
   }
   return true;
 }
@@ -252,11 +269,10 @@ bool incomplete_lu_k::numeric_factorize(mkl_sparse_mat const *const A) {
   const MKL_INT n = rows();
   const MKL_INT base = mkl_base();
   std::vector<double> diag(n);
-  std::unordered_map<MKL_INT, MKL_INT> global_to_csr;
+  MKL_INT k_idx, A_k_idx, k, _j_idx, j_idx;
 
   for (MKL_INT i = 0; i < n; i++) {
 
-    MKL_INT k_idx, A_k_idx;
     for (k_idx = _ai[i] - base, A_k_idx = ai[i] - base;
          k_idx != _ai[i + 1] - base; k_idx++) {
       if (A_k_idx == ai[i + 1] - base || _aj[k_idx] != aj[A_k_idx]) {
@@ -264,21 +280,27 @@ bool incomplete_lu_k::numeric_factorize(mkl_sparse_mat const *const A) {
       } else {
         _av[k_idx] = av[A_k_idx++];
       }
-      global_to_csr[_aj[k_idx] - base] = k_idx;
     }
 
     for (k_idx = _ai[i] - base;
-         _aj[k_idx] - base < i && k_idx != _ai[i + 1] - base; k_idx++) {
-      MKL_INT k = _aj[k_idx] - base;
+         _aj[k_idx] - base != i && k_idx != _ai[i + 1] - base; k_idx++) {
+      k = _aj[k_idx] - base;
       _av[k_idx] /= diag[k];
       const double aik = _av[k_idx];
-// #pragma omp parallel for
-      for (MKL_INT j = _ai[k] - base; j != _ai[k + 1] - base; j++) {
-        if (_aj[j] - base <= k)
-          continue;
-        auto it = global_to_csr.find(_aj[j] - base);
-        if (it != global_to_csr.end())
-          _av[it->second] -= aik * _av[j];
+      _j_idx = k_idx;
+      j_idx = _ai[k] - base;
+      while (_aj[j_idx] - base <= k) {
+        j_idx++;
+      }
+      for (; j_idx != _ai[k + 1] - base && _j_idx != _ai[i + 1] - base;) {
+        if (_aj[_j_idx] == _aj[j_idx]) {
+          _av[_j_idx] -= aik * _av[j_idx];
+          j_idx++;
+          _j_idx++;
+        } else if (_aj[_j_idx] < _aj[j_idx])
+          _j_idx++;
+        else
+          j_idx++;
       }
     }
     // copy diagonal aii
@@ -287,7 +309,6 @@ bool incomplete_lu_k::numeric_factorize(mkl_sparse_mat const *const A) {
     } else {
       diag[i] = _av[k_idx];
     }
-    global_to_csr.clear();
   }
   if (_mkl_base == SPARSE_INDEX_BASE_ONE)
     sp_fill();
