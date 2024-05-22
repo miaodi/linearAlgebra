@@ -128,7 +128,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
       // std::cout << std::endl;
       for (k = 0; k < i; k++) {
         j = _ai[k] - base;
-        while (_ai[j] - base < i && j != _ai[k + 1] - base) {
+        while (_aj[j] - base < i && j != _ai[k + 1] - base) {
           j++;
         }
         if (_ai[j] - base != i)
@@ -139,7 +139,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
                               ? std::numeric_limits<MKL_INT>::max()
                               : std::next(eij)->first;
         for (; j != _ai[k + 1] - base; j++) {
-          std::cout << i << ":" << j << std::endl;
+          std::cout << i << ":" << j << " insert: ";
           while (nextIdx <= _aj[j] - base) {
             eij = std::next(eij);
             nextIdx = std::next(eij) == _rowLevels.end()
@@ -155,10 +155,9 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
             } else {
               eij = _rowLevels.insert_after(
                   eij, std::make_pair(_aj[j] - base, lik + av_levels[j] + 1));
-              nextIdx = std::next(eij) == _rowLevels.end()
-                            ? std::numeric_limits<MKL_INT>::max()
-                            : std::next(eij)->first;
+              nextIdx = std::next(eij)->first;
               list_size++;
+              std::cout << _aj[j] - base << std::endl;
             }
             // std::cout << eij->first + base << " ";
           }
