@@ -207,7 +207,9 @@ bool incomplete_lu_k::symbolic_factorize(mkl_sparse_mat const *const A) {
               } else {
                 eij = _rowLevels.insert_after(
                     eij, std::make_pair(_aj[j] - base, lik + av_levels[j] + 1));
-                nextIdx = std::next(eij)->first;
+                nextIdx = std::next(eij) == _rowLevels.end()
+                              ? std::numeric_limits<MKL_INT>::max()
+                              : std::next(eij)->first;
                 list_size++;
               }
               // std::cout << eij->first + base << " ";
