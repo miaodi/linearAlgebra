@@ -9,6 +9,7 @@
 #include <mkl_rci.h>
 #include <mkl_sparse_handle.h>
 #include <mkl_spblas.h>
+#include <unordered_map>
 
 namespace mkl_wrapper {
 
@@ -250,41 +251,43 @@ bool incomplete_lu_k::numeric_factorize(mkl_sparse_mat const *const A) {
   auto av = A->get_av();
   const MKL_INT n = rows();
   const MKL_INT base = mkl_base();
-  std::vector<double> rowVals(n);
   std::vector<double> diag(n);
-  for (MKL_INT i = 0; i < n; i++) {
-    // initialize levels
-#pragma omp parallel for
-    for (MKL_INT k = 0; k != n; k++)
-      rowVals[k] = 0.;
-#pragma omp parallel for
-    for (MKL_INT k = ai[i] - base; k != ai[i + 1] - base; k++)
-      rowVals[aj[k] - base] = av[k];
+  std::unordered_map<MKL_INT, MKL_INT> global_to_csr;
 
-    MKL_INT k_idx;
-    for (k_idx = _ai[i] - base; _aj[k_idx] - base < i; k_idx++) {
+  for (MKL_INT i = 0; i < n; i++) {
+
+    MKL_INT k_idx, A_k_idx;
+    for (k_idx = _ai[i] - base, A_k_idx = ai[i] - base;
+         k_idx != _ai[i + 1] - base; k_idx++) {
+      if (A_k_idx == ai[i + 1] - base || _aj[k_idx] != aj[A_k_idx]) {
+        _av[k_idx] = 0;
+      } else {
+        _av[k_idx] = av[A_k_idx++];
+      }
+      global_to_csr[_aj[k_idx] - base] = k_idx;
+    }
+
+    for (k_idx = _ai[i] - base;
+         _aj[k_idx] - base < i && k_idx != _ai[i + 1] - base; k_idx++) {
       MKL_INT k = _aj[k_idx] - base;
-      rowVals[k] /= diag[k];
-      const double aik = rowVals[k];
-#pragma omp parallel for
+      _av[k_idx] /= diag[k];
+      const double aik = _av[k_idx];
+// #pragma omp parallel for
       for (MKL_INT j = _ai[k] - base; j != _ai[k + 1] - base; j++) {
         if (_aj[j] - base <= k)
           continue;
-        rowVals[_aj[j] - base] -= aik * _av[j];
+        auto it = global_to_csr.find(_aj[j] - base);
+        if (it != global_to_csr.end())
+          _av[it->second] -= aik * _av[j];
       }
     }
     // copy diagonal aii
     if (_aj[k_idx] - base != i) {
       std::cerr << "no element on diagonal!\n";
     } else {
-      diag[i] = rowVals[i];
+      diag[i] = _av[k_idx];
     }
-
-#pragma omp parallel for
-    // push current row back to av
-    for (k_idx = _ai[i] - base; k_idx != _ai[i + 1] - base; k_idx++) {
-      _av[k_idx] = rowVals[_aj[k_idx] - base];
-    }
+    global_to_csr.clear();
   }
   if (_mkl_base == SPARSE_INDEX_BASE_ONE)
     sp_fill();
