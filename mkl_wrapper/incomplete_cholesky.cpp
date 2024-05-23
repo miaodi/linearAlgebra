@@ -9,9 +9,7 @@
 #include <mkl_spblas.h>
 
 namespace mkl_wrapper {
-incomplete_cholesky_k::incomplete_cholesky_k(const mkl_sparse_mat &A,
-                                             const int level)
-    : incomplete_fact(), _level{level} {
+incomplete_cholesky_k::incomplete_cholesky_k() : incomplete_fact() {
   // std::ofstream myfile;
   // myfile.open("sym_mat.svg");
   // print_svg(myfile);
@@ -111,23 +109,16 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
     for (MKL_INT i = 0; i < n; i++) {
       // initialize levels
       auto rowIt = _rowLevels.before_begin();
-      // std::cout << "step 1: \n";
       k = ai[i] - base;
       while (aj[k] - base < i) {
         k++;
       }
-      // list_size = k;
-      list_size = 0;
+      list_size = k;
       for (; k != ai[i + 1] - base; k++) {
         rowIt = _rowLevels.insert_after(rowIt, std::make_pair(aj[k] - base, 0));
-        // std::cout << aj[k]-base << " ";
-        list_size++;
       }
-      // std::cout << std::endl;
-      // list_size = ai[i + 1] - base - list_size;
+      list_size = ai[i + 1] - base - list_size;
 
-      // std::cout << "step 2: \n";
-      // std::cout << std::endl;
       for (k = 0; k < i; k++) {
         j = _ai[k] - base;
         while (_aj[j] - base < i && j != _ai[k + 1] - base) {
@@ -209,89 +200,85 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
   return true;
 }
 
-// bool incomplete_cholesky_k::factorize() {
-//   MKL_INT *row = _aj.get();
-//   MKL_INT *col = _ai.get();
-//   double *val = _av.get();
+bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
+  auto ai = A->get_ai();
+  auto aj = A->get_aj();
+  auto av = A->get_av();
+  const MKL_INT n = rows();
+  const MKL_INT base = mkl_base();
+  MKL_INT k_idx, A_k_idx, k, _j_idx, j_idx;
 
-//   std::vector<double> tmp(_nrow, 0.0);
+  for (MKL_INT i = 0; i < n; i++) {
 
-//   // fill in the values
-//   for (MKL_INT k = 0; k < _nrow; ++k) {
-//     // get the values for column k
-//     double *ak = val + (col[k] - _mkl_base);
-//     MKL_INT *rowk = row + (col[k] - _mkl_base);
-//     MKL_INT Lk = col[k + 1] - col[k];
+    k_idx = _ai[i] - base;
+    while (_aj[k_idx] - base < i) {
+      k_idx++;
+    }
+    A_k_idx = ai[i] - base;
+    while (aj[A_k_idx] - base < i) {
+      A_k_idx++;
+    }
 
-//     // sanity check
-//     if (rowk[0] - _mkl_base != k) {
-//       fprintf(stderr,
-//               "Fatal error in incomplete Cholesky preconditioner:\nMatrix "
-//               "format error at row %d.",
-//               k);
-//       return false;
-//     }
+    if (aj[A_k_idx] - base != i || _aj[k_idx] - base != i) {
+      std::cerr << "missing aii at row: " << i + base << std::endl;
+      return false;
+    }
+    // std::cout << "hello\n";
+    for (; k_idx != _ai[i + 1] - base; k_idx++) {
+      if (A_k_idx == ai[i + 1] - base || _aj[k_idx] != aj[A_k_idx]) {
+        _av[k_idx] = 0;
+      } else {
+        _av[k_idx] = av[A_k_idx++];
+      }
+      // std::cout << _av[k_idx] << " ";
+    }
+    // std::cout << std::endl;
 
-//     // make sure the diagonal element is not zero
-//     if (ak[0] == 0.0) {
-//       fprintf(stderr,
-//               "Fatal error in incomplete Cholesky preconditioner:\nZero "
-//               "diagonal element at row %d.",
-//               k);
-//       return false;
-//     }
+    for (k = 0; k < i; k++) {
+      j_idx = _ai[k] - base;
+      while (_aj[j_idx] - base < i && j_idx != _ai[k + 1] - base) {
+        j_idx++;
+      }
+      if (_aj[j_idx] - base != i)
+        continue;
+      const double aki = _av[j_idx];
+      _j_idx = _ai[i] - base;
+      for (; j_idx != _ai[k + 1] - base && _j_idx != _ai[i + 1] - base;) {
+        if (_aj[_j_idx] == _aj[j_idx]) {
+          _av[_j_idx++] -= aki * _av[j_idx++];
+        } else if (_aj[_j_idx] < _aj[j_idx])
+          _j_idx++;
+        else
+          j_idx++;
+      }
+    }
 
-//     // make sure the diagonal element is not negative either
-//     if (ak[0] < 0.0) {
-//       fprintf(stderr,
-//               "Fatal error in incomplete Cholesky preconditioner:\nNegative "
-//               "diagonal element at row %d (value = %lg).",
-//               k, ak[0]);
-//       return false;
-//     }
+    k_idx = _ai[i] - base;
+    if (_av[k_idx] <= 0) {
+      std::cerr << "non-positive diagonal!\n";
+      return false;
+    }
+    const double aii = std::sqrt(_av[k_idx]);
+    _av[k_idx++] = aii;
+    for (; k_idx != _ai[i + 1] - base; k_idx++)
+      _av[k_idx] /= aii;
+  }
+  if (_mkl_base == SPARSE_INDEX_BASE_ONE)
+    sp_fill();
+  else
+    to_one_based();
+  return true;
+}
 
-//     // set the diagonal element
-//     double akk = std::sqrt(ak[0]);
-//     ak[0] = akk;
-//     tmp[rowk[0] - _mkl_base] = akk;
+bool incomplete_cholesky_k::solve(double const *const b, double *const x) {
+  sparse_operation_t transA = SPARSE_OPERATION_TRANSPOSE;
+  _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
+  _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
+  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
+  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, b, _interm_vec.data());
 
-//     // divide column by akk
-//     for (MKL_INT j = 1; j < Lk; ++j) {
-//       ak[j] /= akk;
-//       tmp[rowk[j] - _mkl_base] = ak[j];
-//     }
-
-//     // loop over all other columns
-//     for (MKL_INT _j = 1; _j < Lk; ++_j) {
-//       MKL_INT j = rowk[_j] - _mkl_base;
-//       double tjk = tmp[j];
-//       if (tjk != 0.0) {
-//         double *aj = val + col[j] - _mkl_base;
-//         MKL_INT Lj = col[j + 1] - col[j];
-//         MKL_INT *rowj = row + col[j] - _mkl_base;
-
-//         for (MKL_INT i = 0; i < Lj; i++)
-//           aj[i] -= tmp[rowj[i] - _mkl_base] * tjk;
-//       }
-//     }
-
-//     // reset temp buffer
-//     for (MKL_INT j = 0; j < Lk; ++j)
-//       tmp[rowk[j] - _mkl_base] = 0.0;
-//   }
-
-//   return true;
-// }
-
-// bool incomplete_cholesky_k::solve(double const *const b, double *const x) {
-//   sparse_operation_t transA = SPARSE_OPERATION_TRANSPOSE;
-//   _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
-//   _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
-//   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
-//   mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, b, _interm_vec.get());
-
-//   transA = SPARSE_OPERATION_NON_TRANSPOSE;
-//   mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, _interm_vec.get(), x);
-//   return true;
-// }
+  transA = SPARSE_OPERATION_NON_TRANSPOSE;
+  mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, _interm_vec.data(), x);
+  return true;
+}
 } // namespace mkl_wrapper

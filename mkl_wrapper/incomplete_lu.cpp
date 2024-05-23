@@ -294,9 +294,7 @@ bool incomplete_lu_k::numeric_factorize(mkl_sparse_mat const *const A) {
       }
       for (; j_idx != _ai[k + 1] - base && _j_idx != _ai[i + 1] - base;) {
         if (_aj[_j_idx] == _aj[j_idx]) {
-          _av[_j_idx] -= aik * _av[j_idx];
-          j_idx++;
-          _j_idx++;
+          _av[_j_idx++] -= aik * _av[j_idx++];
         } else if (_aj[_j_idx] < _aj[j_idx])
           _j_idx++;
         else
