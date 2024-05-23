@@ -79,10 +79,6 @@ if (USE_METIS_LIB)
   find_package(METIS REQUIRED)
 endif(USE_METIS_LIB)
 
-if (USE_ARPACK_LIB)
-  find_package(arpackng REQUIRED)
-endif(USE_ARPACK_LIB)
-
 configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/config.h.in"
   "${CMAKE_BINARY_DIR}/config.h")
