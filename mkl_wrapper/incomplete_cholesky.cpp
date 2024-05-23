@@ -111,16 +111,15 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
     if (missing_diag)
       return false;
   }
-  // if (_level == 0) {
-  //   _nnz = A->nnz();
-  //   _aj.reset(new MKL_INT[_nnz]);
-  //   _av.reset(new double[_nnz]);
-  //   std::copy(std::execution::par_unseq, A->get_ai().get(),
-  //             A->get_ai().get() + n + 1, _ai.get());
-  //   std::copy(std::execution::par_unseq, A->get_aj().get(),
-  //             A->get_aj().get() + _nnz, _aj.get());
-  // } else
-  {
+  if (_level == 0 && sym) {
+    _nnz = A->nnz();
+    _aj.reset(new MKL_INT[_nnz]);
+    _av.reset(new double[_nnz]);
+    std::copy(std::execution::par_unseq, A->get_ai().get(),
+              A->get_ai().get() + n + 1, _ai.get());
+    std::copy(std::execution::par_unseq, A->get_aj().get(),
+              A->get_aj().get() + _nnz, _aj.get());
+  } else {
     _ai[0] = base;
     MKL_INT aj_size = A->nnz();
     _aj.reset(new MKL_INT[aj_size]);
