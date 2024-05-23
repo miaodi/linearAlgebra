@@ -83,7 +83,34 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
   _mkl_base = A->mkl_base();
   _interm_vec.resize(_nrow);
   const MKL_INT n = A->rows();
+  const MKL_INT base = A->mkl_base();
+  auto ai = A->get_ai();
+  auto aj = A->get_aj();
   _ai.reset(new MKL_INT[n + 1]);
+  const bool sym = A->mkl_descr().type == SPARSE_MATRIX_TYPE_SYMMETRIC;
+  _diagPos.resize(_nrow);
+  if (sym) {
+#pragma omp parallel for
+    for (MKL_INT i = 0; i < _nrow; i++) {
+      _diagPos[i] = ai[i] - base;
+    }
+  } else {
+    volatile bool missing_diag = false;
+#pragma omp parallel for shared(missing_diag)
+    for (MKL_INT i = 0; i < _nrow; i++) {
+      if (missing_diag)
+        continue;
+      auto mid = std::find(aj.get() + ai[i] - base, aj.get() + ai[i + 1] - base,
+                           i + base);
+      if (mid == aj.get() + ai[i + 1] - base) {
+        std::cerr << "Could not find diagonal!" << std::endl;
+        missing_diag = true;
+      }
+      _diagPos[i] = mid - aj.get();
+    }
+    if (missing_diag)
+      return false;
+  }
   // if (_level == 0) {
   //   _nnz = A->nnz();
   //   _aj.reset(new MKL_INT[_nnz]);
@@ -94,9 +121,6 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
   //             A->get_aj().get() + _nnz, _aj.get());
   // } else
   {
-    const MKL_INT base = A->mkl_base();
-    auto ai = A->get_ai();
-    auto aj = A->get_aj();
     _ai[0] = base;
     MKL_INT aj_size = A->nnz();
     _aj.reset(new MKL_INT[aj_size]);
@@ -105,27 +129,23 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
     MKL_INT list_size = 0;
     MKL_INT j;
     MKL_INT k;
+    std::vector<MKL_INT> jStart(n);
 
     for (MKL_INT i = 0; i < n; i++) {
+      jStart[i] = _ai[i] - base + 1;
       // initialize levels
       auto rowIt = _rowLevels.before_begin();
-      k = ai[i] - base;
-      while (aj[k] - base < i) {
-        k++;
-      }
+      k = _diagPos[i];
       list_size = k;
       for (; k != ai[i + 1] - base; k++) {
         rowIt = _rowLevels.insert_after(rowIt, std::make_pair(aj[k] - base, 0));
       }
-      list_size = ai[i + 1] - base - list_size;
+      list_size = k - list_size;
 
       for (k = 0; k < i; k++) {
-        j = _ai[k] - base;
-        while (_aj[j] - base < i && j != _ai[k + 1] - base) {
-          j++;
-        }
-        if (_aj[j] - base != i)
+        if (_aj[jStart[k]] - base != i || jStart[k] == _ai[k + 1] - base)
           continue;
+        j = jStart[k]++;
         // std::cout<<"hello\n";
         auto eij = _rowLevels.begin();
         auto lik = av_levels[j];
@@ -207,22 +227,16 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
   const MKL_INT n = rows();
   const MKL_INT base = mkl_base();
   MKL_INT k_idx, A_k_idx, k, _j_idx, j_idx;
+  std::vector<MKL_INT> jStart(n);
+  std::transform(_ai.get(), _ai.get() + _nrow, jStart.begin(),
+                 [base](const MKL_INT i) { return i - base + 1; });
+  // std::cout << jStart.size() << std::endl;
 
   for (MKL_INT i = 0; i < n; i++) {
 
     k_idx = _ai[i] - base;
-    while (_aj[k_idx] - base < i) {
-      k_idx++;
-    }
-    A_k_idx = ai[i] - base;
-    while (aj[A_k_idx] - base < i) {
-      A_k_idx++;
-    }
+    A_k_idx = _diagPos[i];
 
-    if (aj[A_k_idx] - base != i || _aj[k_idx] - base != i) {
-      std::cerr << "missing aii at row: " << i + base << std::endl;
-      return false;
-    }
     // std::cout << "hello\n";
     for (; k_idx != _ai[i + 1] - base; k_idx++) {
       if (A_k_idx == ai[i + 1] - base || _aj[k_idx] != aj[A_k_idx]) {
@@ -230,17 +244,28 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
       } else {
         _av[k_idx] = av[A_k_idx++];
       }
-      // std::cout << _av[k_idx] << " ";
     }
-    // std::cout << std::endl;
 
     for (k = 0; k < i; k++) {
-      j_idx = _ai[k] - base;
-      while (_aj[j_idx] - base < i && j_idx != _ai[k + 1] - base) {
-        j_idx++;
-      }
-      if (_aj[j_idx] - base != i)
+      // j_idx = _ai[k] - base;
+      // while (_aj[j_idx] - base < i && j_idx != _ai[k + 1] - base) {
+      //   j_idx++;
+      // }
+      // while (_aj[jStart[k]] - base < i && jStart[k] != _ai[k + 1] - base) {
+      //   jStart[k]++;
+      // }
+      // std::cout<<j_idx<<" "<<jStart[k]<<std::endl;
+      // if (_aj[j_idx] - base != i)
+      //   continue;
+
+      // std::cout<<jStart[k]<<std::endl;
+      // while (_aj[jStart[k]] - base < i && jStart[k] != _ai[k + 1] - base) {
+      //   jStart[k]++;
+      // }
+      if (_aj[jStart[k]] - base != i || jStart[k] == _ai[k + 1] - base)
         continue;
+      j_idx = jStart[k]++;
+
       const double aki = _av[j_idx];
       _j_idx = _ai[i] - base;
       for (; j_idx != _ai[k + 1] - base && _j_idx != _ai[i + 1] - base;) {

@@ -123,7 +123,7 @@ mkl_sparse_mat::mkl_sparse_mat(sparse_matrix_t mkl_mat) {
     std::copy(std::execution::seq, rows_start, rows_start + _nrow + 1,
               _ai.get());
   }
-  
+
   if (col_index) {
     _aj.reset(new MKL_INT[_nnz]);
     std::copy(std::execution::seq, col_index, col_index + _nnz, _aj.get());
@@ -341,7 +341,7 @@ void mkl_sparse_mat::print() const {
   }
   std::cout << std::endl;
   std::cout << "aj:\n";
-  
+
   for (MKL_INT i = 0; i < _nrow; i++) {
     for (MKL_INT j = _ai[i] - (MKL_INT)_mkl_base;
          j < _ai[i + 1] - (MKL_INT)_mkl_base; j++)
@@ -352,7 +352,7 @@ void mkl_sparse_mat::print() const {
   //   std::cout << _aj[i] << " ";
   // }
   std::cout << std::endl;
-  
+
   for (MKL_INT i = 0; i < _nrow; i++) {
     for (MKL_INT j = _ai[i] - (MKL_INT)_mkl_base;
          j < _ai[i + 1] - (MKL_INT)_mkl_base; j++)
@@ -656,7 +656,8 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
   for (MKL_INT i = 0; i < _nrow; i++) {
     auto begin = ai[i] - _mkl_base;
     auto end = ai[i + 1] - _mkl_base;
-    auto mid = std::find(aj.get() + begin, aj.get() + end, i + _mkl_base);
+    auto mid =
+        std::find(aj.get() + begin, aj.get() + end, i + (MKL_INT)_mkl_base);
     if (mid == aj.get() + end) {
       std::cerr << "Could not find diagonal!" << std::endl;
     } else {

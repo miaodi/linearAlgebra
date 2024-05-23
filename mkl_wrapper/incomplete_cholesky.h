@@ -18,5 +18,6 @@ public:
 
 protected:
   int _level;
+  std::vector<MKL_INT> _diagPos;
 };
 } // namespace mkl_wrapper
