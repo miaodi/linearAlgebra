@@ -9,73 +9,7 @@
 #include <mkl_spblas.h>
 
 namespace mkl_wrapper {
-incomplete_cholesky_k::incomplete_cholesky_k() : incomplete_fact() {
-  // std::ofstream myfile;
-  // myfile.open("sym_mat.svg");
-  // print_svg(myfile);
-  // myfile.close();
-  // matrix_descr lt_descr;
-  // lt_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
-  // lt_descr.mode = SPARSE_FILL_MODE_UPPER;
-  // sparse_matrix_t lt_mat;
-  // _mkl_stat = mkl_sparse_copy(A.mkl_handler(), lt_descr, &lt_mat);
-  // std::cout << "mkl_sparse_copy: " << _mkl_stat << std::endl;
-  // for (int l = 0; l < _level; l++) {
-  //   lt_descr.type = SPARSE_MATRIX_TYPE_GENERAL;
-  //   lt_descr.mode = SPARSE_FILL_MODE_UPPER;
-  //   sparse_matrix_t result;
-  //   _mkl_stat = mkl_sparse_sp2m(SPARSE_OPERATION_TRANSPOSE, lt_descr, lt_mat,
-  //                               SPARSE_OPERATION_NON_TRANSPOSE, lt_descr,
-  //                               lt_mat, SPARSE_STAGE_NNZ_COUNT, &result);
-  //   std::cout << "mkl_sparse_sp2m: " << _mkl_stat << std::endl;
-  //   _mkl_stat =
-  //       mkl_sparse_sp2m(SPARSE_OPERATION_TRANSPOSE, lt_descr, lt_mat,
-  //                       SPARSE_OPERATION_NON_TRANSPOSE, lt_descr, lt_mat,
-  //                       SPARSE_STAGE_FINALIZE_MULT_NO_VAL, &result);
-  //   std::cout << "mkl_sparse_sp2m: " << _mkl_stat << std::endl;
-  //   // _mkl_stat =
-  //   //     mkl_sparse_sp2m(SPARSE_OPERATION_TRANSPOSE, lt_descr, lt_mat,
-  //   //                     SPARSE_OPERATION_NON_TRANSPOSE, lt_descr, lt_mat,
-  //   //                     SPARSE_STAGE_FULL_MULT, &result);
-  //   // std::cout << "mkl_sparse_sp2m: " << _mkl_stat << std::endl;
-  //   mkl_sparse_destroy(lt_mat);
-  //   lt_mat = result;
-  // }
-
-  // MKL_INT *rows_start{nullptr};
-  // MKL_INT *rows_end;
-  // MKL_INT *col_index{nullptr};
-  // double *values{nullptr};
-  // _mkl_stat =
-  //     mkl_sparse_d_export_csr(lt_mat, &_mkl_base, &_nrow, &_ncol,
-  //     &rows_start,
-  //                             &rows_end, &col_index, &values);
-
-  // if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
-  //   std::cout << "MKL EXPORT CSR FAILED, CODE: " << _mkl_stat << "\n";
-  // }
-  // if (rows_start) {
-  //   _nnz = rows_start[_nrow] - _mkl_base;
-
-  //   _aj.reset(new MKL_INT[_nnz]);
-  //   _av.reset(new double[_nnz]);
-  //   _ai.reset(new MKL_INT[_nrow + 1]);
-  //   std::copy(std::execution::seq, rows_start, rows_start + _nrow + 1,
-  //             _ai.get());
-  // }
-
-  // if (col_index) {
-  //   std::copy(std::execution::seq, col_index, col_index + _nnz, _aj.get());
-  //   std::cout << std::endl;
-  // }
-
-  // if (values) {
-  //   std::copy(std::execution::seq, values, values + _nnz, _av.get());
-  // }
-
-  // sp_fill();
-  // _interm_vec.reset(new double[_nrow]);
-}
+incomplete_cholesky_k::incomplete_cholesky_k() : incomplete_fact() {}
 
 bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
   _nrow = A->rows();
@@ -246,21 +180,6 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
     }
 
     for (k = 0; k < i; k++) {
-      // j_idx = _ai[k] - base;
-      // while (_aj[j_idx] - base < i && j_idx != _ai[k + 1] - base) {
-      //   j_idx++;
-      // }
-      // while (_aj[jStart[k]] - base < i && jStart[k] != _ai[k + 1] - base) {
-      //   jStart[k]++;
-      // }
-      // std::cout<<j_idx<<" "<<jStart[k]<<std::endl;
-      // if (_aj[j_idx] - base != i)
-      //   continue;
-
-      // std::cout<<jStart[k]<<std::endl;
-      // while (_aj[jStart[k]] - base < i && jStart[k] != _ai[k + 1] - base) {
-      //   jStart[k]++;
-      // }
       if (_aj[jStart[k]] - base != i || jStart[k] == _ai[k + 1] - base)
         continue;
       j_idx = jStart[k]++;
