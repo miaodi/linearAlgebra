@@ -62,11 +62,9 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
     MKL_INT list_size = 0;
     MKL_INT j;
     MKL_INT k;
-    std::vector<MKL_INT> jStart(n);
+    std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
 
     for (MKL_INT i = 0; i < n; i++) {
-      jStart[i] = _ai[i] - base + 1;
-      // initialize levels
       auto rowIt = _rowLevels.before_begin();
       k = _diagPos[i];
       list_size = k;
@@ -74,26 +72,26 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
         rowIt = _rowLevels.insert_after(rowIt, std::make_pair(aj[k] - base, 0));
       }
       list_size = k - list_size;
+      // std::cout << "jKRow[i] size: " << jKRow[i].size() << std::endl;
+      for (auto &k_pair : jKRow[i]) {
+        k = k_pair.first;
+        j = k_pair.second;
 
-      for (k = 0; k < i; k++) {
-        if (_aj[jStart[k]] - base != i || jStart[k] == _ai[k + 1] - base)
-          continue;
-        j = jStart[k]++;
-        // std::cout<<"hello\n";
+        if (j + 1 != _ai[k + 1] - base) {
+          jKRow[_aj[j + 1] - base].push_back({k, j + 1});
+        }
         auto eij = _rowLevels.begin();
         auto lik = av_levels[j];
         MKL_INT nextIdx = std::next(eij) == _rowLevels.end()
                               ? std::numeric_limits<MKL_INT>::max()
                               : std::next(eij)->first;
         for (; j != _ai[k + 1] - base; j++) {
-          // std::cout << i << ":" << j << " insert: ";
           while (nextIdx <= _aj[j] - base) {
             eij = std::next(eij);
             nextIdx = std::next(eij) == _rowLevels.end()
                           ? std::numeric_limits<MKL_INT>::max()
                           : std::next(eij)->first;
           }
-          // std::cout << "inner j: " << j << std::endl;
           if (lik + av_levels[j] + 1 <= _level) {
             if (eij->first == _aj[j] - base) {
               if (eij->second > lik + av_levels[j] + 1) {
@@ -106,47 +104,41 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
                             ? std::numeric_limits<MKL_INT>::max()
                             : std::next(eij)->first;
               list_size++;
-              // std::cout << _aj[j] - base << std::endl;
             }
-            // std::cout << eij->first + base << " ";
           }
         }
       }
-      // std::cout << "step 3: \n";
+      if (_ai[i] + list_size - base > aj_size) {
+        MKL_INT new_aj_size;
+        if (2 * i >= n)
+          new_aj_size = 2 * aj_size;
+        else
+          new_aj_size = aj_size * std::ceil(n * 1. / i);
+        std::shared_ptr<MKL_INT[]> new_aj(new MKL_INT[new_aj_size]);
+        auto new_levels = std::make_unique<MKL_INT[]>(new_aj_size);
+
+        std::copy(std::execution::seq, _aj.get(), _aj.get() + aj_size,
+                  new_aj.get());
+        std::copy(std::execution::seq, av_levels.get(),
+                  av_levels.get() + aj_size, new_levels.get());
+        std::swap(new_aj, _aj);
+        std::swap(new_levels, av_levels);
+        std::swap(new_aj_size, aj_size);
+      }
+
       rowIt = _rowLevels.begin();
-      // std::cout << "i: " << i << " j: " << rowIt->first << std::endl;
       MKL_INT pos = _ai[i] - base;
       while (rowIt != _rowLevels.end()) {
-        if (_ai[i] + list_size - base > aj_size) {
-          MKL_INT new_aj_size;
-          if (2 * i >= n)
-            new_aj_size = 2 * aj_size;
-          else
-            new_aj_size = aj_size * std::ceil(n * 1. / i);
-          std::shared_ptr<MKL_INT[]> new_aj(new MKL_INT[new_aj_size]);
-          auto new_levels = std::make_unique<MKL_INT[]>(new_aj_size);
-
-          std::copy(std::execution::seq, _aj.get(), _aj.get() + aj_size,
-                    new_aj.get());
-          std::copy(std::execution::seq, av_levels.get(),
-                    av_levels.get() + aj_size, new_levels.get());
-          std::swap(new_aj, _aj);
-          std::swap(new_levels, av_levels);
-          std::swap(new_aj_size, aj_size);
-          // std::cout<<"copy\n";
-        }
         _aj[pos] = rowIt->first + base;
         av_levels[pos++] = rowIt->second;
-        // std::cout << rowIt->first + base << " ";
         rowIt++;
       }
-      // std::cout<<"heihei\n";
-      // std::cout << std::endl;
       _ai[i + 1] = _ai[i] + list_size;
+      if (list_size != 1)
+        jKRow[_aj[_ai[i] - base + 1] - base].push_back({i, _ai[i] - base + 1});
+      jKRow[i].clear();
       _rowLevels.clear();
-      // std::cout << _ai[i + 1] << std::endl;
     }
-    // std::abort();
     _nnz = _ai[n] - base;
     _av.reset(new double[_nnz]);
   }
@@ -160,17 +152,12 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
   const MKL_INT n = rows();
   const MKL_INT base = mkl_base();
   MKL_INT k_idx, A_k_idx, k, _j_idx, j_idx;
-  std::vector<MKL_INT> jStart(n);
-  std::transform(_ai.get(), _ai.get() + _nrow, jStart.begin(),
-                 [base](const MKL_INT i) { return i - base + 1; });
-  // std::cout << jStart.size() << std::endl;
-
+  std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
   for (MKL_INT i = 0; i < n; i++) {
 
     k_idx = _ai[i] - base;
     A_k_idx = _diagPos[i];
 
-    // std::cout << "hello\n";
     for (; k_idx != _ai[i + 1] - base; k_idx++) {
       if (A_k_idx == ai[i + 1] - base || _aj[k_idx] != aj[A_k_idx]) {
         _av[k_idx] = 0;
@@ -178,11 +165,12 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
         _av[k_idx] = av[A_k_idx++];
       }
     }
+    for (auto &k_pair : jKRow[i]) {
+      k = k_pair.first;
+      j_idx = k_pair.second;
 
-    for (k = 0; k < i; k++) {
-      if (_aj[jStart[k]] - base != i || jStart[k] == _ai[k + 1] - base)
-        continue;
-      j_idx = jStart[k]++;
+      if (j_idx + 1 != _ai[k + 1] - base)
+        jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
 
       const double aki = _av[j_idx];
       _j_idx = _ai[i] - base;
@@ -205,6 +193,9 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
     _av[k_idx++] = aii;
     for (; k_idx != _ai[i + 1] - base; k_idx++)
       _av[k_idx] /= aii;
+    if (_ai[i + 1] - _ai[i] != 1)
+      jKRow[_aj[_ai[i] - base + 1] - base].push_back({i, _ai[i] - base + 1});
+    jKRow[i].clear();
   }
   if (_mkl_base == SPARSE_INDEX_BASE_ONE)
     sp_fill();
