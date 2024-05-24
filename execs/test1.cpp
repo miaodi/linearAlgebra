@@ -75,7 +75,7 @@ void register_solvers() {
                                                                 gmres_iluk);
 
   create_method cg_ic0 = [](mkl_wrapper::mkl_sparse_mat &A) {
-    auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>(A);
+    auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();
     prec->symbolic_factorize(&A);
     prec->numeric_factorize(&A);
     auto solver = std::make_unique<mkl_wrapper::mkl_pcg_solver>(&A, prec);
