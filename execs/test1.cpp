@@ -74,12 +74,17 @@ void register_solvers() {
   utils::singleton<mkl_wrapper::solver_factory>::instance().reg("gmres+iluk",
                                                                 gmres_iluk);
 
-  create_method cg_ic0 = [](mkl_wrapper::mkl_sparse_mat &A) {
+  create_method cg_incomplete_cholesky_k = [](mkl_wrapper::mkl_sparse_mat &A) {
     auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();
     prec->set_level(1);
-
+    // std::ofstream myfile;
+    // myfile.open("icc.svg");
+    // prec->print_svg(myfile);
+    // myfile.close();
+    // std::abort();
     utils::Elapse<>::execute("incomplete_cholesky_k symbolic factorization: ",
                              [&A, &prec]() { prec->symbolic_factorize(&A); });
+
     utils::Elapse<>::execute("incomplete_cholesky_k numeric factorization: ",
                              [&A, &prec]() { prec->numeric_factorize(&A); });
     auto solver = std::make_unique<mkl_wrapper::mkl_pcg_solver>(&A, prec);
@@ -88,8 +93,8 @@ void register_solvers() {
     solver->set_rel_tol(1e-8);
     return std::move(solver);
   };
-  utils::singleton<mkl_wrapper::solver_factory>::instance().reg("cg+ic0",
-                                                                cg_ic0);
+  utils::singleton<mkl_wrapper::solver_factory>::instance().reg(
+      "cg+incomplete_cholesky_k", cg_incomplete_cholesky_k);
 
   create_method cg = [](mkl_wrapper::mkl_sparse_mat &A) {
     auto solver = std::make_unique<mkl_wrapper::mkl_pcg_solver>(&A);
@@ -125,15 +130,15 @@ int main() {
   std::vector<double> rhs(size, 1.);
   std::vector<double> res(size, 0);
   auto solver =
-      utils::singleton<mkl_wrapper::solver_factory>::instance().create("cg+ic0",
+      utils::singleton<mkl_wrapper::solver_factory>::instance().create("cg+incomplete_cholesky_k",
                                                                        k);
-  // std::cout << "cg+ic0: \n";
-  // solver->solve(rhs.data(), res.data());
-
+  std::cout << "cg+incomplete_cholesky_k: \n";
+  res = std::vector<double>(size, 0);
+  solver->solve(rhs.data(), res.data());
   solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
       "gmres+iluk", k);
-  // std::cout << "gmres+iluk: \n";
-  // res = std::vector<double>(size, 0);
-  // solver->solve(rhs.data(), res.data());
+  std::cout << "gmres+iluk: \n";
+  res = std::vector<double>(size, 0);
+  solver->solve(rhs.data(), res.data());
   return 0;
 }
