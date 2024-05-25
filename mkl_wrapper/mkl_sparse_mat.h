@@ -40,9 +40,9 @@ public:
   mkl_sparse_mat(sparse_matrix_t mkl_mat);
 
   ~mkl_sparse_mat();
-  virtual void sp_fill();
+  void sp_fill();
 
-  void optimize();
+  virtual void optimize();
 
   void prune(const double tol = 1e-16);
 
@@ -115,9 +115,9 @@ protected:
 };
 
 // incomplete factorization preconditioner
-class incomplete_fact : public mkl_sparse_mat {
+class precond : public mkl_sparse_mat {
 public:
-  incomplete_fact() : mkl_sparse_mat() {}
+  precond() : mkl_sparse_mat() {}
 
   virtual bool numeric_factorize(mkl_sparse_mat const *const A) {
     return false;
@@ -178,7 +178,7 @@ public:
   // ownership of csr data
   mkl_sparse_mat_sym(sparse_matrix_t mkl_mat);
 
-  virtual void sp_fill();
+  virtual void optimize();
 };
 
 class mkl_sparse_mat_diag : public mkl_sparse_mat {

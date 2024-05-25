@@ -4,7 +4,7 @@
 namespace mkl_wrapper {
 
 // Incomplete Cholesky k level
-class incomplete_cholesky_k : public incomplete_fact {
+class incomplete_cholesky_k : public precond {
 public:
   incomplete_cholesky_k();
 
@@ -16,6 +16,7 @@ public:
 
   void set_level(const int level) { _level = level; }
 
+  virtual void optimize() override;
 protected:
   int _level;
   std::vector<MKL_INT> _diagPos;

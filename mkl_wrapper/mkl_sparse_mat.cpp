@@ -277,17 +277,17 @@ void mkl_sparse_mat::sp_fill() {
   }
   // TODO: test and verify that order is not needed
   // _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
-  _mkl_descr.type = SPARSE_MATRIX_TYPE_GENERAL;
-  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
-  _mkl_descr.mode = SPARSE_FILL_MODE_FULL;
   optimize();
 }
 
 void mkl_sparse_mat::optimize() {
+  _mkl_descr.type = SPARSE_MATRIX_TYPE_GENERAL;
+  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
+  _mkl_descr.mode = SPARSE_FILL_MODE_FULL;
   mkl_sparse_set_mv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _mkl_descr,
                          1000);
   mkl_sparse_set_memory_hint(_mkl_mat, SPARSE_MEMORY_AGGRESSIVE);
-  // mkl_sparse_optimize(_mkl_mat);
+  mkl_sparse_optimize(_mkl_mat);
 }
 
 void mkl_sparse_mat::prune(const double tol) {
@@ -702,24 +702,15 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const MKL_INT row, const MKL_INT col,
   sp_fill();
 }
 
-void mkl_sparse_mat_sym::sp_fill() {
-  if (_mkl_mat) {
-    mkl_sparse_destroy(_mkl_mat);
-    _mkl_mat = nullptr;
-  }
-  _mkl_stat =
-      mkl_sparse_d_create_csr(&_mkl_mat, _mkl_base, _nrow, _ncol, _ai.get(),
-                              _ai.get() + 1, _aj.get(), _av.get());
-  if (_mkl_stat != SPARSE_STATUS_SUCCESS) {
-    std::cerr << "Matrix is not created, state: " << _mkl_stat << std::endl;
-  }
-
-  _mkl_stat = mkl_sparse_order(_mkl_mat); // ordering in CSR format
+void mkl_sparse_mat_sym::optimize() {
   _mkl_descr.type = SPARSE_MATRIX_TYPE_SYMMETRIC;
   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
   _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
 
-  optimize();
+  mkl_sparse_set_mv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _mkl_descr,
+                         1000);
+  mkl_sparse_set_memory_hint(_mkl_mat, SPARSE_MEMORY_AGGRESSIVE);
+  mkl_sparse_optimize(_mkl_mat);
 }
 
 mkl_sparse_mat_diag::mkl_sparse_mat_diag(const MKL_INT size, const double val)

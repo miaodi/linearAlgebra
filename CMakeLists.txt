@@ -47,10 +47,6 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 
-if (USE_AMGCL_LIB)
-  FetchContent_MakeAvailable(AMGCL)
-endif(USE_AMGCL_LIB)
-
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # using GCC
   set(MKL_THREADING gnu_thread)
@@ -66,6 +62,10 @@ find_package(TBB REQUIRED)
 find_package(OpenMP REQUIRED)
 
 find_package(LAPACK REQUIRED)
+
+if (USE_AMGCL_LIB)
+  FetchContent_MakeAvailable(AMGCL)
+endif(USE_AMGCL_LIB)
 
 if (USE_MUMPS_LIB)
   find_package(MUMPS REQUIRED COMPONENTS SEQ METIS OPENMP)

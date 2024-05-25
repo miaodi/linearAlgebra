@@ -61,6 +61,7 @@ public:
       : mkl_iterative_solver(), _A(A), _P(P) {}
 
   virtual bool solve(double const *const b, double *const x) override;
+  mkl_sparse_mat *getPrecond() { return _P.get(); }
 
 protected:
   mkl_sparse_mat *_A;

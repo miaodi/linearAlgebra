@@ -3,9 +3,9 @@
 
 namespace mkl_wrapper {
 
-class incomplete_lu_base : public incomplete_fact {
+class incomplete_lu_base : public precond {
 public:
-  incomplete_lu_base() : incomplete_fact() {}
+  incomplete_lu_base() : precond() {}
 
   virtual bool solve(double const *const b, double *const x) override;
 };
