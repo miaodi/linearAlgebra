@@ -58,7 +58,7 @@ void register_solvers() {
 
   create_method gmres_iluk = [](mkl_wrapper::mkl_sparse_mat &A) {
     auto prec = std::make_shared<mkl_wrapper::incomplete_lu_k>();
-    prec->set_level(1);
+    prec->set_level(4);
 
     utils::Elapse<>::execute("incomplete_lu_k symbolic factorization: ",
                              [&A, &prec]() { prec->symbolic_factorize(&A); });
@@ -76,7 +76,7 @@ void register_solvers() {
 
   create_method cg_incomplete_cholesky_k = [](mkl_wrapper::mkl_sparse_mat &A) {
     auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();
-    prec->set_level(1);
+    prec->set_level(4);
     // std::ofstream myfile;
     // myfile.open("icc.svg");
     // prec->print_svg(myfile);
@@ -134,11 +134,14 @@ int main() {
                                                                        k);
   std::cout << "cg+incomplete_cholesky_k: \n";
   res = std::vector<double>(size, 0);
+  solver->set_print_level(1);
   solver->solve(rhs.data(), res.data());
   solver = utils::singleton<mkl_wrapper::solver_factory>::instance().create(
       "gmres+iluk", k);
   std::cout << "gmres+iluk: \n";
   res = std::vector<double>(size, 0);
+  solver->set_print_level(1);
   solver->solve(rhs.data(), res.data());
+
   return 0;
 }
