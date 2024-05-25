@@ -55,10 +55,10 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
     _nnz = A->nnz();
     _aj.reset(new MKL_INT[_nnz]);
     _av.reset(new double[_nnz]);
-    std::copy(std::execution::seq, A->get_ai().get(),
-              A->get_ai().get() + n + 1, _ai.get());
-    std::copy(std::execution::seq, A->get_aj().get(),
-              A->get_aj().get() + _nnz, _aj.get());
+    std::copy(std::execution::seq, A->get_ai().get(), A->get_ai().get() + n + 1,
+              _ai.get());
+    std::copy(std::execution::seq, A->get_aj().get(), A->get_aj().get() + _nnz,
+              _aj.get());
   } else {
     _ai[0] = base;
     MKL_INT aj_size = A->nnz();
@@ -81,12 +81,14 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
     for (MKL_INT i = 0; i < n; i++) {
       auto rowIt = _rowLevels.before_begin();
       k = _diagPos[i];
-      list_size = k;
+      list_size = ai[i + 1] - base - k;
       for (; k != ai[i + 1] - base; k++) {
         rowIt = _rowLevels.insert_after(rowIt, std::make_pair(aj[k] - base, 0));
       }
-      list_size = k - list_size;
-      // std::cout << "jKRow[i] size: " << jKRow[i].size() << std::endl;
+
+      // use n as the list end to prevent from branch prediction
+      rowIt = _rowLevels.insert_after(rowIt, std::make_pair(n, 0));
+      
       for (auto &k_pair : jKRow[i]) {
         k = k_pair.first;
         j = k_pair.second;
@@ -99,16 +101,12 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
         }
         auto lik = av_levels[j];
         auto eij = _rowLevels.begin();
-        MKL_INT nextIdx = std::next(eij) == _rowLevels.end()
-                              ? std::numeric_limits<MKL_INT>::max()
-                              : std::next(eij)->first;
+        MKL_INT nextIdx = std::next(eij)->first;
         for (; j != _ai[k + 1] - base; j++) {
           MKL_INT jk_idx = _aj[j] - base;
           while (nextIdx <= jk_idx) {
             eij = std::next(eij);
-            nextIdx = std::next(eij) == _rowLevels.end()
-                          ? std::numeric_limits<MKL_INT>::max()
-                          : std::next(eij)->first;
+            nextIdx = std::next(eij)->first;
           }
           MKL_INT level = lik + av_levels[j] + 1;
           if (level <= _level) {
@@ -118,9 +116,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
               }
             } else {
               eij = _rowLevels.insert_after(eij, std::make_pair(jk_idx, level));
-              nextIdx = std::next(eij) == _rowLevels.end()
-                            ? std::numeric_limits<MKL_INT>::max()
-                            : std::next(eij)->first;
+              nextIdx = std::next(eij)->first;
               list_size++;
             }
           }
@@ -148,7 +144,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
       }
       rowIt = _rowLevels.begin();
       MKL_INT pos = _ai[i] - base;
-      while (rowIt != _rowLevels.end()) {
+      for (MKL_INT ii = 0; ii < list_size; ii++) {
         _aj[pos] = rowIt->first + base;
         if (pos == _ai[i] - base + 1) {
           if (jKRow[_aj[pos] - base].empty()) {
