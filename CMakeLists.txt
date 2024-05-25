@@ -16,6 +16,8 @@ option(USE_ARPACK_LIB "Use arpack for generalize eigenvalue problem" OFF)
 
 option(USE_METIS_LIB "Use metis for matrix reordering" OFF) 
 
+option(USE_BOOST_LIB "Use boost library" OFF) 
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules" )
 # Include the init module
 include(MorseInit)
@@ -57,6 +59,7 @@ endif()
 
 set(MKL_ARCH intel64)
 set(MKL_INTERFACE lp64)
+set(MKL_LINK static)
 find_package(MKL CONFIG REQUIRED)
 find_package(TBB REQUIRED)
 find_package(OpenMP REQUIRED)
@@ -78,6 +81,10 @@ endif(USE_ARPACK_LIB)
 if (USE_METIS_LIB)
   find_package(METIS REQUIRED)
 endif(USE_METIS_LIB)
+
+if (USE_BOOST_LIB)
+  find_package(Boost REQUIRED)
+endif(USE_BOOST_LIB)
 
 configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/config.h.in"

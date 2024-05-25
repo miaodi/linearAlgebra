@@ -8,6 +8,12 @@
 #include <mkl_sparse_handle.h>
 #include <mkl_spblas.h>
 
+#include "../config.h"
+
+#ifdef USE_BOOST_LIB
+#include <boost/pool/pool_alloc.hpp>
+#endif
+
 namespace mkl_wrapper {
 incomplete_cholesky_k::incomplete_cholesky_k() : precond() {}
 
@@ -49,20 +55,28 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
     _nnz = A->nnz();
     _aj.reset(new MKL_INT[_nnz]);
     _av.reset(new double[_nnz]);
-    std::copy(std::execution::par_unseq, A->get_ai().get(),
+    std::copy(std::execution::seq, A->get_ai().get(),
               A->get_ai().get() + n + 1, _ai.get());
-    std::copy(std::execution::par_unseq, A->get_aj().get(),
+    std::copy(std::execution::seq, A->get_aj().get(),
               A->get_aj().get() + _nnz, _aj.get());
   } else {
     _ai[0] = base;
     MKL_INT aj_size = A->nnz();
     _aj.reset(new MKL_INT[aj_size]);
     auto av_levels = std::make_unique<MKL_INT[]>(aj_size);
+
+#ifdef USE_BOOST_LIB
+    std::forward_list<std::pair<MKL_INT, MKL_INT>,
+                      boost::fast_pool_allocator<std::pair<MKL_INT, MKL_INT>>>
+        _rowLevels;
+#else
     std::forward_list<std::pair<MKL_INT, MKL_INT>> _rowLevels;
+#endif
     MKL_INT list_size = 0;
     MKL_INT j;
     MKL_INT k;
     std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
+    MKL_INT availableJKRow = 0;
 
     for (MKL_INT i = 0; i < n; i++) {
       auto rowIt = _rowLevels.before_begin();
@@ -78,28 +92,32 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
         j = k_pair.second;
 
         if (j + 1 != _ai[k + 1] - base) {
+          if (jKRow[_aj[j + 1] - base].empty() && availableJKRow < i) {
+            std::swap(jKRow[_aj[j + 1] - base], jKRow[availableJKRow++]);
+          }
           jKRow[_aj[j + 1] - base].push_back({k, j + 1});
         }
-        auto eij = _rowLevels.begin();
         auto lik = av_levels[j];
+        auto eij = _rowLevels.begin();
         MKL_INT nextIdx = std::next(eij) == _rowLevels.end()
                               ? std::numeric_limits<MKL_INT>::max()
                               : std::next(eij)->first;
         for (; j != _ai[k + 1] - base; j++) {
-          while (nextIdx <= _aj[j] - base) {
+          MKL_INT jk_idx = _aj[j] - base;
+          while (nextIdx <= jk_idx) {
             eij = std::next(eij);
             nextIdx = std::next(eij) == _rowLevels.end()
                           ? std::numeric_limits<MKL_INT>::max()
                           : std::next(eij)->first;
           }
-          if (lik + av_levels[j] + 1 <= _level) {
-            if (eij->first == _aj[j] - base) {
-              if (eij->second > lik + av_levels[j] + 1) {
-                eij->second = lik + av_levels[j] + 1;
+          MKL_INT level = lik + av_levels[j] + 1;
+          if (level <= _level) {
+            if (eij->first == jk_idx) {
+              if (eij->second > level) {
+                eij->second = level;
               }
             } else {
-              eij = _rowLevels.insert_after(
-                  eij, std::make_pair(_aj[j] - base, lik + av_levels[j] + 1));
+              eij = _rowLevels.insert_after(eij, std::make_pair(jk_idx, level));
               nextIdx = std::next(eij) == _rowLevels.end()
                             ? std::numeric_limits<MKL_INT>::max()
                             : std::next(eij)->first;
@@ -108,6 +126,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
           }
         }
       }
+      jKRow[i].clear();
 
       _ai[i + 1] = _ai[i] + list_size;
       if (_ai[i + 1] - base > aj_size) {
@@ -131,12 +150,15 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
       MKL_INT pos = _ai[i] - base;
       while (rowIt != _rowLevels.end()) {
         _aj[pos] = rowIt->first + base;
-        if (pos == _ai[i] - base + 1)
+        if (pos == _ai[i] - base + 1) {
+          if (jKRow[_aj[pos] - base].empty()) {
+            std::swap(jKRow[availableJKRow++], jKRow[_aj[pos] - base]);
+          }
           jKRow[_aj[pos] - base].push_back({i, pos});
+        }
         av_levels[pos++] = rowIt->second;
         rowIt++;
       }
-      jKRow[i].clear();
       _rowLevels.clear();
     }
     _nnz = _ai[n] - base;
@@ -153,6 +175,7 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
   const MKL_INT base = mkl_base();
   MKL_INT k_idx, A_k_idx, k, _j_idx, j_idx;
   std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
+  MKL_INT availableJKRow = 0;
   for (MKL_INT i = 0; i < n; i++) {
 
     k_idx = _ai[i] - base;
@@ -169,8 +192,11 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
       k = k_pair.first;
       j_idx = k_pair.second;
 
-      if (j_idx + 1 != _ai[k + 1] - base)
+      if (j_idx + 1 != _ai[k + 1] - base) {
+        if (jKRow[_aj[j_idx + 1] - base].empty() && availableJKRow < i)
+          std::swap(jKRow[_aj[j_idx + 1] - base], jKRow[availableJKRow++]);
         jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
+      }
 
       const double aki = _av[j_idx];
       _j_idx = _ai[i] - base;
@@ -183,11 +209,14 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
           j_idx++;
       }
     }
-    if (_ai[i + 1] - _ai[i] != 1)
-      jKRow[_aj[_ai[i] - base + 1] - base].push_back({i, _ai[i] - base + 1});
     jKRow[i].clear();
-
     k_idx = _ai[i] - base;
+    if (_ai[i + 1] - _ai[i] != 1) {
+      if (jKRow[_aj[k_idx + 1] - base].empty())
+        std::swap(jKRow[availableJKRow++], jKRow[_aj[k_idx + 1] - base]);
+      jKRow[_aj[k_idx + 1] - base].push_back({i, k_idx + 1});
+    }
+
     if (_av[k_idx] <= 0) {
       std::cerr << "non-positive diagonal!\n";
       return false;
@@ -219,8 +248,9 @@ void incomplete_cholesky_k::optimize() {
   _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
 
-  mkl_sparse_set_mv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _mkl_descr,
-                         1000);
+  // mkl_sparse_set_mv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE,
+  // _mkl_descr,
+  //                        1000);
   mkl_sparse_set_sv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _mkl_descr,
                          1000);
   mkl_sparse_set_sv_hint(_mkl_mat, SPARSE_OPERATION_TRANSPOSE, _mkl_descr,

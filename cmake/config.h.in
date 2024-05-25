@@ -7,3 +7,5 @@
 #cmakedefine USE_ARPACK_LIB
 
 #cmakedefine USE_METIS_LIB
+
+#cmakedefine USE_BOOST_LIB
