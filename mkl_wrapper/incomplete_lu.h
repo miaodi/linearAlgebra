@@ -55,5 +55,6 @@ public:
 
 protected:
   int _level;
+  std::vector<MKL_INT> _firstUpperPos;
 };
 } // namespace mkl_wrapper

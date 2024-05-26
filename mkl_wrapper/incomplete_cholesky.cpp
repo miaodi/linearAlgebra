@@ -72,6 +72,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
 #else
     std::forward_list<std::pair<MKL_INT, MKL_INT>> _rowLevels;
 #endif
+
     MKL_INT list_size = 0;
     MKL_INT j;
     MKL_INT k;
