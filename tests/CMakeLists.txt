@@ -28,8 +28,15 @@ endforeach()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/data)
 file(CREATE_LINK ${CMAKE_CURRENT_SOURCE_DIR}/data/ex5.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ex5.mtx SYMBOLIC)
+
+# https://sparse.tamu.edu/Zitney/rdist1
+# 4134
+# no symmetry
 file(CREATE_LINK ${CMAKE_CURRENT_SOURCE_DIR}/data/rdist1.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/rdist1.mtx SYMBOLIC)
 
+# https://sparse.tamu.edu/HB/nos5
+# 468
+# spd
 download_file( 
    https://math.nist.gov/pub/MatrixMarket2/Harwell-Boeing/lanpro/nos5.mtx.gz
    1317ee84c28a6380793e22ec6e70ceb75b1b5a74cb3765da7200b00e22615f16
@@ -39,6 +46,9 @@ download_file(
 FetchContent_GetProperties(nos5 SOURCE_DIR FILE_SOURCE_DIR)
 file(CREATE_LINK ${FILE_SOURCE_DIR}/nos5.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/nos5.mtx SYMBOLIC)
 
+# https://sparse.tamu.edu/Cylshell/s3rmt3m3
+# 5357
+# spd
 download_file( 
    https://math.nist.gov/pub/MatrixMarket2/misc/cylshell/s3rmt3m3.mtx.gz
    ead9e4eaf44a0cd9048152f1308d9c38dedc1f76a07947960fbb5e8f4028585a

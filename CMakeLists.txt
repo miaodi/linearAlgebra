@@ -18,6 +18,8 @@ option(USE_METIS_LIB "Use metis for matrix reordering" OFF)
 
 option(USE_BOOST_LIB "Use boost library" OFF) 
 
+option(BUILD_BENCHMARKS "Build benchmarks" OFF) 
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules" )
 # Include the init module
 include(MorseInit)
@@ -100,4 +102,6 @@ add_subdirectory(execs)
 enable_testing()
 add_subdirectory(tests)
 
-add_subdirectory(benchmarks)
+if (BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
+endif(BUILD_BENCHMARKS)

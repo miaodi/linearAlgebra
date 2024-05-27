@@ -14,13 +14,13 @@
 namespace mkl_wrapper {
 
 // Incomplete Cholesky k level
-class amgcl_precond : public precond {
+class amgcl_precond : public mkl_sparse_mat {
 public:
   amgcl_precond();
 
-  virtual bool symbolic_factorize(mkl_sparse_mat const *const A) override;
+  virtual bool symbolic_factorize(mkl_sparse_mat const *const A);
 
-  virtual bool numeric_factorize(mkl_sparse_mat const *const A) override;
+  virtual bool numeric_factorize(mkl_sparse_mat const *const A);
 
   virtual bool solve(double const *const b, double *const x) override;
 

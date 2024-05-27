@@ -4,7 +4,7 @@
 #include <amgcl/adapter/crs_tuple.hpp>
 #include <execution>
 namespace mkl_wrapper {
-amgcl_precond::amgcl_precond() : precond() {}
+amgcl_precond::amgcl_precond() : mkl_sparse_mat() {}
 
 bool amgcl_precond::symbolic_factorize(mkl_sparse_mat const *const A) {
   _nrow = A->rows();
