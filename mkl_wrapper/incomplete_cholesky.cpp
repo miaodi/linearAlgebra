@@ -196,59 +196,89 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
   auto av = A->get_av();
   const MKL_INT n = rows();
   const MKL_INT base = mkl_base();
-  MKL_INT k_idx, A_k_idx, k, _j_idx, j_idx;
+  MKL_INT i, k_idx, A_k_idx, k, _j_idx, j_idx;
   std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
   MKL_INT availableJKRow = 0;
-  for (MKL_INT i = 0; i < n; i++) {
+  MKL_INT modifiedRow = -1;
+  bool success_flag = false;
+  int iter = 0;
 
-    k_idx = _ai[i] - base;
-    A_k_idx = _diagPos[i];
-
-    for (; k_idx != _ai[i + 1] - base; k_idx++) {
-      if (A_k_idx == ai[i + 1] - base || _aj[k_idx] != aj[A_k_idx]) {
-        _av[k_idx] = 0;
-      } else {
-        _av[k_idx] = av[A_k_idx++];
-      }
-    }
-    for (auto &k_pair : jKRow[i]) {
-      k = k_pair.first;
-      j_idx = k_pair.second;
-
-      if (j_idx + 1 != _ai[k + 1] - base) {
-        if (jKRow[_aj[j_idx + 1] - base].empty() && availableJKRow < i)
-          std::swap(jKRow[_aj[j_idx + 1] - base], jKRow[availableJKRow++]);
-        jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
-      }
-
-      const double aki = _av[j_idx];
-      _j_idx = _ai[i] - base;
-      for (; j_idx != _ai[k + 1] - base && _j_idx != _ai[i + 1] - base;) {
-        if (_aj[_j_idx] == _aj[j_idx]) {
-          _av[_j_idx++] -= aki * _av[j_idx++];
-        } else if (_aj[_j_idx] < _aj[j_idx])
-          _j_idx++;
-        else
-          j_idx++;
-      }
-    }
-    jKRow[i].clear();
-    k_idx = _ai[i] - base;
-    if (_ai[i + 1] - _ai[i] != 1) {
-      if (jKRow[_aj[k_idx + 1] - base].empty())
-        std::swap(jKRow[availableJKRow++], jKRow[_aj[k_idx + 1] - base]);
-      jKRow[_aj[k_idx + 1] - base].push_back({i, k_idx + 1});
-    }
-
-    if (_av[k_idx] <= 0) {
-      std::cerr << "non-positive diagonal!\n";
-      return false;
-    }
-    const double aii = std::sqrt(_av[k_idx]);
-    _av[k_idx++] = aii;
-    for (; k_idx != _ai[i + 1] - base; k_idx++)
-      _av[k_idx] /= aii;
+  // initialize shift
+  double minDiag = std::numeric_limits<double>::max();
+#pragma omp parallel for reduction(min : minDiag)
+  for (i = 0; i < n; i++) {
+    minDiag = std::min(minDiag, av[_diagPos[i]]);
   }
+  double shift = 0.;
+  if (minDiag <= 0.)
+    shift = _initial_shift - minDiag;
+    
+  do {
+    for (i = 0; i < n; i++) {
+
+      k_idx = _ai[i] - base;
+      A_k_idx = _diagPos[i];
+
+      for (; k_idx != _ai[i + 1] - base; k_idx++) {
+        if (A_k_idx == ai[i + 1] - base || _aj[k_idx] != aj[A_k_idx]) {
+          _av[k_idx] = 0;
+        } else {
+          _av[k_idx] = av[A_k_idx++];
+        }
+      }
+      k_idx = _ai[i] - base;
+      _av[k_idx] += shift;
+      for (auto &k_pair : jKRow[i]) {
+        k = k_pair.first;
+        j_idx = k_pair.second;
+
+        if (j_idx + 1 != _ai[k + 1] - base) {
+          if (jKRow[_aj[j_idx + 1] - base].empty() && availableJKRow < i)
+            std::swap(jKRow[_aj[j_idx + 1] - base], jKRow[availableJKRow++]);
+          jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
+          modifiedRow = std::max(_aj[j_idx + 1] - base, modifiedRow);
+        }
+
+        const double aki = _av[j_idx];
+        _j_idx = k_idx;
+        for (; j_idx != _ai[k + 1] - base && _j_idx != _ai[i + 1] - base;) {
+          if (_aj[_j_idx] == _aj[j_idx]) {
+            _av[_j_idx++] -= aki * _av[j_idx++];
+          } else if (_aj[_j_idx] < _aj[j_idx])
+            _j_idx++;
+          else
+            j_idx++;
+        }
+      }
+      jKRow[i].clear();
+      if (_ai[i + 1] - _ai[i] != 1) {
+        if (jKRow[_aj[k_idx + 1] - base].empty())
+          std::swap(jKRow[availableJKRow++], jKRow[_aj[k_idx + 1] - base]);
+        jKRow[_aj[k_idx + 1] - base].push_back({i, k_idx + 1});
+        modifiedRow = std::max(_aj[k_idx + 1] - base, modifiedRow);
+      }
+
+      if (_av[k_idx] <= 0) {
+        if (++iter >= _nrestart)
+          return false;
+        shift = std::max(_initial_shift, 2. * shift);
+        MKL_INT r = 0;
+        for (MKL_INT rr = availableJKRow; rr <= modifiedRow; rr++) {
+          if (jKRow[rr].capacity()) {
+            std::swap(jKRow[rr], jKRow[r++]);
+          }
+        }
+        break;
+      }
+      const double aii = std::sqrt(_av[k_idx]);
+      _av[k_idx++] = aii;
+      for (; k_idx != _ai[i + 1] - base; k_idx++)
+        _av[k_idx] /= aii;
+    }
+    if (i == n)
+      success_flag = true;
+  } while (!success_flag);
+
   if (_mkl_base == SPARSE_INDEX_BASE_ONE)
     sp_fill();
   else

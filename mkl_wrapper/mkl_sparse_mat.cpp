@@ -713,6 +713,25 @@ void mkl_sparse_mat_sym::optimize() {
   mkl_sparse_optimize(_mkl_mat);
 }
 
+std::vector<double> mkl_sparse_mat_sym::rowwiseNorm() const {
+  std::vector<double> row_norm(_nrow, 0);
+  const MKL_INT base = _mkl_base;
+  for (MKL_INT i = 0; i < _nrow; i++) {
+    for (MKL_INT j = _ai[i] - base; j != _ai[i + 1] - base; j++) {
+      row_norm[j] += _av[j] * _av[j];
+      if (_aj[j] - base != i)
+        row_norm[_aj[j] - base] += _av[j] * _av[j];
+    }
+  }
+  for (auto &i : row_norm) {
+    if (i > std::numeric_limits<double>::min())
+      i = 1. / std::sqrt(i);
+    else
+      i = 1.;
+  }
+  return row_norm;
+}
+
 mkl_sparse_mat_diag::mkl_sparse_mat_diag(const MKL_INT size, const double val)
     : mkl_sparse_mat() {
 

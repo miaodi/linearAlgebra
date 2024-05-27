@@ -162,6 +162,8 @@ public:
   mkl_sparse_mat_sym(sparse_matrix_t mkl_mat);
 
   virtual void optimize();
+
+  std::vector<double> rowwiseNorm() const;
 };
 
 class mkl_sparse_mat_diag : public mkl_sparse_mat {

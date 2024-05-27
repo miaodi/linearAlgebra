@@ -216,7 +216,7 @@ bool mkl_pcg_solver::solve(double const *const b, double *const x) {
 
       if (_print_level == 1)
         fprintf(stderr, "%3d = %lg/%lg=%lg, %lg (%lg)\n", ipar[3], residual,
-                residual0, residual / residual0, dpar[3], dpar[6], dpar[7]);
+                residual0, residual / residual0, dpar[3], dpar[6]);
       if (residual / residual0 < _rel_tol || residual < _abs_tol) {
         bsuccess = true;
         bdone = true;

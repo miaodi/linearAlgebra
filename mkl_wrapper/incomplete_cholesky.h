@@ -21,6 +21,8 @@ public:
 
 protected:
   std::vector<double> _interm_vec;
+  double _initial_shift;
+  int _nrestart{10};
 };
 
 // Incomplete Cholesky k level
