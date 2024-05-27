@@ -3,11 +3,24 @@
 
 namespace mkl_wrapper {
 
-class incomplete_lu_base : public precond {
+class incomplete_lu_base : public mkl_sparse_mat {
 public:
-  incomplete_lu_base() : precond() {}
+  incomplete_lu_base() : mkl_sparse_mat() {}
+
+  virtual bool numeric_factorize(mkl_sparse_mat const *const A) {
+    return false;
+  }
+
+  virtual bool symbolic_factorize(mkl_sparse_mat const *const A) {
+    return true;
+  }
 
   virtual bool solve(double const *const b, double *const x) override;
+
+  virtual void optimize() override;
+
+protected:
+  std::vector<double> _interm_vec;
 };
 
 // mkl ilu0

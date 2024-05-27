@@ -18,18 +18,32 @@
 #endif
 namespace mkl_wrapper {
 
-bool incomplete_lu_base::solve(double const *const b, double *const x) {
-  sparse_operation_t transA = SPARSE_OPERATION_NON_TRANSPOSE;
+void incomplete_lu_base::optimize() {
+
   _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
   _mkl_descr.mode = SPARSE_FILL_MODE_LOWER;
   _mkl_descr.diag = SPARSE_DIAG_UNIT;
-  _mkl_stat = mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr, b,
-                                _interm_vec.data());
+  mkl_sparse_set_sv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _mkl_descr,
+                         1000);
+  _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
+  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
+  mkl_sparse_set_sv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _mkl_descr,
+                         1000);
+  mkl_sparse_set_memory_hint(_mkl_mat, SPARSE_MEMORY_AGGRESSIVE);
+  mkl_sparse_optimize(_mkl_mat);
+}
+
+bool incomplete_lu_base::solve(double const *const b, double *const x) {
+  _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
+  _mkl_descr.mode = SPARSE_FILL_MODE_LOWER;
+  _mkl_descr.diag = SPARSE_DIAG_UNIT;
+  _mkl_stat = mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, _mkl_mat,
+                                _mkl_descr, b, _interm_vec.data());
 
   _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
   _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
-  _mkl_stat = mkl_sparse_d_trsv(transA, 1.0, _mkl_mat, _mkl_descr,
-                                _interm_vec.data(), x);
+  _mkl_stat = mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, _mkl_mat,
+                                _mkl_descr, _interm_vec.data(), x);
   return true;
 }
 

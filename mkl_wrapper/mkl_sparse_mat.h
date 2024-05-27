@@ -114,23 +114,6 @@ protected:
   sparse_status_t _mkl_stat;
 };
 
-// incomplete factorization preconditioner
-class precond : public mkl_sparse_mat {
-public:
-  precond() : mkl_sparse_mat() {}
-
-  virtual bool numeric_factorize(mkl_sparse_mat const *const A) {
-    return false;
-  }
-
-  virtual bool symbolic_factorize(mkl_sparse_mat const *const A) {
-    return true;
-  }
-
-protected:
-  std::vector<double> _interm_vec;
-};
-
 std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
                                       MKL_INT const *const pinv);
 

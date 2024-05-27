@@ -15,7 +15,33 @@
 #endif
 
 namespace mkl_wrapper {
-incomplete_cholesky_k::incomplete_cholesky_k() : precond() {}
+bool incomplete_choleksy_base::solve(double const *const b, double *const x) {
+  mkl_sparse_d_trsv(SPARSE_OPERATION_TRANSPOSE, 1.0, _mkl_mat, _mkl_descr, b,
+                    _interm_vec.data());
+
+  mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, _mkl_mat, _mkl_descr,
+                    _interm_vec.data(), x);
+  return true;
+}
+
+void incomplete_choleksy_base::optimize() {
+
+  _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
+  _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
+  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
+
+  // mkl_sparse_set_mv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE,
+  // _mkl_descr,
+  //                        1000);
+  mkl_sparse_set_sv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _mkl_descr,
+                         1000);
+  mkl_sparse_set_sv_hint(_mkl_mat, SPARSE_OPERATION_TRANSPOSE, _mkl_descr,
+                         1000);
+  mkl_sparse_set_memory_hint(_mkl_mat, SPARSE_MEMORY_AGGRESSIVE);
+  mkl_sparse_optimize(_mkl_mat);
+}
+
+incomplete_cholesky_k::incomplete_cholesky_k() : incomplete_choleksy_base() {}
 
 bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
   _nrow = A->rows();
@@ -74,7 +100,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
 #endif
 
     MKL_INT list_size = 0;
-    MKL_INT j;
+    MKL_INT j_idx;
     MKL_INT k;
     std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
     MKL_INT availableJKRow = 0;
@@ -89,27 +115,27 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
 
       // use n as the list end to prevent from branch prediction
       rowIt = _rowLevels.insert_after(rowIt, std::make_pair(n, 0));
-      
+
       for (auto &k_pair : jKRow[i]) {
         k = k_pair.first;
-        j = k_pair.second;
+        j_idx = k_pair.second;
 
-        if (j + 1 != _ai[k + 1] - base) {
-          if (jKRow[_aj[j + 1] - base].empty() && availableJKRow < i) {
-            std::swap(jKRow[_aj[j + 1] - base], jKRow[availableJKRow++]);
+        if (j_idx + 1 != _ai[k + 1] - base) {
+          if (jKRow[_aj[j_idx + 1] - base].empty() && availableJKRow < i) {
+            std::swap(jKRow[_aj[j_idx + 1] - base], jKRow[availableJKRow++]);
           }
-          jKRow[_aj[j + 1] - base].push_back({k, j + 1});
+          jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
         }
-        auto lik = av_levels[j];
+        auto lik = av_levels[j_idx];
         auto eij = _rowLevels.begin();
         MKL_INT nextIdx = std::next(eij)->first;
-        for (; j != _ai[k + 1] - base; j++) {
-          MKL_INT jk_idx = _aj[j] - base;
+        for (; j_idx != _ai[k + 1] - base; j_idx++) {
+          MKL_INT jk_idx = _aj[j_idx] - base;
           while (nextIdx <= jk_idx) {
             eij = std::next(eij);
             nextIdx = std::next(eij)->first;
           }
-          MKL_INT level = lik + av_levels[j] + 1;
+          MKL_INT level = lik + av_levels[j_idx] + 1;
           if (level <= _level) {
             if (eij->first == jk_idx) {
               if (eij->second > level) {
@@ -228,31 +254,5 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
   else
     to_one_based();
   return true;
-}
-
-bool incomplete_cholesky_k::solve(double const *const b, double *const x) {
-  mkl_sparse_d_trsv(SPARSE_OPERATION_TRANSPOSE, 1.0, _mkl_mat, _mkl_descr, b,
-                    _interm_vec.data());
-
-  mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, _mkl_mat, _mkl_descr,
-                    _interm_vec.data(), x);
-  return true;
-}
-
-void incomplete_cholesky_k::optimize() {
-
-  _mkl_descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
-  _mkl_descr.mode = SPARSE_FILL_MODE_UPPER;
-  _mkl_descr.diag = SPARSE_DIAG_NON_UNIT;
-
-  // mkl_sparse_set_mv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE,
-  // _mkl_descr,
-  //                        1000);
-  mkl_sparse_set_sv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _mkl_descr,
-                         1000);
-  mkl_sparse_set_sv_hint(_mkl_mat, SPARSE_OPERATION_TRANSPOSE, _mkl_descr,
-                         1000);
-  mkl_sparse_set_memory_hint(_mkl_mat, SPARSE_MEMORY_AGGRESSIVE);
-  mkl_sparse_optimize(_mkl_mat);
 }
 } // namespace mkl_wrapper

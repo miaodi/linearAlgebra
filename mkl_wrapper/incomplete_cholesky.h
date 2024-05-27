@@ -3,8 +3,28 @@
 
 namespace mkl_wrapper {
 
+class incomplete_choleksy_base : public mkl_sparse_mat_sym {
+public:
+  incomplete_choleksy_base() : mkl_sparse_mat_sym() {}
+
+  virtual bool numeric_factorize(mkl_sparse_mat const *const A) {
+    return false;
+  }
+
+  virtual bool symbolic_factorize(mkl_sparse_mat const *const A) {
+    return true;
+  }
+
+  virtual bool solve(double const *const b, double *const x) override;
+
+  virtual void optimize() override;
+
+protected:
+  std::vector<double> _interm_vec;
+};
+
 // Incomplete Cholesky k level
-class incomplete_cholesky_k : public precond {
+class incomplete_cholesky_k : public incomplete_choleksy_base {
 public:
   incomplete_cholesky_k();
 
@@ -12,11 +32,8 @@ public:
 
   virtual bool numeric_factorize(mkl_sparse_mat const *const A) override;
 
-  virtual bool solve(double const *const b, double *const x) override;
-
   void set_level(const int level) { _level = level; }
 
-  virtual void optimize() override;
 protected:
   int _level;
   std::vector<MKL_INT> _diagPos;
