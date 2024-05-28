@@ -528,6 +528,36 @@ void mkl_sparse_mat::print_gnuplot(std::ostream &out) const {
   }
 }
 
+std::vector<double> mkl_sparse_mat::rowwiseSqrtNorm() const {
+  std::vector<double> row_norm(_nrow, 0);
+  const MKL_INT base = _mkl_base;
+#pragma omp parallel for
+  for (MKL_INT i = 0; i < _nrow; i++) {
+    for (MKL_INT j = _ai[i] - base; j != _ai[i + 1] - base; j++) {
+      row_norm[i] += _av[j] * _av[j];
+    }
+  }
+
+#pragma omp parallel for
+  for (auto &i : row_norm) {
+    if (i > std::numeric_limits<double>::min())
+      i = 1. / std::sqrt(std::sqrt(i));
+    else
+      i = 1.;
+  }
+  return row_norm;
+}
+
+void mkl_sparse_mat::DtAD(const std::vector<double> &diag) {
+  const MKL_INT base = _mkl_base;
+#pragma omp parallel for
+  for (MKL_INT i = 0; i < _nrow; i++) {
+    for (MKL_INT j = _ai[i] - base; j != _ai[i + 1] - base; j++) {
+      _av[j] *= diag[i] * diag[_aj[j] - base];
+    }
+  }
+}
+
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                               double c) {
   if (A.mkl_base() != B.mkl_base()) {
@@ -713,19 +743,20 @@ void mkl_sparse_mat_sym::optimize() {
   mkl_sparse_optimize(_mkl_mat);
 }
 
-std::vector<double> mkl_sparse_mat_sym::rowwiseNorm() const {
+std::vector<double> mkl_sparse_mat_sym::rowwiseSqrtNorm() const {
   std::vector<double> row_norm(_nrow, 0);
   const MKL_INT base = _mkl_base;
   for (MKL_INT i = 0; i < _nrow; i++) {
     for (MKL_INT j = _ai[i] - base; j != _ai[i + 1] - base; j++) {
-      row_norm[j] += _av[j] * _av[j];
+      row_norm[_aj[j] - base] += _av[j] * _av[j];
       if (_aj[j] - base != i)
         row_norm[_aj[j] - base] += _av[j] * _av[j];
     }
   }
+#pragma omp parallel for
   for (auto &i : row_norm) {
     if (i > std::numeric_limits<double>::min())
-      i = 1. / std::sqrt(i);
+      i = 1. / std::sqrt(std::sqrt(i));
     else
       i = 1.;
   }

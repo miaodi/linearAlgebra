@@ -19,10 +19,13 @@ public:
 
   virtual void optimize() override;
 
+  void shift(const bool shift) { _shift = shift; }
+
 protected:
   std::vector<double> _interm_vec;
-  double _initial_shift;
-  int _nrestart{10};
+  double _initial_shift{1e-3};
+  int _nrestart{20};
+  bool _shift{false};
 };
 
 // Incomplete Cholesky k level

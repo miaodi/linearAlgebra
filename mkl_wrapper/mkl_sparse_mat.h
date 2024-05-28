@@ -97,6 +97,10 @@ public:
 
   void print_gnuplot(std::ostream &out) const;
 
+  virtual std::vector<double> rowwiseSqrtNorm() const;
+
+  void DtAD(const std::vector<double>& diag);
+
 protected:
   MKL_INT _nrow; // Number of Rows
   MKL_INT _ncol; // Number of Columns
@@ -163,7 +167,7 @@ public:
 
   virtual void optimize();
 
-  std::vector<double> rowwiseNorm() const;
+  virtual std::vector<double> rowwiseSqrtNorm() const override;
 };
 
 class mkl_sparse_mat_diag : public mkl_sparse_mat {

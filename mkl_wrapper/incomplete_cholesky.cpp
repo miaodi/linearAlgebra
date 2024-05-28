@@ -21,6 +21,7 @@ bool incomplete_choleksy_base::solve(double const *const b, double *const x) {
 
   mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, _mkl_mat, _mkl_descr,
                     _interm_vec.data(), x);
+
   return true;
 }
 
@@ -203,16 +204,18 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
   bool success_flag = false;
   int iter = 0;
 
-  // initialize shift
-  double minDiag = std::numeric_limits<double>::max();
-#pragma omp parallel for reduction(min : minDiag)
-  for (i = 0; i < n; i++) {
-    minDiag = std::min(minDiag, av[_diagPos[i]]);
-  }
   double shift = 0.;
-  if (minDiag <= 0.)
-    shift = _initial_shift - minDiag;
-    
+  if (_shift) {
+    // initialize shift
+    double minDiag = std::numeric_limits<double>::max();
+#pragma omp parallel for reduction(min : minDiag)
+    for (i = 0; i < n; i++) {
+      minDiag = std::min(minDiag, av[_diagPos[i]]);
+    }
+    if (minDiag <= 0.)
+      shift = _initial_shift - minDiag;
+    std::cout << "init shift: " << shift << std::endl;
+  }
   do {
     for (i = 0; i < n; i++) {
 
@@ -259,9 +262,10 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
       }
 
       if (_av[k_idx] <= 0) {
-        if (++iter >= _nrestart)
+        if (!_shift || ++iter >= _nrestart)
           return false;
         shift = std::max(_initial_shift, 2. * shift);
+        std::cout << "shift: " << shift << std::endl;
         MKL_INT r = 0;
         for (MKL_INT rr = availableJKRow; rr <= modifiedRow; rr++) {
           if (jKRow[rr].capacity()) {
