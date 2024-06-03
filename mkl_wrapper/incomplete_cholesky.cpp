@@ -13,6 +13,7 @@
 #ifdef USE_BOOST_LIB
 #include <boost/pool/pool_alloc.hpp>
 #endif
+#include "utils.h"
 
 namespace mkl_wrapper {
 bool incomplete_choleksy_base::solve(double const *const b, double *const x) {
@@ -262,7 +263,7 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
       }
 
       if (_av[k_idx] <= 0) {
-        if (!_shift || ++iter >= _nrestart)
+        if (!_shift || ++iter > _nrestart)
           return false;
         shift = std::max(_initial_shift, 2. * shift);
         std::cout << "shift: " << shift << std::endl;
@@ -289,4 +290,237 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
     to_one_based();
   return true;
 }
+
+incomplete_cholesky_fm::incomplete_cholesky_fm() : incomplete_choleksy_base() {}
+
+bool incomplete_cholesky_fm::symbolic_factorize(mkl_sparse_mat const *const A) {
+  _nrow = A->rows();
+  _ncol = A->cols();
+  _mkl_base = A->mkl_base();
+  _interm_vec.resize(_nrow);
+  const MKL_INT n = A->rows();
+  const MKL_INT base = A->mkl_base();
+  auto ai = A->get_ai();
+  auto aj = A->get_aj();
+  _ai.reset(new MKL_INT[n + 1]);
+  const bool sym = A->mkl_descr().type == SPARSE_MATRIX_TYPE_SYMMETRIC;
+  _diagPos.resize(_nrow);
+  if (sym) {
+    volatile bool missing_diag = false;
+#pragma omp parallel for
+    for (MKL_INT i = 0; i < _nrow; i++) {
+      if (missing_diag)
+        continue;
+      if (aj[ai[i] - base] - base != i) {
+        std::cerr << "Could not find diagonal!" << std::endl;
+        missing_diag = true;
+      }
+      _diagPos[i] = ai[i] - base;
+    }
+    if (missing_diag)
+      return false;
+    const MKL_INT tails = std::min(_p * (_p + 1) / 2, _nrow * (_nrow + 1) / 2);
+    _capacity = A->nnz() + _nrow * _p - tails;
+  } else {
+    volatile bool missing_diag = false;
+#pragma omp parallel for shared(missing_diag)
+    for (MKL_INT i = 0; i < _nrow; i++) {
+      if (missing_diag)
+        continue;
+      auto mid = std::find(aj.get() + ai[i] - base, aj.get() + ai[i + 1] - base,
+                           i + base);
+      if (mid == aj.get() + ai[i + 1] - base) {
+        std::cerr << "Could not find diagonal!" << std::endl;
+        missing_diag = true;
+      }
+      _diagPos[i] = mid - aj.get();
+    }
+    if (missing_diag)
+      return false;
+
+    const MKL_INT tails = std::min(_p * (_p + 1) / 2, _nrow * (_nrow + 1) / 2);
+    _capacity = (A->nnz() + _nrow) / 2 + _nrow * _p - tails;
+  }
+  // std::cout << "_capacity: " << _capacity << std::endl;
+  _aj.reset(new MKL_INT[_capacity]);
+  _av.reset(new double[_capacity]);
+  return true;
+}
+
+bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
+  auto ai = A->get_ai();
+  auto aj = A->get_aj();
+  auto av = A->get_av();
+  const MKL_INT n = rows();
+  const MKL_INT base = mkl_base();
+  MKL_INT i, k_idx, A_k_idx, k, _j_idx, j_idx;
+
+  auto compMax = [](const std::pair<MKL_INT, double> &v1,
+                    const std::pair<MKL_INT, double> &v2) {
+    return std::abs(v1.second) > std::abs(v2.second);
+  };
+  auto compMin = [](const std::pair<MKL_INT, double> &v1,
+                    const std::pair<MKL_INT, double> &v2) {
+    return std::abs(v1.second) < std::abs(v2.second);
+  };
+
+  utils::MaxHeap<std::pair<MKL_INT, double>, decltype(compMax)> max_heap(
+      compMax);
+  utils::MaxHeap<std::pair<MKL_INT, double>, decltype(compMin)> min_heap(
+      compMin);
+  std::vector<std::pair<MKL_INT, double>> popped;
+
+  std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
+#ifdef USE_BOOST_LIB
+  std::forward_list<std::pair<MKL_INT, double>,
+                    boost::fast_pool_allocator<std::pair<MKL_INT, double>>>
+      _rowVals;
+#else
+  std::forward_list<std::pair<MKL_INT, double>> _rowVals;
+#endif
+  MKL_INT list_size = 0;
+  bool success_flag = false;
+  int iter = 0;
+
+  double shift = 0.;
+  if (_shift) {
+    // initialize shift
+    double minDiag = std::numeric_limits<double>::max();
+#pragma omp parallel for reduction(min : minDiag)
+    for (i = 0; i < n; i++) {
+      minDiag = std::min(minDiag, av[_diagPos[i]]);
+    }
+    if (minDiag <= 0.)
+      shift = _initial_shift - minDiag;
+    std::cout << "init shift: " << shift << std::endl;
+  }
+  do {
+    MKL_INT availableJKRow = 0;
+    MKL_INT modifiedRow = -1;
+    _ai[0] = base;
+    for (i = 0; i < n; i++) {
+      _rowVals.clear();
+      auto rowIt = _rowVals.before_begin();
+      k = _diagPos[i];
+      list_size = ai[i + 1] - base - k;
+      for (A_k_idx = _diagPos[i]; A_k_idx < ai[i + 1] - base; A_k_idx++) {
+        rowIt = _rowVals.insert_after(
+            rowIt, std::make_pair(aj[A_k_idx] - base, av[A_k_idx]));
+        // std::cout << aj[A_k_idx] - base << " , " << av[A_k_idx] << std::endl;
+      }
+
+      // use n as the list end to prevent from branch prediction
+      _rowVals.insert_after(rowIt, std::make_pair(n + base, 0));
+      for (auto &k_pair : jKRow[i]) {
+        k = k_pair.first;
+        j_idx = k_pair.second;
+
+        if (j_idx + 1 != _ai[k + 1] - base) {
+          if (jKRow[_aj[j_idx + 1] - base].empty() && availableJKRow < i) {
+            std::swap(jKRow[_aj[j_idx + 1] - base], jKRow[availableJKRow++]);
+          }
+          jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
+          modifiedRow = std::max(_aj[j_idx + 1] - base, modifiedRow);
+        }
+        const double aki = _av[j_idx];
+        auto eij = _rowVals.begin();
+        MKL_INT nextIdx = std::next(eij)->first;
+        for (; j_idx != _ai[k + 1] - base; j_idx++) {
+          MKL_INT jk_idx = _aj[j_idx] - base;
+          while (nextIdx <= jk_idx) {
+            eij = std::next(eij);
+            nextIdx = std::next(eij)->first;
+          }
+          const double val = aki * _av[j_idx];
+          if (eij->first == jk_idx) {
+            eij->second -= val;
+          } else {
+            eij = _rowVals.insert_after(eij, std::make_pair(jk_idx, -val));
+            nextIdx = std::next(eij)->first;
+            list_size++;
+          }
+        }
+      }
+      jKRow[i].clear();
+      // treat a_ii
+      rowIt = _rowVals.begin();
+      k_idx = _ai[i] - base;
+      _aj[k_idx] = rowIt->first + base;
+      _av[k_idx] = rowIt->second + shift;
+
+      // restart with new shift if negative a_ii
+      if (_av[k_idx] <= 0) {
+        if (!_shift || ++iter > _nrestart)
+          return false;
+        shift = std::max(_initial_shift, 2. * shift);
+        std::cout << "shift: " << shift << std::endl;
+        MKL_INT r = 0;
+        for (MKL_INT rr = availableJKRow; rr <= modifiedRow; rr++) {
+          jKRow[rr].clear();
+          if (jKRow[rr].capacity()) {
+            std::swap(jKRow[rr], jKRow[r++]);
+          }
+        }
+        break;
+      }
+
+      const double aii = std::sqrt(_av[k_idx]);
+      _av[k_idx++] = aii;
+      rowIt++;
+      const MKL_INT row_size =
+          ai[i + 1] - _diagPos[i] + std::min(_p, _nrow - i - 1);
+      if (list_size < row_size) {
+        for (int ii = 1; ii < list_size; ii++) {
+          _aj[k_idx] = rowIt->first + base;
+          _av[k_idx++] = rowIt->second / aii;
+          rowIt++;
+        }
+        _ai[i + 1] = _ai[i] + list_size;
+      } else {
+        // if (list_size - 1 > 2 * (row_size - 1)) {
+        max_heap.clear();
+        for (int ii = 1; ii < list_size; ii++) {
+          max_heap.push(*rowIt++);
+          if (max_heap.size() > row_size - 1)
+            max_heap.pop();
+        }
+        auto &heap = max_heap.getHeap();
+        std::sort(heap.begin(), heap.end(),
+                  [](const std::pair<MKL_INT, double> &a,
+                     const std::pair<MKL_INT, double> &b) {
+                    return a.first < b.first;
+                  });
+
+        for (int ii = 0; ii < heap.size(); ii++) {
+          _aj[k_idx] = heap[ii].first + base;
+          _av[k_idx++] = heap[ii].second / aii;
+        }
+        _ai[i + 1] = _ai[i] + heap.size() + 1;
+        // }
+      }
+      // for (int ii = _ai[i] - base; ii != _ai[i + 1] - base; ii++) {
+      //   std::cout << "( " << _aj[ii] << " , " << _av[ii] << " ),"
+      //             << " ";
+      // }
+      // std::cout << std::endl;
+      k_idx = _ai[i] - base;
+      if (_ai[i + 1] - _ai[i] != 1) {
+        if (jKRow[_aj[k_idx + 1] - base].empty())
+          std::swap(jKRow[availableJKRow++], jKRow[_aj[k_idx + 1] - base]);
+        jKRow[_aj[k_idx + 1] - base].push_back({i, k_idx + 1});
+        modifiedRow = std::max(_aj[k_idx + 1] - base, modifiedRow);
+      }
+    }
+    if (i == n)
+      success_flag = true;
+  } while (!success_flag);
+  _nnz = _ai[_nrow] - base;
+  // std::cout << "nnz: " << _nnz << std::endl;
+  if (_mkl_base == SPARSE_INDEX_BASE_ONE)
+    sp_fill();
+  else
+    to_one_based();
+  return true;
+}
+
 } // namespace mkl_wrapper

@@ -556,6 +556,7 @@ void mkl_sparse_mat::DtAD(const std::vector<double> &diag) {
       _av[j] *= diag[i] * diag[_aj[j] - base];
     }
   }
+  sp_fill();
 }
 
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,

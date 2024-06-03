@@ -26,6 +26,7 @@ protected:
   double _initial_shift{1e-3};
   int _nrestart{20};
   bool _shift{false};
+  std::vector<MKL_INT> _diagPos;
 };
 
 // Incomplete Cholesky k level
@@ -41,6 +42,20 @@ public:
 
 protected:
   int _level;
-  std::vector<MKL_INT> _diagPos;
+};
+
+class incomplete_cholesky_fm : public incomplete_choleksy_base {
+public:
+  incomplete_cholesky_fm();
+
+  virtual bool symbolic_factorize(mkl_sparse_mat const *const A) override;
+
+  virtual bool numeric_factorize(mkl_sparse_mat const *const A) override;
+
+  void set_p(const int p) { _p = p; }
+
+protected:
+  int _p{0};
+  int _capacity{0};
 };
 } // namespace mkl_wrapper

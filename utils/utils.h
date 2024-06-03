@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <mkl.h>
+#include <queue>
 #include <random>
 #include <string>
 #include <tuple>
@@ -226,4 +227,79 @@ std::vector<MKL_INT> inversePermute(const std::vector<MKL_INT> &perm,
                                     const MKL_INT base = 0);
 
 bool isPermutation(const std::vector<MKL_INT> &perm, const MKL_INT base = 0);
+
+template <typename T, typename C> class MaxHeap {
+public:
+  MaxHeap(C c) : _comp(c) {}
+
+  // return true if the Max Heap is empty, true otherwise.
+  bool empty() { return _heap.empty(); }
+
+  // used to insert an item in the priority queue.
+  void push(const T &obj) { _heap.push_back(obj); }
+
+  // deletes the highest priority item currently in the queue.
+  void pop() {
+    if (!empty()) {
+      std::swap(_heap[0], _heap[_heap.size() - 1]);
+      _heap.pop_back();
+      if (!empty())
+        heapifyDown(0);
+    }
+  }
+
+  int size() const { return _heap.size(); }
+
+  void clear() { _heap.clear(); }
+
+  // return the highest priority item currently in the queue.
+  T top() {
+    if (!empty()) {
+      return _heap[0];
+    }
+  }
+
+  std::vector<T> &getHeap() { return _heap; }
+
+  void setComp(C c) { _comp = c; }
+
+protected:
+  void heapifyUp(int idx) {
+    int parentIdx = parent(idx);
+    if (parentIdx < 0)
+      return;
+    if (_comp(_heap[parentIdx], _heap[idx])) {
+      std::swap(_heap[parentIdx], _heap[idx]);
+      heapifyUp(parentIdx);
+    }
+  }
+
+  void heapifyDown(int idx) {
+    int largeIdx = idx;
+    int leftChildIdx = leftChild(idx), rightChildIdx = rightChild(idx);
+    if (leftChildIdx < _heap.size()) {
+      if (_comp(_heap[largeIdx], _heap[leftChildIdx]))
+        largeIdx = leftChildIdx;
+    }
+    if (rightChildIdx < _heap.size()) {
+      if (_comp(_heap[largeIdx], _heap[rightChildIdx]))
+        largeIdx = rightChildIdx;
+    }
+
+    if (largeIdx != idx) {
+      std::swap(_heap[largeIdx], _heap[idx]);
+      heapifyDown(largeIdx);
+    }
+  }
+
+  int leftChild(int i) { return 2 * i + 1; }
+
+  int rightChild(int i) { return 2 * i + 2; }
+
+  int parent(int i) { return (i - 1) / 2; }
+
+  std::vector<T> _heap;
+  C _comp;
+};
+
 } // namespace utils
