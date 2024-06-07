@@ -453,7 +453,7 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
         }
 
         const double aki = _av[j_idx];
-        aij_update(_ai, _aj, _av, j_idx, i, base, aki, list_size, _rowVals);
+        aij_update(_ai, _aj, _av, j_idx, k, base, aki, list_size, _rowVals);
       }
 
       jKRow[i].clear();
