@@ -1035,7 +1035,6 @@ symPermute(const mkl_sparse_mat &A, MKL_INT const *const pinv) {
   const MKL_INT n = A.rows();
 
   const MKL_INT base = A.mkl_base();
-  const auto rows = A.rows();
   const auto nnz = A.nnz();
 
   std::shared_ptr<MKL_INT[]> new_ai{new MKL_INT[n + 1]};

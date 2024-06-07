@@ -7,13 +7,9 @@ class incomplete_lu_base : public mkl_sparse_mat {
 public:
   incomplete_lu_base() : mkl_sparse_mat() {}
 
-  virtual bool numeric_factorize(mkl_sparse_mat const *const A) {
-    return false;
-  }
+  virtual bool numeric_factorize(mkl_sparse_mat const *const) { return false; }
 
-  virtual bool symbolic_factorize(mkl_sparse_mat const *const A) {
-    return true;
-  }
+  virtual bool symbolic_factorize(mkl_sparse_mat const *const) { return true; }
 
   virtual bool solve(double const *const b, double *const x) override;
 
@@ -65,7 +61,7 @@ public:
   virtual bool numeric_factorize(mkl_sparse_mat const *const A) override;
 
   void set_level(const int level) { _level = level; }
-  
+
   // virtual bool solve(double const *const b, double *const x) override;
 
 protected:

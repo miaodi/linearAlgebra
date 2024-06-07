@@ -47,6 +47,7 @@ power_sparse_gv::power_sparse_gv(mkl_sparse_mat *A, mkl_sparse_mat *B)
     : mkl_eigen(A, B) {}
 
 bool power_sparse_gv::eigen_solve(double *eigenValues, double *eigenVectors) {
+  eigenVectors = nullptr;
   MKL_INT size = _A->rows();
   mkl_sparse_mat *mat{nullptr};
   mkl_direct_solver *solver{nullptr};

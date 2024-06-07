@@ -78,7 +78,7 @@ auto ReadFromBinaryCSR(const std::string &filename, IVEC &ai, IVEC &aj,
     index[current] = current;
   }
 
-  for (auto i = 0; i < nnz; i++) {
+  for (size_t i = 0; i < nnz; i++) {
     ai[rows[i] + (1 - base)]++;
   }
   ai[0] += base;
@@ -242,14 +242,14 @@ public:
   // deletes the highest priority item currently in the queue.
   void pop() {
     if (!empty()) {
-      std::swap(_heap[0], _heap[_heap.size() - 1]);
+      std::swap(_heap[0], _heap[static_cast<int>(_heap.size()) - 1]);
       _heap.pop_back();
       if (!empty())
         heapifyDown(0);
     }
   }
 
-  int size() const { return _heap.size(); }
+  int size() const { return static_cast<int>(_heap.size()); }
 
   void clear() { _heap.clear(); }
 
@@ -278,11 +278,11 @@ protected:
   void heapifyDown(int idx) {
     int largeIdx = idx;
     int leftChildIdx = leftChild(idx), rightChildIdx = rightChild(idx);
-    if (leftChildIdx < _heap.size()) {
+    if (leftChildIdx < static_cast<int>(_heap.size())) {
       if (_comp(_heap[largeIdx], _heap[leftChildIdx]))
         largeIdx = leftChildIdx;
     }
-    if (rightChildIdx < _heap.size()) {
+    if (rightChildIdx < static_cast<int>(_heap.size())) {
       if (_comp(_heap[largeIdx], _heap[rightChildIdx]))
         largeIdx = rightChildIdx;
     }

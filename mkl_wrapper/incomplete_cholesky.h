@@ -7,19 +7,20 @@ class incomplete_choleksy_base : public mkl_sparse_mat_sym {
 public:
   incomplete_choleksy_base() : mkl_sparse_mat_sym() {}
 
-  virtual bool numeric_factorize(mkl_sparse_mat const *const A) {
-    return false;
-  }
+  virtual bool numeric_factorize(mkl_sparse_mat const *const) { return false; }
 
-  virtual bool symbolic_factorize(mkl_sparse_mat const *const A) {
-    return true;
-  }
+  virtual bool symbolic_factorize(mkl_sparse_mat const *const) { return true; }
 
   virtual bool solve(double const *const b, double *const x) override;
 
   virtual void optimize() override;
 
   void shift(const bool shift) { _shift = shift; }
+
+protected:
+  template <typename LIST, typename IDX, typename VAL>
+  void aij_update(IDX _ai, IDX _aj, VAL _av, MKL_INT j_idx, MKL_INT k,
+                  MKL_INT base, const double aki, int &list_size, LIST &list);
 
 protected:
   std::vector<double> _interm_vec;

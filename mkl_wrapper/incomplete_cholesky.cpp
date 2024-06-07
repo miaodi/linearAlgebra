@@ -43,6 +43,30 @@ void incomplete_choleksy_base::optimize() {
   mkl_sparse_optimize(_mkl_mat);
 }
 
+template <typename LIST, typename IDX, typename VAL>
+void incomplete_choleksy_base::aij_update(IDX _ai, IDX _aj, VAL _av,
+                                          MKL_INT j_idx, MKL_INT k,
+                                          MKL_INT base, const double aki,
+                                          int &list_size, LIST &list) {
+  auto eij = list.begin();
+  MKL_INT nextIdx = std::next(eij)->first;
+  for (; j_idx != _ai[k + 1] - base; j_idx++) {
+    MKL_INT jk_idx = _aj[j_idx] - base;
+    while (nextIdx <= jk_idx) {
+      eij = std::next(eij);
+      nextIdx = std::next(eij)->first;
+    }
+    const double val = aki * _av[j_idx];
+    if (eij->first == jk_idx) {
+      eij->second -= val;
+    } else {
+      eij = list.insert_after(eij, std::make_pair(jk_idx, -val));
+      nextIdx = std::next(eij)->first;
+      list_size++;
+    }
+  }
+}
+
 incomplete_cholesky_k::incomplete_cholesky_k() : incomplete_choleksy_base() {}
 
 bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
@@ -355,7 +379,7 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
   auto av = A->get_av();
   const MKL_INT n = rows();
   const MKL_INT base = mkl_base();
-  MKL_INT i, k_idx, A_k_idx, k, _j_idx, j_idx;
+  MKL_INT i, k_idx, A_k_idx, k, j_idx;
 
   auto compMax = [](const std::pair<MKL_INT, double> &v1,
                     const std::pair<MKL_INT, double> &v2) {
@@ -429,23 +453,7 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
         }
 
         const double aki = _av[j_idx];
-        auto eij = _rowVals.begin();
-        MKL_INT nextIdx = std::next(eij)->first;
-        for (; j_idx != _ai[k + 1] - base; j_idx++) {
-          MKL_INT jk_idx = _aj[j_idx] - base;
-          while (nextIdx <= jk_idx) {
-            eij = std::next(eij);
-            nextIdx = std::next(eij)->first;
-          }
-          const double val = aki * _av[j_idx];
-          if (eij->first == jk_idx) {
-            eij->second -= val;
-          } else {
-            eij = _rowVals.insert_after(eij, std::make_pair(jk_idx, -val));
-            nextIdx = std::next(eij)->first;
-            list_size++;
-          }
-        }
+        aij_update(_ai, _aj, _av, j_idx, i, base, aki, list_size, _rowVals);
       }
 
       jKRow[i].clear();
@@ -499,14 +507,14 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
                     return a.first < b.first;
                   });
 
-        for (int ii = 0; ii < heap.size(); ii++) {
+        for (size_t ii = 0; ii < heap.size(); ii++) {
           _aj[k_idx] = heap[ii].first + base;
           _av[k_idx++] = heap[ii].second;
         }
         _ai[i + 1] = _ai[i] + row_size;
         // }
       }
-      
+
       // append row i to _aj[diagiI+1] row
       k_idx = _ai[i] - base;
       if (_ai[i + 1] - _ai[i] != 1) {

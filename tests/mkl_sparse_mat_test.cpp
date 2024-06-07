@@ -203,7 +203,7 @@ TEST_F(sparse_matrix_Test, sym) {
   auto diag_diff2 = diff2.get_diag();
   auto diag_sym = mat.get_diag();
 
-  for (size_t i = 0; i < diff2.rows(); i++) {
+  for (MKL_INT i = 0; i < diff2.rows(); i++) {
     EXPECT_EQ(diag_diff2[i], diag_sym[i]);
   }
 }
@@ -325,7 +325,7 @@ TEST_F(sparse_matrix_Test, permute) {
     for (size_t i = 0; i < 4; i++) {
       EXPECT_EQ(A.get_ai()[i], C.get_ai()[i]);
     }
-    for (size_t i = 0; i < A.nnz(); i++) {
+    for (MKL_INT i = 0; i < A.nnz(); i++) {
       EXPECT_EQ(A.get_aj()[i], C.get_aj()[i]);
       EXPECT_EQ(A.get_av()[i], C.get_av()[i]);
     }
@@ -346,7 +346,7 @@ TEST_F(sparse_matrix_Test, permute) {
       for (size_t i = 0; i < 4; i++) {
         EXPECT_EQ(A1.get_ai()[i], C.get_ai()[i]);
       }
-      for (size_t i = 0; i < A.nnz(); i++) {
+      for (MKL_INT i = 0; i < A.nnz(); i++) {
         EXPECT_EQ(A1.get_aj()[i], C.get_aj()[i]);
         EXPECT_EQ(A1.get_av()[i], C.get_av()[i]);
       }
@@ -372,10 +372,10 @@ TEST_F(sparse_matrix_Test, permute2) {
         mkl_wrapper::permute(B, inv_perm.data(), inv_perm.data());
     mkl_wrapper::mkl_sparse_mat C(10000, 10000, aiC, ajC, avC);
 
-    for (size_t i = 0; i <= A.rows(); i++) {
+    for (MKL_INT i = 0; i <= A.rows(); i++) {
       EXPECT_EQ(A.get_ai()[i], C.get_ai()[i]);
     }
-    for (size_t i = 0; i < A.nnz(); i++) {
+    for (MKL_INT i = 0; i < A.nnz(); i++) {
       EXPECT_EQ(A.get_aj()[i], C.get_aj()[i]);
       EXPECT_EQ(A.get_av()[i], C.get_av()[i]);
     }
@@ -395,10 +395,10 @@ TEST_F(sparse_matrix_Test, permute2) {
       mkl_wrapper::mkl_sparse_mat C(10000, 10000, aiC, ajC, avC,
                                     SPARSE_INDEX_BASE_ONE);
 
-      for (size_t i = 0; i <= A.rows(); i++) {
+      for (MKL_INT i = 0; i <= A.rows(); i++) {
         EXPECT_EQ(A1.get_ai()[i], C.get_ai()[i]);
       }
-      for (size_t i = 0; i < A.nnz(); i++) {
+      for (MKL_INT i = 0; i < A.nnz(); i++) {
         EXPECT_EQ(A1.get_aj()[i], C.get_aj()[i]);
         EXPECT_EQ(A1.get_av()[i], C.get_av()[i]);
       }

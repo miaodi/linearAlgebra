@@ -77,7 +77,7 @@ public:
   void get_adjacency_graph(std::vector<MKL_INT> &xadj,
                            std::vector<MKL_INT> &adjncy) const;
 
-  virtual bool solve(double const *const b, double *const x) { return false; }
+  virtual bool solve(double const *const, double *const) { return false; }
 
   void to_one_based();
 
@@ -99,7 +99,7 @@ public:
 
   virtual std::vector<double> rowwiseSqrtNorm() const;
 
-  void DtAD(const std::vector<double>& diag);
+  void DtAD(const std::vector<double> &diag);
 
 protected:
   MKL_INT _nrow; // Number of Rows
