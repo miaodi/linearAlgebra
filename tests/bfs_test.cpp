@@ -1,13 +1,13 @@
 #include "BFS.h"
 #include "Reordering.h"
 #include "mkl_sparse_mat.h"
+#include "utils.h"
 #include <algorithm>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <omp.h>
 #include <random>
 #include <unordered_set>
-#include "utils.h"
 
 TEST(bfs, serial) {
   // https://dl.acm.org/cms/attachment/039ee79d-efce-4a81-8a76-ed21ffbd1a5b/f1.jpg
@@ -45,7 +45,6 @@ TEST(bfs, parallel) {
   std::shared_ptr<double[]> avA(new double[28]);
 
   mkl_wrapper::mkl_sparse_mat A(9, 9, aiA, ajA, avA);
-  MKL_INT level;
   reordering::BFS bfs(reordering::PBFS_Fn<false, true>);
   bfs(&A, 0);
 
@@ -87,7 +86,7 @@ TEST(bfs, serial_vs_parallel) {
         pbfs(&mat, s);
         pbfs2(&mat, s);
         EXPECT_EQ(pbfs.getHeight(), bfs.getHeight());
-        for (size_t i = 0; i < mat.rows(); i++)
+        for (auto i = 0; i < mat.rows(); i++)
           EXPECT_EQ(pbfs.getLevels()[i], bfs.getLevels()[i]);
 
         const auto &pbfs_lastLevel = pbfs.getLastLevel();

@@ -51,7 +51,7 @@ public:
 protected:
   int _maxiter{1000};    // max nr of iterations
   double _rel_tol{1e-8}; // residual relative tolerance
-  double _abs_tol{1e-16};
+  double _abs_tol{0.};
   bool m_fail_max_iters{true};
 };
 

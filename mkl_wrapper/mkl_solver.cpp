@@ -358,8 +358,8 @@ bool mkl_fgmres_solver::solve(double const *const b, double *const x) {
        *this parameter is the coefficient hk+1,k of the Hessenberg matrix.
        *---------------------------------------------------------------------------*/
       // std::cout<<"dpar[6]: "<<dpar[6]<<std::endl;
-      if (dpar[6] < 1.0E-13) {
-        std::cout << "dpar[6] < 1.0E-13 finished the gmres process\n";
+      if (dpar[6] < 1.0E-16) {
+        std::cout << "dpar[6] < 1.0E-16 finished the gmres process\n";
         bsuccess = true;
         bdone = true;
       }

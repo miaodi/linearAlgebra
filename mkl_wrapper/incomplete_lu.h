@@ -65,6 +65,8 @@ public:
   virtual bool numeric_factorize(mkl_sparse_mat const *const A) override;
 
   void set_level(const int level) { _level = level; }
+  
+  // virtual bool solve(double const *const b, double *const x) override;
 
 protected:
   int _level;

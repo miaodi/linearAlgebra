@@ -47,7 +47,7 @@ void ReadFromBinaryVec(const std::string &filename, std::vector<double> &vec);
 template <typename IVEC, typename VVEC, typename IB>
 auto ReadFromBinaryCSR(const std::string &filename, IVEC &ai, IVEC &aj,
                        VVEC &av, const IB base) {
-  using index_type = typename IVEC::value_type;
+  // using index_type = typename IVEC::value_type;
 
   IVEC rows;
   auto &cols = aj;
@@ -78,11 +78,11 @@ auto ReadFromBinaryCSR(const std::string &filename, IVEC &ai, IVEC &aj,
     index[current] = current;
   }
 
-  for (size_t i = 0; i < nnz; i++) {
+  for (auto i = 0; i < nnz; i++) {
     ai[rows[i] + (1 - base)]++;
   }
   ai[0] += base;
-  for (size_t i = 0; i < res.first; i++) {
+  for (auto i = 0; i < res.first; i++) {
     ai[i + 1] += ai[i];
   }
   return res;
@@ -99,7 +99,8 @@ void read_matrix_market_csr(
   rows = IVEC(header.nrows + 1, 0);
   typename IVEC::value_type nnz = cols.size();
   IVEC index(nnz);
-  for (typename IVEC::value_type i = 0; i < index.size(); i++) {
+  for (typename IVEC::value_type i = 0;
+       i < (typename IVEC::value_type)index.size(); i++) {
     index[i] = i;
   }
   std::sort(index.begin(), index.end(),
@@ -161,9 +162,9 @@ public:
 template <typename Iter>
 std::pair<Iter, Iter> LoadBalancedPartition(Iter begin, Iter end, int tid,
                                             int nthreads) {
-  const size_t total_work = std::distance(begin, end);
-  const size_t work_per_thread = total_work / nthreads;
-  const size_t resid = total_work % nthreads;
+  const int total_work = std::distance(begin, end);
+  const int work_per_thread = total_work / nthreads;
+  const int resid = total_work % nthreads;
   return tid >= resid
              ? std::make_pair(begin + tid * work_per_thread + resid,
                               begin + (tid + 1) * work_per_thread + resid)
@@ -174,9 +175,9 @@ std::pair<Iter, Iter> LoadBalancedPartition(Iter begin, Iter end, int tid,
 template <typename Iter>
 std::pair<Iter, Iter> LoadPrefixBalancedPartition(Iter begin, Iter end, int tid,
                                                   int nthreads) {
-  const size_t total_work = *end - *begin;
-  const size_t work_per_thread = total_work / nthreads;
-  const size_t resid = total_work % nthreads;
+  const int total_work = *end - *begin;
+  const int work_per_thread = total_work / nthreads;
+  const int resid = total_work % nthreads;
   Iter lb =
       tid == 0
           ? begin

@@ -264,7 +264,7 @@ bool incomplete_lu_k::symbolic_factorize(mkl_sparse_mat const *const A) {
       auto mid = std::upper_bound(_aj.get() + _ai[i] - base,
                                   _aj.get() + _ai[i + 1] - base, i + base);
       if (mid == _aj.get() + _ai[i + 1] - base)
-        _firstUpperPos[i] = n;
+        _firstUpperPos[i] = _ai[i + 1] - base;
       else
         _firstUpperPos[i] = mid - _aj.get();
     }
@@ -323,4 +323,27 @@ bool incomplete_lu_k::numeric_factorize(mkl_sparse_mat const *const A) {
     to_one_based();
   return true;
 }
+
+// bool incomplete_lu_k::solve(double const *const b, double *const x) {
+//   const MKL_INT base = mkl_base();
+//   // std::fill(_interm_vec.begin(), _interm_vec.end(), 0.0);
+//   for (MKL_INT i = 0; i < rows(); i++) {
+//     _interm_vec[i] = b[i];
+//     for (MKL_INT j = _ai[i] - base; j < _firstUpperPos[i]-1; j++) {
+//       _interm_vec[i] -= _av[j] * _interm_vec[_aj[j] - base];
+//     }
+//   }
+//   // for (auto i : _interm_vec)
+//   //   std::cout << i << std::endl;
+//   // std::abort();
+//   for (MKL_INT i = rows() - 1; i >= 0; i--) {
+//     x[i] = _interm_vec[i];
+//     for (MKL_INT j = _firstUpperPos[i]; j < _ai[i + 1] - base; j++) {
+//       x[i] -= _av[j] * x[_aj[j] - base];
+//     }
+//     x[i] /= _av[_firstUpperPos[i] - 1];
+//   }
+
+//   return true;
+// }
 } // namespace mkl_wrapper

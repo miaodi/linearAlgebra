@@ -200,8 +200,6 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
   const MKL_INT base = mkl_base();
   MKL_INT i, k_idx, A_k_idx, k, _j_idx, j_idx;
   std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
-  MKL_INT availableJKRow = 0;
-  MKL_INT modifiedRow = -1;
   bool success_flag = false;
   int iter = 0;
 
@@ -218,6 +216,10 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
     std::cout << "init shift: " << shift << std::endl;
   }
   do {
+    // TODO: a better way to manage JKRow is needed
+    MKL_INT availableJKRow = 0;
+    MKL_INT modifiedRow = -1;
+
     for (i = 0; i < n; i++) {
 
       k_idx = _ai[i] - base;
@@ -401,27 +403,31 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
     for (i = 0; i < n; i++) {
       _rowVals.clear();
       auto rowIt = _rowVals.before_begin();
-      k = _diagPos[i];
+      k = _diagPos[i]; // get diagonal position of row i on A
       list_size = ai[i + 1] - base - k;
+      // copy row i of A to _ai_i
       for (A_k_idx = _diagPos[i]; A_k_idx < ai[i + 1] - base; A_k_idx++) {
         rowIt = _rowVals.insert_after(
             rowIt, std::make_pair(aj[A_k_idx] - base, av[A_k_idx]));
-        // std::cout << aj[A_k_idx] - base << " , " << av[A_k_idx] << std::endl;
       }
 
       // use n as the list end to prevent from branch prediction
       _rowVals.insert_after(rowIt, std::make_pair(n + base, 0));
+
+      // compute _a_ij = _a_ij - sum_{j(i,n)}(_a_ki * _a_kj)
       for (auto &k_pair : jKRow[i]) {
         k = k_pair.first;
         j_idx = k_pair.second;
 
         if (j_idx + 1 != _ai[k + 1] - base) {
-          if (jKRow[_aj[j_idx + 1] - base].empty() && availableJKRow < i) {
+          if (jKRow[_aj[j_idx + 1] - base].capacity() == 0 &&
+              availableJKRow < i) {
             std::swap(jKRow[_aj[j_idx + 1] - base], jKRow[availableJKRow++]);
           }
           jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
           modifiedRow = std::max(_aj[j_idx + 1] - base, modifiedRow);
         }
+
         const double aki = _av[j_idx];
         auto eij = _rowVals.begin();
         MKL_INT nextIdx = std::next(eij)->first;
@@ -441,6 +447,7 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
           }
         }
       }
+
       jKRow[i].clear();
       // treat a_ii
       rowIt = _rowVals.begin();
@@ -480,6 +487,7 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
         // if (list_size - 1 > 2 * (row_size - 1)) {
         max_heap.clear();
         for (int ii = 1; ii < list_size; ii++) {
+          rowIt->second /= aii;
           max_heap.push(*rowIt++);
           if (max_heap.size() > row_size - 1)
             max_heap.pop();
@@ -493,19 +501,16 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
 
         for (int ii = 0; ii < heap.size(); ii++) {
           _aj[k_idx] = heap[ii].first + base;
-          _av[k_idx++] = heap[ii].second / aii;
+          _av[k_idx++] = heap[ii].second;
         }
-        _ai[i + 1] = _ai[i] + heap.size() + 1;
+        _ai[i + 1] = _ai[i] + row_size;
         // }
       }
-      // for (int ii = _ai[i] - base; ii != _ai[i + 1] - base; ii++) {
-      //   std::cout << "( " << _aj[ii] << " , " << _av[ii] << " ),"
-      //             << " ";
-      // }
-      // std::cout << std::endl;
+      
+      // append row i to _aj[diagiI+1] row
       k_idx = _ai[i] - base;
       if (_ai[i + 1] - _ai[i] != 1) {
-        if (jKRow[_aj[k_idx + 1] - base].empty())
+        if (jKRow[_aj[k_idx + 1] - base].capacity() == 0)
           std::swap(jKRow[availableJKRow++], jKRow[_aj[k_idx + 1] - base]);
         jKRow[_aj[k_idx + 1] - base].push_back({i, k_idx + 1});
         modifiedRow = std::max(_aj[k_idx + 1] - base, modifiedRow);

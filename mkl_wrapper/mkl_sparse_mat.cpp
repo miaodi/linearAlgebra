@@ -366,7 +366,6 @@ void mkl_sparse_mat::print() const {
 int mkl_sparse_mat::check() const {
   sparse_checker_error_values check_err_val;
   sparse_struct pt;
-  int error = 0;
 
   sparse_matrix_checker_init(&pt);
   pt.n = _nrow;
@@ -397,7 +396,6 @@ int mkl_sparse_mat::check() const {
 
   if (check_err_val == MKL_SPARSE_CHECKER_NONTRIANGULAR) {
     printf("Matrix check result: MKL_SPARSE_CHECKER_NONTRIANGULAR\n");
-    error = 0;
   } else {
     if (check_err_val == MKL_SPARSE_CHECKER_SUCCESS) {
       printf("Matrix check result: MKL_SPARSE_CHECKER_SUCCESS\n");
@@ -411,7 +409,6 @@ int mkl_sparse_mat::check() const {
     if (check_err_val == MKL_SPARSE_CHECKER_NONORDERED) {
       printf("Matrix check result: MKL_SPARSE_CHECKER_NONORDERED\n");
     }
-    error = 1;
   }
   return check_err_val;
 }
@@ -702,8 +699,6 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
 
   _aj.reset(new MKL_INT[_nnz]);
   _av.reset(new double[_nnz]);
-
-  MKL_INT ind = 0;
 
   for (MKL_INT i = 0; i < _nrow; i++) {
     std::copy(std::execution::seq, aj.get() + diag_pos[i],
