@@ -237,7 +237,10 @@ public:
   bool empty() { return _heap.empty(); }
 
   // used to insert an item in the priority queue.
-  void push(const T &obj) { _heap.push_back(obj); }
+  void push(const T &obj) {
+    _heap.push_back(obj);
+    heapifyUp(_heap.size() - 1);
+  }
 
   // deletes the highest priority item currently in the queue.
   void pop() {
