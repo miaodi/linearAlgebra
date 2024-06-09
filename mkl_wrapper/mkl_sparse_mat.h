@@ -101,6 +101,8 @@ public:
 
   void DtAD(const std::vector<double> &diag);
 
+  virtual bool diag_pos(std::vector<MKL_INT> &) const;
+
 protected:
   MKL_INT _nrow; // Number of Rows
   MKL_INT _ncol; // Number of Columns
@@ -168,6 +170,8 @@ public:
   virtual void optimize();
 
   virtual std::vector<double> rowwiseSqrtNorm() const override;
+
+  virtual bool diag_pos(std::vector<MKL_INT> &) const override;
 };
 
 class mkl_sparse_mat_diag : public mkl_sparse_mat {

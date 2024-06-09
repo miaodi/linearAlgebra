@@ -303,4 +303,37 @@ protected:
   C _comp;
 };
 
+template <typename T>
+class CacheFriendlyVectors : public std::vector<std::vector<T>> {
+public:
+  CacheFriendlyVectors(const size_t size) : std::vector<std::vector<T>>(size) {}
+
+  void push_back(const size_t to, const T &val) {
+    if ((*this)[to].capacity() == 0 && _availableInd < _at) {
+      std::swap((*this)[to], (*this)[_availableInd++]);
+    }
+    (*this)[to].push_back(val);
+    _modifiedInd = std::max(to, _modifiedInd);
+  }
+
+  void to_next() { (*this)[_at++].clear(); }
+
+  void clear() {
+    size_t r = 0;
+    for (size_t rr = _availableInd; rr <= _modifiedInd && r < rr; rr++) {
+      (*this)[rr].clear();
+      if ((*this)[rr].capacity()) {
+        std::swap((*this)[rr], (*this)[r++]);
+      }
+    }
+    _availableInd = 0;
+    _modifiedInd = 0;
+    _at = 0;
+  }
+
+protected:
+  size_t _availableInd{0};
+  size_t _modifiedInd{0};
+  size_t _at{0};
+};
 } // namespace utils

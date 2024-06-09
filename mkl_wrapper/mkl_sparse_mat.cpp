@@ -556,6 +556,27 @@ void mkl_sparse_mat::DtAD(const std::vector<double> &diag) {
   sp_fill();
 }
 
+bool mkl_sparse_mat::diag_pos(std::vector<MKL_INT> &diag) const {
+  diag.resize(_nrow);
+  volatile bool missing_diag = false;
+  const MKL_INT base = _mkl_base;
+#pragma omp parallel for shared(missing_diag)
+  for (MKL_INT i = 0; i < _nrow; i++) {
+    if (missing_diag)
+      continue;
+    auto mid = std::find(_aj.get() + _ai[i] - base,
+                         _aj.get() + _ai[i + 1] - base, i + base);
+    if (mid == _aj.get() + _ai[i + 1] - base) {
+      std::cerr << "Could not find diagonal!" << std::endl;
+      missing_diag = true;
+    }
+    diag[i] = mid - _aj.get();
+  }
+  if (missing_diag)
+    return false;
+  return true;
+}
+
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                               double c) {
   if (A.mkl_base() != B.mkl_base()) {
@@ -757,6 +778,25 @@ std::vector<double> mkl_sparse_mat_sym::rowwiseSqrtNorm() const {
       i = 1.;
   }
   return row_norm;
+}
+
+bool mkl_sparse_mat_sym::diag_pos(std::vector<MKL_INT> &diag) const {
+  diag.resize(_nrow);
+  volatile bool missing_diag = false;
+  const MKL_INT base = _mkl_base;
+#pragma omp parallel for shared(missing_diag)
+  for (MKL_INT i = 0; i < _nrow; i++) {
+    if (missing_diag)
+      continue;
+    if (_aj[_ai[i] - base] - base != i) {
+      std::cerr << "Could not find diagonal!" << std::endl;
+      missing_diag = true;
+    }
+    diag[i] = _ai[i] - base;
+  }
+  if (missing_diag)
+    return false;
+  return true;
 }
 
 mkl_sparse_mat_diag::mkl_sparse_mat_diag(const MKL_INT size, const double val)

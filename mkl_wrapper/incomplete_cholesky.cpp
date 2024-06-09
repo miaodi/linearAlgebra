@@ -80,29 +80,8 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
   auto aj = A->get_aj();
   _ai.reset(new MKL_INT[n + 1]);
   const bool sym = A->mkl_descr().type == SPARSE_MATRIX_TYPE_SYMMETRIC;
-  _diagPos.resize(_nrow);
-  if (sym) {
-#pragma omp parallel for
-    for (MKL_INT i = 0; i < _nrow; i++) {
-      _diagPos[i] = ai[i] - base;
-    }
-  } else {
-    volatile bool missing_diag = false;
-#pragma omp parallel for shared(missing_diag)
-    for (MKL_INT i = 0; i < _nrow; i++) {
-      if (missing_diag)
-        continue;
-      auto mid = std::find(aj.get() + ai[i] - base, aj.get() + ai[i + 1] - base,
-                           i + base);
-      if (mid == aj.get() + ai[i + 1] - base) {
-        std::cerr << "Could not find diagonal!" << std::endl;
-        missing_diag = true;
-      }
-      _diagPos[i] = mid - aj.get();
-    }
-    if (missing_diag)
-      return false;
-  }
+  A->diag_pos(_diagPos);
+
   if (_level == 0 && sym) {
     _nnz = A->nnz();
     _aj.reset(new MKL_INT[_nnz]);
@@ -128,7 +107,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
     MKL_INT list_size = 0;
     MKL_INT j_idx;
     MKL_INT k;
-    std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
+    utils::CacheFriendlyVectors<std::pair<MKL_INT, MKL_INT>> jKRow(n);
     MKL_INT availableJKRow = 0;
 
     for (MKL_INT i = 0; i < n; i++) {
@@ -147,10 +126,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
         j_idx = k_pair.second;
 
         if (j_idx + 1 != _ai[k + 1] - base) {
-          if (jKRow[_aj[j_idx + 1] - base].empty() && availableJKRow < i) {
-            std::swap(jKRow[_aj[j_idx + 1] - base], jKRow[availableJKRow++]);
-          }
-          jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
+          jKRow.push_back(_aj[j_idx + 1] - base, {k, j_idx + 1});
         }
         auto lik = av_levels[j_idx];
         auto eij = _rowLevels.begin();
@@ -175,9 +151,10 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
           }
         }
       }
-      jKRow[i].clear();
+      jKRow.to_next();
 
       _ai[i + 1] = _ai[i] + list_size;
+      
       if (_ai[i + 1] - base > aj_size) {
         MKL_INT new_aj_size;
         if (2 * i >= n)
@@ -195,15 +172,13 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
         std::swap(new_levels, av_levels);
         std::swap(new_aj_size, aj_size);
       }
+
       rowIt = _rowLevels.begin();
       MKL_INT pos = _ai[i] - base;
       for (MKL_INT ii = 0; ii < list_size; ii++) {
         _aj[pos] = rowIt->first + base;
         if (pos == _ai[i] - base + 1) {
-          if (jKRow[_aj[pos] - base].empty()) {
-            std::swap(jKRow[availableJKRow++], jKRow[_aj[pos] - base]);
-          }
-          jKRow[_aj[pos] - base].push_back({i, pos});
+          jKRow.push_back(_aj[pos] - base, {i, pos});
         }
         av_levels[pos++] = rowIt->second;
         rowIt++;
@@ -223,7 +198,7 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
   const MKL_INT n = rows();
   const MKL_INT base = mkl_base();
   MKL_INT i, k_idx, A_k_idx, k, _j_idx, j_idx;
-  std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
+  utils::CacheFriendlyVectors<std::pair<MKL_INT, MKL_INT>> jKRow(n);
   bool success_flag = false;
   int iter = 0;
 
@@ -240,10 +215,6 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
     std::cout << "init shift: " << shift << std::endl;
   }
   do {
-    // TODO: a better way to manage JKRow is needed
-    MKL_INT availableJKRow = 0;
-    MKL_INT modifiedRow = -1;
-
     for (i = 0; i < n; i++) {
 
       k_idx = _ai[i] - base;
@@ -263,10 +234,7 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
         j_idx = k_pair.second;
 
         if (j_idx + 1 != _ai[k + 1] - base) {
-          if (jKRow[_aj[j_idx + 1] - base].empty() && availableJKRow < i)
-            std::swap(jKRow[_aj[j_idx + 1] - base], jKRow[availableJKRow++]);
-          jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
-          modifiedRow = std::max(_aj[j_idx + 1] - base, modifiedRow);
+          jKRow.push_back(_aj[j_idx + 1] - base, {k, j_idx + 1});
         }
 
         const double aki = _av[j_idx];
@@ -280,12 +248,9 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
             j_idx++;
         }
       }
-      jKRow[i].clear();
+      jKRow.to_next();
       if (_ai[i + 1] - _ai[i] != 1) {
-        if (jKRow[_aj[k_idx + 1] - base].empty())
-          std::swap(jKRow[availableJKRow++], jKRow[_aj[k_idx + 1] - base]);
-        jKRow[_aj[k_idx + 1] - base].push_back({i, k_idx + 1});
-        modifiedRow = std::max(_aj[k_idx + 1] - base, modifiedRow);
+        jKRow.push_back(_aj[k_idx + 1] - base, {i, k_idx + 1});
       }
 
       if (_av[k_idx] <= 0) {
@@ -293,12 +258,7 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
           return false;
         shift = std::max(_initial_shift, 2. * shift);
         std::cout << "shift: " << shift << std::endl;
-        MKL_INT r = 0;
-        for (MKL_INT rr = availableJKRow; rr <= modifiedRow; rr++) {
-          if (jKRow[rr].capacity()) {
-            std::swap(jKRow[rr], jKRow[r++]);
-          }
-        }
+        jKRow.clear();
         break;
       }
       const double aii = std::sqrt(_av[k_idx]);
@@ -331,40 +291,12 @@ bool incomplete_cholesky_fm::symbolic_factorize(mkl_sparse_mat const *const A) {
   _ai.reset(new MKL_INT[n + 1]);
   const bool sym = A->mkl_descr().type == SPARSE_MATRIX_TYPE_SYMMETRIC;
   _diagPos.resize(_nrow);
+  if (!A->diag_pos(_diagPos))
+    return false;
+  const MKL_INT tails = std::min(_p * (_p + 1) / 2, _nrow * (_nrow + 1) / 2);
   if (sym) {
-    volatile bool missing_diag = false;
-#pragma omp parallel for
-    for (MKL_INT i = 0; i < _nrow; i++) {
-      if (missing_diag)
-        continue;
-      if (aj[ai[i] - base] - base != i) {
-        std::cerr << "Could not find diagonal!" << std::endl;
-        missing_diag = true;
-      }
-      _diagPos[i] = ai[i] - base;
-    }
-    if (missing_diag)
-      return false;
-    const MKL_INT tails = std::min(_p * (_p + 1) / 2, _nrow * (_nrow + 1) / 2);
     _capacity = A->nnz() + _nrow * _p - tails;
   } else {
-    volatile bool missing_diag = false;
-#pragma omp parallel for shared(missing_diag)
-    for (MKL_INT i = 0; i < _nrow; i++) {
-      if (missing_diag)
-        continue;
-      auto mid = std::find(aj.get() + ai[i] - base, aj.get() + ai[i + 1] - base,
-                           i + base);
-      if (mid == aj.get() + ai[i + 1] - base) {
-        std::cerr << "Could not find diagonal!" << std::endl;
-        missing_diag = true;
-      }
-      _diagPos[i] = mid - aj.get();
-    }
-    if (missing_diag)
-      return false;
-
-    const MKL_INT tails = std::min(_p * (_p + 1) / 2, _nrow * (_nrow + 1) / 2);
     _capacity = (A->nnz() + _nrow) / 2 + _nrow * _p - tails;
   }
   // std::cout << "_capacity: " << _capacity << std::endl;
@@ -396,7 +328,7 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
       compMin);
   std::vector<std::pair<MKL_INT, double>> popped;
 
-  std::vector<std::vector<std::pair<MKL_INT, MKL_INT>>> jKRow(n);
+  utils::CacheFriendlyVectors<std::pair<MKL_INT, MKL_INT>> jKRow(n);
 #ifdef USE_BOOST_LIB
   std::forward_list<std::pair<MKL_INT, double>,
                     boost::fast_pool_allocator<std::pair<MKL_INT, double>>>
@@ -421,8 +353,6 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
     std::cout << "init shift: " << shift << std::endl;
   }
   do {
-    MKL_INT availableJKRow = 0;
-    MKL_INT modifiedRow = -1;
     _ai[0] = base;
     for (i = 0; i < n; i++) {
       _rowVals.clear();
@@ -444,24 +374,19 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
         j_idx = k_pair.second;
 
         if (j_idx + 1 != _ai[k + 1] - base) {
-          if (jKRow[_aj[j_idx + 1] - base].capacity() == 0 &&
-              availableJKRow < i) {
-            std::swap(jKRow[_aj[j_idx + 1] - base], jKRow[availableJKRow++]);
-          }
-          jKRow[_aj[j_idx + 1] - base].push_back({k, j_idx + 1});
-          modifiedRow = std::max(_aj[j_idx + 1] - base, modifiedRow);
+          jKRow.push_back(_aj[j_idx + 1] - base, {k, j_idx + 1});
         }
 
         const double aki = _av[j_idx];
         aij_update(_ai, _aj, _av, j_idx, k, base, aki, list_size, _rowVals);
       }
+      jKRow.to_next();
 
-      jKRow[i].clear();
       // treat a_ii
       rowIt = _rowVals.begin();
       k_idx = _ai[i] - base;
       _aj[k_idx] = rowIt->first + base;
-      _av[k_idx] = rowIt->second + shift;
+      _av[k_idx] = (rowIt++)->second + shift;
 
       // restart with new shift if negative a_ii
       if (_av[k_idx] <= 0) {
@@ -469,19 +394,12 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
           return false;
         shift = std::max(_initial_shift, 2. * shift);
         std::cout << "shift: " << shift << std::endl;
-        MKL_INT r = 0;
-        for (MKL_INT rr = availableJKRow; rr <= modifiedRow; rr++) {
-          jKRow[rr].clear();
-          if (jKRow[rr].capacity()) {
-            std::swap(jKRow[rr], jKRow[r++]);
-          }
-        }
+        jKRow.clear();
         break;
       }
 
       const double aii = std::sqrt(_av[k_idx]);
       _av[k_idx++] = aii;
-      rowIt++;
       const MKL_INT row_size =
           ai[i + 1] - _diagPos[i] + std::min(_p, _nrow - i - 1);
       if (list_size < row_size) {
@@ -518,17 +436,13 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
       // append row i to _aj[diagiI+1] row
       k_idx = _ai[i] - base;
       if (_ai[i + 1] - _ai[i] != 1) {
-        if (jKRow[_aj[k_idx + 1] - base].capacity() == 0)
-          std::swap(jKRow[availableJKRow++], jKRow[_aj[k_idx + 1] - base]);
-        jKRow[_aj[k_idx + 1] - base].push_back({i, k_idx + 1});
-        modifiedRow = std::max(_aj[k_idx + 1] - base, modifiedRow);
+        jKRow.push_back(_aj[k_idx + 1] - base, {i, k_idx + 1});
       }
     }
     if (i == n)
       success_flag = true;
   } while (!success_flag);
   _nnz = _ai[_nrow] - base;
-  // std::cout << "nnz: " << _nnz << std::endl;
   if (_mkl_base == SPARSE_INDEX_BASE_ONE)
     sp_fill();
   else
