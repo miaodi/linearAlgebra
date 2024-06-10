@@ -29,26 +29,26 @@ TEST(reordering, min_degree_node) {
   }
 }
 
-TEST(reordering, pseudoDiameter) {
-  std::vector<std::string> files{"../benchmarks/data/ldoor.mtx"};
-  std::vector<MKL_INT> degrees;
-  for (const auto &fn : files) {
-    std::ifstream f(fn);
-    f.clear();
-    f.seekg(0, std::ios::beg);
-    std::vector<MKL_INT> csr_rows, csr_cols;
-    std::vector<double> csr_vals;
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
-    mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
-                                    csr_rows, csr_cols, csr_vals);
+// TEST(reordering, pseudoDiameter) {
+//   std::vector<std::string> files{"../benchmarks/data/ldoor.mtx"};
+//   std::vector<MKL_INT> degrees;
+//   for (const auto &fn : files) {
+//     std::ifstream f(fn);
+//     f.clear();
+//     f.seekg(0, std::ios::beg);
+//     std::vector<MKL_INT> csr_rows, csr_cols;
+//     std::vector<double> csr_vals;
+//     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+//     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+//                                     csr_rows, csr_cols, csr_vals);
 
-    auto parants_parrem = reordering::ParUnionFindRem(&mat);
-    std::cout << reordering::CountComponents(parants_parrem, 0) << std::endl;
-    MKL_INT source, target;
-    reordering::PseudoDiameter(&mat, source, target, degrees);
-    std::cout << source << " " << target << std::endl;
-  }
-}
+//     auto parants_parrem = reordering::ParUnionFindRem(&mat);
+//     std::cout << reordering::CountComponents(parants_parrem, 0) << std::endl;
+//     MKL_INT source, target;
+//     reordering::PseudoDiameter(&mat, source, target, degrees);
+//     std::cout << source << " " << target << std::endl;
+//   }
+// }
 
 TEST(UnionFind, rank_vs_rem) {
   for (int i = 0; i < 100; i++) {

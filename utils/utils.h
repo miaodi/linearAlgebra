@@ -257,10 +257,11 @@ public:
   void clear() { _heap.clear(); }
 
   // return the highest priority item currently in the queue.
-  T top() {
+  T *top() {
     if (!empty()) {
-      return _heap[0];
+      return &_heap[0];
     }
+    return nullptr;
   }
 
   std::vector<T> &getHeap() { return _heap; }

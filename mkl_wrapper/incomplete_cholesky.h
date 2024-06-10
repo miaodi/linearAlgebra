@@ -53,10 +53,18 @@ public:
 
   virtual bool numeric_factorize(mkl_sparse_mat const *const A) override;
 
-  void set_p(const int p) { _p = p; }
+  void set_lsize(const int lsize) { _lsize = lsize; }
+
+  void set_rsize(const int rsize) { _rsize = rsize; }
 
 protected:
-  int _p{0};
-  int _capacity{0};
+  template <bool buildR> bool numeric_factorize(mkl_sparse_mat const *const A);
+  int _lsize{0};
+  int _rsize{0};
+
+  // strictly upper triangular
+  std::shared_ptr<MKL_INT[]> _ai_r{nullptr}; // Row Pointer for R
+  std::shared_ptr<MKL_INT[]> _aj_r{nullptr}; // Column Index for R
+  std::shared_ptr<double[]> _av_r{nullptr};  // Value Array for R
 };
 } // namespace mkl_wrapper

@@ -50,7 +50,7 @@ void incomplete_choleksy_base::aij_update(IDX _ai, IDX _aj, VAL _av,
                                           int &list_size, LIST &list) {
   auto eij = list.begin();
   MKL_INT nextIdx = std::next(eij)->first;
-  for (; j_idx != _ai[k + 1] - base; j_idx++) {
+  for (; j_idx < _ai[k + 1] - base; j_idx++) {
     MKL_INT jk_idx = _aj[j_idx] - base;
     while (nextIdx <= jk_idx) {
       eij = std::next(eij);
@@ -154,7 +154,7 @@ bool incomplete_cholesky_k::symbolic_factorize(mkl_sparse_mat const *const A) {
       jKRow.to_next();
 
       _ai[i + 1] = _ai[i] + list_size;
-      
+
       if (_ai[i + 1] - base > aj_size) {
         MKL_INT new_aj_size;
         if (2 * i >= n)
@@ -293,18 +293,36 @@ bool incomplete_cholesky_fm::symbolic_factorize(mkl_sparse_mat const *const A) {
   _diagPos.resize(_nrow);
   if (!A->diag_pos(_diagPos))
     return false;
-  const MKL_INT tails = std::min(_p * (_p + 1) / 2, _nrow * (_nrow + 1) / 2);
-  if (sym) {
-    _capacity = A->nnz() + _nrow * _p - tails;
-  } else {
-    _capacity = (A->nnz() + _nrow) / 2 + _nrow * _p - tails;
+  const MKL_INT l_tails =
+      std::min(_lsize * (_lsize + 1) / 2, _nrow * (_nrow + 1) / 2);
+  const MKL_INT l_capacity =
+      sym ? (A->nnz() + _nrow * _lsize - l_tails)
+          : ((A->nnz() + _nrow) / 2 + _nrow * _lsize - l_tails);
+  _aj.reset(new MKL_INT[l_capacity]);
+  _av.reset(new double[l_capacity]);
+  if (_rsize) {
+    _ai_r.reset(new MKL_INT[n + 1]);
+
+    const MKL_INT r_tails =
+        std::min(_rsize * (_rsize + 1) / 2, _nrow * (_nrow + 1) / 2);
+
+    const MKL_INT r_capacity = _nrow * _rsize - r_tails;
+
+    _aj_r.reset(new MKL_INT[r_capacity]);
+    _av_r.reset(new double[r_capacity]);
   }
-  // std::cout << "_capacity: " << _capacity << std::endl;
-  _aj.reset(new MKL_INT[_capacity]);
-  _av.reset(new double[_capacity]);
+
   return true;
 }
 
+bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
+  if (_rsize)
+    return numeric_factorize<true>(A);
+  else
+    return numeric_factorize<false>(A);
+}
+
+template <bool buildR>
 bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
   auto ai = A->get_ai();
   auto aj = A->get_aj();
@@ -322,13 +340,19 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
     return std::abs(v1.second) < std::abs(v2.second);
   };
 
-  utils::MaxHeap<std::pair<MKL_INT, double>, decltype(compMax)> max_heap(
+  utils::MaxHeap<std::pair<MKL_INT, double>, decltype(compMax)> max_heap_L(
+      compMax);
+  utils::MaxHeap<std::pair<MKL_INT, double>, decltype(compMax)> max_heap_R(
       compMax);
   utils::MaxHeap<std::pair<MKL_INT, double>, decltype(compMin)> min_heap(
       compMin);
-  std::vector<std::pair<MKL_INT, double>> popped;
 
-  utils::CacheFriendlyVectors<std::pair<MKL_INT, MKL_INT>> jKRow(n);
+  utils::CacheFriendlyVectors<std::pair<MKL_INT, MKL_INT>> jKRowU(n);
+  utils::CacheFriendlyVectors<MKL_INT> jKRowR(n);
+
+  std::vector<MKL_INT> curR(n, std::numeric_limits<MKL_INT>::max());
+  std::vector<MKL_INT> curU(n, std::numeric_limits<MKL_INT>::max());
+
 #ifdef USE_BOOST_LIB
   std::forward_list<std::pair<MKL_INT, double>,
                     boost::fast_pool_allocator<std::pair<MKL_INT, double>>>
@@ -352,8 +376,12 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
       shift = _initial_shift - minDiag;
     std::cout << "init shift: " << shift << std::endl;
   }
+
   do {
     _ai[0] = base;
+    if constexpr (buildR) {
+      _ai_r[0] = base;
+    }
     for (i = 0; i < n; i++) {
       _rowVals.clear();
       auto rowIt = _rowVals.before_begin();
@@ -369,18 +397,38 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
       _rowVals.insert_after(rowIt, std::make_pair(n + base, 0));
 
       // compute _a_ij = _a_ij - sum_{j(i,n)}(_a_ki * _a_kj)
-      for (auto &k_pair : jKRow[i]) {
+      for (auto &k_pair : jKRowU[i]) {
         k = k_pair.first;
         j_idx = k_pair.second;
 
         if (j_idx + 1 != _ai[k + 1] - base) {
-          jKRow.push_back(_aj[j_idx + 1] - base, {k, j_idx + 1});
+          jKRowU.push_back(_aj[j_idx + 1] - base, {k, j_idx + 1});
+        }
+        if constexpr (buildR) {
+          curU[k] = j_idx + 1;
         }
 
         const double aki = _av[j_idx];
         aij_update(_ai, _aj, _av, j_idx, k, base, aki, list_size, _rowVals);
+
+        if constexpr (buildR) {
+          aij_update(_ai_r, _aj_r, _av_r, curR[k], k, base, aki, list_size,
+                     _rowVals);
+        }
       }
-      jKRow.to_next();
+      jKRowU.to_next();
+
+      if constexpr (buildR) {
+        for (auto k : jKRowR[i]) {
+          j_idx = curR[k]++;
+          const double aki = _av_r[j_idx];
+          aij_update(_ai, _aj, _av, curU[k], k, base, aki, list_size, _rowVals);
+          if (j_idx + 1 != _ai_r[k + 1] - base) {
+            jKRowR.push_back(_aj_r[j_idx + 1] - base, k);
+          }
+        }
+        jKRowR.to_next();
+      }
 
       // treat a_ii
       rowIt = _rowVals.begin();
@@ -394,49 +442,83 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
           return false;
         shift = std::max(_initial_shift, 2. * shift);
         std::cout << "shift: " << shift << std::endl;
-        jKRow.clear();
+        jKRowU.clear();
+        if constexpr (buildR)
+          jKRowR.clear();
         break;
       }
 
       const double aii = std::sqrt(_av[k_idx]);
       _av[k_idx++] = aii;
-      const MKL_INT row_size =
-          ai[i + 1] - _diagPos[i] + std::min(_p, _nrow - i - 1);
-      if (list_size < row_size) {
+      const MKL_INT row_l_size =
+          ai[i + 1] - _diagPos[i] + std::min(_lsize, _nrow - i - 1);
+      if (list_size < row_l_size) {
         for (int ii = 1; ii < list_size; ii++) {
           _aj[k_idx] = rowIt->first + base;
           _av[k_idx++] = rowIt->second / aii;
           rowIt++;
         }
         _ai[i + 1] = _ai[i] + list_size;
+        if constexpr (buildR)
+          _ai_r[i + 1] = _ai_r[i];
       } else {
-        // if (list_size - 1 > 2 * (row_size - 1)) {
-        max_heap.clear();
+        max_heap_L.clear();
+        if constexpr (buildR)
+          max_heap_R.clear();
+          
         for (int ii = 1; ii < list_size; ii++) {
           rowIt->second /= aii;
-          max_heap.push(*rowIt++);
-          if (max_heap.size() > row_size - 1)
-            max_heap.pop();
+          max_heap_L.push(*rowIt++);
+          if (max_heap_L.size() > row_l_size - 1) {
+            if constexpr (buildR) {
+              max_heap_R.push(*max_heap_L.top());
+              if (max_heap_R.size() > _rsize) {
+                max_heap_R.pop();
+              }
+            }
+            max_heap_L.pop();
+          }
         }
-        auto &heap = max_heap.getHeap();
-        std::sort(heap.begin(), heap.end(),
+        auto &heapL = max_heap_L.getHeap();
+        std::sort(heapL.begin(), heapL.end(),
                   [](const std::pair<MKL_INT, double> &a,
                      const std::pair<MKL_INT, double> &b) {
                     return a.first < b.first;
                   });
-
-        for (size_t ii = 0; ii < heap.size(); ii++) {
-          _aj[k_idx] = heap[ii].first + base;
-          _av[k_idx++] = heap[ii].second;
+        for (size_t ii = 0; ii < heapL.size(); ii++) {
+          _aj[k_idx] = heapL[ii].first + base;
+          _av[k_idx++] = heapL[ii].second;
         }
-        _ai[i + 1] = _ai[i] + row_size;
-        // }
+        _ai[i + 1] = _ai[i] + row_l_size;
+
+        if constexpr (buildR) {
+          k_idx = _ai_r[i] - base;
+          auto &heapR = max_heap_R.getHeap();
+          std::sort(heapR.begin(), heapR.end(),
+                    [](const std::pair<MKL_INT, double> &a,
+                       const std::pair<MKL_INT, double> &b) {
+                      return a.first < b.first;
+                    });
+          for (size_t ii = 0; ii < heapR.size(); ii++) {
+            _aj_r[k_idx] = heapR[ii].first + base;
+            _av_r[k_idx++] = heapR[ii].second;
+          }
+          _ai_r[i + 1] = _ai_r[i] + max_heap_R.size();
+          k_idx = _ai_r[i] - base;
+          if (_ai_r[i + 1] - _ai_r[i] != 0) {
+            jKRowR.push_back(_aj_r[k_idx] - base, i);
+          }
+          curR[i] = k_idx;
+        }
       }
 
       // append row i to _aj[diagiI+1] row
       k_idx = _ai[i] - base;
-      if (_ai[i + 1] - _ai[i] != 1) {
-        jKRow.push_back(_aj[k_idx + 1] - base, {i, k_idx + 1});
+      if (_ai[i + 1] - _ai[i] > 1) {
+        jKRowU.push_back(_aj[k_idx + 1] - base, {i, k_idx + 1});
+      }
+      if constexpr (buildR) {
+        curU[i] = k_idx + 1;
       }
     }
     if (i == n)
