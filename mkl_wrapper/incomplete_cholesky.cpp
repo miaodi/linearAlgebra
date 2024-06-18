@@ -350,8 +350,8 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
   utils::CacheFriendlyVectors<std::pair<MKL_INT, MKL_INT>> jKRowU(n);
   utils::CacheFriendlyVectors<MKL_INT> jKRowR(n);
 
-  std::vector<MKL_INT> curR(n, std::numeric_limits<MKL_INT>::max());
-  std::vector<MKL_INT> curU(n, std::numeric_limits<MKL_INT>::max());
+  std::vector<MKL_INT> curR(n);
+  std::vector<MKL_INT> curU(n);
 
 #ifdef USE_BOOST_LIB
   std::forward_list<std::pair<MKL_INT, double>,
@@ -384,6 +384,9 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
     }
     for (i = 0; i < n; i++) {
       _rowVals.clear();
+      curU[i] = std::numeric_limits<MKL_INT>::max();
+      curR[i] = std::numeric_limits<MKL_INT>::max();
+
       auto rowIt = _rowVals.before_begin();
       k = _diagPos[i]; // get diagonal position of row i on A
       list_size = ai[i + 1] - base - k;
@@ -400,17 +403,14 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
       for (auto &k_pair : jKRowU[i]) {
         k = k_pair.first;
         j_idx = k_pair.second;
-
         if (j_idx + 1 != _ai[k + 1] - base) {
           jKRowU.push_back(_aj[j_idx + 1] - base, {k, j_idx + 1});
         }
         if constexpr (buildR) {
           curU[k] = j_idx + 1;
         }
-
         const double aki = _av[j_idx];
         aij_update(_ai, _aj, _av, j_idx, k, base, aki, list_size, _rowVals);
-
         if constexpr (buildR) {
           aij_update(_ai_r, _aj_r, _av_r, curR[k], k, base, aki, list_size,
                      _rowVals);
@@ -465,7 +465,7 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
         max_heap_L.clear();
         if constexpr (buildR)
           max_heap_R.clear();
-          
+
         for (int ii = 1; ii < list_size; ii++) {
           rowIt->second /= aii;
           max_heap_L.push(*rowIt++);
@@ -505,7 +505,7 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
           }
           _ai_r[i + 1] = _ai_r[i] + max_heap_R.size();
           k_idx = _ai_r[i] - base;
-          if (_ai_r[i + 1] - _ai_r[i] != 0) {
+          if (_ai_r[i + 1] > _ai_r[i]) {
             jKRowR.push_back(_aj_r[k_idx] - base, i);
           }
           curR[i] = k_idx;
@@ -514,9 +514,8 @@ bool incomplete_cholesky_fm::numeric_factorize(mkl_sparse_mat const *const A) {
 
       // append row i to _aj[diagiI+1] row
       k_idx = _ai[i] - base;
-      if (_ai[i + 1] - _ai[i] > 1) {
+      if (_ai[i + 1] - _ai[i] > 1)
         jKRowU.push_back(_aj[k_idx + 1] - base, {i, k_idx + 1});
-      }
       if constexpr (buildR) {
         curU[i] = k_idx + 1;
       }
