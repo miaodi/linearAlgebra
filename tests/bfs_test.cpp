@@ -33,9 +33,23 @@ TEST(bfs, serial) {
 
   EXPECT_EQ(bfs2.getLastLevel().size(), 1);
   EXPECT_EQ(bfs2.getLastLevel()[0], 8);
+
+  A.to_one_based();
+
+  bfs(&A, 1);
+  EXPECT_EQ(bfs.getHeight(), 5);
+  for (size_t i = 0; i < ref.size(); i++) {
+    EXPECT_EQ(bfs.getLevels()[i], ref[i]);
+  }
+
+  bfs2(&A, 1);
+
+  EXPECT_EQ(bfs2.getLastLevel().size(), 1);
+  EXPECT_EQ(bfs2.getLastLevel()[0], 9);
 }
 
 TEST(bfs, parallel) {
+  omp_set_num_threads(5);
   // https://dl.acm.org/cms/attachment/039ee79d-efce-4a81-8a76-ed21ffbd1a5b/f1.jpg
   std::shared_ptr<MKL_INT[]> aiA(
       new MKL_INT[10]{0, 3, 5, 8, 12, 16, 20, 24, 27, 28});
@@ -62,6 +76,7 @@ TEST(bfs, parallel) {
 }
 
 TEST(bfs, serial_vs_parallel) {
+  omp_set_num_threads(5);
   std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
   for (const auto &fn : files) {
     std::ifstream f(fn);
@@ -72,7 +87,8 @@ TEST(bfs, serial_vs_parallel) {
     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                     csr_rows, csr_cols, csr_vals);
-
+    mkl_wrapper::mkl_sparse_mat mat1(mat);
+    mat1.to_one_based();
     for (int s = 0; s < mat.rows(); s++) {
       reordering::BFS bfs(reordering::BFS_Fn<true>);
       bfs(&mat, s);
@@ -96,6 +112,15 @@ TEST(bfs, serial_vs_parallel) {
 
         EXPECT_EQ(pbfs.getHeight(), pbfs2.getHeight());
 
+        EXPECT_EQ(pbfs2.getLastLevel().size(), bfs.getLastLevel().size());
+
+        // test base 1
+        pbfs2(&mat1, s + 1);
+        std::unordered_set<MKL_INT> pbfs_set2;
+        for (auto i : pbfs2.getLastLevel())
+          pbfs_set2.insert(i - 1);
+        EXPECT_EQ(bfs_set, pbfs_set2);
+        EXPECT_EQ(pbfs.getHeight(), pbfs2.getHeight());
         EXPECT_EQ(pbfs2.getLastLevel().size(), bfs.getLastLevel().size());
       }
     }

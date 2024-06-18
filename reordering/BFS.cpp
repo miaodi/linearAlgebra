@@ -17,19 +17,20 @@ bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
   std::fill_n(levels.begin(), levels.size(), -1);
   auto ai = mat->get_ai();
   auto aj = mat->get_aj();
+  const MKL_INT base = mat->mkl_base();
 
   utils::CircularBuffer<MKL_INT> cb(
       std::max(1, static_cast<MKL_INT>(mat->rows() * .2)));
-  cb.push(source - mat->mkl_base());
-  levels[source - mat->mkl_base()] = 0;
+  cb.push(source - base);
+  levels[source - base] = 0;
   if constexpr (LASTLEVEL)
     lastLevel.push_back(source);
   int widthCounter = 1;
   while (!cb.isEmpty()) {
     auto u = cb.first();
     cb.shift();
-    for (MKL_INT i = ai[u]; i < ai[u + 1]; i++) {
-      auto v = aj[i] - mat->mkl_base();
+    for (MKL_INT i = ai[u] - base; i < ai[u + 1] - base; i++) {
+      auto v = aj[i] - base;
       if (levels[v] == -1) {
         if (height < levels[u] + 1) {
           height = levels[u] + 1;
@@ -41,7 +42,7 @@ bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
         }
         levels[v] = height;
         if constexpr (LASTLEVEL)
-          lastLevel.push_back(v + mat->mkl_base());
+          lastLevel.push_back(v + base);
         if (!cb.available())
           cb.resizePreserve(cb.size() * 2);
         cb.push(v);
@@ -65,6 +66,7 @@ bool PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
   }
   auto ai = mat->get_ai();
   auto aj = mat->get_aj();
+  const MKL_INT base = mat->mkl_base();
   bool stat = true;
   int max_threads = omp_get_max_threads();
   static std::vector<std::vector<MKL_INT>> bvc;
@@ -78,11 +80,11 @@ bool PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
   std::vector<MKL_INT> count_per_thread_prev(max_threads + 1, 0);
   height = 0;
   if constexpr (RECORDLEVEL) {
-    levels[source - mat->mkl_base()] = 0;
+    levels[source - base] = 0;
   }
-  bvn[0].push_back(source - mat->mkl_base());
+  bvn[0].push_back(source - base);
   // visited[source - mat->mkl_base()] = true;
-  visited.set(source - mat->mkl_base());
+  visited.set(source - base);
   count_per_thread[1] = 1;
   MKL_INT total_work;
   MKL_INT total_work_prev;
@@ -129,7 +131,7 @@ bool PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
         if constexpr (LASTLEVEL) {
           for (size_t i = 0; i < bvn[tid].size(); i++) {
             *(lastLevel.data() + count_per_thread_prev[tid] + i) =
-                bvn[tid][i] + mat->mkl_base();
+                bvn[tid][i] + base;
           }
         }
         bvn[tid].resize(0);
@@ -150,8 +152,9 @@ bool PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
                       ? chunck_pos_pairs[tid + 1].second
                       : bvc[i].size();
         for (int j = start; j < end; j++) {
-          for (MKL_INT k = ai[bvc[i][j]]; k < ai[bvc[i][j] + 1]; k++) {
-            auto v = aj[k] - mat->mkl_base();
+          for (MKL_INT k = ai[bvc[i][j]] - base; k < ai[bvc[i][j] + 1] - base;
+               k++) {
+            auto v = aj[k] - base;
             if constexpr (RECORDLEVEL) {
               if (!visited.get(v)) {
                 // visited[v] = true;

@@ -3,11 +3,13 @@
 #include "UnionFind.h"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
+#include <algorithm>
+#include <deque>
 #include <gtest/gtest.h>
 #include <omp.h>
 #include <unordered_map>
 
-TEST(reordering, min_degree_node) {
+TEST(global_min_degree, parallel_vs_serial) {
   std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
   for (const auto &fn : files) {
     std::ifstream f(fn);
@@ -18,37 +20,113 @@ TEST(reordering, min_degree_node) {
     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                     csr_rows, csr_cols, csr_vals);
-    auto res = reordering::MinDegreeNode(&mat);
+
+    std::vector<MKL_INT> degrees;
+    reordering::NodeDegree(&mat, degrees);
+    auto res = reordering::MinDegreeNode(
+        degrees, mat.mkl_base(),
+        std::views::iota(0 + mat.mkl_base(), mat.rows() + mat.mkl_base()));
 
     for (int t = 1; t <= 8; t++) {
       omp_set_num_threads(t);
-      auto res2 = reordering::PMinDegreeNode(&mat);
-      EXPECT_EQ(res.first, res2.first);
-      EXPECT_EQ(res.second, res2.second);
+      std::vector<MKL_INT> pdegrees;
+      reordering::PNodeDegree(&mat, pdegrees);
+      auto res1 = reordering::PMinDegreeNode(
+          pdegrees, mat.mkl_base(),
+          std::views::iota(0 + mat.mkl_base(), mat.rows() + mat.mkl_base()));
+      EXPECT_EQ(degrees, pdegrees);
+      EXPECT_EQ(res, res1);
     }
   }
 }
 
-// TEST(reordering, pseudoDiameter) {
-//   std::vector<std::string> files{"../benchmarks/data/ldoor.mtx"};
-//   std::vector<MKL_INT> degrees;
-//   for (const auto &fn : files) {
-//     std::ifstream f(fn);
-//     f.clear();
-//     f.seekg(0, std::ios::beg);
-//     std::vector<MKL_INT> csr_rows, csr_cols;
-//     std::vector<double> csr_vals;
-//     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
-//     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
-//                                     csr_rows, csr_cols, csr_vals);
+TEST(global_min_degree, base0_vs_base1) {
+  std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
+  for (const auto &fn : files) {
+    std::ifstream f(fn);
+    f.clear();
+    f.seekg(0, std::ios::beg);
+    std::vector<MKL_INT> csr_rows, csr_cols;
+    std::vector<double> csr_vals;
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                    csr_rows, csr_cols, csr_vals);
+    std::vector<MKL_INT> degrees0;
+    reordering::NodeDegree(&mat, degrees0);
+    auto res = reordering::MinDegreeNode(
+        degrees0, mat.mkl_base(),
+        std::views::iota(0 + mat.mkl_base(), mat.rows() + mat.mkl_base()));
 
-//     auto parants_parrem = reordering::ParUnionFindRem(&mat);
-//     std::cout << reordering::CountComponents(parants_parrem, 0) << std::endl;
-//     MKL_INT source, target;
-//     reordering::PseudoDiameter(&mat, source, target, degrees);
-//     std::cout << source << " " << target << std::endl;
-//   }
-// }
+    mat.to_one_based();
+    std::vector<MKL_INT> degrees1;
+    reordering::NodeDegree(&mat, degrees1);
+    auto res1 = reordering::MinDegreeNode(
+        degrees1, mat.mkl_base(),
+        std::views::iota(0 + mat.mkl_base(), mat.rows() + mat.mkl_base()));
+    res1.first -= 1; // convert to base 0
+    EXPECT_EQ(res, res1);
+  }
+}
+
+TEST(component_min_degree, compare_with_sliding_window_size_10) {
+  std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
+  for (const auto &fn : files) {
+    std::ifstream f(fn);
+    f.clear();
+    f.seekg(0, std::ios::beg);
+    std::vector<MKL_INT> csr_rows, csr_cols;
+    std::vector<double> csr_vals;
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                    csr_rows, csr_cols, csr_vals);
+    const MKL_INT base = mat.mkl_base();
+    auto ai = mat.get_ai();
+    std::deque<std::pair<MKL_INT, MKL_INT>> window;
+    std::vector<MKL_INT> degrees;
+    reordering::NodeDegree(&mat, degrees);
+    for (int i = 0; i < mat.rows(); i++) {
+
+      while (!window.empty() && window.back().second > ai[i + 1] - ai[i])
+        window.pop_back();
+      window.push_back(std::make_pair(i + base, ai[i + 1] - ai[i]));
+
+      while (window.front().first <= i - 10 + base)
+        window.pop_front();
+      if (i >= 9) {
+        auto res = reordering::MinDegreeNode(
+            degrees, mat.mkl_base(),
+            std::views::iota(i - 9 + base, i + 1 + base));
+        EXPECT_EQ(res, window.front());
+      }
+    }
+  }
+}
+
+TEST(reordering, pseudoDiameter) {
+  std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
+  std::vector<MKL_INT> degrees;
+  for (const auto &fn : files) {
+    std::ifstream f(fn);
+    f.clear();
+    f.seekg(0, std::ios::beg);
+    std::vector<MKL_INT> csr_rows, csr_cols;
+    std::vector<double> csr_vals;
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                    csr_rows, csr_cols, csr_vals);
+
+    std::vector<MKL_INT> degrees;
+    reordering::NodeDegree(&mat, degrees);
+    MKL_INT source, target;
+    std::cout << "diameter: "
+              << reordering::PseudoDiameter(
+                     &mat, degrees,
+                     std::views::iota(0 + mat.mkl_base(),
+                                      mat.rows() + mat.mkl_base()),
+                     source, target)
+              << " " << source << " " << target << std::endl;
+  }
+}
 
 TEST(UnionFind, rank_vs_rem) {
   for (int i = 0; i < 100; i++) {
@@ -111,13 +189,46 @@ TEST(UnionFind, rem_vs_parrem) {
       // if (rank_to_rem.size() != rem_to_rank.size()) {
       //   mat.print();
       //   for (int i = 0; i < mat.rows(); i++) {
-      //     std::cout << i << " " << reordering::Find(parents_rem, i) << " " <<
+      //     std::cout << i << " " << reordering::Find(parents_rem, i) << " "
+      // <<
       //     reordering::Find(parants_parrem, i)
       //               << std::endl;
       //   }
       //   std::cout << std::endl;
       //   break;
       // }
+    }
+  }
+}
+
+TEST(UnionFind, parrem_base) {
+  omp_set_num_threads(5);
+  for (int i = 0; i < 100; i++) {
+    auto mat = mkl_wrapper::random_sparse(1000, 2);
+    mat.to_zero_based();
+    auto parants_parrem = reordering::ParUnionFindRem(&mat);
+    mat.to_one_based();
+    auto parants_parrem1 = reordering::ParUnionFindRem(&mat);
+
+    std::unordered_map<MKL_INT, MKL_INT> zero_to_one;
+    std::unordered_map<MKL_INT, MKL_INT> one_to_zero;
+    for (int i = 0; i < mat.rows(); i++) {
+      if (zero_to_one.find(reordering::Find(parants_parrem, i)) ==
+          zero_to_one.end()) {
+        zero_to_one[reordering::Find(parants_parrem, i)] =
+            reordering::Find(parants_parrem1, i);
+      } else {
+        EXPECT_EQ(zero_to_one[reordering::Find(parants_parrem1, i)],
+                  reordering::Find(parants_parrem1, i));
+      }
+      if (one_to_zero.find(reordering::Find(parants_parrem1, i)) ==
+          one_to_zero.end()) {
+        one_to_zero[reordering::Find(parants_parrem1, i)] =
+            reordering::Find(parants_parrem, i);
+      } else {
+        EXPECT_EQ(one_to_zero[reordering::Find(parants_parrem1, i)],
+                  reordering::Find(parants_parrem, i));
+      }
     }
   }
 }
@@ -152,70 +263,52 @@ TEST(UnionFind, rem_vs_parrank) {
 }
 
 TEST(Reordering, SerialCM) {
-  omp_set_num_threads(5);
-  // std::string k_mat("../../data/shared/K.bin");
-  // std::vector<MKL_INT> k_csr_rows, k_csr_cols;
-  // std::vector<double> k_csr_vals;
-  // std::cout << "read K\n";
-  // utils::ReadFromBinaryCSR(k_mat, k_csr_rows, k_csr_cols, k_csr_vals,
-  //                          SPARSE_INDEX_BASE_ONE);
-  // std::shared_ptr<MKL_INT[]> k_csr_rows_ptr(k_csr_rows.data(),
-  //                                           [](MKL_INT[]) {});
-  // std::shared_ptr<MKL_INT[]> k_csr_cols_ptr(k_csr_cols.data(),
-  //                                           [](MKL_INT[]) {});
-  // std::shared_ptr<double[]> k_csr_vals_ptr(k_csr_vals.data(), [](double[]) {});
-
-  // const MKL_INT size = k_csr_rows.size() - 1;
-  // mkl_wrapper::mkl_sparse_mat mat(size, size, k_csr_rows_ptr, k_csr_cols_ptr,
-  //                                 k_csr_vals_ptr, SPARSE_INDEX_BASE_ONE);
-  // mat.to_zero_based();
-
-  std::ifstream f("data/ex5.mtx");
-  f.clear();
-  f.seekg(0, std::ios::beg);
-  std::vector<MKL_INT> csr_rows, csr_cols;
-  std::vector<double> csr_vals;
-  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
-  mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
-                                  csr_rows, csr_cols, csr_vals);
-
-  std::cout << "bandwidth before reordering: " << mat.bandwidth() << std::endl;
+  omp_set_num_threads(1);
+  std::vector<std::string> files{"data/ex5.mtx", "data/s3rmt3m3.mtx"};
   std::ofstream myfile;
-  myfile.open("mat.svg");
-  mat.print_svg(myfile);
-  myfile.close();
-  auto inv_perm = reordering::SerialCM(&mat);
-  std::cout << (utils::isPermutation(inv_perm, mat.mkl_base())) << std::endl;
-  auto perm = utils::inversePermute(inv_perm, mat.mkl_base());
-  auto [ai, aj, av] = mkl_wrapper::permute(mat, inv_perm.data(), perm.data());
-  mkl_wrapper::mkl_sparse_mat perm_mat(mat.rows(), mat.cols(), ai, aj, av);
-  std::cout << "bandwidth after rcm reordering: " << perm_mat.bandwidth()
-            << std::endl;
-  myfile.open("mat_perm.svg");
-  perm_mat.print_svg(myfile);
-  myfile.close();
-#ifdef USE_METIS_LIB
-  auto inv_perm1 = reordering::Metis(&mat);
-  std::cout << (utils::isPermutation(inv_perm1, mat.mkl_base())) << std::endl;
-  auto perm1 = utils::inversePermute(inv_perm1, mat.mkl_base());
-  auto [ai1, aj1, av1] =
-      mkl_wrapper::permute(mat, inv_perm1.data(), perm1.data());
-  mkl_wrapper::mkl_sparse_mat perm_mat1(mat.rows(), mat.cols(), ai1, aj1, av1);
-  std::cout << "bandwidth after metis reordering: " << perm_mat1.bandwidth()
-            << std::endl;
-  myfile.open("mat_perm_metis.svg");
-  perm_mat1.print_svg(myfile);
-  myfile.close();
-#endif
-  auto symMat = mkl_wrapper::mkl_sparse_mat_sym(mat);
-  myfile.open("mat_sym.svg");
-  symMat.print_svg(myfile);
-  myfile.close();
+  for (const auto &fn : files) {
+    std::ifstream f(fn);
+    f.clear();
+    f.seekg(0, std::ios::beg);
+    std::vector<MKL_INT> csr_rows, csr_cols;
+    std::vector<double> csr_vals;
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                    csr_rows, csr_cols, csr_vals);
 
-  auto [ai2, aj2, av2] = mkl_wrapper::symPermute(mat, perm.data());
-  mkl_wrapper::mkl_sparse_mat_sym perm_mat_sym(mat.rows(), mat.cols(), ai2, aj2,
-                                               av2);
-  myfile.open("perm_mat_sym.svg");
-  perm_mat_sym.print_svg(myfile);
-  myfile.close();
+    std::cout << "bandwidth before rcm reordering: " << mat.bandwidth()
+              << std::endl;
+    std::vector<MKL_INT> inv_perm, perm;
+    reordering::SerialCM(&mat, inv_perm, perm);
+    auto [ai, aj, av] = mkl_wrapper::permute(mat, inv_perm.data(), perm.data());
+    mkl_wrapper::mkl_sparse_mat perm_mat(mat.rows(), mat.cols(), ai, aj, av);
+    std::cout << "bandwidth after rcm reordering: " << perm_mat.bandwidth()
+              << std::endl;
+
+    myfile.open("mat_perm_rcm.svg");
+    perm_mat.print_svg(myfile);
+    myfile.close();
+    mat.to_one_based();
+    std::vector<MKL_INT> inv_perm1, perm1;
+    reordering::SerialCM(&mat, inv_perm1, perm1);
+    for (int i = 0; i < mat.rows(); i++) {
+      EXPECT_EQ(inv_perm[i], inv_perm1[i] - 1);
+    }
+
+#ifdef USE_METIS_LIB
+    std::vector<MKL_INT> nd_inv_perm, nd_perm;
+    reordering::Metis(&mat, nd_inv_perm, nd_perm);
+    std::cout << (utils::isPermutation(nd_inv_perm, mat.mkl_base()))
+              << std::endl;
+    auto [ai1, aj1, av1] =
+        mkl_wrapper::permute(mat, nd_inv_perm.data(), nd_perm.data());
+    mkl_wrapper::mkl_sparse_mat perm_mat1(mat.rows(), mat.cols(), ai1, aj1, av1,
+                                          SPARSE_INDEX_BASE_ONE);
+    std::cout << "bandwidth after metis reordering: " << perm_mat1.bandwidth()
+              << std::endl;
+    myfile.open("mat_perm_metis.svg");
+    perm_mat1.print_svg(myfile);
+    myfile.close();
+#endif
+  }
 }

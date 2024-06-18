@@ -35,7 +35,7 @@ UnionFindRank(mkl_wrapper::mkl_sparse_mat const *const mat) {
   for (MKL_INT i = 0; i < mat->rows(); i++) {
     for (MKL_INT j = ai[i] - base; j < ai[i + 1] - base; j++) {
 
-      unite(i + base, aj[j]);
+      unite(i, aj[j] - base);
     }
   }
   return parents;
@@ -72,8 +72,7 @@ UnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat) {
   auto aj = mat->get_aj();
   for (MKL_INT i = 0; i < mat->rows(); i++) {
     for (MKL_INT j = ai[i] - base; j < ai[i + 1] - base; j++) {
-
-      unite(i + base, aj[j]);
+      unite(i, aj[j] - base);
     }
   }
   return parents;
@@ -115,8 +114,7 @@ ParUnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat) {
 
     for (auto it = start; it != end; it++) {
       for (MKL_INT j = *it - base; j < *(it + 1) - base; j++) {
-
-        unite(it - ai.get() + base, aj[j]);
+        unite(it - ai.get(), aj[j] - base);
       }
     }
   }
@@ -201,17 +199,16 @@ void DisjointSets::execute() {
 #pragma omp parallel for
   for (MKL_INT i = 0; i < mMat->rows(); i++) {
     for (MKL_INT j = ai[i] - base; j < ai[i + 1] - base; j++) {
-
-      unite(i + base, aj[j]);
+      unite(i, aj[j] - base);
     }
   }
 }
 
-int CountComponents(std::vector<MKL_INT> &parents, const MKL_INT base) {
+int CountComponents(std::vector<MKL_INT> &parents) {
   int sum = 0;
 #pragma omp parallel for reduction(+ : sum)
   for (MKL_INT i = 0; i < parents.size(); i++) {
-    if (Find(parents, i) == i + base)
+    if (Find(parents, i) == i)
       sum++;
   }
   return sum;
@@ -223,7 +220,7 @@ void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
                     std::vector<MKL_INT> &compPrefSum) {
   sortedComp.resize(parents.size());
   std::vector<std::vector<MKL_INT>> rootsOfThread(omp_get_max_threads());
-  std::unordered_map<MKL_INT, MKL_INT> rootToInd;
+  std::unordered_map<MKL_INT, MKL_INT> rootToInd; // inverse map of compRoots
   std::vector<MKL_INT> compSizePrefixSum;
 #pragma omp parallel
   {
@@ -232,8 +229,9 @@ void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
     auto [start, end] = utils::LoadBalancedPartition(
         parents.begin(), parents.end(), tid, nthreads);
 
+    // find roots
     for (auto it = start; it != end; it++) {
-      const MKL_INT index = it - parents.begin() + base;
+      const MKL_INT index = it - parents.begin();
       if (Find(parents, index) == index)
         rootsOfThread[tid].push_back(index);
     }
@@ -241,6 +239,12 @@ void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
 #pragma omp barrier
 #pragma omp master
     {
+      // write all roots and inverse map
+      int roots = 0;
+      for (int i = 0; i < nthreads; i++) {
+        roots += rootsOfThread[i].size();
+      }
+      compRoots.reserve(roots);
       compRoots.resize(0);
       for (int i = 0; i < nthreads; i++) {
         for (auto root : rootsOfThread[i]) {
@@ -248,44 +252,42 @@ void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
           compRoots.push_back(root);
         }
       }
+
+      // prefix sum of each component on each thread
       compSizePrefixSum =
           std::vector<MKL_INT>(compRoots.size() * (nthreads + 1), 0);
-
       compPrefSum = std::vector<MKL_INT>(compRoots.size() + 1, 0);
     }
+
+    // size of each component on each thread
+    // TODO: should optimize inner outer loop
 #pragma omp barrier
     for (auto it = start; it != end; it++) {
-      const MKL_INT index = it - parents.begin() + base;
+      const MKL_INT index = it - parents.begin();
       compSizePrefixSum[(tid + 1) * compRoots.size() +
                         rootToInd[Find(parents, index)]]++;
     }
 
+    // prefix sum
 #pragma omp barrier
 #pragma omp master
     {
-      for (int i = 0; i < compRoots.size(); i++) {
+      for (size_t i = 0; i < compRoots.size(); i++) {
         compSizePrefixSum[i] = compPrefSum[i];
-        // compSizePrefixSum[i] = compPrefSum[i];
-        // std::cout << compSizePrefixSum[i + 1] << " ";
         for (int j = 0; j < nthreads; j++) {
           compSizePrefixSum[(j + 1) * compRoots.size() + i] +=
               compSizePrefixSum[j * compRoots.size() + i];
-          // std::cout << compSizePrefixSum[j * (compRoots.size() + 1) + i + 1]
-          //           << " ";
         }
-        // std::cout << std::endl;
         compPrefSum[i + 1] = compSizePrefixSum[nthreads * compRoots.size() + i];
       }
     }
 
 #pragma omp barrier
     for (auto it = start; it != end; it++) {
-      const MKL_INT index = it - parents.begin() + base;
-      // std::cout << compSizePrefixSum[tid * (compRoots.size() + 1) +
-      //                                rootToInd[Find(parents, index)]]
-      //           << " " << index << std::endl;
+      const MKL_INT index = it - parents.begin();
       sortedComp[compSizePrefixSum[tid * compRoots.size() +
-                                   rootToInd[Find(parents, index)]]++] = index;
+                                   rootToInd[Find(parents, index)]]++] =
+          index + base;
     }
   }
 }

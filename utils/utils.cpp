@@ -98,14 +98,13 @@ std::vector<MKL_INT> randomPermute(const MKL_INT n, const MKL_INT base) {
   return perm;
 }
 
-std::vector<MKL_INT> inversePermute(const std::vector<MKL_INT> &perm,
-                                    const MKL_INT base) {
-  std::vector<MKL_INT> inv_perm(perm.size());
+void inversePermute(std::vector<MKL_INT> &iperm,
+                    const std::vector<MKL_INT> &perm, const MKL_INT base) {
+  iperm.resize(perm.size());
 #pragma parallel for
   for (MKL_INT i = 0; i < perm.size(); i++) {
-    inv_perm[perm[i] - base] = i + base;
+    iperm[perm[i] - base] = i + base;
   }
-  return inv_perm;
 }
 bool isPermutation(const std::vector<MKL_INT> &perm, const MKL_INT base) {
   std::vector<MKL_INT> inv_perm(perm.size(), -1);

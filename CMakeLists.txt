@@ -8,6 +8,8 @@ endif()
 # set(CMAKE_CXX_FLAGS "-Wall -Wextra")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
+set(CMAKE_CXX_STANDARD 20)
+
 option(USE_AMGCL_LIB "Use the amg library amgcl" OFF) 
 
 option(USE_MUMPS_LIB "Use the linear solver library mumps. Note that only non-mpi version is supported" OFF) 

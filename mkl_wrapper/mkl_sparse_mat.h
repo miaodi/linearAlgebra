@@ -130,7 +130,7 @@ permuteRow(const mkl_sparse_mat &A, MKL_INT const *const pinv);
 std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
            std::shared_ptr<double[]>>
 permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
-        MKL_INT const *const q);
+        MKL_INT const *const p);
 
 // c*A+B
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,

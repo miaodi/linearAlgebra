@@ -966,7 +966,6 @@ mkl_sparse_mat random_sparse(const MKL_INT row, const MKL_INT nnzRow) {
 std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
                                       MKL_INT const *const pinv) {
   const auto &ai = A.get_ai();
-
   const MKL_INT base = A.mkl_base();
   const auto rows = A.rows();
 
@@ -984,9 +983,11 @@ std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
     const int nthreads = omp_get_num_threads();
     auto [start, end] = utils::LoadBalancedPartition(
         new_ai.get(), new_ai.get() + rows, tid, nthreads);
+        
+    // pinv[i] = k -> pinv_{i,k} = 1 -> C(i,*) = A(k, *)
     for (auto i = start; i < end; i++) {
-      size_t rowInd = pinv[i - new_ai.get()] - base;
-      MKL_INT nz = ai[rowInd + 1] - ai[rowInd];
+      size_t k = pinv[i - new_ai.get()] - base;
+      MKL_INT nz = ai[k + 1] - ai[k];
       *(i + 1) = (i == start ? 0 : *i) + nz;
       localNNZ[tid + 1] += nz;
     }
@@ -1010,7 +1011,7 @@ std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
 std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
            std::shared_ptr<double[]>>
 permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
-        MKL_INT const *const q) {
+        MKL_INT const *const p) {
   auto new_ai = permutedAI(A, pinv);
 
   const auto &ai = A.get_ai();
@@ -1034,14 +1035,16 @@ permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
     for (auto i = start; i < end; i++) {
       // copy and convert aj and av
       size_t rowInd = pinv ? pinv[i - new_ai.get()] - base : (i - new_ai.get());
+      // permute column in each row p[i] = k -> q_{i,k} = 1 -> new(*, k) = old(*, i)
       std::transform(
           aj.get() + ai[rowInd] - base, aj.get() + ai[rowInd + 1] - base,
           new_aj.get() + *i - base,
-          [q, base](MKL_INT ind) { return q ? q[ind - base] : (ind - base); });
+          [p, base](MKL_INT ind) { return p ? p[ind - base] : (ind - base); });
+
       std::copy(std::execution::seq, av.get() + ai[rowInd] - base,
                 av.get() + ai[rowInd + 1] - base, new_av.get() + *i - base);
 
-      if (q == nullptr)
+      if (p == nullptr)
         continue;
       // intersion sort aj and av based on the column index
       auto pos = new_aj.get() + *(i + 1) - base - 1;

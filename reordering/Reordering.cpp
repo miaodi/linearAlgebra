@@ -1,184 +1,45 @@
 #include "Reordering.h"
-#include "BFS.h"
 #include "UnionFind.h"
-#include "mkl_sparse_mat.h"
+#include "utils.h"
 #include <algorithm>
 #include <execution>
 #include <iostream>
-#include <limits>
+#include <span>
 #ifdef USE_METIS_LIB
 #include <metis.h>
 #endif
-#include <omp.h>
 
 namespace reordering {
-std::pair<MKL_INT, MKL_INT>
-MinDegreeNode(mkl_wrapper::mkl_sparse_mat const *const mat,
-              std::vector<MKL_INT> *degrees) {
-  std::pair<MKL_INT, MKL_INT> res(-1, std::numeric_limits<MKL_INT>::max());
-  if (degrees)
-    degrees->resize(mat->rows());
+
+void NodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
+                std::vector<MKL_INT> &degrees) {
+  degrees.resize(mat->rows());
+  const MKL_INT base = mat->mkl_base();
   auto ai = mat->get_ai();
-  auto aj = mat->get_aj();
+
   for (MKL_INT i = 0; i < mat->rows(); i++) {
-    MKL_INT degree = ai[i + 1] - ai[i];
-    if (degrees)
-      (*degrees)[i] = degree;
-    if (degree < res.second) {
-      res.first = i + mat->mkl_base();
-      res.second = degree;
-    }
-  }
-  return res;
-}
-
-void PairReduce(std::pair<MKL_INT, MKL_INT> &inout,
-                const std::pair<MKL_INT, MKL_INT> &in) {
-  if (in.second < inout.second) {
-    inout = in;
-  } else if (in.second == inout.second) {
-    inout.first = std::min(in.first, inout.first);
+    degrees[i] = ai[i + 1] - ai[i];
   }
 }
-#pragma omp declare reduction(                                  \
-                              PairReduce :                      \
-                              std::pair<MKL_INT, MKL_INT> :     \
-                              PairReduce(omp_out, omp_in)       \
-                             )                                  \
-                    initializer (omp_priv=omp_orig)
 
-std::pair<MKL_INT, MKL_INT>
-PMinDegreeNode(mkl_wrapper::mkl_sparse_mat const *const mat,
-               std::vector<MKL_INT> *degrees) {
-  std::pair<MKL_INT, MKL_INT> res(-1, std::numeric_limits<MKL_INT>::max());
-  if (degrees)
-    degrees->resize(mat->rows());
+void PNodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
+                 std::vector<MKL_INT> &degrees) {
+  degrees.resize(mat->rows());
+  const MKL_INT base = mat->mkl_base();
   auto ai = mat->get_ai();
-  auto aj = mat->get_aj();
-#pragma omp parallel for reduction(PairReduce : res)
+
+#pragma omp parallel for
   for (MKL_INT i = 0; i < mat->rows(); i++) {
-    if (degrees)
-      (*degrees)[i] = ai[i + 1] - ai[i];
-    PairReduce(res, std::make_pair(i + mat->mkl_base(), ai[i + 1] - ai[i]));
+    degrees[i] = ai[i + 1] - ai[i];
   }
-  res.first += mat->mkl_base();
-  return res;
 }
 
-void PseudoDiameter(mkl_wrapper::mkl_sparse_mat const *const mat,
-                    MKL_INT &source, MKL_INT &target,
-                    std::vector<MKL_INT> &degrees) {
-  source = MinDegreeNode(mat, &degrees).first;
-  target = -1;
-  std::vector<MKL_INT> choosen;
-  auto ai = mat->get_ai();
-  auto aj = mat->get_aj();
-  MKL_INT diameter;
-  MKL_INT forwardWidth;
-  MKL_INT backwardWidth;
-  while (target == -1) {
-    choosen.resize(0);
-    BFS bfs(reordering::PBFS_Fn<true, false>);
-    bfs(mat, source);
-    diameter = bfs.getHeight();
-    forwardWidth = bfs.getHeight();
-    while (choosen.size() < 5) {
-      int minDeg = std::numeric_limits<int>::max();
-      int sel = -1;
-      for (auto i : bfs.getLastLevel()) {
-        i = i - mat->mkl_base();
-        if (degrees[i] < minDeg) {
-          minDeg = degrees[i];
-          sel = i;
-        }
-      }
-      if (minDeg == std::numeric_limits<int>::max())
-        break;
-
-      choosen.push_back(sel);
-      degrees[sel] = std::numeric_limits<int>::max();
-      for (MKL_INT i = ai[sel]; i < ai[sel + 1]; i++) {
-        degrees[aj[i]] = std::numeric_limits<int>::max();
-      }
-    }
-    backwardWidth = std::numeric_limits<int>::max();
-    for (auto i : choosen) {
-      bfs.setShortCut(backwardWidth);
-      if (!bfs(mat, i))
-        continue;
-      if (diameter < bfs.getHeight() && bfs.getWidth() < backwardWidth) {
-        source = i + mat->mkl_base();
-        break;
-      } else if (bfs.getWidth() < backwardWidth) {
-
-        backwardWidth = bfs.getWidth();
-        target = i + mat->mkl_base();
-      }
-    }
-  }
-  std::cout << "diameter: " << diameter << std::endl;
-  if (forwardWidth > backwardWidth)
-    std::swap(source, target);
-}
-
-std::vector<MKL_INT> SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat) {
-  //   MKL_INT source, target;
-  //   std::vector<MKL_INT> degrees;
-  //   PseudoDiameter(mat, source, target, degrees);
-
-  //   struct Node {
-  //     MKL_INT base_zero_index;
-  //     MKL_INT level;
-  //     MKL_INT degree;
-  //   };
-
-  //   const MKL_INT base = mat->mkl_base();
-  //   std::vector<Node> nodes(mat->cols());
-  //   // initialize nodes
-  // #pragma omp parallel for
-  //   for (MKL_INT i = 0; i < mat->cols(); i++) {
-  //     nodes[i].base_zero_index = i;
-  //     nodes[i].degree = degrees[i];
-  //     nodes[i].level = std::numeric_limits<MKL_INT>::max();
-  //   }
-
-  //   std::vector<Node *> cur;
-  //   std::vector<Node *> next;
-  //   std::vector<MKL_INT> inv_perm(mat->cols());
-  //   nodes[source - base].level = 0;
-  //   cur.push_back(&nodes[source - base]);
-  //   MKL_INT nextId = 0;
-
-  //   const auto &ai = mat->get_ai();
-  //   const auto &aj = mat->get_aj();
-
-  //   while (cur.size()) {
-  //     size_t base_zero_index = 0;
-  //     for (const auto &n : cur) {
-  //       inv_perm[nextId++] = n->base_zero_index + base;
-  //       for (MKL_INT j = ai[n->base_zero_index]; j < ai[n->base_zero_index +
-  //       1];
-  //            j++) {
-  //         if (nodes[aj[j] - base].level > nodes[n->base_zero_index].level +
-  //         1) {
-  //           nodes[aj[j] - base].level = nodes[n->base_zero_index].level + 1;
-  //           next.push_back(&nodes[aj[j] - base]);
-  //         }
-  //       }
-  //       std::sort(
-  //           next.begin() + base_zero_index, next.end(),
-  //           [](const auto &a, const auto &b) { return a->degree < b->degree;
-  //           });
-  //       base_zero_index = next.size();
-  //     }
-  //     cur.clear();
-  //     std::swap(cur, next);
-  //   }
-
+void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
+              std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm) {
   // TODO: need to assert rows=cols
   std::vector<MKL_INT> degrees;
-  PMinDegreeNode(mat, &degrees);
-  std::vector<MKL_INT> inv_perm(mat->cols());
+  PNodeDegree(mat, degrees); // get degrees of all nodes
+  iperm.resize(mat->cols());
 
   auto parents = reordering::ParUnionFindRem(mat);
 
@@ -190,104 +51,107 @@ std::vector<MKL_INT> SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat) {
   const auto &ai = mat->get_ai();
   const auto &aj = mat->get_aj();
 
-  auto find_min_deg = [&degrees, base](auto begin, auto end) {
-    MKL_INT deg = std::numeric_limits<MKL_INT>::max();
-    MKL_INT pos = -1;
-    for (auto it = begin; it != end; it++) {
-      if (deg > degrees[*it - base]) {
-        pos = *it;
-        deg = degrees[*it - base];
-      }
-    }
-    return pos;
-  };
+  reordering::ComponentsStat(parents, base, compRoots, sortedComp, compPrefSum);
+  MKL_INT offset;
+  MKL_INT source, target;
+  MKL_INT e;
+  std::vector<MKL_INT> prefix;
+  std::vector<MKL_INT> children;
 
-  reordering::ComponentsStat(parents, mat->mkl_base(), compRoots, sortedComp,
-                             compPrefSum);
   for (int c = 0; c < compRoots.size(); c++) {
-    MKL_INT offset = compPrefSum[c];
-    MKL_INT i = sortedComp[offset];
+    offset = compPrefSum[c];
+    // special treatment for components of size 1 and 2
     if (compPrefSum[c + 1] - compPrefSum[c] == 1) {
-      inv_perm[offset] = i;
+      iperm[offset] = sortedComp[offset];
       continue;
     } else if (compPrefSum[c + 1] - compPrefSum[c] == 2) {
-      inv_perm[offset] = i;
-      inv_perm[offset + 1] = sortedComp[offset + 1];
+      iperm[offset] = sortedComp[offset];
+      iperm[offset + 1] = sortedComp[offset + 1];
       continue;
     }
 
-    i = find_min_deg(sortedComp.cbegin() + compPrefSum[c],
-                     sortedComp.cbegin() + compPrefSum[c + 1]);
+    // select source node
+    // source = reordering::MinDegreeNode(
+    //              degrees, base,
+    //              std::span(sortedComp.cbegin() + compPrefSum[c],
+    //                        sortedComp.cbegin() + compPrefSum[c + 1]))
+    //              .first -
+    //          base;
+    reordering::PseudoDiameter(
+        mat, degrees,
+        std::span(sortedComp.cbegin() + compPrefSum[c],
+                  sortedComp.cbegin() + compPrefSum[c + 1]),
+        source, target);
+    e = offset;
+    iperm[e++] = source;
+
     reordering::BFS bfs(reordering::BFS_Fn<false>);
-    bfs(mat, i);
+    bfs(mat, source);
     auto &levels = bfs.getLevels();
     const auto height = bfs.getHeight();
     // std::cout << "height: " << height << std::endl;
 
-    std::vector<MKL_INT> prefix(height + 1, 0);
+    prefix.resize(height + 1);
+    std::fill(prefix.begin(), prefix.end(), 0);
     for (MKL_INT p = compPrefSum[c]; p != compPrefSum[c + 1]; p++) {
       prefix[levels[sortedComp[p] - base] + 1]++;
     }
     for (MKL_INT l = 0; l < height; l++) {
       prefix[l + 1] += prefix[l];
     }
-    // for (auto p : prefix) {
-    //   std::cout << p << " ";
-    // }
-    // std::cout << std::endl;
-    std::vector<MKL_INT> children;
+
     children.reserve(bfs.getWidth());
-    MKL_INT e = offset;
-    inv_perm[e++] = i;
-    // std::cout << "bfs.getWidth(): " << bfs.getWidth() << std::endl;
     for (MKL_INT l = 0; l < height; l++) {
       for (MKL_INT r = prefix[l]; r != prefix[l + 1]; r++) {
-        MKL_INT u = inv_perm[r + offset];
-        for (MKL_INT j = ai[u - base]; j != ai[u - base + 1]; j++) {
-          MKL_INT v = aj[j - base] - base;
+        children.resize(0);
+        MKL_INT u = iperm[r + offset] - base;
+        for (MKL_INT j = ai[u] - base; j != ai[u + 1] - base; j++) {
+          MKL_INT v = aj[j] - base;
           if (levels[v] == l + 1) {
             children.push_back(v);
-            levels[v] = -1;
+            levels[v] = -1; // TODO: optimization is needed
           }
         }
 
-        // std::cout << "children.size: " << children.size() << std::endl;
+        // pick nodes with the smallest degree
         std::sort(children.begin(), children.end(),
-                  [&degrees, base](const MKL_INT a, const MKL_INT b) {
-                    if (degrees[a - base] == degrees[b - base])
+                  [&degrees](const MKL_INT a, const MKL_INT b) {
+                    if (degrees[a] == degrees[b])
                       return a < b;
-                    return degrees[a - base] < degrees[b - base];
+                    return degrees[a] < degrees[b];
                   });
-        // std::cout << "children size: " << children.size() << std::endl;
-        for (auto i : children) {
-          inv_perm[e++] = i + base;
-          // std::cout << i - base << " " << degrees[i - base] << std::endl;
+#pragma ivdep
+#pragma vector always
+        for (size_t i = 0; i < children.size(); i++) {
+          iperm[e + i] = children[i] + base;
         }
-        children.resize(0);
+        e += children.size();
+        // for (auto i : children)
+        //   iperm[e++] = i + base;
       }
     }
   }
-  std::reverse(std::execution::par_unseq, inv_perm.begin(), inv_perm.end());
-  return inv_perm;
+  std::reverse(std::execution::par_unseq, iperm.begin(), iperm.end());
+  utils::inversePermute(perm, iperm, base);
 }
 
 #ifdef USE_METIS_LIB
-std::vector<MKL_INT> Metis(mkl_wrapper::mkl_sparse_mat const *const mat) {
+void Metis(mkl_wrapper::mkl_sparse_mat const *const mat,
+           std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm) {
 
-  std::vector<MKL_INT> iperm(mat->cols());
-  std::vector<MKL_INT> perm(mat->cols());
+  iperm.resize(mat->cols());
+  perm.resize(mat->cols());
   std::vector<MKL_INT> xadj;
   std::vector<MKL_INT> adjncy;
-
   mat->get_adjacency_graph(xadj, adjncy);
 
   std::vector<idx_t> options(METIS_NOPTIONS);
   METIS_SetDefaultOptions(options.data());
   options[METIS_OPTION_NUMBERING] = static_cast<MKL_INT>(mat->mkl_base());
   MKL_INT nvtxs = mat->rows();
+  // perm[i] = k -> perm[i, k] = 1 -> C(i,*) = perm dot A(k,*)
   METIS_NodeND(&nvtxs, xadj.data(), adjncy.data(), NULL, options.data(),
-               perm.data(), iperm.data());
-  return perm;
+               iperm.data(), perm.data());
 }
 #endif
 } // namespace reordering

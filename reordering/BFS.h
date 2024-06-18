@@ -29,7 +29,10 @@ public:
 
   std::vector<MKL_INT> &getLevels() { return _levels; }
 
+  // number of levels of BFS
   MKL_INT getHeight() const { return _height; }
+
+  // the max width of all levels
   MKL_INT getWidth() const { return _width; }
 
   void setShortCut(const MKL_INT sc) { _shortCut = sc; }

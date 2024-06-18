@@ -30,6 +30,8 @@ template <typename T> T Find(std::vector<T> &parents, T x) {
 //   return x;
 // };
 
+// NOTE: no matter the base of mat, the output parents vector is always 0 based
+
 std::vector<MKL_INT>
 UnionFindRank(mkl_wrapper::mkl_sparse_mat const *const mat);
 
@@ -63,7 +65,7 @@ public:
   mkl_wrapper::mkl_sparse_mat const *const mMat;
 };
 
-int CountComponents(std::vector<MKL_INT> &parents, const MKL_INT base = 0);
+int CountComponents(std::vector<MKL_INT> &parents);
 
 void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
                     std::vector<MKL_INT> &compRoots,
