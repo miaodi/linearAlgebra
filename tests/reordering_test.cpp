@@ -263,7 +263,7 @@ TEST(UnionFind, rem_vs_parrank) {
 }
 
 TEST(Reordering, SerialCM) {
-  omp_set_num_threads(1);
+  omp_set_num_threads(3);
   std::vector<std::string> files{"data/ex5.mtx", "data/s3rmt3m3.mtx"};
   std::ofstream myfile;
   for (const auto &fn : files) {
@@ -273,6 +273,7 @@ TEST(Reordering, SerialCM) {
     std::vector<MKL_INT> csr_rows, csr_cols;
     std::vector<double> csr_vals;
     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+
     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                     csr_rows, csr_cols, csr_vals);
 
@@ -280,35 +281,44 @@ TEST(Reordering, SerialCM) {
               << std::endl;
     std::vector<MKL_INT> inv_perm, perm;
     reordering::SerialCM(&mat, inv_perm, perm);
+    EXPECT_EQ(utils::isPermutation(inv_perm, mat.mkl_base()), true);
     auto [ai, aj, av] = mkl_wrapper::permute(mat, inv_perm.data(), perm.data());
     mkl_wrapper::mkl_sparse_mat perm_mat(mat.rows(), mat.cols(), ai, aj, av);
     std::cout << "bandwidth after rcm reordering: " << perm_mat.bandwidth()
               << std::endl;
 
-    myfile.open("mat_perm_rcm.svg");
-    perm_mat.print_svg(myfile);
-    myfile.close();
+    // myfile.open("mat_perm_rcm.svg");
+    // perm_mat.print_svg(myfile);
+    // myfile.close();
+
     mat.to_one_based();
+
     std::vector<MKL_INT> inv_perm1, perm1;
     reordering::SerialCM(&mat, inv_perm1, perm1);
+    EXPECT_EQ(utils::isPermutation(inv_perm1, mat.mkl_base()), true);
     for (int i = 0; i < mat.rows(); i++) {
       EXPECT_EQ(inv_perm[i], inv_perm1[i] - 1);
+    }
+
+    std::vector<MKL_INT> inv_perm2, perm2;
+    reordering::SerialCM(&mat, inv_perm2, perm2);
+    for (int i = 0; i < mat.rows(); i++) {
+      EXPECT_EQ(inv_perm1[i], inv_perm2[i]);
     }
 
 #ifdef USE_METIS_LIB
     std::vector<MKL_INT> nd_inv_perm, nd_perm;
     reordering::Metis(&mat, nd_inv_perm, nd_perm);
-    std::cout << (utils::isPermutation(nd_inv_perm, mat.mkl_base()))
-              << std::endl;
+    EXPECT_EQ(utils::isPermutation(nd_inv_perm, mat.mkl_base()), true);
     auto [ai1, aj1, av1] =
         mkl_wrapper::permute(mat, nd_inv_perm.data(), nd_perm.data());
     mkl_wrapper::mkl_sparse_mat perm_mat1(mat.rows(), mat.cols(), ai1, aj1, av1,
                                           SPARSE_INDEX_BASE_ONE);
     std::cout << "bandwidth after metis reordering: " << perm_mat1.bandwidth()
               << std::endl;
-    myfile.open("mat_perm_metis.svg");
-    perm_mat1.print_svg(myfile);
-    myfile.close();
+    // myfile.open("mat_perm_metis.svg");
+    // perm_mat1.print_svg(myfile);
+    // myfile.close();
 #endif
   }
 }

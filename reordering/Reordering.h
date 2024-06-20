@@ -52,8 +52,9 @@ void PairReduce(std::pair<T, T> &inout, const std::pair<T, T> &in) {
 template <typename View>
 std::pair<MKL_INT, MKL_INT> PMinDegreeNode(const std::vector<MKL_INT> &degrees,
                                            const MKL_INT base, View &&view) {
-#pragma omp declare reduction(pairreduce:std::pair<MKL_INT, MKL_INT>                                     \
-                              : PairReduce <MKL_INT>(omp_out, omp_in)) initializer (omp_priv=omp_orig)
+#pragma omp declare reduction(                                                 \
+        pairreduce : std::pair<MKL_INT, MKL_INT> : PairReduce<MKL_INT>(        \
+                omp_out, omp_in)) initializer(omp_priv = omp_orig)
 
   std::pair<MKL_INT, MKL_INT> res(-1, std::numeric_limits<MKL_INT>::max());
 #pragma omp parallel for reduction(pairreduce : res)
@@ -96,6 +97,9 @@ double PseudoDiameter(mkl_wrapper::mkl_sparse_mat const *const mat,
         if (degrees[i - base] < minDeg) {
           minDeg = degrees[i - base];
           sel = i;
+        } else if (degrees[i - base] ==
+                   minDeg) { // make sure multi threading result is consistent
+          sel = std::min(sel, i);
         }
       }
       if (minDeg == std::numeric_limits<int>::max())
