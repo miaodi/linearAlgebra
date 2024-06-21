@@ -45,8 +45,8 @@ public:
 
       std::cout << "bandwidth before reordering: " << mat->bandwidth()
                 << std::endl;
-      auto inv_perm = reordering::SerialCM(mat.get());
-      auto perm = utils::inversePermute(inv_perm, mat->mkl_base());
+      std::vector<MKL_INT> inv_perm, perm;
+      reordering::SerialCM(mat.get(), inv_perm, perm);
       auto [ai, aj, av] =
           mkl_wrapper::permute(*mat, inv_perm.data(), perm.data());
       perm_mat.reset(new mkl_wrapper::mkl_sparse_mat(mat->rows(), mat->cols(),
@@ -55,8 +55,8 @@ public:
                 << std::endl;
 
 #ifdef USE_METIS_LIB
-      auto inv_perm1 = reordering::Metis(mat.get());
-      auto perm1 = utils::inversePermute(inv_perm1, mat->mkl_base());
+      std::vector<MKL_INT> inv_perm1, perm1;
+      reordering::Metis(mat.get(), inv_perm1, perm1);
       auto [ai1, aj1, av1] =
           mkl_wrapper::permute(*mat, inv_perm1.data(), perm1.data());
       perm_mat1.reset(new mkl_wrapper::mkl_sparse_mat(mat->rows(), mat->cols(),
@@ -99,7 +99,7 @@ BENCHMARK_REGISTER_F(Reordering, RCM);
 BENCHMARK_DEFINE_F(Reordering, Metis)(benchmark::State &state) {
   std::vector<double> x(mat->cols());
   std::vector<double> rhs(mat->rows());
-  std::iota(std::begin(rhs), std::end(rhs), 0); 
+  std::iota(std::begin(rhs), std::end(rhs), 0);
   for (auto _ : state) {
     perm_mat1->mult_vec(rhs.data(), x.data());
   }

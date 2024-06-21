@@ -59,20 +59,23 @@ BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_NOLEVELS)
     ->RangeMultiplier(2)
     ->Range(1, 1 << 5);
 
-BENCHMARK_F(MyFixture, BM_MinDegNode)(benchmark::State &state) {
+BENCHMARK_F(MyFixture, BM_NodeDegree)(benchmark::State &state) {
   for (auto _ : state) {
-    benchmark::DoNotOptimize(reordering::MinDegreeNode(ptr.get()));
+    std::vector<MKL_INT> degrees;
+    reordering::NodeDegree(ptr.get(), degrees);
   }
 }
 
-BENCHMARK_DEFINE_F(MyFixture, BM_PMinDegNode)(benchmark::State &state) {
+BENCHMARK_DEFINE_F(MyFixture, BM_PNodeDegree)(benchmark::State &state) {
   omp_set_num_threads(state.range(0));
   for (auto _ : state) {
-    benchmark::DoNotOptimize(reordering::PMinDegreeNode(ptr.get()));
+    std::vector<MKL_INT> degrees;
+    reordering::PNodeDegree(ptr.get(), degrees);
   }
 }
 
-BENCHMARK_REGISTER_F(MyFixture, BM_PMinDegNode)
+BENCHMARK_REGISTER_F(MyFixture, BM_PNodeDegree)
     ->RangeMultiplier(2)
     ->Range(1, 1 << 5);
+
 BENCHMARK_MAIN();

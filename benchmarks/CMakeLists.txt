@@ -1,9 +1,8 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(benchmarks)
 
-# Add Google Test
-include(../cmake/GoogleTest.cmake)
-
+# Add Google Benchmark
+include(../cmake/GoogleBenchmark.cmake)
 include(../cmake/DownloadFile.cmake)
 
 file(GLOB_RECURSE ALL_BENCH_CPP *.cpp)
