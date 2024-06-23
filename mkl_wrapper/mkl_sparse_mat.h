@@ -103,6 +103,8 @@ public:
 
   virtual bool diag_pos(std::vector<MKL_INT> &) const;
 
+  void randomVals();
+
 protected:
   MKL_INT _nrow; // Number of Rows
   MKL_INT _ncol; // Number of Columns

@@ -577,6 +577,12 @@ bool mkl_sparse_mat::diag_pos(std::vector<MKL_INT> &diag) const {
   return true;
 }
 
+void mkl_sparse_mat::randomVals() {
+  for (MKL_INT i = 0; i < _nnz; i++) {
+    _av[i] = utils::random(0., 1.);
+  }
+}
+
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                               double c) {
   if (A.mkl_base() != B.mkl_base()) {
@@ -983,7 +989,7 @@ std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
     const int nthreads = omp_get_num_threads();
     auto [start, end] = utils::LoadBalancedPartition(
         new_ai.get(), new_ai.get() + rows, tid, nthreads);
-        
+
     // pinv[i] = k -> pinv_{i,k} = 1 -> C(i,*) = A(k, *)
     for (auto i = start; i < end; i++) {
       size_t k = pinv[i - new_ai.get()] - base;
@@ -1035,7 +1041,8 @@ permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
     for (auto i = start; i < end; i++) {
       // copy and convert aj and av
       size_t rowInd = pinv ? pinv[i - new_ai.get()] - base : (i - new_ai.get());
-      // permute column in each row p[i] = k -> q_{i,k} = 1 -> new(*, k) = old(*, i)
+      // permute column in each row p[i] = k -> q_{i,k} = 1 -> new(*, k) =
+      // old(*, i)
       std::transform(
           aj.get() + ai[rowInd] - base, aj.get() + ai[rowInd + 1] - base,
           new_aj.get() + *i - base,
