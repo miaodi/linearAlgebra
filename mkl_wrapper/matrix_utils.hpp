@@ -7,6 +7,7 @@
 #include <numeric>
 #include <omp.h>
 #include <tuple>
+#include <type_traits>
 
 namespace matrix_utils {
 
@@ -229,6 +230,103 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const SIZE nnz,
     }
   }
   return std::make_tuple(ai_transpose, aj_transpose, av_transpose);
-} // namespace matrix_utils
+}
+
+template <class Array>
+using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
+
+/// @brief Forward-substitution algorithm for low triangular csr matrix L. Note
+/// that the diagonal term must be provided
+/// @tparam SIZE
+/// @tparam R
+/// @tparam C
+/// @tparam V
+/// @tparam VALTYPE
+/// @param rows
+/// @param cols
+/// @param nnz
+/// @param base
+/// @param ai
+/// @param aj
+/// @param av
+/// @param rhs
+/// @param x
+template <typename SIZE, typename R, typename C, typename V, typename VALTYPE>
+std::enable_if_t<!std::is_same_v<array_value_type<V>, VALTYPE>, void>
+ForwardSubstitution(const SIZE rows, const SIZE cols, const SIZE nnz,
+                    const SIZE base, const R &ai, const C &aj, const V &av,
+                    VALTYPE const *const rhs, VALTYPE *const x) {
+
+  using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
+  using COLTYPE = typename std::decay<decltype(aj[0])>::type;
+  ROWTYPE j;
+  for (SIZE i = 0; i < rows; i++) {
+    x[i] = b[i];
+    for (j = ai[i] - base; j < ai[i + 1] - base - 1; j++) {
+      x[i] -= av[j] * x[aj[j] - base];
+    }
+    x[i] /= av[j];
+  }
+}
+
+template <typename SIZE, typename R, typename C, typename VEC>
+void TopologicalSort(const SIZE nodes, const SIZE base, const R &ai,
+                     const C &aj, VEC &iperm, VEC &prefix) {
+  iperm.reserve(nodes);
+  iperm.clear();
+  prefix.reserve(std::max(1, nodes / 100));
+  prefix.resize(1);
+  prefix[0] = 0;
+  std::vector<int> degrees(nodes);
+  for (SIZE i = 0; i < nodes; i++) {
+    prefix.push_back(prefix.back());
+    degrees[i] = ai[i + 1] - ai[i];
+    if (ai[i + 1] - ai[i] == 1) {
+      iperm.push_back(i + base);
+      prefix.back()++;
+    }
+  }
+  size_t level = 0;
+  while (iperm.size() != nodes) {
+    prefix.push_back(prefix.back());
+    for (size_t i = prefix[level]; i < prefix[level + 1]; i++) {
+      const auto idx = iperm[i] - base;
+      for (auto j = ai[idx] - base; j < ai[idx + 1] - base; j++) {
+        if (--degrees[aj[j] - base] == 1) {
+          iperm.push_back(aj[j]);
+          prefix.back()++;
+        }
+      }
+    }
+  }
+}
+
+template <typename SIZE, typename R, typename C, typename V, typename VEC,
+          typename VALTYPE>
+std::enable_if_t<!std::is_same_v<array_value_type<V>, VALTYPE>, void>
+LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
+                                 const SIZE rows, const SIZE cols,
+                                 const SIZE nnz, const SIZE base, const R &ai,
+                                 const C &aj, const V &av,
+                                 VALTYPE const *const rhs, VALTYPE *const x) {
+  using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
+  using COLTYPE = typename std::decay<decltype(aj[0])>::type;
+
+#pragma omp parallel
+  {
+    ROWTYPE j;
+    for (int l = 0; l < prefix.size() - 1; l++) {
+#pragma omp for
+      for (SIZE i = prefix[l]; i < prefix[l + 1]; i++) {
+        x[i] = b[i];
+        for (j = ai[i] - base; j < ai[i + 1] - base - 1; j++) {
+          x[i] -= av[j] * x[aj[j] - base];
+        }
+        x[i] /= av[j];
+      }
+#pragma omp barrier
+    }
+  }
+}
 
 } // namespace matrix_utils
