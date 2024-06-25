@@ -1,4 +1,5 @@
 #include "mkl_sparse_mat.h"
+#include "matrix_utils.hpp"
 #include "utils.h"
 #include <algorithm>
 #include <cassert>
@@ -557,24 +558,8 @@ void mkl_sparse_mat::DtAD(const std::vector<double> &diag) {
 }
 
 bool mkl_sparse_mat::diag_pos(std::vector<MKL_INT> &diag) const {
-  diag.resize(_nrow);
-  volatile bool missing_diag = false;
-  const MKL_INT base = _mkl_base;
-#pragma omp parallel for shared(missing_diag)
-  for (MKL_INT i = 0; i < _nrow; i++) {
-    if (missing_diag)
-      continue;
-    auto mid = std::find(_aj.get() + _ai[i] - base,
-                         _aj.get() + _ai[i + 1] - base, i + base);
-    if (mid == _aj.get() + _ai[i + 1] - base) {
-      std::cerr << "Could not find diagonal!" << std::endl;
-      missing_diag = true;
-    }
-    diag[i] = mid - _aj.get();
-  }
-  if (missing_diag)
-    return false;
-  return true;
+  return matrix_utils::DiagonalPosition(_nrow, (MKL_INT)_mkl_base, _ai, _aj,
+                                        diag);
 }
 
 void mkl_sparse_mat::randomVals() {

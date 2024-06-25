@@ -11,6 +11,12 @@
 
 namespace matrix_utils {
 
+template <class T> auto find_address_of(T &&p) { return p.get(); }
+
+template <typename T> auto find_address_of(T *p) { return p; }
+
+template <typename T> auto find_address_of(const std::vector<T> &p) { return p.cbegin(); }
+
 /// @brief A serial compressed sparse row matrix transpose function
 /// @param rows number of rows of the matrix about to be transposed
 /// @param cols number of columns of the matrix about to be transposed
@@ -34,17 +40,17 @@ auto SerialTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
   std::shared_ptr<VALTYPE[]> av_transpose(new VALTYPE[nnz]);
 
   ai_transpose[0] = base;
-  std::fill_n(std::execution::seq, ai_transpose.get() + 1, rows_transpose + 1,
-              0);
+  std::fill_n(std::execution::seq, find_address_of(ai_transpose) + 1,
+              rows_transpose + 1, 0);
 
   // assign size of row i to ai[i+1]
   for (size_t i = 0; i < nnz; i++) {
     ai_transpose[aj[i] - base + 2]++;
   }
 
-  std::inclusive_scan(ai_transpose.get(),
-                      ai_transpose.get() + rows_transpose + 2,
-                      ai_transpose.get());
+  std::inclusive_scan(find_address_of(ai_transpose),
+                      find_address_of(ai_transpose) + rows_transpose + 2,
+                      find_address_of(ai_transpose));
 
   for (SIZE i = 0; i < rows; i++) {
     for (COLTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
@@ -175,7 +181,7 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const SIZE nnz,
     const int nthreads = omp_get_num_threads();
 
     auto [start, end] = utils::LoadPrefixBalancedPartition(
-        ai.get(), ai.get() + rows, tid, nthreads);
+        find_address_of(ai), find_address_of(ai) + rows, tid, nthreads);
     threadPrefixSum[tid].reset(new ROWTYPE[rows_transpose]());
 
     for (auto it = start; it < end; it++) {
@@ -194,7 +200,7 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const SIZE nnz,
         ai_transpose[rowID + 1] += threadPrefixSum[t][rowID];
       }
     }
-    prefix[tid + 1] = ai_transpose[end - ai.get()];
+    prefix[tid + 1] = ai_transpose[end - find_address_of(ai)];
 
 #pragma omp barrier
 
@@ -255,7 +261,7 @@ template <typename SIZE, typename R, typename C, typename V, typename VALTYPE>
 std::enable_if_t<!std::is_same_v<array_value_type<V>, VALTYPE>, void>
 ForwardSubstitution(const SIZE rows, const SIZE cols, const SIZE nnz,
                     const SIZE base, const R &ai, const C &aj, const V &av,
-                    VALTYPE const *const rhs, VALTYPE *const x) {
+                    VALTYPE const *const b, VALTYPE *const x) {
 
   using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
   using COLTYPE = typename std::decay<decltype(aj[0])>::type;
@@ -308,7 +314,7 @@ LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
                                  const SIZE rows, const SIZE cols,
                                  const SIZE nnz, const SIZE base, const R &ai,
                                  const C &aj, const V &av,
-                                 VALTYPE const *const rhs, VALTYPE *const x) {
+                                 VALTYPE const *const b, VALTYPE *const x) {
   using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
   using COLTYPE = typename std::decay<decltype(aj[0])>::type;
 
@@ -329,4 +335,29 @@ LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
   }
 }
 
+template <typename SIZE, typename R, typename C, typename VEC>
+bool DiagonalPosition(const SIZE rows, const SIZE base, const R &ai,
+                      const C &aj, VEC &diag) {
+  using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
+  using COLTYPE = typename std::decay<decltype(aj[0])>::type;
+
+  diag.resize(rows);
+  volatile bool missing_diag = false;
+#pragma omp parallel for shared(missing_diag)
+  for (SIZE i = 0; i < rows; i++) {
+    if (missing_diag)
+      continue;
+    auto mid =
+        std::lower_bound(find_address_of(aj) + ai[i] - base,
+                         find_address_of(aj) + ai[i + 1] - base, i + base);
+    if (*mid != i + base) {
+      std::cerr << "Could not find diagonal!" << std::endl;
+      missing_diag = true;
+    }
+    diag[i] = mid - find_address_of(aj);
+  }
+  if (missing_diag)
+    return false;
+  return true;
+}
 } // namespace matrix_utils
