@@ -111,3 +111,88 @@ TEST(transpose_and_partranspose, base1) {
   //   t_mat.print_svg(myfile);
   //   myfile.close();
 }
+
+TEST(SplitLDU, base0) {
+  omp_set_num_threads(5);
+  auto mat = mkl_wrapper::random_sparse(1000, 32);
+  mat.randomVals();
+
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
+  std::vector<double> D;
+  matrix_utils::SplitLDU(mat.rows(), (int)mat.mkl_base(), mat.get_ai(),
+                         mat.get_aj(), mat.get_av(), L, D, U);
+  mkl_wrapper::mkl_sparse_mat matL(mat.rows(), mat.rows(), L.ai, L.aj, L.av);
+  mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av);
+  auto tmp = mkl_wrapper::mkl_sparse_sum(matU, mat, -1.);
+  auto matD = mkl_wrapper::mkl_sparse_sum(matL, tmp, -1.);
+  matD.prune(1e-11);
+
+  std::vector<double> ones(mat.rows(), 1);
+  std::vector<double> diag(mat.rows());
+
+  matD.mult_vec(ones.data(), diag.data());
+  for (int i = 0; i < mat.rows(); i++) {
+    EXPECT_NEAR(diag[i], D[i], 2e-11);
+  }
+  
+  // std::ofstream myfile;
+  // myfile.open("origin.svg");
+  // mat.print_svg(myfile);
+  // myfile.close();
+
+  // myfile.open("L.svg");
+  // matL.print_svg(myfile);
+  // myfile.close();
+
+  // myfile.open("U.svg");
+  // matU.print_svg(myfile);
+  // myfile.close();
+
+  // myfile.open("D.svg");
+  // matD.print_svg(myfile);
+  // myfile.close();
+}
+
+TEST(SplitLDU, base1) {
+  omp_set_num_threads(5);
+  auto mat = mkl_wrapper::random_sparse(1000, 32);
+  mat.randomVals();
+  mat.to_one_based();
+
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
+  std::vector<double> D;
+  matrix_utils::SplitLDU(mat.rows(), (int)mat.mkl_base(), mat.get_ai(),
+                         mat.get_aj(), mat.get_av(), L, D, U);
+  mkl_wrapper::mkl_sparse_mat matL(mat.rows(), mat.rows(), L.ai, L.aj, L.av,
+                                   SPARSE_INDEX_BASE_ONE);
+  mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av,
+                                   SPARSE_INDEX_BASE_ONE);
+  auto tmp = mkl_wrapper::mkl_sparse_sum(matU, mat, -1.);
+  auto matD = mkl_wrapper::mkl_sparse_sum(matL, tmp, -1.);
+  matD.prune(1e-11);
+
+  std::vector<double> ones(mat.rows(), 1);
+  std::vector<double> diag(mat.rows());
+
+  matD.mult_vec(ones.data(), diag.data());
+  for (int i = 0; i < mat.rows(); i++) {
+    EXPECT_NEAR(diag[i], D[i], 2e-11);
+  }
+
+  // std::ofstream myfile;
+  // myfile.open("origin.svg");
+  // mat.print_svg(myfile);
+  // myfile.close();
+
+  // myfile.open("L.svg");
+  // matL.print_svg(myfile);
+  // myfile.close();
+
+  // myfile.open("U.svg");
+  // matU.print_svg(myfile);
+  // myfile.close();
+
+  // myfile.open("D.svg");
+  // matD.print_svg(myfile);
+  // myfile.close();
+}

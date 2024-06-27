@@ -27,9 +27,9 @@ template <typename R, typename C, typename V> struct CSRMatrix {
   ColType cols;
   ColType base;
   RowType nnz;
-  size_t ai_size{-1};
-  size_t aj_size{-1};
-  size_t av_size{-1};
+  size_t ai_size{0};
+  size_t aj_size{0};
+  size_t av_size{0};
   std::shared_ptr<RowType[]> ai;
   std::shared_ptr<ColType[]> aj;
   std::shared_ptr<ValType[]> av;
@@ -382,11 +382,12 @@ bool DiagonalPosition(const SIZE rows, const SIZE base, const R &ai,
 }
 
 template <typename SIZE, typename R, typename C, typename V>
-bool SplitLDU(
+void SplitLDU(
     const SIZE rows, const SIZE base, const R &ai, const C &aj, const V &av,
     CSRMatrix<array_value_type<R>, array_value_type<C>, array_value_type<V>> &L,
-    CSRMatrix<array_value_type<R>, array_value_type<C>, array_value_type<V>> &U,
-    std::vector<array_value_type<V>> &D) {
+    std::vector<array_value_type<V>> &D,
+    CSRMatrix<array_value_type<R>, array_value_type<C>, array_value_type<V>>
+        &U) {
   using RowType = CSRMatrix<array_value_type<R>, array_value_type<C>,
                             array_value_type<V>>::RowType;
   using ColType = CSRMatrix<array_value_type<R>, array_value_type<C>,
@@ -421,80 +422,74 @@ bool SplitLDU(
   {
     const int tid = omp_get_thread_num();
     const int nthreads = omp_get_num_threads();
-
     auto [start, end] = utils::LoadPrefixBalancedPartition(
         find_address_of(ai), find_address_of(ai) + rows, tid, nthreads);
     LU_prefix[tid + 1].first = 0;
     LU_prefix[tid + 1].second = 0;
     for (auto it = start; it < end; it++) {
       SIZE i = it - find_address_of(ai);
-      if (missing_diag)
-        continue;
+
       auto mid =
           std::lower_bound(find_address_of(aj) + *it - base,
                            find_address_of(aj) + *(it + 1) - base, i + base);
-      if (*mid != i + base) {
-        std::cerr << "Could not find diagonal!" << std::endl;
-        missing_diag = true;
-      }
-
+      const bool zero_diag = *mid != i + base;
       diag[i] = mid - find_address_of(aj);
-      D[i] = av[diag[i]];
+      D[i] = zero_diag ? 0 : av[diag[i]];
       const RowType L_size = mid - (find_address_of(aj) + *it - base);
       LU_prefix[tid + 1].first += L_size;
       L.ai[i + 1] = LU_prefix[tid + 1].first;
-      const RowType U_size = *(it + 1) - *it - 1 - L_size;
+      const RowType U_size = *(it + 1) - *it - L_size - (zero_diag ? 0 : 1);
       LU_prefix[tid + 1].second += U_size;
       U.ai[i + 1] = LU_prefix[tid + 1].second;
     }
 #pragma omp barrier
-    if (!missing_diag) {
 #pragma omp master
-      {
-        std::inclusive_scan(LU_prefix.begin(), LU_prefix.end(),
-                            LU_prefix.begin());
-        L.nnz = LU_prefix[nthreads].first;
-        if (L.aj_size < L.nnz) {
-          L.aj.reset(new ColType[L.nnz]);
-          L.aj_size = L.nnz;
-        }
-        if (L.av_size < L.nnz) {
-          L.av.reset(new ValType[L.nnz]);
-          L.av_size = L.nnz;
-        }
-
-        U.nnz = LU_prefix[nthreads].second;
-        if (U.aj_size < U.nnz) {
-          U.aj.reset(new ColType[U.nnz]);
-          U.aj_size = U.nnz;
-        }
-        if (U.av_size < U.nnz) {
-          U.av.reset(new ValType[U.nnz]);
-          U.av_size = U.nnz;
-        }
+    {
+      for (size_t i = 1; i < LU_prefix.size(); i++) {
+        LU_prefix[i].first += LU_prefix[i - 1].first;
+        LU_prefix[i].second += LU_prefix[i - 1].second;
+      }
+      L.nnz = LU_prefix[nthreads].first;
+      if (L.aj_size < L.nnz) {
+        L.aj.reset(new ColType[L.nnz]);
+        L.aj_size = L.nnz;
+      }
+      if (L.av_size < L.nnz) {
+        L.av.reset(new ValType[L.nnz]);
+        L.av_size = L.nnz;
       }
 
-      for (auto it = start; it < end; it++) {
-        SIZE i = it - find_address_of(ai);
-        L.ai[i + 1] += LU_prefix[tid].first;
-        U.ai[i + 1] += LU_prefix[tid].second;
-        RowType L_pos = LU_prefix[tid].first - base;
-        RowType U_pos = LU_prefix[tid].second - base;
+      U.nnz = LU_prefix[nthreads].second;
+      if (U.aj_size < U.nnz) {
+        U.aj.reset(new ColType[U.nnz]);
+        U.aj_size = U.nnz;
+      }
+      if (U.av_size < U.nnz) {
+        U.av.reset(new ValType[U.nnz]);
+        U.av_size = U.nnz;
+      }
+    }
 
-        for (RowType j = *it - base; j < diag[i]; j++) {
-          L.aj[L_pos] = aj[j];
-          L.av[L_pos++] = av[j];
-        }
-        for (RowType j = diag[i] + 1; j < *(it + 1) - base; j++) {
-          U.aj[U_pos] = aj[j];
-          U.av[U_pos++] = av[j];
-        }
+#pragma omp barrier
+    RowType L_pos = LU_prefix[tid].first - base;
+    RowType U_pos = LU_prefix[tid].second - base;
+    for (auto it = start; it < end; it++) {
+      SIZE i = it - find_address_of(ai);
+      const bool zero_diag = aj[diag[i]] - base != i;
+      L.ai[i + 1] += LU_prefix[tid].first;
+      U.ai[i + 1] += LU_prefix[tid].second;
+
+      for (RowType j = *it - base; j < diag[i]; j++) {
+        L.aj[L_pos] = aj[j];
+        L.av[L_pos++] = av[j];
+      }
+      for (RowType j = diag[i] + (zero_diag ? 0 : 1); j < *(it + 1) - base;
+           j++) {
+        U.aj[U_pos] = aj[j];
+        U.av[U_pos++] = av[j];
       }
     }
   }
-  if (missing_diag)
-    return false;
-  return true;
 }
 
 } // namespace matrix_utils
