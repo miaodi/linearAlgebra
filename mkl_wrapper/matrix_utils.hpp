@@ -15,7 +15,27 @@ template <class T> auto find_address_of(T &&p) { return p.get(); }
 
 template <typename T> auto find_address_of(T *p) { return p; }
 
-template <typename T> auto find_address_of(const std::vector<T> &p) { return p.cbegin(); }
+template <typename T> auto find_address_of(const std::vector<T> &p) {
+  return p.cbegin();
+}
+
+template <typename R, typename C, typename V> struct CSRMatrix {
+  using RowType = R;
+  using ColType = C;
+  using ValType = V;
+  ColType rows;
+  ColType cols;
+  ColType base;
+  RowType nnz;
+  size_t ai_size{-1};
+  size_t aj_size{-1};
+  size_t av_size{-1};
+  std::shared_ptr<RowType[]> ai;
+  std::shared_ptr<ColType[]> aj;
+  std::shared_ptr<ValType[]> av;
+
+  CSRMatrix() = default;
+};
 
 /// @brief A serial compressed sparse row matrix transpose function
 /// @param rows number of rows of the matrix about to be transposed
@@ -28,9 +48,9 @@ template <typename T> auto find_address_of(const std::vector<T> &p) { return p.c
 template <typename SIZE, typename R, typename C, typename V>
 auto SerialTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
                      const SIZE base, const R &ai, const C &aj, const V &av) {
-  using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
-  using COLTYPE = typename std::decay<decltype(aj[0])>::type;
-  using VALTYPE = typename std::decay<decltype(av[0])>::type;
+  using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
+  using COLTYPE = typename std::decay_t<decltype(aj[0])>;
+  using VALTYPE = typename std::decay_t<decltype(av[0])>;
 
   const SIZE cols_transpose = rows;
   const SIZE rows_transpose = cols;
@@ -73,9 +93,9 @@ auto SerialTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
 template <typename SIZE, typename R, typename C, typename V>
 auto ParallelTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
                        const SIZE base, const R &ai, const C &aj, const V &av) {
-  using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
-  using COLTYPE = typename std::decay<decltype(aj[0])>::type;
-  using VALTYPE = typename std::decay<decltype(av[0])>::type;
+  using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
+  using COLTYPE = typename std::decay_t<decltype(aj[0])>;
+  using VALTYPE = typename std::decay_t<decltype(av[0])>;
   const SIZE cols_transpose = rows;
   const SIZE rows_transpose = cols;
   std::shared_ptr<ROWTYPE[]> ai_transpose(new ROWTYPE[rows_transpose + 1]);
@@ -159,9 +179,9 @@ template <typename SIZE, typename R, typename C, typename V>
 auto ParallelTranspose2(const SIZE rows, const SIZE cols, const SIZE nnz,
                         const SIZE base, const R &ai, const C &aj,
                         const V &av) {
-  using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
-  using COLTYPE = typename std::decay<decltype(aj[0])>::type;
-  using VALTYPE = typename std::decay<decltype(av[0])>::type;
+  using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
+  using COLTYPE = typename std::decay_t<decltype(aj[0])>;
+  using VALTYPE = typename std::decay_t<decltype(av[0])>;
   const SIZE cols_transpose = rows;
   const SIZE rows_transpose = cols;
   std::shared_ptr<ROWTYPE[]> ai_transpose(new ROWTYPE[rows_transpose + 1]());
@@ -263,8 +283,8 @@ ForwardSubstitution(const SIZE rows, const SIZE cols, const SIZE nnz,
                     const SIZE base, const R &ai, const C &aj, const V &av,
                     VALTYPE const *const b, VALTYPE *const x) {
 
-  using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
-  using COLTYPE = typename std::decay<decltype(aj[0])>::type;
+  using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
+  using COLTYPE = typename std::decay_t<decltype(aj[0])>;
   ROWTYPE j;
   for (SIZE i = 0; i < rows; i++) {
     x[i] = b[i];
@@ -315,8 +335,8 @@ LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
                                  const SIZE nnz, const SIZE base, const R &ai,
                                  const C &aj, const V &av,
                                  VALTYPE const *const b, VALTYPE *const x) {
-  using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
-  using COLTYPE = typename std::decay<decltype(aj[0])>::type;
+  using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
+  using COLTYPE = typename std::decay_t<decltype(aj[0])>;
 
 #pragma omp parallel
   {
@@ -338,8 +358,8 @@ LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
 template <typename SIZE, typename R, typename C, typename VEC>
 bool DiagonalPosition(const SIZE rows, const SIZE base, const R &ai,
                       const C &aj, VEC &diag) {
-  using ROWTYPE = typename std::decay<decltype(ai[0])>::type;
-  using COLTYPE = typename std::decay<decltype(aj[0])>::type;
+  using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
+  using COLTYPE = typename std::decay_t<decltype(aj[0])>;
 
   diag.resize(rows);
   volatile bool missing_diag = false;
@@ -360,4 +380,121 @@ bool DiagonalPosition(const SIZE rows, const SIZE base, const R &ai,
     return false;
   return true;
 }
+
+template <typename SIZE, typename R, typename C, typename V>
+bool SplitLDU(
+    const SIZE rows, const SIZE base, const R &ai, const C &aj, const V &av,
+    CSRMatrix<array_value_type<R>, array_value_type<C>, array_value_type<V>> &L,
+    CSRMatrix<array_value_type<R>, array_value_type<C>, array_value_type<V>> &U,
+    std::vector<array_value_type<V>> &D) {
+  using RowType = CSRMatrix<array_value_type<R>, array_value_type<C>,
+                            array_value_type<V>>::RowType;
+  using ColType = CSRMatrix<array_value_type<R>, array_value_type<C>,
+                            array_value_type<V>>::ColType;
+  using ValType = CSRMatrix<array_value_type<R>, array_value_type<C>,
+                            array_value_type<V>>::ValType;
+
+  L.rows = rows;
+  L.cols = rows;
+  L.base = base;
+  if (L.ai_size < rows + 1) {
+    L.ai.reset(new RowType[rows + 1]);
+    L.ai_size = rows + 1;
+  }
+
+  U.rows = rows;
+  U.cols = rows;
+  U.base = base;
+  if (U.ai_size < rows + 1) {
+    U.ai.reset(new RowType[rows + 1]);
+    U.ai_size = rows + 1;
+  }
+
+  L.ai[0] = base;
+  U.ai[0] = base;
+  D.resize(rows);
+  std::vector<RowType> diag(rows);
+  std::vector<std::pair<RowType, RowType>> LU_prefix(omp_get_max_threads() + 1);
+  LU_prefix[0] = {base, base};
+  volatile bool missing_diag = false;
+#pragma omp parallel shared(missing_diag)
+  {
+    const int tid = omp_get_thread_num();
+    const int nthreads = omp_get_num_threads();
+
+    auto [start, end] = utils::LoadPrefixBalancedPartition(
+        find_address_of(ai), find_address_of(ai) + rows, tid, nthreads);
+    LU_prefix[tid + 1].first = 0;
+    LU_prefix[tid + 1].second = 0;
+    for (auto it = start; it < end; it++) {
+      SIZE i = it - find_address_of(ai);
+      if (missing_diag)
+        continue;
+      auto mid =
+          std::lower_bound(find_address_of(aj) + *it - base,
+                           find_address_of(aj) + *(it + 1) - base, i + base);
+      if (*mid != i + base) {
+        std::cerr << "Could not find diagonal!" << std::endl;
+        missing_diag = true;
+      }
+
+      diag[i] = mid - find_address_of(aj);
+      D[i] = av[diag[i]];
+      const RowType L_size = mid - (find_address_of(aj) + *it - base);
+      LU_prefix[tid + 1].first += L_size;
+      L.ai[i + 1] = LU_prefix[tid + 1].first;
+      const RowType U_size = *(it + 1) - *it - 1 - L_size;
+      LU_prefix[tid + 1].second += U_size;
+      U.ai[i + 1] = LU_prefix[tid + 1].second;
+    }
+#pragma omp barrier
+    if (!missing_diag) {
+#pragma omp master
+      {
+        std::inclusive_scan(LU_prefix.begin(), LU_prefix.end(),
+                            LU_prefix.begin());
+        L.nnz = LU_prefix[nthreads].first;
+        if (L.aj_size < L.nnz) {
+          L.aj.reset(new ColType[L.nnz]);
+          L.aj_size = L.nnz;
+        }
+        if (L.av_size < L.nnz) {
+          L.av.reset(new ValType[L.nnz]);
+          L.av_size = L.nnz;
+        }
+
+        U.nnz = LU_prefix[nthreads].second;
+        if (U.aj_size < U.nnz) {
+          U.aj.reset(new ColType[U.nnz]);
+          U.aj_size = U.nnz;
+        }
+        if (U.av_size < U.nnz) {
+          U.av.reset(new ValType[U.nnz]);
+          U.av_size = U.nnz;
+        }
+      }
+
+      for (auto it = start; it < end; it++) {
+        SIZE i = it - find_address_of(ai);
+        L.ai[i + 1] += LU_prefix[tid].first;
+        U.ai[i + 1] += LU_prefix[tid].second;
+        RowType L_pos = LU_prefix[tid].first - base;
+        RowType U_pos = LU_prefix[tid].second - base;
+
+        for (RowType j = *it - base; j < diag[i]; j++) {
+          L.aj[L_pos] = aj[j];
+          L.av[L_pos++] = av[j];
+        }
+        for (RowType j = diag[i] + 1; j < *(it + 1) - base; j++) {
+          U.aj[U_pos] = aj[j];
+          U.av[U_pos++] = av[j];
+        }
+      }
+    }
+  }
+  if (missing_diag)
+    return false;
+  return true;
+}
+
 } // namespace matrix_utils
