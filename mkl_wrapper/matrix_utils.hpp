@@ -25,7 +25,7 @@ template <typename R, typename C, typename V> struct CSRMatrix {
   using ValType = V;
   ColType rows;
   ColType cols;
-  ColType base;
+  int base;
   RowType nnz;
   size_t ai_size{0};
   size_t aj_size{0};
@@ -46,8 +46,8 @@ template <typename R, typename C, typename V> struct CSRMatrix {
 /// @param aj column index
 /// @param av value vector
 template <typename SIZE, typename R, typename C, typename V>
-auto SerialTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
-                     const SIZE base, const R &ai, const C &aj, const V &av) {
+auto SerialTranspose(const SIZE rows, const SIZE cols, const size_t nnz,
+                     const int base, const R &ai, const C &aj, const V &av) {
   using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
   using COLTYPE = typename std::decay_t<decltype(aj[0])>;
   using VALTYPE = typename std::decay_t<decltype(av[0])>;
@@ -57,7 +57,9 @@ auto SerialTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
   std::shared_ptr<ROWTYPE[]> ai_transpose(
       new ROWTYPE[rows_transpose + 2]); // prevent from branching
   std::shared_ptr<COLTYPE[]> aj_transpose(new COLTYPE[nnz]);
-  std::shared_ptr<VALTYPE[]> av_transpose(new VALTYPE[nnz]);
+  std::shared_ptr<VALTYPE[]> av_transpose{nullptr};
+  if (av != nullptr)
+    av_transpose.reset(new VALTYPE[nnz]);
 
   ai_transpose[0] = base;
   std::fill_n(std::execution::seq, find_address_of(ai_transpose) + 1,
@@ -76,7 +78,8 @@ auto SerialTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
     for (COLTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
       const COLTYPE idx = ai_transpose[aj[j] - base + 1]++ - base;
       aj_transpose[idx] = i + base;
-      av_transpose[idx] = av[j];
+      if (av != nullptr)
+        av_transpose[idx] = av[j];
     }
   }
   return std::make_tuple(ai_transpose, aj_transpose, av_transpose);
@@ -91,8 +94,8 @@ auto SerialTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
 /// @param aj column index
 /// @param av value vector
 template <typename SIZE, typename R, typename C, typename V>
-auto ParallelTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
-                       const SIZE base, const R &ai, const C &aj, const V &av) {
+auto ParallelTranspose(const SIZE rows, const SIZE cols, const size_t nnz,
+                       const int base, const R &ai, const C &aj, const V &av) {
   using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
   using COLTYPE = typename std::decay_t<decltype(aj[0])>;
   using VALTYPE = typename std::decay_t<decltype(av[0])>;
@@ -100,7 +103,9 @@ auto ParallelTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
   const SIZE rows_transpose = cols;
   std::shared_ptr<ROWTYPE[]> ai_transpose(new ROWTYPE[rows_transpose + 1]);
   std::shared_ptr<COLTYPE[]> aj_transpose(new COLTYPE[nnz]);
-  std::shared_ptr<VALTYPE[]> av_transpose(new VALTYPE[nnz]);
+  std::shared_ptr<VALTYPE[]> av_transpose{nullptr};
+  if (av != nullptr)
+    av_transpose.reset(new VALTYPE[nnz]);
 
   ai_transpose[0] = base;
 
@@ -160,7 +165,8 @@ auto ParallelTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
         const SIZE rowID = it - ai.get();
         const COLTYPE idx = threadPrefixSum[tid][aj[j] - base]++ - base;
         aj_transpose[idx] = rowID + base;
-        av_transpose[idx] = av[j];
+        if (av != nullptr)
+          av_transpose[idx] = av[j];
       }
     }
   }
@@ -176,9 +182,8 @@ auto ParallelTranspose(const SIZE rows, const SIZE cols, const SIZE nnz,
 /// @param aj column index
 /// @param av value vector
 template <typename SIZE, typename R, typename C, typename V>
-auto ParallelTranspose2(const SIZE rows, const SIZE cols, const SIZE nnz,
-                        const SIZE base, const R &ai, const C &aj,
-                        const V &av) {
+auto ParallelTranspose2(const SIZE rows, const SIZE cols, const size_t nnz,
+                        const int base, const R &ai, const C &aj, const V &av) {
   using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
   using COLTYPE = typename std::decay_t<decltype(aj[0])>;
   using VALTYPE = typename std::decay_t<decltype(av[0])>;
@@ -187,8 +192,10 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const SIZE nnz,
   std::shared_ptr<ROWTYPE[]> ai_transpose(new ROWTYPE[rows_transpose + 1]());
   ai_transpose[0] = base;
   std::shared_ptr<COLTYPE[]> aj_transpose(new COLTYPE[nnz]);
-  std::shared_ptr<VALTYPE[]> av_transpose(new VALTYPE[nnz]);
-  omp_set_num_threads(3);
+  std::shared_ptr<VALTYPE[]> av_transpose{nullptr};
+  if (av != nullptr)
+    av_transpose.reset(new VALTYPE[nnz]);
+
   std::vector<std::unique_ptr<ROWTYPE[]>> threadPrefixSum(
       omp_get_max_threads());
 
@@ -251,7 +258,8 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const SIZE nnz,
         const ROWTYPE rowID = it - ai.get();
         const COLTYPE idx = threadPrefixSum[tid][aj[j] - base]++ - base;
         aj_transpose[idx] = rowID + base;
-        av_transpose[idx] = av[j];
+        if (av != nullptr)
+          av_transpose[idx] = av[j];
       }
     }
   }
@@ -262,15 +270,13 @@ template <class Array>
 using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
 
 /// @brief Forward-substitution algorithm for low triangular csr matrix L. Note
-/// that the diagonal term must be provided
+/// that the diagonal term is assumed to be 1
 /// @tparam SIZE
 /// @tparam R
 /// @tparam C
 /// @tparam V
 /// @tparam VALTYPE
 /// @param rows
-/// @param cols
-/// @param nnz
 /// @param base
 /// @param ai
 /// @param aj
@@ -278,61 +284,63 @@ using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
 /// @param rhs
 /// @param x
 template <typename SIZE, typename R, typename C, typename V, typename VALTYPE>
-std::enable_if_t<!std::is_same_v<array_value_type<V>, VALTYPE>, void>
-ForwardSubstitution(const SIZE rows, const SIZE cols, const SIZE nnz,
-                    const SIZE base, const R &ai, const C &aj, const V &av,
-                    VALTYPE const *const b, VALTYPE *const x) {
+std::enable_if_t<std::is_same_v<array_value_type<V>, VALTYPE>, void>
+ForwardSubstitution(const SIZE rows, const int base, const R &ai, const C &aj,
+                    const V &av, VALTYPE const *const b, VALTYPE *const x) {
 
   using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
   using COLTYPE = typename std::decay_t<decltype(aj[0])>;
   ROWTYPE j;
   for (SIZE i = 0; i < rows; i++) {
     x[i] = b[i];
-    for (j = ai[i] - base; j < ai[i + 1] - base - 1; j++) {
+    for (j = ai[i] - base; j < ai[i + 1] - base; j++) {
       x[i] -= av[j] * x[aj[j] - base];
     }
-    x[i] /= av[j];
   }
 }
 
 template <typename SIZE, typename R, typename C, typename VEC>
-void TopologicalSort(const SIZE nodes, const SIZE base, const R &ai,
-                     const C &aj, VEC &iperm, VEC &prefix) {
+void TopologicalSort(const SIZE nodes, const int base, const R &ai, const C &aj,
+                     VEC &iperm, VEC &prefix) {
   iperm.reserve(nodes);
   iperm.clear();
+  std::vector<int> degrees(nodes);
   prefix.reserve(std::max(1, nodes / 100));
   prefix.resize(1);
   prefix[0] = 0;
-  std::vector<int> degrees(nodes);
+  prefix.push_back(prefix.back());
   for (SIZE i = 0; i < nodes; i++) {
-    prefix.push_back(prefix.back());
     degrees[i] = ai[i + 1] - ai[i];
-    if (ai[i + 1] - ai[i] == 1) {
+    if (degrees[i] == 0) {
       iperm.push_back(i + base);
       prefix.back()++;
     }
   }
+
+  auto t_csr = matrix_utils::ParallelTranspose(
+      nodes, nodes, ai[nodes] - base, base, ai, aj, (double *)nullptr);
+  const auto &[t_ai, t_aj, t_av] = t_csr;
   size_t level = 0;
   while (iperm.size() != nodes) {
     prefix.push_back(prefix.back());
     for (size_t i = prefix[level]; i < prefix[level + 1]; i++) {
       const auto idx = iperm[i] - base;
-      for (auto j = ai[idx] - base; j < ai[idx + 1] - base; j++) {
-        if (--degrees[aj[j] - base] == 1) {
-          iperm.push_back(aj[j]);
+      for (auto j = t_ai[idx] - base; j < t_ai[idx + 1] - base; j++) {
+        if (--degrees[t_aj[j] - base] == 0) {
+          iperm.push_back(t_aj[j]);
           prefix.back()++;
         }
       }
     }
+    level++;
   }
 }
 
 template <typename SIZE, typename R, typename C, typename V, typename VEC,
           typename VALTYPE>
-std::enable_if_t<!std::is_same_v<array_value_type<V>, VALTYPE>, void>
+std::enable_if_t<std::is_same_v<array_value_type<V>, VALTYPE>, void>
 LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
-                                 const SIZE rows, const SIZE cols,
-                                 const SIZE nnz, const SIZE base, const R &ai,
+                                 const SIZE rows, const int base, const R &ai,
                                  const C &aj, const V &av,
                                  VALTYPE const *const b, VALTYPE *const x) {
   using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
@@ -340,15 +348,14 @@ LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
 
 #pragma omp parallel
   {
-    ROWTYPE j;
     for (int l = 0; l < prefix.size() - 1; l++) {
 #pragma omp for
       for (SIZE i = prefix[l]; i < prefix[l + 1]; i++) {
-        x[i] = b[i];
-        for (j = ai[i] - base; j < ai[i + 1] - base - 1; j++) {
-          x[i] -= av[j] * x[aj[j] - base];
+        const SIZE idx = iperm[i] - base;
+        x[idx] = b[idx];
+        for (auto j = ai[idx] - base; j < ai[idx + 1] - base; j++) {
+          x[idx] -= av[j] * x[aj[j] - base];
         }
-        x[i] /= av[j];
       }
 #pragma omp barrier
     }
@@ -356,8 +363,8 @@ LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
 }
 
 template <typename SIZE, typename R, typename C, typename VEC>
-bool DiagonalPosition(const SIZE rows, const SIZE base, const R &ai,
-                      const C &aj, VEC &diag) {
+bool DiagonalPosition(const SIZE rows, const int base, const R &ai, const C &aj,
+                      VEC &diag) {
   using ROWTYPE = typename std::decay_t<decltype(ai[0])>;
   using COLTYPE = typename std::decay_t<decltype(aj[0])>;
 
@@ -381,9 +388,24 @@ bool DiagonalPosition(const SIZE rows, const SIZE base, const R &ai,
   return true;
 }
 
+/// @brief Split a matrix into strictly lower triangular matrix L, diagonal D,
+/// and strictly upper triangular matrix U
+/// @tparam SIZE
+/// @tparam R
+/// @tparam C
+/// @tparam V
+/// @param rows size of the square matrix
+/// @param base matrix index base (0 or 1)
+/// @param ai row index
+/// @param aj column index
+/// @param av value vector
+/// @param L strictly lower triangular matrix
+/// @param D diagonal matrix, stored as a vector. Note that zero diagonal is
+/// allowed
+/// @param U strictly upper triangular matrix
 template <typename SIZE, typename R, typename C, typename V>
 void SplitLDU(
-    const SIZE rows, const SIZE base, const R &ai, const C &aj, const V &av,
+    const SIZE rows, const int base, const R &ai, const C &aj, const V &av,
     CSRMatrix<array_value_type<R>, array_value_type<C>, array_value_type<V>> &L,
     std::vector<array_value_type<V>> &D,
     CSRMatrix<array_value_type<R>, array_value_type<C>, array_value_type<V>>

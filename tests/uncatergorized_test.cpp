@@ -1,4 +1,5 @@
 
+#include "incomplete_lu.h"
 #include "matrix_utils.hpp"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
@@ -112,6 +113,21 @@ TEST(transpose_and_partranspose, base1) {
   //   myfile.close();
 }
 
+TEST(transpose_and_partranspose, no_av) {
+  auto mat = mkl_wrapper::random_sparse(10, 3);
+  mat.randomVals();
+  mat.to_one_based();
+
+  //   std::ofstream myfile;
+  //   myfile.open("origin.svg");
+  //   mat.print_svg(myfile);
+  //   myfile.close();
+
+  auto t_csr = matrix_utils::SerialTranspose(mat.rows(), mat.cols(), mat.nnz(),
+                                             (int)mat.mkl_base(), mat.get_ai(),
+                                             mat.get_aj(), (double *)nullptr);
+}
+
 TEST(SplitLDU, base0) {
   omp_set_num_threads(5);
   auto mat = mkl_wrapper::random_sparse(1000, 32);
@@ -134,7 +150,7 @@ TEST(SplitLDU, base0) {
   for (int i = 0; i < mat.rows(); i++) {
     EXPECT_NEAR(diag[i], D[i], 2e-11);
   }
-  
+
   // std::ofstream myfile;
   // myfile.open("origin.svg");
   // mat.print_svg(myfile);
@@ -195,4 +211,63 @@ TEST(SplitLDU, base1) {
   // myfile.open("D.svg");
   // matD.print_svg(myfile);
   // myfile.close();
+}
+
+TEST(triangular_solve, forward_substitution) {
+  omp_set_num_threads(4);
+
+  std::ifstream f("data/ex5.mtx");
+  f.clear();
+  f.seekg(0, std::ios::beg);
+  std::vector<MKL_INT> csr_rows, csr_cols;
+  std::vector<double> csr_vals;
+  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+  mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                  csr_rows, csr_cols, csr_vals);
+  const MKL_INT size = csr_rows.size() - 1;
+  mat.to_zero_based();
+  mkl_wrapper::incomplete_lu_k prec;
+  prec.set_level(5);
+  prec.symbolic_factorize(&mat);
+  prec.numeric_factorize(&mat);
+
+  std::ofstream myfile;
+  myfile.open("prec.svg");
+  prec.print_svg(myfile);
+  myfile.close();
+
+  std::vector<double> b(mat.rows());
+  std::iota(std::begin(b), std::end(b), 0);
+  std::vector<double> x_serial(mat.rows(), 0.0);
+  std::vector<double> x_par(mat.rows(), 0.0);
+  std::vector<double> x_mkl(mat.rows(), 0.0);
+
+  matrix_descr descr;
+  descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
+  descr.mode = SPARSE_FILL_MODE_LOWER;
+  descr.diag = SPARSE_DIAG_UNIT;
+  mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, prec.mkl_handler(),
+                    descr, b.data(), x_mkl.data());
+
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
+  std::vector<double> D;
+
+  matrix_utils::SplitLDU(prec.rows(), (int)prec.mkl_base(), prec.get_ai(),
+                         prec.get_aj(), prec.get_av(), L, D, U);
+
+  matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai, L.aj, L.av, b.data(),
+                                    x_serial.data());
+  for (int i = 0; i < mat.rows(); i++) {
+    EXPECT_NEAR(x_serial[i], x_mkl[i], 1e-13);
+  }
+
+  std::vector<int> iperm(L.rows);
+  std::vector<int> prefix;
+  matrix_utils::TopologicalSort(L.rows, L.base, L.ai, L.aj, iperm, prefix);
+
+  matrix_utils::LevelScheduleForwardSubstitution(
+      iperm, prefix, L.rows, L.base, L.ai, L.aj, L.av, b.data(), x_par.data());
+  for (int i = 0; i < mat.rows(); i++) {
+    EXPECT_NEAR(x_par[i], x_mkl[i], 1e-13);
+  }
 }
