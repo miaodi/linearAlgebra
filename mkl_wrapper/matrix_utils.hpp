@@ -140,12 +140,9 @@ auto ParallelTranspose(const SIZE rows, const SIZE cols, const size_t nnz,
 
 // may be optimized by a parallel scan
 #pragma omp master
-    {
-
-      std::inclusive_scan(ai_transpose.get(),
-                          ai_transpose.get() + rows_transpose + 1,
-                          ai_transpose.get());
-    }
+    std::inclusive_scan(ai_transpose.get(),
+                        ai_transpose.get() + rows_transpose + 1,
+                        ai_transpose.get());
 
 #pragma omp barrier
 #pragma omp for
@@ -227,7 +224,7 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const size_t nnz,
         ai_transpose[rowID + 1] += threadPrefixSum[t][rowID];
       }
     }
-    prefix[tid + 1] = ai_transpose[end - find_address_of(ai)];
+    prefix[tid + 1] = ai_transpose[endt - find_address_of(ai_transpose)];
 
 #pragma omp barrier
 
@@ -252,7 +249,6 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const size_t nnz,
     }
 
 #pragma omp barrier
-
     for (auto it = start; it < end; it++) {
       for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
         const ROWTYPE rowID = it - ai.get();
@@ -317,7 +313,7 @@ void TopologicalSort(const SIZE nodes, const int base, const R &ai, const C &aj,
     }
   }
 
-  auto t_csr = matrix_utils::ParallelTranspose(
+  auto t_csr = matrix_utils::ParallelTranspose2(
       nodes, nodes, ai[nodes] - base, base, ai, aj, (double *)nullptr);
   const auto &[t_ai, t_aj, t_av] = t_csr;
   size_t level = 0;

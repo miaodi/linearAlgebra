@@ -45,7 +45,7 @@ public:
       std::cout << "matrix size: " << mat->rows() << "\n";
 
       precond = std::make_unique<mkl_wrapper::incomplete_lu_k>();
-      precond->set_level(3);
+      precond->set_level(4);
       precond->symbolic_factorize(mat.get());
       precond->numeric_factorize(mat.get());
     }
@@ -97,10 +97,6 @@ BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
   }
 }
 
-BENCHMARK_REGISTER_F(MyFixture, ParallelForward)
-    ->Arg(10)
-    ->Arg(100)
-    ->Arg(1000)
-    ->Arg(10000);
+BENCHMARK_REGISTER_F(MyFixture, ParallelForward)->Arg(10)->Arg(100)->Arg(1000);
 
 BENCHMARK_MAIN();
