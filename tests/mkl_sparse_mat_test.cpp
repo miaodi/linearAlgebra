@@ -1,4 +1,5 @@
 #include "../utils/utils.h"
+#include "matrix_utils.hpp"
 #include "mkl_solver.h"
 #include "mkl_sparse_mat.h"
 #include <gtest/gtest.h>
@@ -315,6 +316,9 @@ TEST_F(sparse_matrix_Test, permute) {
     // test zero based
     std::vector<MKL_INT> perm0 = utils::randomPermute(3, A.mkl_base()),
                          inv_perm;
+
+    auto [a, b, c] =
+        matrix_utils::AllocateCSRData(A.rows(), A.nnz());
     auto [aiB, ajB, avB] = mkl_wrapper::permute(A, perm0.data(), perm0.data());
     mkl_wrapper::mkl_sparse_mat B(3, 3, aiB, ajB, avB);
 

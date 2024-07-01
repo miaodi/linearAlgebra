@@ -13,13 +13,13 @@
 TEST(transpose_and_partranspose, base0) {
   auto mat = mkl_wrapper::random_sparse(100, 16);
   mat.randomVals();
-  auto t_csr = matrix_utils::SerialTranspose(mat.rows(), mat.cols(), mat.nnz(),
-                                             (int)mat.mkl_base(), mat.get_ai(),
-                                             mat.get_aj(), mat.get_av());
+  auto t_csr = matrix_utils::SerialTranspose(
+      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.get_aj().get(), mat.get_av().get());
 
   auto tt_csr = matrix_utils::SerialTranspose(
-      mat.cols(), mat.rows(), mat.nnz(), (int)mat.mkl_base(),
-      std::get<0>(t_csr), std::get<1>(t_csr), std::get<2>(t_csr));
+      mat.cols(), mat.rows(), (int)mat.mkl_base(), std::get<0>(t_csr).get(),
+      std::get<1>(t_csr).get(), std::get<2>(t_csr).get());
 
   for (int i = 0; i <= mat.rows(); i++) {
     EXPECT_EQ(std::get<0>(tt_csr)[i], mat.get_ai()[i]);
@@ -30,8 +30,8 @@ TEST(transpose_and_partranspose, base0) {
   }
 
   auto ptt_csr = matrix_utils::ParallelTranspose(
-      mat.cols(), mat.rows(), mat.nnz(), (int)mat.mkl_base(),
-      std::get<0>(t_csr), std::get<1>(t_csr), std::get<2>(t_csr));
+      mat.cols(), mat.rows(), (int)mat.mkl_base(), std::get<0>(t_csr).get(),
+      std::get<1>(t_csr).get(), std::get<2>(t_csr).get());
 
   for (int i = 0; i <= mat.rows(); i++) {
     EXPECT_EQ(std::get<0>(tt_csr)[i], std::get<0>(ptt_csr)[i]);
@@ -42,8 +42,8 @@ TEST(transpose_and_partranspose, base0) {
   }
 
   auto pt2_csr = matrix_utils::ParallelTranspose2(
-      mat.rows(), mat.cols(), mat.nnz(), (int)mat.mkl_base(), mat.get_ai(),
-      mat.get_aj(), mat.get_av());
+      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.get_aj().get(), mat.get_av().get());
 
   for (int i = 0; i <= mat.rows(); i++) {
     EXPECT_EQ(std::get<0>(t_csr)[i], std::get<0>(pt2_csr)[i]);
@@ -64,13 +64,13 @@ TEST(transpose_and_partranspose, base1) {
   //   mat.print_svg(myfile);
   //   myfile.close();
 
-  auto t_csr = matrix_utils::SerialTranspose(mat.rows(), mat.cols(), mat.nnz(),
-                                             (int)mat.mkl_base(), mat.get_ai(),
-                                             mat.get_aj(), mat.get_av());
+  auto t_csr = matrix_utils::SerialTranspose(
+      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.get_aj().get(), mat.get_av().get());
 
   auto tt_csr = matrix_utils::SerialTranspose(
-      mat.cols(), mat.rows(), mat.nnz(), (int)mat.mkl_base(),
-      std::get<0>(t_csr), std::get<1>(t_csr), std::get<2>(t_csr));
+      mat.cols(), mat.rows(), (int)mat.mkl_base(), std::get<0>(t_csr).get(),
+      std::get<1>(t_csr).get(), std::get<2>(t_csr).get());
 
   for (int i = 0; i <= mat.rows(); i++) {
     EXPECT_EQ(std::get<0>(tt_csr)[i], mat.get_ai()[i]);
@@ -81,8 +81,8 @@ TEST(transpose_and_partranspose, base1) {
   }
 
   auto pt_csr = matrix_utils::ParallelTranspose(
-      mat.rows(), mat.cols(), mat.nnz(), (int)mat.mkl_base(), mat.get_ai(),
-      mat.get_aj(), mat.get_av());
+      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.get_aj().get(), mat.get_av().get());
 
   for (int i = 0; i <= mat.rows(); i++) {
     EXPECT_EQ(std::get<0>(t_csr)[i], std::get<0>(pt_csr)[i]);
@@ -93,8 +93,8 @@ TEST(transpose_and_partranspose, base1) {
   }
 
   auto pt2_csr = matrix_utils::ParallelTranspose2(
-      mat.rows(), mat.cols(), mat.nnz(), (int)mat.mkl_base(), mat.get_ai(),
-      mat.get_aj(), mat.get_av());
+      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.get_aj().get(), mat.get_av().get());
 
   for (int i = 0; i <= mat.rows(); i++) {
     EXPECT_EQ(std::get<0>(t_csr)[i], std::get<0>(pt2_csr)[i]);
@@ -123,9 +123,9 @@ TEST(transpose_and_partranspose, no_av) {
   //   mat.print_svg(myfile);
   //   myfile.close();
 
-  auto t_csr = matrix_utils::SerialTranspose(mat.rows(), mat.cols(), mat.nnz(),
-                                             (int)mat.mkl_base(), mat.get_ai(),
-                                             mat.get_aj(), (double *)nullptr);
+  auto t_csr = matrix_utils::SerialTranspose(
+      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.get_aj().get(), (double *)nullptr);
 }
 
 TEST(SplitLDU, base0) {
@@ -135,8 +135,8 @@ TEST(SplitLDU, base0) {
 
   matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
   std::vector<double> D;
-  matrix_utils::SplitLDU(mat.rows(), (int)mat.mkl_base(), mat.get_ai(),
-                         mat.get_aj(), mat.get_av(), L, D, U);
+  matrix_utils::SplitLDU(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+                         mat.get_aj().get(), mat.get_av().get(), L, D, U);
   mkl_wrapper::mkl_sparse_mat matL(mat.rows(), mat.rows(), L.ai, L.aj, L.av);
   mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av);
   auto tmp = mkl_wrapper::mkl_sparse_sum(matU, mat, -1.);
@@ -177,8 +177,8 @@ TEST(SplitLDU, base1) {
 
   matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
   std::vector<double> D;
-  matrix_utils::SplitLDU(mat.rows(), (int)mat.mkl_base(), mat.get_ai(),
-                         mat.get_aj(), mat.get_av(), L, D, U);
+  matrix_utils::SplitLDU(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+                         mat.get_aj().get(), mat.get_av().get(), L, D, U);
   mkl_wrapper::mkl_sparse_mat matL(mat.rows(), mat.rows(), L.ai, L.aj, L.av,
                                    SPARSE_INDEX_BASE_ONE);
   mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av,
@@ -231,10 +231,10 @@ TEST(triangular_solve, forward_substitution) {
   prec.symbolic_factorize(&mat);
   prec.numeric_factorize(&mat);
 
-  std::ofstream myfile;
-  myfile.open("prec.svg");
-  prec.print_svg(myfile);
-  myfile.close();
+  // std::ofstream myfile;
+  // myfile.open("prec.svg");
+  // prec.print_svg(myfile);
+  // myfile.close();
 
   std::vector<double> b(mat.rows());
   std::iota(std::begin(b), std::end(b), 0);
@@ -252,22 +252,36 @@ TEST(triangular_solve, forward_substitution) {
   matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
   std::vector<double> D;
 
-  matrix_utils::SplitLDU(prec.rows(), (int)prec.mkl_base(), prec.get_ai(),
-                         prec.get_aj(), prec.get_av(), L, D, U);
+  matrix_utils::SplitLDU(prec.rows(), (int)prec.mkl_base(), prec.get_ai().get(),
+                         prec.get_aj().get(), prec.get_av().get(), L, D, U);
 
-  matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai, L.aj, L.av, b.data(),
-                                    x_serial.data());
+  matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
+                                    L.av.get(), b.data(), x_serial.data());
   for (int i = 0; i < mat.rows(); i++) {
     EXPECT_NEAR(x_serial[i], x_mkl[i], 1e-13);
   }
 
   std::vector<int> iperm(L.rows);
   std::vector<int> prefix;
-  matrix_utils::TopologicalSort(L.rows, L.base, L.ai, L.aj, iperm, prefix);
-
+  matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
+      L.rows, L.base, L.ai.get(), L.aj.get(), iperm, prefix);
   matrix_utils::LevelScheduleForwardSubstitution(
-      iperm, prefix, L.rows, L.base, L.ai, L.aj, L.av, b.data(), x_par.data());
+      iperm, prefix, L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get(),
+      b.data(), x_par.data());
   for (int i = 0; i < mat.rows(); i++) {
     EXPECT_NEAR(x_par[i], x_mkl[i], 1e-13);
+  }
+
+  auto Lt_data = matrix_utils::ParallelTranspose(
+      L.rows, L.cols, L.base, L.ai.get(), L.aj.get(), L.av.get());
+
+  std::vector<double> x_serial_t(mat.rows(), 0.0);
+
+  matrix_utils::ForwardSubstitutionT(
+      L.rows, L.base, std::get<0>(Lt_data).get(), std::get<1>(Lt_data).get(),
+      std::get<2>(Lt_data).get(), b.data(), x_serial_t.data());
+
+  for (int i = 0; i < mat.rows(); i++) {
+    EXPECT_NEAR(x_serial_t[i], x_mkl[i], 1e-13);
   }
 }
