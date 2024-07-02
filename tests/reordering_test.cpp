@@ -2,6 +2,7 @@
 #include "Reordering.h"
 #include "UnionFind.h"
 #include "mkl_sparse_mat.h"
+#include "matrix_utils.hpp"
 #include "utils.h"
 #include <algorithm>
 #include <deque>
@@ -282,7 +283,12 @@ TEST(Reordering, SerialCM) {
     std::vector<MKL_INT> inv_perm, perm;
     reordering::SerialCM(&mat, inv_perm, perm);
     EXPECT_EQ(utils::isPermutation(inv_perm, mat.mkl_base()), true);
-    auto [ai, aj, av] = mkl_wrapper::permute(mat, inv_perm.data(), perm.data());
+
+    auto [ai, aj, av] = matrix_utils::AllocateCSRData(mat.rows(), mat.nnz());
+    matrix_utils::permute(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+                          mat.get_aj().get(), mat.get_av().get(),
+                          inv_perm.data(), perm.data(), ai.get(), aj.get(),
+                          av.get());
     mkl_wrapper::mkl_sparse_mat perm_mat(mat.rows(), mat.cols(), ai, aj, av);
     std::cout << "bandwidth after rcm reordering: " << perm_mat.bandwidth()
               << std::endl;
@@ -310,8 +316,11 @@ TEST(Reordering, SerialCM) {
     std::vector<MKL_INT> nd_inv_perm, nd_perm;
     reordering::Metis(&mat, nd_inv_perm, nd_perm);
     EXPECT_EQ(utils::isPermutation(nd_inv_perm, mat.mkl_base()), true);
-    auto [ai1, aj1, av1] =
-        mkl_wrapper::permute(mat, nd_inv_perm.data(), nd_perm.data());
+    auto [ai1, aj1, av1] = matrix_utils::AllocateCSRData(mat.rows(), mat.nnz());
+    matrix_utils::permute(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+                          mat.get_aj().get(), mat.get_av().get(),
+                          nd_inv_perm.data(), nd_perm.data(), ai1.get(),
+                          aj1.get(), av1.get());
     mkl_wrapper::mkl_sparse_mat perm_mat1(mat.rows(), mat.cols(), ai1, aj1, av1,
                                           SPARSE_INDEX_BASE_ONE);
     std::cout << "bandwidth after metis reordering: " << perm_mat1.bandwidth()

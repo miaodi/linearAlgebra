@@ -44,11 +44,11 @@ template <typename R, typename C, typename V> struct CSRMatrix {
 
 template <typename SIZE = int, typename ROWTYPE = int, typename COLTYPE = int,
           typename VALTYPE = double>
-auto AllocateCSRData(const SIZE rows, const ROWTYPE nnz) {
+decltype(auto) AllocateCSRData(const SIZE rows, const ROWTYPE nnz) {
 
-  std::shared_ptr<ROWTYPE[]> ai(new ROWTYPE(rows + 1));
-  std::shared_ptr<COLTYPE[]> aj(new COLTYPE(nnz));
-  std::shared_ptr<VALTYPE[]> av(new VALTYPE(nnz));
+  std::shared_ptr<ROWTYPE[]> ai(new ROWTYPE[rows + 1]);
+  std::shared_ptr<COLTYPE[]> aj(new COLTYPE[nnz]);
+  std::shared_ptr<VALTYPE[]> av(new VALTYPE[nnz]);
   return std::make_tuple(ai, aj, av);
 }
 
@@ -269,7 +269,7 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const int base,
   return std::make_tuple(ai_transpose, aj_transpose, av_transpose);
 }
 
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VEC>
+template <typename SIZE, typename ROWTYPE, typename COLTYPE>
 void permutedAI(const SIZE rows, const int base, ROWTYPE const *ai,
                 COLTYPE const *aj, COLTYPE const *iperm, ROWTYPE *permed_ai) {
   if (iperm == nullptr) {
@@ -362,8 +362,7 @@ void permuteRow(const SIZE rows, const int base, ROWTYPE const *ai,
 template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void symPermute(const SIZE rows, const int base, ROWTYPE const *ai,
                 COLTYPE const *aj, VALTYPE const *av, COLTYPE const *iperm,
-                COLTYPE const *p, ROWTYPE *permed_ai, COLTYPE *permed_aj,
-                VALTYPE *permed_av) {
+                ROWTYPE *permed_ai, COLTYPE *permed_aj, VALTYPE *permed_av) {
   // upper triangular
   const SIZE n = rows;
   const auto nnz = ai[rows] - base;

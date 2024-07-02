@@ -29,7 +29,7 @@ public:
       //     size, size, csr_rows, csr_cols, csr_vals, SPARSE_INDEX_BASE_ONE));
       // mat->to_zero_based();
 
-      std::ifstream f("/home/dimiao/matrix_lib/inline_1.mtx");
+      std::ifstream f("/SCRATCH/dimiao/test_zone/matrices/pwtk.mtx");
       f.clear();
       f.seekg(0, std::ios::beg);
       std::vector<MKL_INT> csr_rows, csr_cols;

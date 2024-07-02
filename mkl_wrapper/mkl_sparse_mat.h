@@ -121,19 +121,6 @@ protected:
 
   sparse_status_t _mkl_stat;
 };
-
-std::shared_ptr<MKL_INT[]> permutedAI(const mkl_sparse_mat &A,
-                                      MKL_INT const *const pinv);
-
-std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
-           std::shared_ptr<double[]>>
-permuteRow(const mkl_sparse_mat &A, MKL_INT const *const pinv);
-
-std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
-           std::shared_ptr<double[]>>
-permute(const mkl_sparse_mat &A, MKL_INT const *const pinv,
-        MKL_INT const *const p);
-
 // c*A+B
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,
                               double c = 1.);
@@ -192,10 +179,6 @@ mkl_sparse_mat_sym mkl_sparse_mult_ptap(mkl_sparse_mat_sym &A,
 // P*A*PT
 mkl_sparse_mat_sym mkl_sparse_mult_papt(mkl_sparse_mat_sym &A,
                                         mkl_sparse_mat &P);
-
-std::tuple<std::shared_ptr<MKL_INT[]>, std::shared_ptr<MKL_INT[]>,
-           std::shared_ptr<double[]>>
-symPermute(const mkl_sparse_mat &A, MKL_INT const *const pinv);
 
 // col major
 class dense_mat {

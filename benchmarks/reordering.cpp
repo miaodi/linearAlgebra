@@ -1,5 +1,6 @@
 #include "Reordering.h"
 #include "../config.h"
+#include "matrix_utils.hpp"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
 #include <benchmark/benchmark.h>
@@ -48,7 +49,11 @@ public:
       std::vector<MKL_INT> inv_perm, perm;
       reordering::SerialCM(mat.get(), inv_perm, perm);
       auto [ai, aj, av] =
-          mkl_wrapper::permute(*mat, inv_perm.data(), perm.data());
+          matrix_utils::AllocateCSRData(mat->rows(), mat->nnz());
+      matrix_utils::permute(mat->rows(), (int)mat->mkl_base(),
+                            mat->get_ai().get(), mat->get_aj().get(),
+                            mat->get_av().get(), inv_perm.data(), perm.data(),
+                            ai.get(), aj.get(), av.get());
       perm_mat.reset(new mkl_wrapper::mkl_sparse_mat(mat->rows(), mat->cols(),
                                                      ai, aj, av));
       std::cout << "bandwidth after reordering: " << perm_mat->bandwidth()
@@ -58,13 +63,23 @@ public:
       std::vector<MKL_INT> inv_perm1, perm1;
       reordering::Metis(mat.get(), inv_perm1, perm1);
       auto [ai1, aj1, av1] =
-          mkl_wrapper::permute(*mat, inv_perm1.data(), perm1.data());
+          matrix_utils::AllocateCSRData(mat->rows(), mat->nnz());
+      matrix_utils::permute(mat->rows(), (int)mat->mkl_base(),
+                            mat->get_ai().get(), mat->get_aj().get(),
+                            mat->get_av().get(), inv_perm1.data(), perm1.data(),
+                            ai1.get(), aj1.get(), av1.get());
       perm_mat1.reset(new mkl_wrapper::mkl_sparse_mat(mat->rows(), mat->cols(),
                                                       ai1, aj1, av1));
       std::cout << "bandwidth after reordering: " << perm_mat1->bandwidth()
                 << std::endl;
 #endif
-      auto [ai2, aj2, av2] = mkl_wrapper::symPermute(*mat, perm.data());
+
+      auto [ai2, aj2, av2] =
+          matrix_utils::AllocateCSRData(mat->rows(), mat->nnz());
+      matrix_utils::symPermute(mat->rows(), (int)mat->mkl_base(),
+                               mat->get_ai().get(), mat->get_aj().get(),
+                               mat->get_av().get(), inv_perm.data(), ai2.get(),
+                               aj2.get(), av2.get());
       perm_mat_sym.reset(new mkl_wrapper::mkl_sparse_mat_sym(
           mat->rows(), mat->cols(), ai2, aj2, av2));
       std::cout << "bandwidth after reordering: " << perm_mat_sym->bandwidth()
