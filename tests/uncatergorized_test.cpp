@@ -1,6 +1,7 @@
 
 #include "incomplete_lu.h"
 #include "matrix_utils.hpp"
+#include "triangle_solve.hpp"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
 #include <algorithm>
@@ -284,4 +285,56 @@ TEST(triangular_solve, forward_substitution) {
   for (int i = 0; i < mat.rows(); i++) {
     EXPECT_NEAR(x_serial_t[i], x_mkl[i], 1e-13);
   }
+}
+
+
+TEST(triangular_solve, forward_substitution1) {
+  omp_set_num_threads(4);
+
+  std::ifstream f("/home/dimiao/matrix_lib/thermal1.mtx");
+  // std::ifstream f("data/ex5.mtx");
+  f.clear();
+  f.seekg(0, std::ios::beg);
+  std::vector<MKL_INT> csr_rows, csr_cols;
+  std::vector<double> csr_vals;
+  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+  mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
+                                  csr_rows, csr_cols, csr_vals);
+  const MKL_INT size = csr_rows.size() - 1;
+  mat.to_zero_based();
+  mkl_wrapper::incomplete_lu_k prec;
+  prec.set_level(5);
+  prec.symbolic_factorize(&mat);
+  prec.numeric_factorize(&mat);
+
+  // std::ofstream myfile;
+  // myfile.open("prec.svg");
+  // prec.print_svg(myfile);
+  // myfile.close();
+
+  std::vector<double> b(mat.rows());
+  std::iota(std::begin(b), std::end(b), 0);
+  std::vector<double> x_serial(mat.rows(), 0.0);
+  std::vector<double> x_par(mat.rows(), 0.0);
+  std::vector<double> x_mkl(mat.rows(), 0.0);
+
+  matrix_descr descr;
+  descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
+  descr.mode = SPARSE_FILL_MODE_LOWER;
+  descr.diag = SPARSE_DIAG_UNIT;
+  mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, prec.mkl_handler(),
+                    descr, b.data(), x_mkl.data());
+
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
+  std::vector<double> D;
+
+  matrix_utils::SplitLDU(prec.rows(), (int)prec.mkl_base(), prec.get_ai().get(),
+                         prec.get_aj().get(), prec.get_av().get(), L, D, U);
+
+  // matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
+  //                                   L.av.get(), b.data(), x_serial.data());
+
+  matrix_utils::OptimizedForwardSubstitution<int, int, int, double> forwardsweep;
+
+  forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
 }

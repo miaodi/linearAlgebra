@@ -41,6 +41,19 @@ template <typename R, typename C, typename V> struct CSRMatrix {
 
   CSRMatrix() = default;
 };
+template <typename R, typename C, typename V> struct CSRMatrixVec {
+  using ROWTYPE = R;
+  using COLTYPE = C;
+  using VALTYPE = V;
+  COLTYPE rows;
+  COLTYPE cols;
+  int base;
+  std::vector<ROWTYPE> ai;
+  std::vector<COLTYPE> aj;
+  std::vector<VALTYPE> av;
+
+  CSRMatrixVec() = default;
+};
 
 template <typename SIZE = int, typename ROWTYPE = int, typename COLTYPE = int,
           typename VALTYPE = double>
@@ -309,7 +322,7 @@ void permutedAI(const SIZE rows, const int base, ROWTYPE const *ai,
 template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void permute(const SIZE rows, const int base, ROWTYPE const *ai,
              COLTYPE const *aj, VALTYPE const *av, COLTYPE const *iperm,
-             COLTYPE const *p, ROWTYPE *permed_ai, COLTYPE *permed_aj,
+             COLTYPE const *perm, ROWTYPE *permed_ai, COLTYPE *permed_aj,
              VALTYPE *permed_av) {
   permutedAI(rows, base, ai, aj, iperm, permed_ai);
   const auto nnz = ai[rows] - base;
@@ -324,17 +337,17 @@ void permute(const SIZE rows, const int base, ROWTYPE const *ai,
     for (auto i = start; i < end; i++) {
       // copy and convert aj and av
       size_t rowInd = iperm ? iperm[i - permed_ai] - base : (i - permed_ai);
-      // permute column in each row p[i] = k -> q_{i,k} = 1 -> new(*, k) =
+      // permute column in each row perm[i] = k -> q_{i,k} = 1 -> new(*, k) =
       // old(*, i)
       std::transform(aj + ai[rowInd] - base, aj + ai[rowInd + 1] - base,
-                     permed_aj + *i - base, [p, base](MKL_INT ind) {
-                       return p ? p[ind - base] : (ind - base);
+                     permed_aj + *i - base, [perm, base](MKL_INT ind) {
+                       return perm ? perm[ind - base] : (ind - base);
                      });
 
       std::copy(std::execution::seq, av + ai[rowInd] - base,
                 av + ai[rowInd + 1] - base, permed_av + *i - base);
 
-      if (p == nullptr)
+      if (perm == nullptr)
         continue;
       // intersion sort aj and av based on the column index
       auto pos = permed_aj + *(i + 1) - base - 1;
@@ -355,8 +368,8 @@ template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void permuteRow(const SIZE rows, const int base, ROWTYPE const *ai,
                 COLTYPE const *aj, VALTYPE const *av, COLTYPE const *iperm,
                 ROWTYPE *permed_ai, COLTYPE *permed_aj, VALTYPE *permed_av) {
-  permute(rows, base, ai, aj, av, iperm, nullptr, permed_ai, permed_aj,
-          permed_av);
+  permute(rows, base, ai, aj, av, iperm, (COLTYPE const *)nullptr, permed_ai,
+          permed_aj, permed_av);
 }
 
 template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
@@ -442,61 +455,6 @@ void symPermute(const SIZE rows, const int base, ROWTYPE const *ai,
 template <class Array>
 using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
 
-/// @brief Forward-substitution algorithm for low triangular csr matrix L. Note
-/// that the diagonal term is assumed to be 1
-/// @tparam SIZE
-/// @tparam R
-/// @tparam C
-/// @tparam V
-/// @tparam VALTYPE
-/// @param size
-/// @param base
-/// @param ai
-/// @param aj
-/// @param av
-/// @param rhs
-/// @param x
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ForwardSubstitution(const SIZE size, const int base, ROWTYPE const *ai,
-                         COLTYPE const *aj, VALTYPE const *av,
-                         VALTYPE const *const b, VALTYPE *const x) {
-  ROWTYPE j;
-  for (SIZE i = 0; i < size; i++) {
-    x[i] = b[i];
-    for (j = ai[i] - base; j < ai[i + 1] - base; j++) {
-      x[i] -= av[j] * x[aj[j] - base];
-    }
-  }
-}
-
-/// @brief Forward-substitution algorithm for low triangular csr matrix L
-/// obtained by the transpose of a strict upper triangular csr matrix. Note that
-/// the diagonal term is assumed to be 1
-/// @tparam SIZE
-/// @tparam R
-/// @tparam C
-/// @tparam V
-/// @tparam VALTYPE
-/// @param size
-/// @param base
-/// @param ai
-/// @param aj
-/// @param av
-/// @param rhs
-/// @param x
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ForwardSubstitutionT(const SIZE size, const int base, ROWTYPE const *ai,
-                          COLTYPE const *aj, VALTYPE const *av,
-                          VALTYPE const *const b, VALTYPE *const x) {
-  ROWTYPE j;
-  std::copy(b, b + size, x);
-  for (SIZE i = 0; i < size; i++) {
-    for (j = ai[i] - base; j < ai[i + 1] - base; j++) {
-      x[aj[j] - base] -= av[j] * x[i];
-    }
-  }
-}
-
 enum TriangularSolve { L = 0, U = 1 };
 
 template <TriangularSolve TS = L, typename SIZE, typename ROWTYPE,
@@ -579,37 +537,12 @@ void TopologicalSort2(const SIZE nodes, const int base, ROWTYPE const *ai,
   }
   std::inclusive_scan(prefix.begin(), prefix.end(), prefix.begin());
 
-  iperm.reserve(nodes);
-  iperm.clear();
+  iperm.resize(nodes);
   for (SIZE i = 0; i < nodes; i++) {
     iperm[prefix[degrees[i]]++] = i + base;
   }
   std::rotate(prefix.rbegin(), prefix.rbegin() + 1, prefix.rend());
   prefix[0] = 0;
-}
-
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE,
-          typename VEC>
-void LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
-                                      const SIZE rows, const int base,
-                                      ROWTYPE const *ai, COLTYPE const *aj,
-                                      VALTYPE const *av, VALTYPE const *const b,
-                                      VALTYPE *const x) {
-
-#pragma omp parallel
-  {
-    for (int l = 0; l < prefix.size() - 1; l++) {
-#pragma omp for
-      for (SIZE i = prefix[l]; i < prefix[l + 1]; i++) {
-        const SIZE idx = iperm[i] - base;
-        x[idx] = b[idx];
-        for (auto j = ai[idx] - base; j < ai[idx + 1] - base; j++) {
-          x[idx] -= av[j] * x[aj[j] - base];
-        }
-      }
-#pragma omp barrier
-    }
-  }
 }
 
 template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VEC>
@@ -704,7 +637,7 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
       U.ai[i + 1] = LU_prefix[tid + 1].second;
     }
 #pragma omp barrier
-#pragma omp master
+#pragma omp single
     {
       for (size_t i = 1; i < LU_prefix.size(); i++) {
         LU_prefix[i].first += LU_prefix[i - 1].first;
@@ -731,7 +664,6 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
       }
     }
 
-#pragma omp barrier
     ROWTYPE L_pos = LU_prefix[tid].first - base;
     ROWTYPE U_pos = LU_prefix[tid].second - base;
     for (auto it = start; it < end; it++) {
