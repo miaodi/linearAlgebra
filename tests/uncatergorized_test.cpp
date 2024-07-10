@@ -289,10 +289,10 @@ TEST(triangular_solve, forward_substitution) {
 
 
 TEST(triangular_solve, forward_substitution1) {
-  omp_set_num_threads(4);
+  omp_set_num_threads(1);
 
-  std::ifstream f("/home/dimiao/matrix_lib/thermal1.mtx");
-  // std::ifstream f("data/ex5.mtx");
+  // std::ifstream f("/SCRATCH/dimiao/test_zone/matrices/thermal1.mtx");
+  std::ifstream f("data/ex5.mtx");
   f.clear();
   f.seekg(0, std::ios::beg);
   std::vector<MKL_INT> csr_rows, csr_cols;
@@ -314,9 +314,9 @@ TEST(triangular_solve, forward_substitution1) {
 
   std::vector<double> b(mat.rows());
   std::iota(std::begin(b), std::end(b), 0);
-  std::vector<double> x_serial(mat.rows(), 0.0);
-  std::vector<double> x_par(mat.rows(), 0.0);
+  std::vector<double> x(mat.rows(), 0.0);
   std::vector<double> x_mkl(mat.rows(), 0.0);
+  std::vector<double> x_serial(mat.rows(), 0.0);
 
   matrix_descr descr;
   descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
@@ -331,10 +331,14 @@ TEST(triangular_solve, forward_substitution1) {
   matrix_utils::SplitLDU(prec.rows(), (int)prec.mkl_base(), prec.get_ai().get(),
                          prec.get_aj().get(), prec.get_av().get(), L, D, U);
 
-  // matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
-  //                                   L.av.get(), b.data(), x_serial.data());
+  matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
+                                    L.av.get(), b.data(), x_serial.data());
 
   matrix_utils::OptimizedForwardSubstitution<int, int, int, double> forwardsweep;
-
+  std::cout<<"L.base: "<<L.base<<std::endl;
   forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
+  forwardsweep(b.data(), x.data());
+  for(int i = 0;i<x.size();i++){
+    std::cout << x[i] << " " << x_mkl[i] << " " << x_serial[i] << std::endl;
+  }
 }

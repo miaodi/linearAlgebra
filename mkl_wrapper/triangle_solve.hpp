@@ -110,9 +110,9 @@ public:
     _nthreads = omp_get_max_threads();
     matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
         rows, base, ai, aj, _iperm, _levels);
-    const COLTYPE level = _levels.size() - 1;
+    _numLevels = _levels.size() - 1;
 
-    std::cout << "rows: " << rows << " , levels: " << level << std::endl;
+    std::cout << "rows: " << rows << " , levels: " << _numLevels << std::endl;
     _threadlevels.resize(_nthreads);
     _threadiperm.resize(rows);
 #pragma omp parallel num_threads(_nthreads)
@@ -122,10 +122,10 @@ public:
       // #pragma omp single
       //       std::cout << "nthreads: " << nthreads << std::endl;
 
-      _threadlevels[tid].resize(level + 1);
+      _threadlevels[tid].resize(_numLevels + 1);
       _threadlevels[tid][0] = 0;
 
-      for (COLTYPE l = 0; l < level; l++) {
+      for (COLTYPE l = 0; l < _numLevels; l++) {
         auto [start, end] = utils::LoadBalancedPartition(
             _iperm.data() + _levels[l], _iperm.data() + _levels[l + 1], tid,
             nthreads);
@@ -141,19 +141,19 @@ public:
       {
         COLTYPE size = 0;
         for (int tid = 1; tid < nthreads; tid++) {
-          size += _threadlevels[tid - 1][level];
+          size += _threadlevels[tid - 1][_numLevels];
           _threadlevels[tid][0] = size;
         }
       }
 
-      for (COLTYPE l = 0; l < level; l++) {
+      for (COLTYPE l = 0; l < _numLevels; l++) {
         _threadlevels[tid][l + 1] += _threadlevels[tid][0];
       }
 
 #pragma omp barrier
       COLTYPE cur = _threadlevels[tid][0];
 
-      for (COLTYPE l = 0; l < level; l++) {
+      for (COLTYPE l = 0; l < _numLevels; l++) {
         auto [start, end] = utils::LoadBalancedPartition(
             _iperm.data() + _levels[l], _iperm.data() + _levels[l + 1], tid,
             nthreads);
@@ -163,15 +163,47 @@ public:
       }
     }
     std::cout << utils::isPermutation(_threadiperm, base) << std::endl;
+    for(auto i: _threadiperm){
+      std::cout << i << " ";
+    }
+    std::cout << std::endl;
     matrix_utils::permuteRow(rows, base, ai, aj, av, _threadiperm.data(),
                              _reorderedMat.ai.data(), _reorderedMat.aj.data(),
                              _reorderedMat.av.data());
+  }
+
+  void operator()(const VALTYPE *const b, VALTYPE *const x) const {
+#pragma omp parallel num_threads(_nthreads)
+    {
+      const int tid = omp_get_thread_num();
+      const int nthreads = omp_get_num_threads();
+      std::cout << "hello world" << std::endl;
+      for (COLTYPE l = 0; l < _numLevels; l++) {
+        const COLTYPE start = _threadlevels[tid][l];
+        const COLTYPE end = _threadlevels[tid][l + 1];
+        std::cout << "tid: " << tid << " , start: " << start
+                  << " , end: " << end << std::endl;
+        for (COLTYPE i = start; i < end; i++) {
+          const SIZE idx = _threadiperm[i] - _reorderedMat.base;
+          std::cout << i << " " << idx << std::endl;
+          x[idx] = b[idx];
+          for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
+               j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
+            x[idx] -= _reorderedMat.av[j] *
+                      x[_reorderedMat.aj[j] - _reorderedMat.base];
+          }
+        }
+#pragma omp barrier
+      }
+    }
   }
 
 protected:
   int _nthreads;
   std::vector<COLTYPE> _iperm;
   std::vector<COLTYPE> _levels;
+
+  COLTYPE _numLevels;
   std::vector<std::vector<COLTYPE>>
       _threadlevels; // level prefix for each thread
   std::vector<COLTYPE> _threadiperm;
