@@ -20,6 +20,8 @@ option(USE_METIS_LIB "Use metis for matrix reordering" OFF)
 
 option(USE_BOOST_LIB "Use boost library" OFF) 
 
+option(USE_CUDA "Use cuda (cudss)" OFF)
+
 option(BUILD_BENCHMARKS "Build benchmarks" OFF) 
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules" )
@@ -89,6 +91,14 @@ endif(USE_METIS_LIB)
 if (USE_BOOST_LIB)
   find_package(Boost REQUIRED)
 endif(USE_BOOST_LIB)
+
+if (USE_CUDA)
+  enable_language(CUDA)
+  set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  set(CMAKE_CUDA_EXTENSIONS OFF)
+  find_package(cudss REQUIRED)
+endif(USE_CUDA)
 
 configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/config.h.in"
