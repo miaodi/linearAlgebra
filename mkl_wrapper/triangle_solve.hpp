@@ -76,7 +76,6 @@ void LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
                                       ROWTYPE const *ai, COLTYPE const *aj,
                                       VALTYPE const *av, VALTYPE const *const b,
                                       VALTYPE *const x) {
-
 #pragma omp parallel
   {
     for (int l = 0; l < prefix.size() - 1; l++) {
@@ -111,10 +110,9 @@ public:
     matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
         rows, base, ai, aj, _iperm, _levels);
     _numLevels = _levels.size() - 1;
-
-    std::cout << "rows: " << rows << " , levels: " << _numLevels << std::endl;
     _threadlevels.resize(_nthreads);
     _threadiperm.resize(rows);
+    
 #pragma omp parallel num_threads(_nthreads)
     {
       const int tid = omp_get_thread_num();
@@ -162,11 +160,6 @@ public:
         }
       }
     }
-    std::cout << utils::isPermutation(_threadiperm, base) << std::endl;
-    for(auto i: _threadiperm){
-      std::cout << i << " ";
-    }
-    std::cout << std::endl;
     matrix_utils::permuteRow(rows, base, ai, aj, av, _threadiperm.data(),
                              _reorderedMat.ai.data(), _reorderedMat.aj.data(),
                              _reorderedMat.av.data());
@@ -177,15 +170,15 @@ public:
     {
       const int tid = omp_get_thread_num();
       const int nthreads = omp_get_num_threads();
-      std::cout << "hello world" << std::endl;
       for (COLTYPE l = 0; l < _numLevels; l++) {
         const COLTYPE start = _threadlevels[tid][l];
         const COLTYPE end = _threadlevels[tid][l + 1];
-        std::cout << "tid: " << tid << " , start: " << start
-                  << " , end: " << end << std::endl;
+        // std::cout << "tid: " << tid << " , start: " << start
+        //           << " , end: " << end << std::endl;
         for (COLTYPE i = start; i < end; i++) {
           const SIZE idx = _threadiperm[i] - _reorderedMat.base;
-          std::cout << i << " " << idx << std::endl;
+          // std::cout << _reorderedMat.ai[i] << " " << _reorderedMat.ai[i + 1]
+          //           << std::endl;
           x[idx] = b[idx];
           for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
                j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {

@@ -30,7 +30,7 @@ public:
       //     size, size, csr_rows, csr_cols, csr_vals, SPARSE_INDEX_BASE_ONE));
       // mat->to_zero_based();
 
-      std::ifstream f("/SCRATCH/dimiao/test_zone/matrices/pwtk.mtx");
+      std::ifstream f("/home/dimiao/matrix_lib/thermal2.mtx");
       f.clear();
       f.seekg(0, std::ios::beg);
       std::vector<MKL_INT> csr_rows, csr_cols;
@@ -66,7 +66,6 @@ BENCHMARK_DEFINE_F(MyFixture, SerialForward)(benchmark::State &state) {
 BENCHMARK_REGISTER_F(MyFixture, SerialForward)->Arg(10)->Arg(100);
 
 BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
-
   omp_set_num_threads(8);
   std::vector<double> x(mat->rows(), 0.0);
   std::vector<double> b(mat->rows(), 1.0);
@@ -91,5 +90,28 @@ BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
 }
 
 BENCHMARK_REGISTER_F(MyFixture, ParallelForward)->Arg(10)->Arg(100);
+
+BENCHMARK_DEFINE_F(MyFixture, CacheParForward)(benchmark::State &state) {
+  omp_set_num_threads(8);
+  std::vector<double> x(mat->rows(), 0.0);
+  std::vector<double> b(mat->rows(), 1.0);
+
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
+  std::vector<double> D;
+
+  matrix_utils::SplitLDU(mat->rows(), (int)mat->mkl_base(), mat->get_ai().get(),
+                         mat->get_aj().get(), mat->get_av().get(), L, D, U);
+
+  matrix_utils::OptimizedForwardSubstitution<int, int, int, double>
+      forwardsweep;
+  forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
+  for (auto _ : state) {
+    for (int i = 0; i < state.range(0); i++) {
+      forwardsweep(b.data(), x.data());
+    }
+  }
+}
+
+BENCHMARK_REGISTER_F(MyFixture, CacheParForward)->Arg(10)->Arg(100);
 
 BENCHMARK_MAIN();

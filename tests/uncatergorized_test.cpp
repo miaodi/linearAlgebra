@@ -1,8 +1,8 @@
 
 #include "incomplete_lu.h"
 #include "matrix_utils.hpp"
-#include "triangle_solve.hpp"
 #include "mkl_sparse_mat.h"
+#include "triangle_solve.hpp"
 #include "utils.h"
 #include <algorithm>
 #include <fstream>
@@ -287,12 +287,12 @@ TEST(triangular_solve, forward_substitution) {
   }
 }
 
-
 TEST(triangular_solve, forward_substitution1) {
-  omp_set_num_threads(1);
+  omp_set_num_threads(4);
 
-  // std::ifstream f("/SCRATCH/dimiao/test_zone/matrices/thermal1.mtx");
-  std::ifstream f("data/ex5.mtx");
+  std::ifstream f("/home/dimiao/matrix_lib/thermal2.mtx");
+  // std::ifstream
+  // f("/home/dimiao/repo/linearAlgebra/release/benchmarks/data/ldoor.mtx");
   f.clear();
   f.seekg(0, std::ios::beg);
   std::vector<MKL_INT> csr_rows, csr_cols;
@@ -334,11 +334,13 @@ TEST(triangular_solve, forward_substitution1) {
   matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
                                     L.av.get(), b.data(), x_serial.data());
 
-  matrix_utils::OptimizedForwardSubstitution<int, int, int, double> forwardsweep;
-  std::cout<<"L.base: "<<L.base<<std::endl;
+  matrix_utils::OptimizedForwardSubstitution<int, int, int, double>
+      forwardsweep;
   forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
-  forwardsweep(b.data(), x.data());
-  for(int i = 0;i<x.size();i++){
-    std::cout << x[i] << " " << x_mkl[i] << " " << x_serial[i] << std::endl;
+  for (int i = 0; i < 1000; i++)
+    forwardsweep(b.data(), x.data());
+
+  for (int i = 0; i < x.size(); i++) {
+    EXPECT_EQ(x[i], x_serial[i]);
   }
 }

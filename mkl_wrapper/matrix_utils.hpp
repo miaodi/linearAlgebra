@@ -341,7 +341,7 @@ void permute(const SIZE rows, const int base, ROWTYPE const *ai,
       // old(*, i)
       std::transform(aj + ai[rowInd] - base, aj + ai[rowInd + 1] - base,
                      permed_aj + *i - base, [perm, base](MKL_INT ind) {
-                       return perm ? perm[ind - base] : (ind - base);
+                       return perm ? perm[ind - base] : ind;
                      });
 
       std::copy(std::execution::seq, av + ai[rowInd] - base,
