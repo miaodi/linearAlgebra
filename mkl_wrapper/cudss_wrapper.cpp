@@ -25,12 +25,9 @@ cudss_solver::cudss_solver(mkl_sparse_mat const *A) : mkl_solver() {
   cudaMemcpy(csr_values_d, A->get_av().get(), nnz * sizeof(double),
              cudaMemcpyHostToDevice);
 
-  /* Create a CUDA stream */
   cudaStreamCreate(&stream);
-
   /* Creating the cuDSS library handle */
   cudssCreate(&handle);
-
   cudssSetStream(handle, stream);
 
   cudssConfigCreate(&solverConfig);
@@ -62,16 +59,32 @@ bool cudss_solver::factorize() {
 }
 
 bool cudss_solver::solve(double const *const b, double *const x) {
+
   cudaMemcpy(b_values_d, b, size * sizeof(double), cudaMemcpyHostToDevice);
   cudssMatrixCreateDn(&rhs, size, 1, size, b_values_d, CUDA_R_64F,
                       CUDSS_LAYOUT_COL_MAJOR);
   cudssExecute(handle, CUDSS_PHASE_SOLVE, solverConfig, solverData, cudaMat,
                res, rhs);
   cudssMatrixDestroy(rhs);
+  cudaStreamSynchronize(stream);
+
   cudaMemcpy(x, x_values_d, size * sizeof(double), cudaMemcpyDeviceToHost);
   return true;
 }
 
-cudss_solver::~cudss_solver() {}
+cudss_solver::~cudss_solver() {
+  cudssMatrixDestroy(cudaMat);
+  cudssMatrixDestroy(res);
+  cudssDataDestroy(handle, solverData);
+  cudssConfigDestroy(solverConfig);
+  cudssDestroy(handle);
+  cudaStreamDestroy(stream);
+
+  cudaFree(csr_offsets_d);
+  cudaFree(csr_columns_d);
+  cudaFree(csr_values_d);
+  cudaFree(x_values_d);
+  cudaFree(b_values_d);
+}
 } // namespace mkl_wrapper
 #endif
