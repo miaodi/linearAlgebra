@@ -1,12 +1,14 @@
 #pragma once
 
+#include "BitVector.hpp"
 #include "utils.h"
+#include <chrono>
 #include <execution>
-#include <iostream>
 #include <memory>
 #include <numeric>
 #include <omp.h>
 #include <span>
+#include <thread>
 #include <tuple>
 #include <type_traits>
 
@@ -92,14 +94,16 @@ void LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
   }
 }
 
-template <typename SIZE = int, typename ROWTYPE = int, typename COLTYPE = int,
-          typename VALTYPE = double>
+template <bool WithBarrier = true, typename SIZE = int, typename ROWTYPE = int,
+          typename COLTYPE = int, typename VALTYPE = double>
 class OptimizedForwardSubstitution {
 public:
   OptimizedForwardSubstitution() : _nthreads{omp_get_max_threads()} {}
 
   void analysis(const SIZE rows, const int base, ROWTYPE const *ai,
                 COLTYPE const *aj, VALTYPE const *av) {
+    if constexpr (!WithBarrier)
+      _bv.resize(rows);
     const auto nnz = ai[rows] - base;
     _reorderedMat.ai.resize(rows + 1);
     _reorderedMat.aj.resize(nnz);
@@ -112,7 +116,7 @@ public:
     _numLevels = _levels.size() - 1;
     _threadlevels.resize(_nthreads);
     _threadiperm.resize(rows);
-    
+
 #pragma omp parallel num_threads(_nthreads)
     {
       const int tid = omp_get_thread_num();
@@ -166,6 +170,9 @@ public:
   }
 
   void operator()(const VALTYPE *const b, VALTYPE *const x) const {
+    if constexpr (!WithBarrier) {
+      _bv.clearAll();
+    }
 #pragma omp parallel num_threads(_nthreads)
     {
       const int tid = omp_get_thread_num();
@@ -177,16 +184,32 @@ public:
         //           << " , end: " << end << std::endl;
         for (COLTYPE i = start; i < end; i++) {
           const SIZE idx = _threadiperm[i] - _reorderedMat.base;
-          // std::cout << _reorderedMat.ai[i] << " " << _reorderedMat.ai[i + 1]
+          // std::cout << _reorderedMat.ai[i] << " " << _reorderedMat.ai[i +
+          // 1]
           //           << std::endl;
           x[idx] = b[idx];
           for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
                j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
-            x[idx] -= _reorderedMat.av[j] *
-                      x[_reorderedMat.aj[j] - _reorderedMat.base];
+            const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
+
+            if constexpr (!WithBarrier) {
+              while (!_bv.get(j_idx)) {
+                std::this_thread::yield();
+                // sleep(0);
+                // std::this_thread::sleep_for(std::chrono::nanoseconds(1));
+                // std::cout << "j_idx: " << j_idx << std::endl;
+                // continue;
+              }
+            }
+            x[idx] -= _reorderedMat.av[j] * x[j_idx];
+          }
+          if constexpr (!WithBarrier) {
+            _bv.set(idx);
           }
         }
+        if constexpr (WithBarrier) {
 #pragma omp barrier
+        }
       }
     }
   }
@@ -201,5 +224,7 @@ protected:
       _threadlevels; // level prefix for each thread
   std::vector<COLTYPE> _threadiperm;
   CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _reorderedMat;
+
+  mutable utils::BitVector<COLTYPE> _bv;
 };
 } // namespace matrix_utils

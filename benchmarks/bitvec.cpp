@@ -1,4 +1,4 @@
-#include "BitVector.h"
+#include "BitVector.hpp"
 #include <atomic>
 #include <benchmark/benchmark.h>
 #include <memory>

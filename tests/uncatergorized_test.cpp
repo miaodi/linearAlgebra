@@ -288,11 +288,12 @@ TEST(triangular_solve, forward_substitution) {
 }
 
 TEST(triangular_solve, forward_substitution1) {
-  omp_set_num_threads(4);
+  omp_set_num_threads(2);
 
-  std::ifstream f("/home/dimiao/matrix_lib/thermal2.mtx");
-  // std::ifstream
-  // f("/home/dimiao/repo/linearAlgebra/release/benchmarks/data/ldoor.mtx");
+  std::ifstream f("data/s3rmt3m3.mtx");
+
+  // std::ifstream f("/home/dimiao/matrix_lib/thermal2.mtx");
+
   f.clear();
   f.seekg(0, std::ios::beg);
   std::vector<MKL_INT> csr_rows, csr_cols;
@@ -303,7 +304,7 @@ TEST(triangular_solve, forward_substitution1) {
   const MKL_INT size = csr_rows.size() - 1;
   mat.to_zero_based();
   mkl_wrapper::incomplete_lu_k prec;
-  prec.set_level(5);
+  prec.set_level(0);
   prec.symbolic_factorize(&mat);
   prec.numeric_factorize(&mat);
 
@@ -334,13 +335,13 @@ TEST(triangular_solve, forward_substitution1) {
   matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
                                     L.av.get(), b.data(), x_serial.data());
 
-  matrix_utils::OptimizedForwardSubstitution<int, int, int, double>
+  matrix_utils::OptimizedForwardSubstitution<true, int, int, int, double>
       forwardsweep;
   forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
-  for (int i = 0; i < 1000; i++)
+  for (int i = 0; i < 1000; i++) {
     forwardsweep(b.data(), x.data());
-
-  for (int i = 0; i < x.size(); i++) {
-    EXPECT_EQ(x[i], x_serial[i]);
+    for (int i = 0; i < x.size(); i++) {
+      EXPECT_EQ(x[i], x_serial[i]);
+    }
   }
 }

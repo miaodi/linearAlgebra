@@ -1,5 +1,5 @@
 #include "BFS.h"
-#include "BitVector.h"
+#include "BitVector.hpp"
 #include "mkl_sparse_mat.h"
 #include <algorithm>
 #include <execution>

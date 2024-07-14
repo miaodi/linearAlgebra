@@ -65,7 +65,34 @@ BENCHMARK_DEFINE_F(MyFixture, SerialForward)(benchmark::State &state) {
 
 BENCHMARK_REGISTER_F(MyFixture, SerialForward)->Arg(10)->Arg(100);
 
-BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
+// BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
+//   omp_set_num_threads(8);
+//   std::vector<double> x(mat->rows(), 0.0);
+//   std::vector<double> b(mat->rows(), 1.0);
+
+//   matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
+//   std::vector<double> D;
+
+//   matrix_utils::SplitLDU(mat->rows(), (int)mat->mkl_base(), mat->get_ai().get(),
+//                          mat->get_aj().get(), mat->get_av().get(), L, D, U);
+
+//   std::vector<int> iperm(L.rows);
+//   std::vector<int> prefix;
+//   matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
+//       L.rows, L.base, L.ai.get(), L.aj.get(), iperm, prefix);
+//   for (auto _ : state) {
+//     for (int i = 0; i < state.range(0); i++) {
+//       matrix_utils::LevelScheduleForwardSubstitution(
+//           iperm, prefix, L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get(),
+//           b.data(), x.data());
+//     }
+//   }
+// }
+
+// BENCHMARK_REGISTER_F(MyFixture, ParallelForward)->Arg(10)->Arg(100);
+
+BENCHMARK_DEFINE_F(MyFixture, CacheParForward_barrier)
+(benchmark::State &state) {
   omp_set_num_threads(8);
   std::vector<double> x(mat->rows(), 0.0);
   std::vector<double> b(mat->rows(), 1.0);
@@ -76,33 +103,7 @@ BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
   matrix_utils::SplitLDU(mat->rows(), (int)mat->mkl_base(), mat->get_ai().get(),
                          mat->get_aj().get(), mat->get_av().get(), L, D, U);
 
-  std::vector<int> iperm(L.rows);
-  std::vector<int> prefix;
-  matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
-      L.rows, L.base, L.ai.get(), L.aj.get(), iperm, prefix);
-  for (auto _ : state) {
-    for (int i = 0; i < state.range(0); i++) {
-      matrix_utils::LevelScheduleForwardSubstitution(
-          iperm, prefix, L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get(),
-          b.data(), x.data());
-    }
-  }
-}
-
-BENCHMARK_REGISTER_F(MyFixture, ParallelForward)->Arg(10)->Arg(100);
-
-BENCHMARK_DEFINE_F(MyFixture, CacheParForward)(benchmark::State &state) {
-  omp_set_num_threads(8);
-  std::vector<double> x(mat->rows(), 0.0);
-  std::vector<double> b(mat->rows(), 1.0);
-
-  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
-  std::vector<double> D;
-
-  matrix_utils::SplitLDU(mat->rows(), (int)mat->mkl_base(), mat->get_ai().get(),
-                         mat->get_aj().get(), mat->get_av().get(), L, D, U);
-
-  matrix_utils::OptimizedForwardSubstitution<int, int, int, double>
+  matrix_utils::OptimizedForwardSubstitution<true, int, int, int, double>
       forwardsweep;
   forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
   for (auto _ : state) {
@@ -112,6 +113,30 @@ BENCHMARK_DEFINE_F(MyFixture, CacheParForward)(benchmark::State &state) {
   }
 }
 
-BENCHMARK_REGISTER_F(MyFixture, CacheParForward)->Arg(10)->Arg(100);
+BENCHMARK_REGISTER_F(MyFixture, CacheParForward_barrier)->Arg(10)->Arg(100);
+
+BENCHMARK_DEFINE_F(MyFixture, CacheParForward_nobarrier)
+(benchmark::State &state) {
+  omp_set_num_threads(8);
+  std::vector<double> x(mat->rows(), 0.0);
+  std::vector<double> b(mat->rows(), 1.0);
+
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
+  std::vector<double> D;
+
+  matrix_utils::SplitLDU(mat->rows(), (int)mat->mkl_base(), mat->get_ai().get(),
+                         mat->get_aj().get(), mat->get_av().get(), L, D, U);
+
+  matrix_utils::OptimizedForwardSubstitution<false, int, int, int, double>
+      forwardsweep;
+  forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
+  for (auto _ : state) {
+    for (int i = 0; i < state.range(0); i++) {
+      forwardsweep(b.data(), x.data());
+    }
+  }
+}
+
+BENCHMARK_REGISTER_F(MyFixture, CacheParForward_nobarrier)->Arg(10)->Arg(100);
 
 BENCHMARK_MAIN();
