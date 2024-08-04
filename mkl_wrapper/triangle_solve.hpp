@@ -151,6 +151,8 @@ public:
       for (COLTYPE l = 0; l < _numLevels; l++) {
         _threadlevels[tid][l + 1] += _threadlevels[tid][0];
       }
+      // up to this point, _threadlevels becomes the prefix of size of each
+      // super task
 
 #pragma omp barrier
       COLTYPE cur = _threadlevels[tid][0];
@@ -214,6 +216,16 @@ public:
     }
   }
 
+  void build_task_graph() {
+    const SIZE num_tasks = _nthreads * _numLevels;
+    _taskAdjGraph.rows = num_tasks;
+    _taskAdjGraph.cols = num_tasks;
+    _taskAdjGraph.base = 0;
+    _taskAdjGraph.ai.resize(num_tasks + 1);
+    _taskAdjGraph.ai[0] = 0;
+    _taskAdjGraph.aj.resize(_reorderedMat.nnz());
+  }
+
 protected:
   int _nthreads;
   std::vector<COLTYPE> _iperm;
@@ -224,6 +236,9 @@ protected:
       _threadlevels; // level prefix for each thread
   std::vector<COLTYPE> _threadiperm;
   CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _reorderedMat;
+
+  // always zero based
+  CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskAdjGraph;
 
   mutable utils::BitVector<COLTYPE> _bv;
 };

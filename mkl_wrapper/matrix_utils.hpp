@@ -40,6 +40,7 @@ template <typename R, typename C, typename V> struct CSRMatrix {
   std::shared_ptr<VALTYPE[]> av;
 
   CSRMatrix() = default;
+  ROWTYPE nnz() const { return ai[rows] - base; }
 };
 template <typename R, typename C, typename V> struct CSRMatrixVec {
   using ROWTYPE = R;
@@ -53,6 +54,7 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
   std::vector<VALTYPE> av;
 
   CSRMatrixVec() = default;
+  ROWTYPE nnz() const { return ai[rows] - base; }
 };
 
 template <typename SIZE = int, typename ROWTYPE = int, typename COLTYPE = int,
