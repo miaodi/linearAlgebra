@@ -102,6 +102,7 @@ public:
 
   void analysis(const SIZE rows, const int base, ROWTYPE const *ai,
                 COLTYPE const *aj, VALTYPE const *av) {
+    _size = rows;
     if constexpr (!WithBarrier)
       _bv.resize(rows);
     const auto nnz = ai[rows] - base;
@@ -112,8 +113,8 @@ public:
     _reorderedMat.rows = rows;
     _nthreads = omp_get_max_threads();
     matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
-        rows, base, ai, aj, _iperm, _levels);
-    _numLevels = _levels.size() - 1;
+        rows, base, ai, aj, _iperm, _levelPrefix);
+    _levels = _levelPrefix.size() - 1;
     _threadlevels.resize(_nthreads);
     _threadiperm.resize(rows);
 
@@ -124,13 +125,13 @@ public:
       // #pragma omp single
       //       std::cout << "nthreads: " << nthreads << std::endl;
 
-      _threadlevels[tid].resize(_numLevels + 1);
+      _threadlevels[tid].resize(_levels + 1);
       _threadlevels[tid][0] = 0;
 
-      for (COLTYPE l = 0; l < _numLevels; l++) {
+      for (COLTYPE l = 0; l < _levels; l++) {
         auto [start, end] = utils::LoadBalancedPartition(
-            _iperm.data() + _levels[l], _iperm.data() + _levels[l + 1], tid,
-            nthreads);
+            _iperm.data() + _levelPrefix[l],
+            _iperm.data() + _levelPrefix[l + 1], tid, nthreads);
         const COLTYPE size = std::distance(start, end);
         // #pragma omp critical
         //         std::cout << "tid: " << tid << " , size: " << size <<
@@ -143,12 +144,12 @@ public:
       {
         COLTYPE size = 0;
         for (int tid = 1; tid < nthreads; tid++) {
-          size += _threadlevels[tid - 1][_numLevels];
+          size += _threadlevels[tid - 1][_levels];
           _threadlevels[tid][0] = size;
         }
       }
 
-      for (COLTYPE l = 0; l < _numLevels; l++) {
+      for (COLTYPE l = 0; l < _levels; l++) {
         _threadlevels[tid][l + 1] += _threadlevels[tid][0];
       }
       // up to this point, _threadlevels becomes the prefix of size of each
@@ -157,10 +158,10 @@ public:
 #pragma omp barrier
       COLTYPE cur = _threadlevels[tid][0];
 
-      for (COLTYPE l = 0; l < _numLevels; l++) {
+      for (COLTYPE l = 0; l < _levels; l++) {
         auto [start, end] = utils::LoadBalancedPartition(
-            _iperm.data() + _levels[l], _iperm.data() + _levels[l + 1], tid,
-            nthreads);
+            _iperm.data() + _levelPrefix[l],
+            _iperm.data() + _levelPrefix[l + 1], tid, nthreads);
         for (auto it = start; it != end; it++) {
           _threadiperm[cur++] = *it;
         }
@@ -179,7 +180,7 @@ public:
     {
       const int tid = omp_get_thread_num();
       const int nthreads = omp_get_num_threads();
-      for (COLTYPE l = 0; l < _numLevels; l++) {
+      for (COLTYPE l = 0; l < _levels; l++) {
         const COLTYPE start = _threadlevels[tid][l];
         const COLTYPE end = _threadlevels[tid][l + 1];
         // std::cout << "tid: " << tid << " , start: " << start
@@ -217,28 +218,226 @@ public:
   }
 
   void build_task_graph() {
-    const SIZE num_tasks = _nthreads * _numLevels;
-    _taskAdjGraph.rows = num_tasks;
-    _taskAdjGraph.cols = num_tasks;
-    _taskAdjGraph.base = 0;
-    _taskAdjGraph.ai.resize(num_tasks + 1);
-    _taskAdjGraph.ai[0] = 0;
-    _taskAdjGraph.aj.resize(_reorderedMat.nnz());
+    _threadTaskPrefix.resize(_nthreads + 1);
+    _threadPrefixSum.resize(_nthreads + 1);
+    _threadPrefixSum[0] = 0;
+    _threadPrefixSum2.resize(_nthreads + 1);
+    std::fill(_threadPrefixSum2.begin(), _threadPrefixSum2.end(), 0);
+    _reorderedRowIdToTaskId.resize(_size);
+    std::cout << "levels: " << _levels << std::endl;
+
+    // const SIZE num_tasks = _nthreads * _levels;
+
+    // _permedToTask.resize(num_tasks);
+
+#pragma omp parallel num_threads(_nthreads)
+    {
+      const int tid = omp_get_thread_num();
+      const int nthreads = omp_get_num_threads();
+
+      COLTYPE cnt = 0;
+      for (COLTYPE l = 0; l < _levels; l++) {
+        if (_threadlevels[tid][l + 1] > _threadlevels[tid][l])
+          ++cnt;
+      }
+      _threadTaskPrefix[tid + 1] = cnt;
+
+#pragma omp barrier
+#pragma omp single
+      {
+        _threadTaskPrefix[0] = 0;
+        std::inclusive_scan(_threadTaskPrefix.begin(), _threadTaskPrefix.end(),
+                            _threadTaskPrefix.begin());
+        _tasks = _threadTaskPrefix[_nthreads];
+
+        std::cout << "tasks: " << _tasks << std::endl;
+        _taskBoundaryPrefix.resize(_tasks + 1);
+        _nnzPerTask.resize(_tasks);
+
+        _taskInvAdjGraph.rows = _tasks;
+        _taskInvAdjGraph.cols = _tasks;
+        _taskInvAdjGraph.base = 0;
+        _taskInvAdjGraph.ai.resize(_tasks + 1);
+        _taskInvAdjGraph.ai[0] = 0; // zero based
+        _taskInvAdjGraph.aj.resize(_reorderedMat.nnz());
+
+        _taskInvAdjGraphTemp.rows = _tasks;
+        _taskInvAdjGraphTemp.cols = _tasks;
+        _taskInvAdjGraphTemp.base = 0;
+        _taskInvAdjGraphTemp.ai.resize(_tasks + 1);
+        _taskInvAdjGraphTemp.ai[0] = 0; // zero based
+        _taskInvAdjGraphTemp.aj.resize(_reorderedMat.nnz());
+      }
+
+      COLTYPE taskOffset = _threadTaskPrefix[tid];
+      for (COLTYPE l = 0; l < _levels; l++) {
+        if (_threadlevels[tid][l + 1] > _threadlevels[tid][l])
+          _taskBoundaryPrefix[taskOffset++] =
+              _threadlevels[tid][l + 1] - _threadlevels[tid][l];
+      }
+
+#pragma omp barrier
+#pragma omp single
+      {
+        _taskBoundaryPrefix[0] = 0;
+        std::inclusive_scan(_taskBoundaryPrefix.begin(),
+                            _taskBoundaryPrefix.end(),
+                            _taskBoundaryPrefix.begin());
+      }
+
+      // split  tasks to each  thread
+      auto [start, end] =
+          utils::LoadBalancedPartitionPos(_tasks, tid, nthreads);
+#pragma omp critical
+      {
+        std::cout << "tid: " << tid << " start:  " << start << "  end: " << end
+                  << std::endl;
+      }
+      _threadPrefixSum[tid + 1] = 0;
+      for (COLTYPE task = start; task < end; task++) {
+        COLTYPE invAdjSizePerTask = 0;
+        for (COLTYPE i = _taskBoundaryPrefix[task];
+             i < _taskBoundaryPrefix[task + 1]; i++) {
+          invAdjSizePerTask += _reorderedMat.ai[i + 1] - _reorderedMat.ai[i];
+          _reorderedRowIdToTaskId[i] = task;
+        }
+        _threadPrefixSum[tid + 1] += invAdjSizePerTask;
+        _taskInvAdjGraph.ai[task + 1] = _threadPrefixSum[tid + 1];
+        _nnzPerTask[task] = invAdjSizePerTask;
+        // #pragma omp critical
+        //         {
+        //           std::cout << "tid: " << tid << " task: " << task
+        //                     << " ai:  " << _taskInvAdjGraph.ai[task + 1] <<
+        //                     std::endl;
+        //         }
+      }
+
+#pragma omp barrier
+#pragma omp single
+      {
+        std::inclusive_scan(_threadPrefixSum.begin(), _threadPrefixSum.end(),
+                            _threadPrefixSum.begin());
+      }
+      for (COLTYPE task = start; task < end; task++) {
+        _taskInvAdjGraph.ai[task + 1] += _threadPrefixSum[tid];
+      }
+
+#pragma omp barrier
+      // #pragma omp barrier
+      // #pragma omp single
+      //       {
+      //         for (auto i = 0; i <= _tasks; i++) {
+      //           std::cout << _taskInvAdjGraph.ai[i] << std::endl;
+      //         }
+      //       }
+
+      // rebalance the work load
+      std::tie(start, end) = utils::LoadPrefixBalancedPartitionPos(
+          _taskInvAdjGraph.ai.begin(), _taskInvAdjGraph.ai.begin() + _tasks,
+          tid, nthreads);
+
+      COLTYPE maxInvAdjSize = 0;
+      for (auto task = start; task < end; task++) {
+        maxInvAdjSize = std::max(maxInvAdjSize, _nnzPerTask[task]);
+      }
+
+#pragma omp critical
+      {
+        std::cout << "tid: " << tid << " startPos: " << start
+                  << " endPos: " << end << std::endl;
+      }
+
+      auto startThread =
+          std::distance(_threadTaskPrefix.begin(),
+                        upper_bound(_threadTaskPrefix.begin(),
+                                    _threadTaskPrefix.end(), start)) -
+          1;
+      auto endThread =
+          std::distance(_threadTaskPrefix.begin(),
+                        upper_bound(_threadTaskPrefix.begin(),
+                                    _threadTaskPrefix.end(), end)) -
+          1;
+      endThread =
+          std::min(endThread, static_cast<decltype(endThread)>(_nthreads) - 1);
+
+      // building task inverse adjacency graph
+      _taskInvAdj.resize(maxInvAdjSize);
+      for (auto thread = startThread; thread <= endThread; thread++) {
+        ROWTYPE threadCount = 0;
+        const COLTYPE threadBegin = _threadTaskPrefix[thread];
+        const COLTYPE threadEnd = _threadTaskPrefix[thread + 1];
+        const COLTYPE startTask = std::max(start, threadBegin);
+        const COLTYPE endTask = std::min(end, threadEnd);
+#pragma omp critical
+        std::cout << "tid: " << tid << " startTask: " << startTask
+                  << " endTask: " << endTask << std::endl;
+        for (auto task = startTask; task < endTask; task++) {
+          maxInvAdjSize = 0;
+          if (task != startTask)
+            _taskInvAdj[maxInvAdjSize++] = task - 1;
+          for (COLTYPE row = _taskBoundaryPrefix[task];
+               row < _taskBoundaryPrefix[task + 1]; row++) {
+            for (COLTYPE j = _reorderedMat.ai[row] - _reorderedMat.base;
+                 j < _reorderedMat.ai[row + 1] - _reorderedMat.base; j++) {
+              auto col = _reorderedRowIdToTaskId[_reorderedMat.aj[j] -
+                                                 _reorderedMat.base];
+              if (col < threadBegin || col >= threadEnd) {
+                _taskInvAdj[maxInvAdjSize++] = col;
+              }
+            }
+          }
+          std::sort(_taskInvAdj.begin(), _taskInvAdj.begin() + maxInvAdjSize);
+          maxInvAdjSize =
+              std::distance(_taskInvAdj.begin(),
+                            std::unique(_taskInvAdj.begin(),
+                                        _taskInvAdj.begin() + maxInvAdjSize));
+          // #pragma omp critical
+          //           std::cout << "tid: " << tid << " maxInvAdjSize: " <<
+          //           maxInvAdjSize
+          //                     << std::endl;
+          _taskInvAdjGraphTemp.ai[task + 1] = maxInvAdjSize;
+          std::copy(_taskInvAdj.begin(), _taskInvAdj.begin() + maxInvAdjSize,
+                    _taskInvAdjGraph.aj.begin() + _taskInvAdjGraph.ai[task]);
+          threadCount += maxInvAdjSize;
+        }
+        __sync_fetch_and_add(&_threadPrefixSum2[thread + 1], threadCount);
+        std::cout << threadCount << std::endl;
+      }
+
+      // #pragma omp barrier
+      // #pragma omp single
+      //       {
+      //         for (auto i : _threadPrefixSum2) {
+      //           std::cout << i << std::endl;
+      //         }
+      //       }
+    }
   }
 
 protected:
   int _nthreads;
+  SIZE _size;
   std::vector<COLTYPE> _iperm;
-  std::vector<COLTYPE> _levels;
+  std::vector<COLTYPE> _levelPrefix;
 
-  COLTYPE _numLevels;
+  COLTYPE _levels;
   std::vector<std::vector<COLTYPE>>
       _threadlevels; // level prefix for each thread
   std::vector<COLTYPE> _threadiperm;
   CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _reorderedMat;
 
   // always zero based
-  CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskAdjGraph;
+  COLTYPE _tasks;
+  CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskInvAdjGraph;
+  CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskInvAdjGraphTemp;
+  std::vector<COLTYPE> _threadTaskPrefix; // tasks on each thread
+  std::vector<COLTYPE>
+      _taskBoundaryPrefix; // num of rows in each task size task + 1
+  std::vector<ROWTYPE> _threadPrefixSum;  //
+  std::vector<ROWTYPE> _threadPrefixSum2; //
+  std::vector<COLTYPE> _reorderedRowIdToTaskId;
+  std::vector<COLTYPE> _taskInvAdj;
+  std::vector<COLTYPE> _nnzPerTask;
 
   mutable utils::BitVector<COLTYPE> _bv;
 };

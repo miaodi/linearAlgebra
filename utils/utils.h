@@ -3,6 +3,7 @@
 #include <fast_matrix_market/fast_matrix_market.hpp>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <mkl.h>
 #include <queue>
 #include <random>
@@ -162,14 +163,24 @@ public:
 template <typename Iter>
 std::pair<Iter, Iter> LoadBalancedPartition(Iter begin, Iter end, int tid,
                                             int nthreads) {
-  const int total_work = std::distance(begin, end);
-  const int work_per_thread = total_work / nthreads;
-  const int resid = total_work % nthreads;
+  const size_t total_work = std::distance(begin, end);
+  const size_t work_per_thread = total_work / nthreads;
+  const size_t resid = total_work % nthreads;
   return tid >= resid
              ? std::make_pair(begin + tid * work_per_thread + resid,
                               begin + (tid + 1) * work_per_thread + resid)
              : std::make_pair(begin + tid * (work_per_thread + 1),
                               begin + (tid + 1) * (work_per_thread + 1));
+}
+
+template <typename T>
+std::pair<T, T> LoadBalancedPartitionPos(T total_work, int tid, int nthreads) {
+  const T work_per_thread = total_work / nthreads;
+  const T resid = total_work % nthreads;
+  return tid >= resid ? std::make_pair(tid * work_per_thread + resid,
+                                       (tid + 1) * work_per_thread + resid)
+                      : std::make_pair(tid * (work_per_thread + 1),
+                                       (tid + 1) * (work_per_thread + 1));
 }
 
 template <typename Iter>
@@ -178,6 +189,9 @@ std::pair<Iter, Iter> LoadPrefixBalancedPartition(Iter begin, Iter end, int tid,
   const int total_work = *end - *begin;
   const int work_per_thread = total_work / nthreads;
   const int resid = total_work % nthreads;
+  // std::cout << "total_work: " << total_work
+  //           << " work_per_thread: " << work_per_thread << " resid: " << resid
+  //           << std::endl;
   Iter lb =
       tid == 0
           ? begin
@@ -192,7 +206,17 @@ std::pair<Iter, Iter> LoadPrefixBalancedPartition(Iter begin, Iter end, int tid,
                                         ? ((tid + 1) * work_per_thread + resid)
                                         : ((tid + 1) * (work_per_thread + 1))) +
                                        *begin);
+
+  // std::cout << "tid: " << tid << " le " << le - begin << std::endl;
   return std::make_pair(lb, le);
+}
+
+template <typename Iter>
+std::pair<typename Iter::difference_type, typename Iter::difference_type>
+LoadPrefixBalancedPartitionPos(Iter begin, Iter end, int tid, int nthreads) {
+  auto [sIter, eIter] = LoadPrefixBalancedPartition(begin, end, tid, nthreads);
+  return std::make_pair(std::distance(begin, sIter),
+                        std::distance(begin, eIter));
 }
 
 void printProgress(double percentage);
