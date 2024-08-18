@@ -5,7 +5,7 @@ project(Linear_Algebra CXX Fortran)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
-# set(CMAKE_CXX_FLAGS "-Wall -Wextra")
+set(CMAKE_CXX_FLAGS "-Wno-unused-variable")
 # set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 set(CMAKE_CXX_STANDARD 20)
@@ -47,6 +47,15 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(Spectra)
+
+FetchContent_Declare(
+  cereal
+  GIT_REPOSITORY https://github.com/USCiLab/cereal.git
+  GIT_TAG master
+  GIT_SHALLOW TRUE
+)
+set(SKIP_PERFORMANCE_COMPARISON ON)
+FetchContent_MakeAvailable(cereal)
 
 FetchContent_Declare(
   AMGCL

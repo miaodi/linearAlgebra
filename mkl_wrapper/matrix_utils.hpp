@@ -54,6 +54,8 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
 
   CSRMatrixVec() = default;
   ROWTYPE nnz() const { return ai[rows] - base; }
+
+  template <class Archive> void serialize(Archive &ar) { ar(ai, aj, av); }
 };
 
 template <typename SIZE = int, typename ROWTYPE = int, typename COLTYPE = int,
@@ -74,32 +76,30 @@ decltype(auto) AllocateCSRData(const SIZE rows, const ROWTYPE nnz) {
 /// @param ai row index
 /// @param aj column index
 /// @param av value vector
+/// @param ai_transpose row index of transpose matrix
+/// @param aj_transpose column index transpose matrix
+/// @param av_transpose value vector transpose matrix
 template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-auto SerialTranspose(const SIZE rows, const SIZE cols, const int base,
-                     ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av) {
-
+void SerialTranspose(const SIZE rows, const SIZE cols, const int base,
+                     ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
+                     ROWTYPE *ai_transpose, COLTYPE *aj_transpose,
+                     VALTYPE *av_transpose) {
+  const bool update_av = av_transpose != nullptr && av != nullptr;
   const SIZE cols_transpose = rows;
   const SIZE rows_transpose = cols;
   const auto nnz = ai[rows] - base;
-  std::shared_ptr<ROWTYPE[]> ai_transpose(
-      new ROWTYPE[rows_transpose + 2]); // prevent from branching
-  std::shared_ptr<COLTYPE[]> aj_transpose(new COLTYPE[nnz]);
-  std::shared_ptr<VALTYPE[]> av_transpose{nullptr};
-  if (av != nullptr)
-    av_transpose.reset(new VALTYPE[nnz]);
 
   ai_transpose[0] = base;
-  std::fill_n(std::execution::seq, find_address_of(ai_transpose) + 1,
-              rows_transpose + 1, 0);
+  std::fill_n(std::execution::seq, ai_transpose + 1, rows_transpose, 0);
 
   // assign size of row i to ai[i+1]
   for (size_t i = 0; i < nnz; i++) {
-    ai_transpose[aj[i] - base + 2]++;
+    if (aj[i] - base + 2 < rows_transpose + 1)
+      ai_transpose[aj[i] - base + 2]++;
   }
 
-  std::inclusive_scan(find_address_of(ai_transpose),
-                      find_address_of(ai_transpose) + rows_transpose + 2,
-                      find_address_of(ai_transpose));
+  std::inclusive_scan(ai_transpose, ai_transpose + rows_transpose + 1,
+                      ai_transpose);
 
   for (SIZE i = 0; i < rows; i++) {
     for (COLTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
@@ -109,7 +109,6 @@ auto SerialTranspose(const SIZE rows, const SIZE cols, const int base,
         av_transpose[idx] = av[j];
     }
   }
-  return std::make_tuple(ai_transpose, aj_transpose, av_transpose);
 }
 
 /// @brief A parallel compressed sparse row matrix transpose function
@@ -121,17 +120,14 @@ auto SerialTranspose(const SIZE rows, const SIZE cols, const int base,
 /// @param aj column index
 /// @param av value vector
 template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-auto ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
-                       ROWTYPE const *ai, COLTYPE const *aj,
-                       VALTYPE const *av) {
+void ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
+                       ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
+                       ROWTYPE *ai_transpose, COLTYPE *aj_transpose,
+                       VALTYPE *av_transpose) {
   const SIZE cols_transpose = rows;
   const SIZE rows_transpose = cols;
   const auto nnz = ai[rows] - base;
-  std::shared_ptr<ROWTYPE[]> ai_transpose(new ROWTYPE[rows_transpose + 1]);
-  std::shared_ptr<COLTYPE[]> aj_transpose(new COLTYPE[nnz]);
-  std::shared_ptr<VALTYPE[]> av_transpose{nullptr};
-  if (av != nullptr)
-    av_transpose.reset(new VALTYPE[nnz]);
+  const bool update_av = av_transpose != nullptr && av != nullptr;
 
   ai_transpose[0] = base;
 
@@ -164,9 +160,8 @@ auto ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
 
 // may be optimized by a parallel scan
 #pragma omp single
-    std::inclusive_scan(ai_transpose.get(),
-                        ai_transpose.get() + rows_transpose + 1,
-                        ai_transpose.get());
+    std::inclusive_scan(ai_transpose, ai_transpose + rows_transpose + 1,
+                        ai_transpose);
 
 #pragma omp for
     for (SIZE rowID = 0; rowID < rows_transpose; rowID++) {
@@ -185,12 +180,11 @@ auto ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
         const SIZE rowID = it - ai;
         const COLTYPE idx = threadPrefixSum[tid][aj[j] - base]++ - base;
         aj_transpose[idx] = rowID + base;
-        if (av != nullptr)
+        if (update_av)
           av_transpose[idx] = av[j];
       }
     }
   }
-  return std::make_tuple(ai_transpose, aj_transpose, av_transpose);
 }
 
 /// @brief A parallel compressed sparse row matrix transpose function
@@ -202,18 +196,15 @@ auto ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
 /// @param aj column index
 /// @param av value vector
 template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-auto ParallelTranspose2(const SIZE rows, const SIZE cols, const int base,
-                        ROWTYPE const *ai, COLTYPE const *aj,
-                        VALTYPE const *av) {
+void ParallelTranspose2(const SIZE rows, const SIZE cols, const int base,
+                        ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
+                        ROWTYPE *ai_transpose, COLTYPE *aj_transpose,
+                        VALTYPE *av_transpose) {
   const SIZE cols_transpose = rows;
   const SIZE rows_transpose = cols;
   const auto nnz = ai[rows] - base;
-  std::shared_ptr<ROWTYPE[]> ai_transpose(new ROWTYPE[rows_transpose + 1]());
   ai_transpose[0] = base;
-  std::shared_ptr<COLTYPE[]> aj_transpose(new COLTYPE[nnz]);
-  std::shared_ptr<VALTYPE[]> av_transpose{nullptr};
-  if (av != nullptr)
-    av_transpose.reset(new VALTYPE[nnz]);
+  const bool update_av = av_transpose != nullptr && av != nullptr;
 
   std::vector<std::unique_ptr<ROWTYPE[]>> threadPrefixSum(
       omp_get_max_threads());
@@ -238,15 +229,15 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const int base,
 
 #pragma omp barrier
     auto [startt, endt] = utils::LoadBalancedPartition(
-        ai_transpose.get(), ai_transpose.get() + rows_transpose, tid, nthreads);
+        ai_transpose, ai_transpose + rows_transpose, tid, nthreads);
     for (auto it = startt; it < endt; it++) {
-      const ROWTYPE rowID = it - ai_transpose.get();
+      const ROWTYPE rowID = it - ai_transpose;
       ai_transpose[rowID + 1] = (it == startt) ? 0 : ai_transpose[rowID];
       for (int t = 0; t < nthreads; t++) {
         ai_transpose[rowID + 1] += threadPrefixSum[t][rowID];
       }
     }
-    prefix[tid + 1] = ai_transpose[endt - find_address_of(ai_transpose)];
+    prefix[tid + 1] = ai_transpose[endt - ai_transpose];
 
 #pragma omp barrier
 
@@ -254,13 +245,13 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const int base,
     std::inclusive_scan(prefix.begin(), prefix.end(), prefix.begin());
 
     for (auto it = startt; it < endt; it++) {
-      const ROWTYPE rowID = it - ai_transpose.get();
+      const ROWTYPE rowID = it - ai_transpose;
       ai_transpose[rowID + 1] += prefix[tid];
     }
 
 #pragma omp barrier
     for (auto it = startt; it < endt; it++) {
-      const ROWTYPE rowID = it - ai_transpose.get();
+      const ROWTYPE rowID = it - ai_transpose;
       ROWTYPE tmp = threadPrefixSum[0][rowID];
       threadPrefixSum[0][rowID] = ai_transpose[rowID];
       for (int t = 1; t < nthreads; t++) {
@@ -275,12 +266,11 @@ auto ParallelTranspose2(const SIZE rows, const SIZE cols, const int base,
         const ROWTYPE rowID = it - ai;
         const COLTYPE idx = threadPrefixSum[tid][aj[j] - base]++ - base;
         aj_transpose[idx] = rowID + base;
-        if (av != nullptr)
+        if (update_av)
           av_transpose[idx] = av[j];
       }
     }
   }
-  return std::make_tuple(ai_transpose, aj_transpose, av_transpose);
 }
 
 template <typename SIZE, typename ROWTYPE, typename COLTYPE>
@@ -686,4 +676,33 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
   }
 }
 
+template <typename SIZE, typename ROWTYPE, typename COLTYPE>
+bool ValidCSR(const SIZE rows, const SIZE cols, const int base,
+              ROWTYPE const *ai, COLTYPE const *aj) {
+  if (ai[0] != base) {
+    std::cout << "ai[0] is not equal to base" << std::endl;
+    return false;
+  }
+  for (SIZE i = 0; i < rows; i++) {
+    if (ai[i + 1] < ai[i]) {
+      std::cout << "ai is not monotonically increasing" << std::endl;
+      return false;
+    }
+    if (!std::is_sorted(aj + ai[i] - base, aj + ai[i + 1] - base)) {
+      std::cout << "Unsorted row " << i << std::endl;
+      return false;
+    }
+    if (std::adjacent_find(aj + ai[i] - base, aj + ai[i + 1] - base) !=
+        aj + ai[i + 1] - base) {
+      std::cout << "Duplicate entry in row " << i << std::endl;
+      return false;
+    }
+
+    if (aj[ai[i] - base] < base || aj[ai[i + 1] - base - 1] >= cols + base) {
+      std::cout << "Column index out of range in row " << i << std::endl;
+      return false;
+    }
+  }
+  return true;
+}
 } // namespace matrix_utils
