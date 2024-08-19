@@ -230,10 +230,6 @@ public:
     _reorderedRowIdToTaskId.resize(_size);
     std::cout << "levels: " << _levels << std::endl;
 
-    // const SIZE num_tasks = _nthreads * _levels;
-
-    // _permedToTask.resize(num_tasks);
-
 #pragma omp parallel num_threads(_nthreads)
     {
       const int tid = omp_get_thread_num();
@@ -254,6 +250,8 @@ public:
                             _threadTaskPrefix.begin());
         _tasks = _threadTaskPrefix[_nthreads];
 
+        // taskSizes.resize(_tasks);
+
         std::cout << "tasks: " << _tasks << std::endl;
         _taskBoundaryPrefix.resize(_tasks + 1);
 
@@ -262,7 +260,9 @@ public:
         _taskInvAdjGraph.base = 0;
         _taskInvAdjGraph.ai.resize(_tasks + 1);
         _taskInvAdjGraph.ai[0] = 0; // zero based
-        _taskInvAdjGraph.aj.resize(_reorderedMat.nnz());
+        _taskInvAdjGraph.aj.resize(
+            _reorderedMat.nnz() +
+            _tasks); // added _tasks for edges within super-tasks
 
         _taskAdjGraph.rows = _tasks;
         _taskAdjGraph.cols = _tasks;
@@ -304,6 +304,8 @@ public:
           invAdjSizePerTask += _reorderedMat.ai[i + 1] - _reorderedMat.ai[i];
           _reorderedRowIdToTaskId[i] = task;
         }
+        invAdjSizePerTask +=
+            1; // added 1 for task -> task-1 dependency within each super-tasks
         _threadPrefixSum[tid + 1] += invAdjSizePerTask;
         _taskInvAdjGraph.ai[task + 1] = _threadPrefixSum[tid + 1];
         // #pragma omp critical
@@ -379,7 +381,7 @@ public:
                   << " endTask: " << endTask << std::endl;
         for (auto task = startTask; task < endTask; task++) {
           maxInvAdjSize = 0;
-          if (task != startTask)
+          if (task != threadBegin)
             _taskInvAdj[tid][maxInvAdjSize++] = task - 1;
           for (COLTYPE row = _taskBoundaryPrefix[task];
                row < _taskBoundaryPrefix[task + 1]; row++) {
@@ -419,16 +421,16 @@ public:
 #pragma omp barrier
 #pragma omp single
       {
+
         std::inclusive_scan(_threadPrefixSum.begin(), _threadPrefixSum.end(),
                             _threadPrefixSum.begin());
         _taskAdjGraph.aj.resize(_threadPrefixSum[_nthreads]);
-        std::cout << "_threadPrefixSum[_nthreads]: "
-                  << _threadPrefixSum[_nthreads] << std::endl;
         _taskAdjGraph.ai[_tasks] = _threadPrefixSum[_nthreads];
       }
 
-      _taskAdjGraph.ai[start] = _threadPrefixSum[tid];
-      for (auto task = start; task < end - 1; task++) {
+      _taskAdjGraph.ai[_threadTaskPrefix[tid]] = _threadPrefixSum[tid];
+      for (auto task = _threadTaskPrefix[tid];
+           task < _threadTaskPrefix[tid + 1] - 1; task++) {
         _taskAdjGraph.ai[task + 1] += _taskAdjGraph.ai[task];
       }
 
@@ -440,12 +442,15 @@ public:
                   _taskAdjGraph.aj.begin() + _taskAdjGraph.ai[task]);
       }
     }
+
+    std::swap(_taskAdjGraph, _taskInvAdjGraph);
+
     // std::ifstream f("test.bin");
     // if (!f.good()) {
     //   std::ofstream ofs("test.bin", std::ios::binary);
     //   std::stringstream ss;
     //   cereal::BinaryOutputArchive oarchive(ss);
-    //   oarchive(_taskAdjGraph);
+    //   oarchive(_taskInvAdjGraph);
     //   ofs << ss.rdbuf();
     // } else {
     //   std::ifstream ofs("test.bin", std::ios::binary);
@@ -456,34 +461,21 @@ public:
     //   cereal::BinaryInputArchive iarchive(ss);
     //   iarchive(temp);
     //   for (auto i = 0; i < temp.aj.size(); i++) {
-    //     if (temp.aj[i] != _taskAdjGraph.aj[i])
+    //     if (temp.aj[i] != _taskInvAdjGraph.aj[i])
     //       std::cout << "fucked\n";
     //   }
     //   for (auto i = 0; i < temp.ai.size(); i++) {
-    //     if (temp.ai[i] != _taskAdjGraph.ai[i])
+    //     if (temp.ai[i] != _taskInvAdjGraph.ai[i])
     //       std::cout << "fucked\n";
     //   }
     // }
 
-    std::swap(_taskAdjGraph, _taskInvAdjGraph);
     _taskAdjGraph.aj.resize(_taskInvAdjGraph.nnz());
-    std::cout << "_taskInvAdjGraph: " << _taskInvAdjGraph.ai.size()
-              << std::endl;
-    std::cout << "_taskAdjGraph.aj: " << _taskAdjGraph.aj.size() << std::endl;
     matrix_utils::ParallelTranspose2(
         _taskInvAdjGraph.rows, _taskInvAdjGraph.cols, _taskInvAdjGraph.base,
         _taskInvAdjGraph.ai.data(), _taskInvAdjGraph.aj.data(),
         (VALTYPE const *)nullptr, _taskAdjGraph.ai.data(),
         _taskAdjGraph.aj.data(), (VALTYPE *)nullptr);
-
-    for (auto i : _taskAdjGraph.ai) {
-      std::cout << i << " ";
-    }
-    std::cout << std::endl;
-    for (auto i : _taskInvAdjGraph.ai) {
-      std::cout << i << " ";
-    }
-    std::cout << std::endl;
 
     _taskInvAdjGraph2.rows = _tasks;
     _taskInvAdjGraph2.cols = _tasks;
@@ -491,6 +483,7 @@ public:
     _taskInvAdjGraph2.ai.resize(_tasks + 1);
     _taskInvAdjGraph2.ai[0] = 0; // zero based
     // _taskInvAdjGraph2.aj.resize(_taskInvAdjGraph.aj.size());
+    _transitiveEdgeRemoveAj.resize(_taskInvAdjGraph.aj.size());
 
     std::cout << "_taskAdjGraph is valid: "
               << matrix_utils::ValidCSR(
@@ -505,104 +498,167 @@ public:
                      _taskInvAdjGraph.aj.data())
               << std::endl;
 
-    for (auto j = _taskInvAdjGraph.ai[38]; j < _taskInvAdjGraph.ai[38 + 1];
-         j++) {
-      std::cout << _taskInvAdjGraph.aj[j] << " ";
-    }
-    std::cout << std::endl;
+    // for (ROWTYPE i = 0; i < _taskInvAdjGraph.rows; i++) {
+    //   for (COLTYPE j = _taskInvAdjGraph.ai[i]; j < _taskInvAdjGraph.ai[i +
+    //   1];
+    //        j++) {
+    //     std::cout << _taskInvAdjGraph.aj[j] << " ";
+    //   }
+    //   std::cout << std::endl;
+    // }
+    // std::cout << std::endl;
 
-    for (auto i = 0; i <= _taskInvAdjGraph.rows; i++) {
-      // std::cout << _taskInvAdjGraph.ai[i] << std::endl;
-      for (auto j = _taskInvAdjGraph.ai[i]; j < _taskInvAdjGraph.ai[i + 1];
-           j++) {
-        std::cout << _taskInvAdjGraph.aj[j] << " ";
+#pragma omp parallel num_threads(_nthreads)
+    {
+      const int tid = omp_get_thread_num();
+      const int nthreads = omp_get_num_threads();
+
+      // rebalance the work load
+      auto [start3, end3] = utils::LoadPrefixBalancedPartitionPos(
+          _taskAdjGraph.ai.begin(), _taskAdjGraph.ai.begin() + _tasks, tid,
+          nthreads);
+
+      auto startThread =
+          std::distance(_threadTaskPrefix.begin(),
+                        upper_bound(_threadTaskPrefix.begin(),
+                                    _threadTaskPrefix.end(),
+                                    static_cast<COLTYPE>(start3))) -
+          1;
+      auto endThread = std::distance(_threadTaskPrefix.begin(),
+                                     upper_bound(_threadTaskPrefix.begin(),
+                                                 _threadTaskPrefix.end(),
+                                                 static_cast<COLTYPE>(end3))) -
+                       1;
+      endThread =
+          std::min(endThread, static_cast<decltype(endThread)>(_nthreads) - 1);
+
+      ROWTYPE threadCount = 0;
+      COLTYPE maxInvAdjSize = 0;
+      COLTYPE parent;
+      _threadPrefixSum[tid + 1] = 0;
+      for (auto thread = startThread; thread <= endThread; thread++) {
+        threadCount = 0;
+        const COLTYPE threadBegin = _threadTaskPrefix[thread];
+        const COLTYPE threadEnd = _threadTaskPrefix[thread + 1];
+        const COLTYPE startTask =
+            std::max(static_cast<COLTYPE>(start3), threadBegin);
+        const COLTYPE endTask = std::min(static_cast<COLTYPE>(end3), threadEnd);
+        for (auto task = startTask; task < endTask; task++) {
+          maxInvAdjSize = 0;
+
+          for (ROWTYPE parentID = _taskInvAdjGraph.ai[task];
+               parentID < _taskInvAdjGraph.ai[task + 1]; parentID++) {
+            parent = _taskInvAdjGraph.aj[parentID];
+            auto parentPtr =
+                _taskInvAdjGraph.aj.data() + _taskInvAdjGraph.ai[task];
+            auto parentEndPtr =
+                _taskInvAdjGraph.aj.data() + _taskInvAdjGraph.ai[task + 1];
+            auto childPtr = _taskAdjGraph.aj.data() + _taskAdjGraph.ai[parent];
+            auto childEndPtr =
+                _taskAdjGraph.aj.data() + _taskAdjGraph.ai[parent + 1];
+
+            bool remove = false;
+            if (parentPtr < parentEndPtr) {
+              childPtr = std::lower_bound(childPtr, childEndPtr, *parentPtr);
+            }
+            if (childPtr < childEndPtr) {
+              parentPtr = std::lower_bound(parentPtr, parentEndPtr, *childPtr);
+            }
+
+            while (parentPtr != parentEndPtr && childPtr != childEndPtr) {
+              COLTYPE cmp = *parentPtr - *childPtr;
+              if (0 == cmp) {
+                remove = true;
+                break;
+              } else if (cmp < 0)
+                ++parentPtr;
+              else
+                ++childPtr;
+            }
+            if (!remove) {
+              _taskInvAdj[tid][maxInvAdjSize++] = parent;
+            }
+          }
+          _taskInvAdjGraph2.ai[task + 1] = maxInvAdjSize;
+          std::copy(_taskInvAdj[tid].begin(),
+                    _taskInvAdj[tid].begin() + maxInvAdjSize,
+                    _transitiveEdgeRemoveAj.begin() +
+                        _taskInvAdjGraph.ai[task]);
+          threadCount += maxInvAdjSize;
+          // #pragma omp critical
+          //           {
+          //             std::cout << "tid: " << tid << " task " << task
+          //                       << " : start point: " <<
+          //                       _taskInvAdjGraph.ai[task]
+          //                       << " | ";
+          //             for (int i = 0; i < maxInvAdjSize; i++) {
+          //               std::cout << _taskInvAdj[tid][i] << " ";
+          //             }
+          //             std::cout << std::endl;
+          //           }
+        }
+        __atomic_add_fetch(&_threadPrefixSum[thread + 1], threadCount,
+                           __ATOMIC_RELAXED);
       }
-      std::cout << std::endl;
+#pragma omp barrier
+#pragma omp single
+      {
+        std::inclusive_scan(_threadPrefixSum.begin(), _threadPrefixSum.end(),
+                            _threadPrefixSum.begin());
+        _taskInvAdjGraph2.aj.resize(_threadPrefixSum[_nthreads]);
+        _taskInvAdjGraph2.ai[_tasks] = _threadPrefixSum[_nthreads];
+      }
+
+      _taskInvAdjGraph2.ai[_threadTaskPrefix[tid]] = _threadPrefixSum[tid];
+      for (auto task = _threadTaskPrefix[tid];
+           task < _threadTaskPrefix[tid + 1] - 1; task++) {
+        _taskInvAdjGraph2.ai[task + 1] += _taskInvAdjGraph2.ai[task];
+      }
+
+#pragma omp barrier
+      for (auto task = start3; task < end3; task++) {
+        std::copy(_transitiveEdgeRemoveAj.begin() + _taskInvAdjGraph.ai[task],
+                  _transitiveEdgeRemoveAj.begin() + _taskInvAdjGraph.ai[task] +
+                      _taskInvAdjGraph2.ai[task + 1] -
+                      _taskInvAdjGraph2.ai[task],
+                  _taskInvAdjGraph2.aj.begin() + _taskInvAdjGraph2.ai[task]);
+      }
     }
 
-    // #pragma omp parallel
-    //     {
-    //       const int tid = omp_get_thread_num();
-    //       const int nthreads = omp_get_num_threads();
+    std::cout << "_taskInvAdjGraph2 is valid: "
+              << matrix_utils::ValidCSR(
+                     _taskInvAdjGraph2.rows, _taskInvAdjGraph2.cols,
+                     _taskInvAdjGraph2.base, _taskInvAdjGraph2.ai.data(),
+                     _taskInvAdjGraph2.aj.data())
+              << std::endl;
 
-    //       // rebalance the work load
-    //       auto [start3, end3] = utils::LoadPrefixBalancedPartitionPos(
-    //           _taskAdjGraph.ai.begin(), _taskAdjGraph.ai.begin() + _tasks,
-    //           tid, nthreads);
-
-    //       auto startThread =
-    //           std::distance(_threadTaskPrefix.begin(),
-    //                         upper_bound(_threadTaskPrefix.begin(),
-    //                                     _threadTaskPrefix.end(),
-    //                                     static_cast<COLTYPE>(start3))) -
-    //           1;
-    //       auto endThread = std::distance(_threadTaskPrefix.begin(),
-    //                                      upper_bound(_threadTaskPrefix.begin(),
-    //                                                  _threadTaskPrefix.end(),
-    //                                                  static_cast<COLTYPE>(end3)))
-    //                                                  -
-    //                        1;
-    //       endThread =
-    //           std::min(endThread, static_cast<decltype(endThread)>(_nthreads)
-    //           - 1);
-
-    //       ROWTYPE threadCount = 0;
-    //       COLTYPE maxInvAdjSize = 0;
-    //       for (auto thread = startThread; thread <= endThread; thread++) {
-    //         threadCount = 0;
-    //         const COLTYPE threadBegin = _threadTaskPrefix[thread];
-    //         const COLTYPE threadEnd = _threadTaskPrefix[thread + 1];
-    //         const COLTYPE startTask =
-    //             std::max(static_cast<COLTYPE>(start3), threadBegin);
-    //         const COLTYPE endTask = std::min(static_cast<COLTYPE>(end3),
-    //         threadEnd);
-    // #pragma omp critical
-    //         std::cout << "tid: " << tid << " startTask: " << startTask
-    //                   << " endTask: " << endTask << std::endl;
-    //         for (auto task = startTask; task < endTask; task++) {
-    //           maxInvAdjSize = 0;
-
-    //           for (COLTYPE child = _taskAdjGraph.ai[task];
-    //                child < _taskAdjGraph.ai[task + 1]; child++) {
-    //             auto childPtr = _taskAdjGraph.aj.data() +
-    //             _taskAdjGraph.ai[task]; auto childEndPtr =
-    //                 _taskAdjGraph.aj.data() + _taskAdjGraph.ai[task + 1];
-    //             auto parentPtr =
-    //                 _taskInvAdjGraph.aj.data() + _taskInvAdjGraph.ai[child];
-    //             auto parentEndPtr =
-    //                 _taskInvAdjGraph.aj.data() + _taskInvAdjGraph.ai[child +
-    //                 1];
-
-    //             bool remove = false;
-    //             if (childPtr < childEndPtr) {
-    //               std::cout << std::distance(_taskInvAdjGraph.aj.data(),
-    //                                          parentPtr) -
-    //                                _taskInvAdjGraph.ai[child]
-    //                         << std::endl;
-    //               parentPtr = std::lower_bound(parentPtr, parentEndPtr,
-    //               *childPtr);
-    //             }
-    //             if (parentPtr < parentEndPtr) {
-    //               childPtr = std::lower_bound(childPtr, childEndPtr,
-    //               *parentPtr);
-    //             }
-
-    //             while (parentPtr != parentEndPtr && childPtr != childEndPtr)
-    //             {
-    //               COLTYPE cmp = *parentPtr - *childPtr;
-    //               if (0 == cmp) {
-    //                 remove = true;
-    //                 break;
-    //               } else if (cmp < 0)
-    //                 ++parentPtr;
-    //               else
-    //                 ++childPtr;
-    //             }
-    //             // if(!remove)
-    //           }
-    //         }
-    //       }
-    //     }
+    std::ifstream f("test.bin");
+    if (!f.good()) {
+      std::ofstream ofs("test.bin", std::ios::binary);
+      std::stringstream ss;
+      cereal::BinaryOutputArchive oarchive(ss);
+      oarchive(_taskInvAdjGraph2);
+      ofs << ss.rdbuf();
+    } else {
+      std::ifstream ofs("test.bin", std::ios::binary);
+      std::stringstream ss;
+      ss << ofs.rdbuf();
+      ofs.close();
+      CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> temp;
+      cereal::BinaryInputArchive iarchive(ss);
+      iarchive(temp);
+      for (auto i = 0; i < temp.aj.size(); i++) {
+        if (temp.aj[i] != _taskInvAdjGraph2.aj[i])
+          std::cout << "fucked\n";
+      }
+      for (auto i = 0; i < temp.ai.size(); i++) {
+        if (temp.ai[i] != _taskInvAdjGraph2.ai[i])
+          std::cout << "fucked\n";
+      }
+      std::cout << _taskInvAdjGraph.nnz() << " " << _taskInvAdjGraph2.nnz()
+                << std::endl;
+      std::cout << "finished check\n";
+    }
   }
 
 protected:
@@ -619,8 +675,8 @@ protected:
 
   // always zero based
   COLTYPE _tasks;
-  CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskInvAdjGraph; // parents
   CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskAdjGraph;    // children
+  CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskInvAdjGraph; // parents
   CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE>
       _taskInvAdjGraph2; // parents after transisive edge removal
   std::vector<COLTYPE> _threadTaskPrefix; // tasks on each thread
@@ -630,7 +686,11 @@ protected:
   // std::vector<ROWTYPE> _threadPrefixSum2; //
   std::vector<COLTYPE> _reorderedRowIdToTaskId;
   std::vector<std::vector<COLTYPE>> _taskInvAdj; // thread local
+  std::vector<COLTYPE> _transitiveEdgeRemoveAj;
 
   mutable utils::BitVector<COLTYPE> _bv;
+
+  // debugging
+  // std::vector<COLTYPE> taskSizes;
 }; // namespace matrix_utils
 } // namespace matrix_utils

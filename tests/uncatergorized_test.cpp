@@ -312,7 +312,7 @@ TEST(triangular_solve, forward_substitution) {
 }
 
 TEST(triangular_solve, forward_substitution1) {
-  omp_set_num_threads(1);
+  omp_set_num_threads(2);
 
   std::ifstream f("data/nos5.mtx");
 
