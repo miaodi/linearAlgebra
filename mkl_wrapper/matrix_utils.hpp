@@ -342,8 +342,8 @@ void permute(const SIZE rows, const int base, ROWTYPE const *ai,
         continue;
       // intersion sort aj and av based on the column index
       auto pos = permed_aj + *(i + 1) - base - 1;
-      while (pos != permed_aj + *i - base) {
-        for (auto j = permed_aj + *i - base; j != pos; j++) {
+      while (pos > permed_aj + *i - base) {
+        for (auto j = permed_aj + *i - base; j < pos; j++) {
           if (*j > *pos) {
             std::swap(*j, *pos);
             std::swap(permed_av[j - permed_aj], permed_av[pos - permed_aj]);
@@ -439,6 +439,22 @@ void symPermute(const SIZE rows, const int base, ROWTYPE const *ai,
           pos--;
         }
       }
+    }
+  }
+}
+
+template <typename SIZE, typename COLTYPE, typename VALTYPE>
+void permuteVec(const SIZE rows, const int base, VALTYPE const *const v,
+                COLTYPE const *const iperm, VALTYPE *const permed_v) {
+  if (iperm) {
+#pragma omp parallel for
+    for (SIZE i = 0; i < rows; i++) {
+      permed_v[i] = v[iperm[i] - base];
+    }
+  } else {
+#pragma omp parallel for
+    for (SIZE i = 0; i < rows; i++) {
+      permed_v[i] = v[i];
     }
   }
 }
@@ -539,7 +555,6 @@ void TopologicalSort2(const SIZE nodes, const int base, ROWTYPE const *ai,
 template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VEC>
 bool DiagonalPosition(const SIZE rows, const int base, ROWTYPE const *ai,
                       COLTYPE const *aj, VEC &diag) {
-
   diag.resize(rows);
   volatile bool missing_diag = false;
 #pragma omp parallel for shared(missing_diag)
