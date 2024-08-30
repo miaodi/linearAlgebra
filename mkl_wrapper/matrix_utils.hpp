@@ -289,7 +289,7 @@ void permutedAI(const SIZE rows, const int base, ROWTYPE const *ai,
     auto [start, end] = utils::LoadBalancedPartition(
         permed_ai, permed_ai + rows, tid, nthreads);
 
-    // iperm[i] = k -> pinv_{i,k} = 1 -> C(i,*) = A(k, *)
+    // iperm[i] = k -> pinv_{i,k} = 1 -> Aperm(i,*) = A(k, *)
     for (auto i = start; i < end; i++) {
       size_t k = iperm[i - permed_ai] - base;
       MKL_INT nz = ai[k + 1] - ai[k];
@@ -595,6 +595,7 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
               COLTYPE const *aj, VALTYPE const *av,
               CSRMatrix<ROWTYPE, COLTYPE, VALTYPE> &L, std::vector<VALTYPE> &D,
               CSRMatrix<ROWTYPE, COLTYPE, VALTYPE> &U) {
+  ROWTYPE nnz = ai[rows] - base;
   L.rows = rows;
   L.cols = rows;
   L.base = base;
@@ -617,25 +618,23 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
   std::vector<ROWTYPE> diag(rows);
   std::vector<std::pair<ROWTYPE, ROWTYPE>> LU_prefix(omp_get_max_threads() + 1);
   LU_prefix[0] = {base, base};
-  volatile bool missing_diag = false;
-#pragma omp parallel shared(missing_diag)
+
+#pragma omp parallel
   {
     const int tid = omp_get_thread_num();
     const int nthreads = omp_get_num_threads();
-    auto [start, end] = utils::LoadPrefixBalancedPartition(
-        find_address_of(ai), find_address_of(ai) + rows, tid, nthreads);
+    auto [start, end] =
+        utils::LoadPrefixBalancedPartition(ai, ai + rows, tid, nthreads);
     LU_prefix[tid + 1].first = 0;
     LU_prefix[tid + 1].second = 0;
     for (auto it = start; it < end; it++) {
-      SIZE i = it - find_address_of(ai);
-
+      SIZE i = it - ai;
       auto mid =
-          std::lower_bound(find_address_of(aj) + *it - base,
-                           find_address_of(aj) + *(it + 1) - base, i + base);
-      const bool zero_diag = *mid != i + base;
-      diag[i] = mid - find_address_of(aj);
+          std::lower_bound(aj + *it - base, aj + *(it + 1) - base, i + base);
+      const bool zero_diag = (mid == aj + *(it + 1) - base || *mid != i + base);
+      diag[i] = mid - aj;
       D[i] = zero_diag ? 0 : av[diag[i]];
-      const ROWTYPE L_size = mid - (find_address_of(aj) + *it - base);
+      const ROWTYPE L_size = mid - (aj + *it - base);
       LU_prefix[tid + 1].first += L_size;
       L.ai[i + 1] = LU_prefix[tid + 1].first;
       const ROWTYPE U_size = *(it + 1) - *it - L_size - (zero_diag ? 0 : 1);
@@ -673,8 +672,8 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
     ROWTYPE L_pos = LU_prefix[tid].first - base;
     ROWTYPE U_pos = LU_prefix[tid].second - base;
     for (auto it = start; it < end; it++) {
-      SIZE i = it - find_address_of(ai);
-      const bool zero_diag = aj[diag[i]] - base != i;
+      SIZE i = it - ai;
+      const bool zero_diag = (diag[i] == nnz || aj[diag[i]] - base != i);
       L.ai[i + 1] += LU_prefix[tid].first;
       U.ai[i + 1] += LU_prefix[tid].second;
 
