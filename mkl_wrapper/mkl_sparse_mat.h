@@ -119,7 +119,7 @@ protected:
   sparse_index_base_t _mkl_base{SPARSE_INDEX_BASE_ZERO};
   matrix_descr _mkl_descr;
 
-  sparse_status_t _mkl_stat;
+  sparse_status_t _mkl_stat{SPARSE_STATUS_SUCCESS};
 };
 // c*A+B
 mkl_sparse_mat mkl_sparse_sum(const mkl_sparse_mat &A, const mkl_sparse_mat &B,

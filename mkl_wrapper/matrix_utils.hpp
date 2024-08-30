@@ -712,7 +712,8 @@ bool ValidCSR(const SIZE rows, const SIZE cols, const int base,
       return false;
     }
 
-    if (aj[ai[i] - base] < base || aj[ai[i + 1] - base - 1] >= cols + base) {
+    if ((ai[i + 1] - ai[i] > 0) &&
+        (aj[ai[i] - base] < base || aj[ai[i + 1] - base - 1] >= cols + base)) {
       std::cout << "Column index out of range in row " << i << std::endl;
       return false;
     }

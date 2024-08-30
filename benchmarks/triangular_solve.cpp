@@ -103,7 +103,7 @@ BENCHMARK_DEFINE_F(MyFixture, CacheParForward_barrier)
   matrix_utils::SplitLDU(mat->rows(), (int)mat->mkl_base(), mat->get_ai().get(),
                          mat->get_aj().get(), mat->get_av().get(), L, D, U);
 
-  matrix_utils::OptimizedForwardSubstitution<true, int, int, int, double>
+  matrix_utils::OptimizedForwardSubstitution<matrix_utils::FBSubstitutionType::Barrier, int, int, int, double>
       forwardsweep;
   forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
   for (auto _ : state) {
@@ -115,28 +115,28 @@ BENCHMARK_DEFINE_F(MyFixture, CacheParForward_barrier)
 
 BENCHMARK_REGISTER_F(MyFixture, CacheParForward_barrier)->Arg(10)->Arg(100);
 
-BENCHMARK_DEFINE_F(MyFixture, CacheParForward_nobarrier)
-(benchmark::State &state) {
-  omp_set_num_threads(8);
-  std::vector<double> x(mat->rows(), 0.0);
-  std::vector<double> b(mat->rows(), 1.0);
+// BENCHMARK_DEFINE_F(MyFixture, CacheParForward_nobarrier)
+// (benchmark::State &state) {
+//   omp_set_num_threads(8);
+//   std::vector<double> x(mat->rows(), 0.0);
+//   std::vector<double> b(mat->rows(), 1.0);
 
-  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
-  std::vector<double> D;
+//   matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
+//   std::vector<double> D;
 
-  matrix_utils::SplitLDU(mat->rows(), (int)mat->mkl_base(), mat->get_ai().get(),
-                         mat->get_aj().get(), mat->get_av().get(), L, D, U);
+//   matrix_utils::SplitLDU(mat->rows(), (int)mat->mkl_base(), mat->get_ai().get(),
+//                          mat->get_aj().get(), mat->get_av().get(), L, D, U);
 
-  matrix_utils::OptimizedForwardSubstitution<false, int, int, int, double>
-      forwardsweep;
-  forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
-  for (auto _ : state) {
-    for (int i = 0; i < state.range(0); i++) {
-      forwardsweep(b.data(), x.data());
-    }
-  }
-}
+//   matrix_utils::OptimizedForwardSubstitution<false, int, int, int, double>
+//       forwardsweep;
+//   forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
+//   for (auto _ : state) {
+//     for (int i = 0; i < state.range(0); i++) {
+//       forwardsweep(b.data(), x.data());
+//     }
+//   }
+// }
 
-BENCHMARK_REGISTER_F(MyFixture, CacheParForward_nobarrier)->Arg(10)->Arg(100);
+// BENCHMARK_REGISTER_F(MyFixture, CacheParForward_nobarrier)->Arg(10)->Arg(100);
 
 BENCHMARK_MAIN();

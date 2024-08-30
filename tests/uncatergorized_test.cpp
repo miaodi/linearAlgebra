@@ -312,7 +312,7 @@ TEST(triangular_solve, forward_substitution) {
 }
 
 TEST(triangular_solve, forward_substitution1) {
-  omp_set_num_threads(2);
+  omp_set_num_threads(5);
 
   std::ifstream f("data/nos5.mtx");
 
@@ -359,12 +359,39 @@ TEST(triangular_solve, forward_substitution1) {
   matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
                                     L.av.get(), b.data(), x_serial.data());
 
-  matrix_utils::OptimizedForwardSubstitution<true, int, int, int, double>
-      forwardsweep;
-  forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
-  forwardsweep.build_task_graph();
-  for (int i = 0; i < 1000; i++) {
-    forwardsweep(b.data(), x.data());
+  matrix_utils::OptimizedForwardSubstitution<
+      matrix_utils::FBSubstitutionType::Barrier, int, int, int, double>
+      forwardsweep_barrier;
+  forwardsweep_barrier.analysis(L.rows, L.base, L.ai.get(), L.aj.get(),
+                                L.av.get());
+  for (int i = 0; i < 100; i++) {
+    forwardsweep_barrier(b.data(), x.data());
+    for (int i = 0; i < x.size(); i++) {
+      EXPECT_EQ(x[i], x_serial[i]);
+    }
+  }
+
+  matrix_utils::OptimizedForwardSubstitution<
+      matrix_utils::FBSubstitutionType::NoBarrier, int, int, int, double>
+      forwardsweep_nobarrier;
+  forwardsweep_nobarrier.analysis(L.rows, L.base, L.ai.get(), L.aj.get(),
+                                  L.av.get());
+  for (int i = 0; i < 100; i++) {
+    forwardsweep_nobarrier(b.data(), x.data());
+    for (int i = 0; i < x.size(); i++) {
+      EXPECT_EQ(x[i], x_serial[i]);
+    }
+  }
+
+  matrix_utils::OptimizedForwardSubstitution<
+      matrix_utils::FBSubstitutionType::NoBarrierSuperNode, int, int, int,
+      double>
+      forwardsweep_nobarrier_sn;
+  forwardsweep_nobarrier_sn.analysis(L.rows, L.base, L.ai.get(), L.aj.get(),
+                                     L.av.get());
+  forwardsweep_nobarrier_sn(b.data(), x.data());
+  for (int i = 0; i < 100; i++) {
+    forwardsweep_nobarrier_sn(b.data(), x.data());
     for (int i = 0; i < x.size(); i++) {
       EXPECT_EQ(x[i], x_serial[i]);
     }

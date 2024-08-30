@@ -97,8 +97,11 @@ void LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
   }
 }
 
-template <bool WithBarrier = true, typename SIZE = int, typename ROWTYPE = int,
-          typename COLTYPE = int, typename VALTYPE = double>
+enum class FBSubstitutionType { Barrier, NoBarrier, NoBarrierSuperNode };
+
+template <FBSubstitutionType FBST = FBSubstitutionType::Barrier,
+          typename SIZE = int, typename ROWTYPE = int, typename COLTYPE = int,
+          typename VALTYPE = double>
 class OptimizedForwardSubstitution {
 public:
   OptimizedForwardSubstitution() : _nthreads{omp_get_max_threads()} {}
@@ -106,8 +109,7 @@ public:
   void analysis(const SIZE rows, const int base, ROWTYPE const *ai,
                 COLTYPE const *aj, VALTYPE const *av) {
     _size = rows;
-    if constexpr (!WithBarrier)
-      _bv.resize(rows);
+    _vec.resize(_size);
     const auto nnz = ai[rows] - base;
     _reorderedMat.ai.resize(rows + 1);
     _reorderedMat.aj.resize(nnz);
@@ -132,10 +134,10 @@ public:
       _threadlevels[tid][0] = 0;
 
       for (COLTYPE l = 0; l < _levels; l++) {
-        auto [start, end] = utils::LoadBalancedPartition(
-            _iperm.data() + _levelPrefix[l],
-            _iperm.data() + _levelPrefix[l + 1], tid, nthreads);
-        const COLTYPE size = std::distance(start, end);
+        // TODO: a better load balancing is needed
+        auto [start, end] = utils::LoadBalancedPartitionPos(
+            _levelPrefix[l + 1] - _levelPrefix[l], tid, nthreads);
+        const COLTYPE size = end - start;
         // #pragma omp critical
         //         std::cout << "tid: " << tid << " , size: " << size <<
         //         std::endl;
@@ -162,23 +164,56 @@ public:
       COLTYPE cur = _threadlevels[tid][0];
 
       for (COLTYPE l = 0; l < _levels; l++) {
-        auto [start, end] = utils::LoadBalancedPartition(
-            _iperm.data() + _levelPrefix[l],
-            _iperm.data() + _levelPrefix[l + 1], tid, nthreads);
-        for (auto it = start; it != end; it++) {
-          _threadiperm[cur++] = *it;
+        auto [start, end] = utils::LoadBalancedPartitionPos(
+            _levelPrefix[l + 1] - _levelPrefix[l], tid, nthreads);
+        for (auto i = start; i != end; i++) {
+          _threadiperm[cur++] = _iperm[i + _levelPrefix[l]];
         }
       }
     }
+
+    utils::inversePermute(_threadperm, _threadiperm, base);
+
+    // matrix_utils::permute(rows, base, ai, aj, av, _threadiperm.data(),
+    //                       _threadperm.data(), _reorderedMat.ai.data(),
+    //                       _reorderedMat.aj.data(), _reorderedMat.av.data());
+
     matrix_utils::permuteRow(rows, base, ai, aj, av, _threadiperm.data(),
                              _reorderedMat.ai.data(), _reorderedMat.aj.data(),
                              _reorderedMat.av.data());
+
+    if constexpr (FBST == FBSubstitutionType::NoBarrierSuperNode) {
+
+      build_task_graph();
+      // for (auto i = 0; i < _taskInvAdjGraph.rows; i++) {
+      //   std::cout << "taks " << i << ": ";
+      //   for (auto j = _taskInvAdjGraph.ai[i]; j < _taskInvAdjGraph.ai[i + 1];
+      //        j++) {
+      //     std::cout << _taskInvAdjGraph.aj[j] << " ";
+      //   }
+      //   std::cout << std::endl;
+      // }
+    }
+
+    if constexpr (FBST == FBSubstitutionType::NoBarrier)
+      _bv.resize(_size);
+    else if constexpr (FBST == FBSubstitutionType::NoBarrierSuperNode)
+      _bv.resize(_tasks);
   }
 
   void operator()(const VALTYPE *const b, VALTYPE *const x) const {
-    if constexpr (!WithBarrier) {
-      _bv.clearAll();
-    }
+    if constexpr (FBST == FBSubstitutionType::Barrier)
+      BarrierOp(b, x);
+    else if constexpr (FBST == FBSubstitutionType::NoBarrier)
+      NoBarrierOp(b, x);
+    else if constexpr (FBST == FBSubstitutionType::NoBarrierSuperNode)
+      NoBarrierSuperNodeOp(b, x);
+  }
+
+  void BarrierOp(const VALTYPE *const b, VALTYPE *const x) const {
+    // matrix_utils::permuteVec(_size, _reorderedMat.base, b,
+    // _threadiperm.data(),
+    //                          _vec.data());
 #pragma omp parallel num_threads(_nthreads)
     {
       const int tid = omp_get_thread_num();
@@ -197,25 +232,76 @@ public:
           for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
                j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
             const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
+            // _vec[i] -= _reorderedMat.av[j] * _vec[j_idx];
+            x[idx] -= _reorderedMat.av[j] * x[j_idx];
+          }
+        }
+#pragma omp barrier
+      }
+    }
+    // std::copy(_vec.begin(), _vec.end(), x);
+    // matrix_utils::permuteVec(_size, _reorderedMat.base, _vec.data(),
+    //                          _threadperm.data(), x);
+  }
 
-            if constexpr (!WithBarrier) {
-              while (!_bv.get(j_idx)) {
-                std::this_thread::yield();
-                // sleep(0);
-                // std::this_thread::sleep_for(std::chrono::nanoseconds(1));
-                // std::cout << "j_idx: " << j_idx << std::endl;
-                // continue;
-              }
+  void NoBarrierOp(const VALTYPE *const b, VALTYPE *const x) const {
+    _bv.clearAll();
+#pragma omp parallel num_threads(_nthreads)
+    {
+      const int tid = omp_get_thread_num();
+      const int nthreads = omp_get_num_threads();
+      for (COLTYPE l = 0; l < _levels; l++) {
+        const COLTYPE start = _threadlevels[tid][l];
+        const COLTYPE end = _threadlevels[tid][l + 1];
+        // std::cout << "tid: " << tid << " , start: " << start
+        //           << " , end: " << end << std::endl;
+        for (COLTYPE i = start; i < end; i++) {
+          const SIZE idx = _threadiperm[i] - _reorderedMat.base;
+          x[idx] = b[idx];
+          for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
+               j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
+            const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
+
+            while (!_bv.get(j_idx)) {
+              std::this_thread::yield();
             }
             x[idx] -= _reorderedMat.av[j] * x[j_idx];
           }
-          if constexpr (!WithBarrier) {
-            _bv.set(idx);
+          _bv.set(idx);
+        }
+      }
+    }
+  }
+
+  void NoBarrierSuperNodeOp(const VALTYPE *const b, VALTYPE *const x) const {
+    _bv.clearAll();
+#pragma omp parallel num_threads(_nthreads)
+    {
+      const int tid = omp_get_thread_num();
+      const int nthreads = omp_get_num_threads();
+      for (COLTYPE task = _threadTaskPrefix[tid];
+           task < _threadTaskPrefix[tid + 1]; task++) {
+
+        for (COLTYPE i = _taskInvAdjGraph2.ai[task];
+             i < _taskInvAdjGraph2.ai[task + 1]; i++) {
+          const COLTYPE j_idx = _taskInvAdjGraph2.aj[i];
+          while (!_bv.get(j_idx)) {
+            std::this_thread::yield();
+            // std::this_thread::sleep_for(std::chrono::milliseconds(1));
           }
         }
-        if constexpr (WithBarrier) {
-#pragma omp barrier
+
+        for (COLTYPE i = _taskBoundaryPrefix[task];
+             i < _taskBoundaryPrefix[task + 1]; i++) {
+          const SIZE idx = _threadiperm[i] - _reorderedMat.base;
+          x[idx] = b[idx];
+          for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
+               j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
+            const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
+            x[idx] -= _reorderedMat.av[j] * x[j_idx];
+          }
         }
+        _bv.set(task);
       }
     }
   }
@@ -235,12 +321,13 @@ public:
       const int tid = omp_get_thread_num();
       const int nthreads = omp_get_num_threads();
 
+      // count the number of tasks for each thread
       COLTYPE cnt = 0;
       for (COLTYPE l = 0; l < _levels; l++) {
         if (_threadlevels[tid][l + 1] > _threadlevels[tid][l])
           ++cnt;
       }
-      _threadTaskPrefix[tid + 1] = cnt;
+      _threadTaskPrefix[tid + 1] = cnt; // tasks in each thread
 
 #pragma omp barrier
 #pragma omp single
@@ -272,11 +359,13 @@ public:
         // _taskAdjGraph.aj.resize(_reorderedMat.nnz());
       }
 
+      // build task boundary prefix (prefix of task sizes)
       COLTYPE taskOffset = _threadTaskPrefix[tid];
       for (COLTYPE l = 0; l < _levels; l++) {
-        if (_threadlevels[tid][l + 1] > _threadlevels[tid][l])
-          _taskBoundaryPrefix[taskOffset++] =
+        if (_threadlevels[tid][l + 1] > _threadlevels[tid][l]) {
+          _taskBoundaryPrefix[++taskOffset] =
               _threadlevels[tid][l + 1] - _threadlevels[tid][l];
+        }
       }
 
 #pragma omp barrier
@@ -288,14 +377,9 @@ public:
                             _taskBoundaryPrefix.begin());
       }
 
-      // split  tasks to each  thread
+      // split tasks to each thread
       auto [start, end] =
           utils::LoadBalancedPartitionPos(_tasks, tid, nthreads);
-#pragma omp critical
-      {
-        std::cout << "tid: " << tid << " start:  " << start << "  end: " << end
-                  << std::endl;
-      }
       _threadPrefixSum[tid + 1] = 0;
       for (COLTYPE task = start; task < end; task++) {
         COLTYPE invAdjSizePerTask = 0;
@@ -304,8 +388,8 @@ public:
           invAdjSizePerTask += _reorderedMat.ai[i + 1] - _reorderedMat.ai[i];
           _reorderedRowIdToTaskId[i] = task;
         }
-        invAdjSizePerTask +=
-            1; // added 1 for task -> task-1 dependency within each super-tasks
+        invAdjSizePerTask += 1; // added 1 for task -> task-1 dependency
+                                // within each super-tasks
         _threadPrefixSum[tid + 1] += invAdjSizePerTask;
         _taskInvAdjGraph.ai[task + 1] = _threadPrefixSum[tid + 1];
         // #pragma omp critical
@@ -322,6 +406,7 @@ public:
         std::inclusive_scan(_threadPrefixSum.begin(), _threadPrefixSum.end(),
                             _threadPrefixSum.begin());
       }
+
       for (COLTYPE task = start; task < end; task++) {
         _taskInvAdjGraph.ai[task + 1] += _threadPrefixSum[tid];
       }
@@ -342,15 +427,9 @@ public:
           tid, nthreads);
 
       COLTYPE maxInvAdjSize = 0;
-      for (auto task = start; task < end; task++) {
+      for (auto task = start2; task < end2; task++) {
         maxInvAdjSize = std::max(maxInvAdjSize, _taskInvAdjGraph.ai[task + 1] -
                                                     _taskInvAdjGraph.ai[task]);
-      }
-
-#pragma omp critical
-      {
-        std::cout << "tid: " << tid << " startPos: " << start
-                  << " endPos: " << end << std::endl;
       }
 
       auto startThread =
@@ -376,19 +455,18 @@ public:
         const COLTYPE startTask =
             std::max(static_cast<COLTYPE>(start2), threadBegin);
         const COLTYPE endTask = std::min(static_cast<COLTYPE>(end2), threadEnd);
-#pragma omp critical
-        std::cout << "tid: " << tid << " startTask: " << startTask
-                  << " endTask: " << endTask << std::endl;
+
         for (auto task = startTask; task < endTask; task++) {
           maxInvAdjSize = 0;
           if (task != threadBegin)
             _taskInvAdj[tid][maxInvAdjSize++] = task - 1;
           for (COLTYPE row = _taskBoundaryPrefix[task];
                row < _taskBoundaryPrefix[task + 1]; row++) {
-            for (COLTYPE j = _reorderedMat.ai[row] - _reorderedMat.base;
-                 j < _reorderedMat.ai[row + 1] - _reorderedMat.base; j++) {
-              auto col = _reorderedRowIdToTaskId[_reorderedMat.aj[j] -
-                                                 _reorderedMat.base];
+            for (COLTYPE i = _reorderedMat.ai[row] - _reorderedMat.base;
+                 i < _reorderedMat.ai[row + 1] - _reorderedMat.base; i++) {
+              COLTYPE j = _reorderedMat.aj[i] - _reorderedMat.base;
+              auto col =
+                  _reorderedRowIdToTaskId[_threadperm[j] - _reorderedMat.base];
               if (col < threadBegin || col >= threadEnd) {
                 _taskInvAdj[tid][maxInvAdjSize++] = col;
               }
@@ -400,10 +478,7 @@ public:
               _taskInvAdj[tid].begin(),
               std::unique(_taskInvAdj[tid].begin(),
                           _taskInvAdj[tid].begin() + maxInvAdjSize));
-          // // #pragma omp critical
-          // //           std::cout << "tid: " << tid << " maxInvAdjSize: " <<
-          // //           maxInvAdjSize
-          // //                     << std::endl;
+
           _taskAdjGraph.ai[task + 1] = maxInvAdjSize;
           std::copy(_taskInvAdj[tid].begin(),
                     _taskInvAdj[tid].begin() + maxInvAdjSize,
@@ -421,7 +496,6 @@ public:
 #pragma omp barrier
 #pragma omp single
       {
-
         std::inclusive_scan(_threadPrefixSum.begin(), _threadPrefixSum.end(),
                             _threadPrefixSum.begin());
         _taskAdjGraph.aj.resize(_threadPrefixSum[_nthreads]);
@@ -436,10 +510,9 @@ public:
 
 #pragma omp barrier
       for (auto task = start2; task < end2; task++) {
-        std::copy(_taskInvAdjGraph.aj.begin() + _taskInvAdjGraph.ai[task],
-                  _taskInvAdjGraph.aj.begin() + _taskInvAdjGraph.ai[task] +
-                      _taskAdjGraph.ai[task + 1] - _taskAdjGraph.ai[task],
-                  _taskAdjGraph.aj.begin() + _taskAdjGraph.ai[task]);
+        std::copy_n(_taskInvAdjGraph.aj.begin() + _taskInvAdjGraph.ai[task],
+                    _taskAdjGraph.ai[task + 1] - _taskAdjGraph.ai[task],
+                    _taskAdjGraph.aj.begin() + _taskAdjGraph.ai[task]);
       }
     }
 
@@ -471,7 +544,13 @@ public:
     // }
 
     _taskAdjGraph.aj.resize(_taskInvAdjGraph.nnz());
-    matrix_utils::ParallelTranspose2(
+    // matrix_utils::ParallelTranspose(
+    //     _taskInvAdjGraph.rows, _taskInvAdjGraph.cols,
+    // _taskInvAdjGraph.base,
+    //     _taskInvAdjGraph.ai.data(), _taskInvAdjGraph.aj.data(),
+    //     (VALTYPE const *)nullptr, _taskAdjGraph.ai.data(),
+    //     _taskAdjGraph.aj.data(), (VALTYPE *)nullptr);
+    matrix_utils::SerialTranspose(
         _taskInvAdjGraph.rows, _taskInvAdjGraph.cols, _taskInvAdjGraph.base,
         _taskInvAdjGraph.ai.data(), _taskInvAdjGraph.aj.data(),
         (VALTYPE const *)nullptr, _taskAdjGraph.ai.data(),
@@ -485,6 +564,7 @@ public:
     // _taskInvAdjGraph2.aj.resize(_taskInvAdjGraph.aj.size());
     _transitiveEdgeRemoveAj.resize(_taskInvAdjGraph.aj.size());
 
+#ifdef DEBUG
     std::cout << "_taskAdjGraph is valid: "
               << matrix_utils::ValidCSR(
                      _taskAdjGraph.rows, _taskAdjGraph.cols, _taskAdjGraph.base,
@@ -497,6 +577,7 @@ public:
                      _taskInvAdjGraph.base, _taskInvAdjGraph.ai.data(),
                      _taskInvAdjGraph.aj.data())
               << std::endl;
+#endif
 
     // for (ROWTYPE i = 0; i < _taskInvAdjGraph.rows; i++) {
     //   for (COLTYPE j = _taskInvAdjGraph.ai[i]; j < _taskInvAdjGraph.ai[i +
@@ -616,6 +697,7 @@ public:
       }
 
 #pragma omp barrier
+
       for (auto task = start3; task < end3; task++) {
         std::copy(_transitiveEdgeRemoveAj.begin() + _taskInvAdjGraph.ai[task],
                   _transitiveEdgeRemoveAj.begin() + _taskInvAdjGraph.ai[task] +
@@ -625,40 +707,44 @@ public:
       }
     }
 
-    std::cout << "_taskInvAdjGraph2 is valid: "
-              << matrix_utils::ValidCSR(
-                     _taskInvAdjGraph2.rows, _taskInvAdjGraph2.cols,
-                     _taskInvAdjGraph2.base, _taskInvAdjGraph2.ai.data(),
-                     _taskInvAdjGraph2.aj.data())
-              << std::endl;
+    // // sanity check
+    // {
+    //   std::cout << "_taskInvAdjGraph2 is valid: "
+    //             << matrix_utils::ValidCSR(
+    //                    _taskInvAdjGraph2.rows, _taskInvAdjGraph2.cols,
+    //                    _taskInvAdjGraph2.base, _taskInvAdjGraph2.ai.data(),
+    //                    _taskInvAdjGraph2.aj.data())
+    //             << std::endl;
 
-    std::ifstream f("test.bin");
-    if (!f.good()) {
-      std::ofstream ofs("test.bin", std::ios::binary);
-      std::stringstream ss;
-      cereal::BinaryOutputArchive oarchive(ss);
-      oarchive(_taskInvAdjGraph2);
-      ofs << ss.rdbuf();
-    } else {
-      std::ifstream ofs("test.bin", std::ios::binary);
-      std::stringstream ss;
-      ss << ofs.rdbuf();
-      ofs.close();
-      CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> temp;
-      cereal::BinaryInputArchive iarchive(ss);
-      iarchive(temp);
-      for (auto i = 0; i < temp.aj.size(); i++) {
-        if (temp.aj[i] != _taskInvAdjGraph2.aj[i])
-          std::cout << "fucked\n";
-      }
-      for (auto i = 0; i < temp.ai.size(); i++) {
-        if (temp.ai[i] != _taskInvAdjGraph2.ai[i])
-          std::cout << "fucked\n";
-      }
-      std::cout << _taskInvAdjGraph.nnz() << " " << _taskInvAdjGraph2.nnz()
-                << std::endl;
-      std::cout << "finished check\n";
-    }
+    //   std::ifstream f("test.bin");
+    //   if (!f.good()) {
+    //     std::ofstream ofs("test.bin", std::ios::binary);
+    //     std::stringstream ss;
+    //     cereal::BinaryOutputArchive oarchive(ss);
+    //     oarchive(_taskInvAdjGraph2);
+    //     ofs << ss.rdbuf();
+    //   } else {
+    //     std::ifstream ofs("test.bin", std::ios::binary);
+    //     std::stringstream ss;
+    //     ss << ofs.rdbuf();
+    //     ofs.close();
+    //     CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> temp;
+    //     cereal::BinaryInputArchive iarchive(ss);
+    //     iarchive(temp);
+    //     for (auto i = 0; i < temp.aj.size(); i++) {
+    //       if (temp.aj[i] != _taskInvAdjGraph2.aj[i])
+    //         std::cout << "fucked\n";
+    //     }
+    //     for (auto i = 0; i < temp.ai.size(); i++) {
+    //       if (temp.ai[i] != _taskInvAdjGraph2.ai[i])
+    //         std::cout << "fucked\n";
+    //     }
+    //     std::cout << _taskInvAdjGraph.nnz() << " " <<
+    //     _taskInvAdjGraph2.nnz()
+    //               << std::endl;
+    //     std::cout << "finished check\n";
+    //   }
+    // }
   }
 
 protected:
@@ -666,13 +752,16 @@ protected:
   SIZE _size;
   std::vector<COLTYPE> _iperm;
   std::vector<COLTYPE> _levelPrefix;
+  mutable std::vector<double> _vec;
 
   COLTYPE _levels;
   std::vector<std::vector<COLTYPE>>
-      _threadlevels; // level prefix for each thread
+      _threadlevels; // level prefix for each thread, zero based
   std::vector<COLTYPE> _threadiperm;
+  std::vector<COLTYPE> _threadperm;
   CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _reorderedMat;
 
+  // super node level scheduling data
   // always zero based
   COLTYPE _tasks;
   CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskAdjGraph;    // children
@@ -692,5 +781,5 @@ protected:
 
   // debugging
   // std::vector<COLTYPE> taskSizes;
-}; // namespace matrix_utils
+};
 } // namespace matrix_utils
