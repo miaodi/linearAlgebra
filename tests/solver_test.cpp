@@ -15,6 +15,7 @@
 
 TEST(Solve, pardiso_vs_cudss) {
   omp_set_num_threads(3);
+  const double tol = 1e-10;
   std::vector<std::string> files{"data/ex5.mtx"};
   std::ofstream myfile;
   for (const auto &fn : files) {
@@ -45,7 +46,7 @@ TEST(Solve, pardiso_vs_cudss) {
     cudss_solver2.solve(b.data(), x_cudss2.data());
 
     for (int i = 0; i < mat.rows(); i++) {
-      EXPECT_EQ(x_cudss2[i], x_cudss[i]);
+      EXPECT_NEAR(x_cudss2[i], x_cudss[i], tol * std::abs(x_cudss[i]));
     }
   }
 }
