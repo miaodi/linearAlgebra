@@ -58,9 +58,9 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
   template <class Archive> void serialize(Archive &ar) { ar(ai, aj, av); }
 };
 
-template <typename SIZE = int, typename ROWTYPE = int, typename COLTYPE = int,
+template <typename ROWTYPE = int, typename COLTYPE = int,
           typename VALTYPE = double>
-decltype(auto) AllocateCSRData(const SIZE rows, const ROWTYPE nnz) {
+decltype(auto) AllocateCSRData(const COLTYPE rows, const ROWTYPE nnz) {
 
   std::shared_ptr<ROWTYPE[]> ai(new ROWTYPE[rows + 1]);
   std::shared_ptr<COLTYPE[]> aj(new COLTYPE[nnz]);
@@ -79,21 +79,21 @@ decltype(auto) AllocateCSRData(const SIZE rows, const ROWTYPE nnz) {
 /// @param ai_transpose row index of transpose matrix
 /// @param aj_transpose column index transpose matrix
 /// @param av_transpose value vector transpose matrix
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void SerialTranspose(const SIZE rows, const SIZE cols, const int base,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void SerialTranspose(const COLTYPE rows, const COLTYPE cols, const int base,
                      ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
                      ROWTYPE *ai_transpose, COLTYPE *aj_transpose,
                      VALTYPE *av_transpose) {
   const bool update_av = av_transpose != nullptr && av != nullptr;
-  const SIZE cols_transpose = rows;
-  const SIZE rows_transpose = cols;
+  const COLTYPE cols_transpose = rows;
+  const COLTYPE rows_transpose = cols;
   const auto nnz = ai[rows] - base;
 
   ai_transpose[0] = base;
   std::fill_n(std::execution::seq, ai_transpose + 1, rows_transpose, 0);
 
   // assign size of row i to ai[i+1]
-  for (size_t i = 0; i < nnz; i++) {
+  for (auto i = 0; i < nnz; i++) {
     if (aj[i] - base + 2 < rows_transpose + 1)
       ai_transpose[aj[i] - base + 2]++;
   }
@@ -101,7 +101,7 @@ void SerialTranspose(const SIZE rows, const SIZE cols, const int base,
   std::inclusive_scan(ai_transpose, ai_transpose + rows_transpose + 1,
                       ai_transpose);
 
-  for (SIZE i = 0; i < rows; i++) {
+  for (COLTYPE i = 0; i < rows; i++) {
     for (COLTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
       const COLTYPE idx = ai_transpose[aj[j] - base + 1]++ - base;
       aj_transpose[idx] = i + base;
@@ -119,13 +119,13 @@ void SerialTranspose(const SIZE rows, const SIZE cols, const int base,
 /// @param ai row index
 /// @param aj column index
 /// @param av value vector
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void ParallelTranspose(const COLTYPE rows, const COLTYPE cols, const int base,
                        ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
                        ROWTYPE *ai_transpose, COLTYPE *aj_transpose,
                        VALTYPE *av_transpose) {
-  const SIZE cols_transpose = rows;
-  const SIZE rows_transpose = cols;
+  const COLTYPE cols_transpose = rows;
+  const COLTYPE rows_transpose = cols;
   const auto nnz = ai[rows] - base;
   const bool update_av = av_transpose != nullptr && av != nullptr;
 
@@ -151,7 +151,7 @@ void ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
 
 #pragma omp barrier
 #pragma omp for
-    for (SIZE rowID = 0; rowID < rows_transpose; rowID++) {
+    for (COLTYPE rowID = 0; rowID < rows_transpose; rowID++) {
       ai_transpose[rowID + 1] = 0;
       for (int t = 0; t < nthreads; t++) {
         ai_transpose[rowID + 1] += threadPrefixSum[t][rowID];
@@ -164,7 +164,7 @@ void ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
                         ai_transpose);
 
 #pragma omp for
-    for (SIZE rowID = 0; rowID < rows_transpose; rowID++) {
+    for (COLTYPE rowID = 0; rowID < rows_transpose; rowID++) {
       ROWTYPE tmp = threadPrefixSum[0][rowID];
       threadPrefixSum[0][rowID] = ai_transpose[rowID];
       for (int t = 1; t < nthreads; t++) {
@@ -177,7 +177,7 @@ void ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
 
     for (auto it = start; it < end; it++) {
       for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
-        const SIZE rowID = it - ai;
+        const COLTYPE rowID = it - ai;
         const COLTYPE idx = threadPrefixSum[tid][aj[j] - base]++ - base;
         aj_transpose[idx] = rowID + base;
         if (update_av)
@@ -195,13 +195,13 @@ void ParallelTranspose(const SIZE rows, const SIZE cols, const int base,
 /// @param ai row index
 /// @param aj column index
 /// @param av value vector
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ParallelTranspose2(const SIZE rows, const SIZE cols, const int base,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void ParallelTranspose2(const COLTYPE rows, const COLTYPE cols, const int base,
                         ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
                         ROWTYPE *ai_transpose, COLTYPE *aj_transpose,
                         VALTYPE *av_transpose) {
-  const SIZE cols_transpose = rows;
-  const SIZE rows_transpose = cols;
+  const COLTYPE cols_transpose = rows;
+  const COLTYPE rows_transpose = cols;
   const auto nnz = ai[rows] - base;
   ai_transpose[0] = base;
   const bool update_av = av_transpose != nullptr && av != nullptr;
@@ -273,9 +273,9 @@ void ParallelTranspose2(const SIZE rows, const SIZE cols, const int base,
   }
 }
 
-template <typename SIZE, typename ROWTYPE, typename COLTYPE>
-void permutedAI(const SIZE rows, const int base, ROWTYPE const *ai,
-                COLTYPE const *aj, COLTYPE const *iperm, ROWTYPE *permed_ai) {
+template <typename ROWTYPE, typename COLTYPE>
+void permutedAI(const COLTYPE rows, const int base, ROWTYPE const *ai,
+                COLTYPE const *iperm, ROWTYPE *permed_ai) {
   if (iperm == nullptr) {
     std::copy(std::execution::par, ai, ai + rows + 1, permed_ai);
   }
@@ -310,12 +310,12 @@ void permutedAI(const SIZE rows, const int base, ROWTYPE const *ai,
   permed_ai[0] = base;
 }
 
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void permute(const SIZE rows, const int base, ROWTYPE const *ai,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void permute(const COLTYPE rows, const int base, ROWTYPE const *ai,
              COLTYPE const *aj, VALTYPE const *av, COLTYPE const *iperm,
              COLTYPE const *perm, ROWTYPE *permed_ai, COLTYPE *permed_aj,
              VALTYPE *permed_av) {
-  permutedAI(rows, base, ai, aj, iperm, permed_ai);
+  permutedAI(rows, base, ai, iperm, permed_ai);
   const auto nnz = ai[rows] - base;
 
 #pragma omp parallel
@@ -355,20 +355,20 @@ void permute(const SIZE rows, const int base, ROWTYPE const *ai,
   }
 }
 
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void permuteRow(const SIZE rows, const int base, ROWTYPE const *ai,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void permuteRow(const COLTYPE rows, const int base, ROWTYPE const *ai,
                 COLTYPE const *aj, VALTYPE const *av, COLTYPE const *iperm,
                 ROWTYPE *permed_ai, COLTYPE *permed_aj, VALTYPE *permed_av) {
   permute(rows, base, ai, aj, av, iperm, (COLTYPE const *)nullptr, permed_ai,
           permed_aj, permed_av);
 }
 
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void symPermute(const SIZE rows, const int base, ROWTYPE const *ai,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
                 COLTYPE const *aj, VALTYPE const *av, COLTYPE const *iperm,
                 ROWTYPE *permed_ai, COLTYPE *permed_aj, VALTYPE *permed_av) {
   // upper triangular
-  const SIZE n = rows;
+  const COLTYPE n = rows;
   const auto nnz = ai[rows] - base;
   permed_ai[0] = base;
   std::vector<MKL_INT> ai_prefix(n * (omp_get_max_threads() + 1), 0);
@@ -443,17 +443,17 @@ void symPermute(const SIZE rows, const int base, ROWTYPE const *ai,
   }
 }
 
-template <typename SIZE, typename COLTYPE, typename VALTYPE>
-void permuteVec(const SIZE rows, const int base, VALTYPE const *const v,
+template <typename COLTYPE, typename VALTYPE>
+void permuteVec(const COLTYPE rows, const int base, VALTYPE const *const v,
                 COLTYPE const *const iperm, VALTYPE *const permed_v) {
   if (iperm) {
 #pragma omp parallel for
-    for (SIZE i = 0; i < rows; i++) {
+    for (COLTYPE i = 0; i < rows; i++) {
       permed_v[i] = v[iperm[i] - base];
     }
   } else {
 #pragma omp parallel for
-    for (SIZE i = 0; i < rows; i++) {
+    for (COLTYPE i = 0; i < rows; i++) {
       permed_v[i] = v[i];
     }
   }
@@ -464,9 +464,9 @@ using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
 
 enum TriangularSolve { L = 0, U = 1 };
 
-template <TriangularSolve TS = L, typename SIZE, typename ROWTYPE,
-          typename COLTYPE, typename VEC>
-void TopologicalSort(const SIZE nodes, const int base, ROWTYPE const *ai,
+template <TriangularSolve TS = L, typename ROWTYPE, typename COLTYPE,
+          typename VEC>
+void TopologicalSort(const COLTYPE nodes, const int base, ROWTYPE const *ai,
                      COLTYPE const *aj, VEC &iperm, VEC &prefix) {
   iperm.reserve(nodes);
   iperm.clear();
@@ -475,7 +475,7 @@ void TopologicalSort(const SIZE nodes, const int base, ROWTYPE const *ai,
   prefix.resize(1);
   prefix[0] = 0;
   prefix.push_back(prefix.back());
-  SIZE start, end, inc;
+  COLTYPE start, end, inc;
   if constexpr (TS == L) {
     start = 0;
     end = nodes;
@@ -486,7 +486,7 @@ void TopologicalSort(const SIZE nodes, const int base, ROWTYPE const *ai,
     inc = -1;
   }
 
-  for (SIZE i = start; i != end; i += inc) {
+  for (COLTYPE i = start; i != end; i += inc) {
     degrees[i] = ai[i + 1] - ai[i];
     if (degrees[i] == 0) {
       iperm.push_back(i + base);
@@ -513,12 +513,12 @@ void TopologicalSort(const SIZE nodes, const int base, ROWTYPE const *ai,
   }
 }
 
-template <TriangularSolve TS = L, typename SIZE, typename ROWTYPE,
-          typename COLTYPE, typename VEC>
-void TopologicalSort2(const SIZE nodes, const int base, ROWTYPE const *ai,
+template <TriangularSolve TS = L, typename ROWTYPE, typename COLTYPE,
+          typename VEC>
+void TopologicalSort2(const COLTYPE nodes, const int base, ROWTYPE const *ai,
                       COLTYPE const *aj, VEC &iperm, VEC &prefix) {
   std::vector<int> degrees(nodes, 0);
-  SIZE start, end, inc;
+  COLTYPE start, end, inc;
   if constexpr (TS == L) {
     start = 0;
     end = nodes;
@@ -528,8 +528,8 @@ void TopologicalSort2(const SIZE nodes, const int base, ROWTYPE const *ai,
     end = -1;
     inc = -1;
   }
-  SIZE level = 0;
-  for (SIZE i = start; i != end; i += inc) {
+  COLTYPE level = 0;
+  for (COLTYPE i = start; i != end; i += inc) {
     for (auto j = ai[i] - base; j < ai[i + 1] - base; j++) {
       degrees[i] = std::max(degrees[i], degrees[aj[j] - base] + 1);
     }
@@ -539,26 +539,26 @@ void TopologicalSort2(const SIZE nodes, const int base, ROWTYPE const *ai,
   prefix.resize(level + 1);
   std::fill(prefix.begin(), prefix.end(), 0);
 
-  for (SIZE i = 0; i < nodes; i++) {
+  for (COLTYPE i = 0; i < nodes; i++) {
     prefix[degrees[i] + 1]++;
   }
   std::inclusive_scan(prefix.begin(), prefix.end(), prefix.begin());
 
   iperm.resize(nodes);
-  for (SIZE i = 0; i < nodes; i++) {
+  for (COLTYPE i = 0; i < nodes; i++) {
     iperm[prefix[degrees[i]]++] = i + base;
   }
   std::rotate(prefix.rbegin(), prefix.rbegin() + 1, prefix.rend());
   prefix[0] = 0;
 }
 
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VEC>
-bool DiagonalPosition(const SIZE rows, const int base, ROWTYPE const *ai,
+template <typename ROWTYPE, typename COLTYPE, typename VEC>
+bool DiagonalPosition(const COLTYPE rows, const int base, ROWTYPE const *ai,
                       COLTYPE const *aj, VEC &diag) {
   diag.resize(rows);
   volatile bool missing_diag = false;
 #pragma omp parallel for shared(missing_diag)
-  for (SIZE i = 0; i < rows; i++) {
+  for (COLTYPE i = 0; i < rows; i++) {
     if (missing_diag)
       continue;
     auto mid =
@@ -577,7 +577,6 @@ bool DiagonalPosition(const SIZE rows, const int base, ROWTYPE const *ai,
 
 /// @brief Split a matrix into strictly lower triangular matrix L, diagonal D,
 /// and strictly upper triangular matrix U
-/// @tparam SIZE
 /// @tparam R
 /// @tparam C
 /// @tparam V
@@ -590,8 +589,8 @@ bool DiagonalPosition(const SIZE rows, const int base, ROWTYPE const *ai,
 /// @param D diagonal matrix, stored as a vector. Note that zero diagonal is
 /// allowed
 /// @param U strictly upper triangular matrix
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
               COLTYPE const *aj, VALTYPE const *av,
               CSRMatrix<ROWTYPE, COLTYPE, VALTYPE> &L, std::vector<VALTYPE> &D,
               CSRMatrix<ROWTYPE, COLTYPE, VALTYPE> &U) {
@@ -599,7 +598,7 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
   L.rows = rows;
   L.cols = rows;
   L.base = base;
-  if (L.ai_size < rows + 1) {
+  if (L.ai_size < static_cast<size_t>(rows) + 1) {
     L.ai.reset(new ROWTYPE[rows + 1]);
     L.ai_size = rows + 1;
   }
@@ -607,7 +606,7 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
   U.rows = rows;
   U.cols = rows;
   U.base = base;
-  if (U.ai_size < rows + 1) {
+  if (U.ai_size < static_cast<size_t>(rows) + 1) {
     U.ai.reset(new ROWTYPE[rows + 1]);
     U.ai_size = rows + 1;
   }
@@ -628,7 +627,7 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
     LU_prefix[tid + 1].first = 0;
     LU_prefix[tid + 1].second = 0;
     for (auto it = start; it < end; it++) {
-      SIZE i = it - ai;
+      COLTYPE i = it - ai;
       auto mid =
           std::lower_bound(aj + *it - base, aj + *(it + 1) - base, i + base);
       const bool zero_diag = (mid == aj + *(it + 1) - base || *mid != i + base);
@@ -649,21 +648,21 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
         LU_prefix[i].second += LU_prefix[i - 1].second;
       }
       L.nnz = LU_prefix[nthreads].first;
-      if (L.aj_size < L.nnz) {
+      if (L.aj_size < static_cast<size_t>(L.nnz)) {
         L.aj.reset(new COLTYPE[L.nnz]);
         L.aj_size = L.nnz;
       }
-      if (L.av_size < L.nnz) {
+      if (L.av_size < static_cast<size_t>(L.nnz)) {
         L.av.reset(new VALTYPE[L.nnz]);
         L.av_size = L.nnz;
       }
 
       U.nnz = LU_prefix[nthreads].second;
-      if (U.aj_size < U.nnz) {
+      if (U.aj_size < static_cast<size_t>(U.nnz)) {
         U.aj.reset(new COLTYPE[U.nnz]);
         U.aj_size = U.nnz;
       }
-      if (U.av_size < U.nnz) {
+      if (U.av_size < static_cast<size_t>(U.nnz)) {
         U.av.reset(new VALTYPE[U.nnz]);
         U.av_size = U.nnz;
       }
@@ -672,7 +671,7 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
     ROWTYPE L_pos = LU_prefix[tid].first - base;
     ROWTYPE U_pos = LU_prefix[tid].second - base;
     for (auto it = start; it < end; it++) {
-      SIZE i = it - ai;
+      COLTYPE i = it - ai;
       const bool zero_diag = (diag[i] == nnz || aj[diag[i]] - base != i);
       L.ai[i + 1] += LU_prefix[tid].first;
       U.ai[i + 1] += LU_prefix[tid].second;
@@ -690,14 +689,14 @@ void SplitLDU(const SIZE rows, const int base, ROWTYPE const *ai,
   }
 }
 
-template <typename SIZE, typename ROWTYPE, typename COLTYPE>
-bool ValidCSR(const SIZE rows, const SIZE cols, const int base,
+template <typename ROWTYPE, typename COLTYPE>
+bool ValidCSR(const COLTYPE rows, const COLTYPE cols, const int base,
               ROWTYPE const *ai, COLTYPE const *aj) {
   if (ai[0] != base) {
     std::cout << "ai[0] is not equal to base" << std::endl;
     return false;
   }
-  for (SIZE i = 0; i < rows; i++) {
+  for (COLTYPE i = 0; i < rows; i++) {
     if (ai[i + 1] < ai[i]) {
       std::cout << "ai is not monotonically increasing" << std::endl;
       return false;

@@ -2,8 +2,6 @@
 
 #include "BitVector.hpp"
 #include "utils.h"
-#include <cereal/archives/binary.hpp>
-#include <cereal/types/vector.hpp>
 #include <chrono>
 #include <execution>
 #include <fstream>
@@ -21,7 +19,6 @@ namespace matrix_utils {
 
 /// @brief Forward-substitution algorithm for low triangular csr matrix L. Note
 /// that the diagonal term is assumed to be 1
-/// @tparam SIZE
 /// @tparam R
 /// @tparam C
 /// @tparam V
@@ -33,23 +30,50 @@ namespace matrix_utils {
 /// @param av
 /// @param rhs
 /// @param x
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ForwardSubstitution(const SIZE size, const int base, ROWTYPE const *ai,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void ForwardSubstitution(const COLTYPE size, const int base, ROWTYPE const *ai,
                          COLTYPE const *aj, VALTYPE const *av,
                          VALTYPE const *const b, VALTYPE *const x) {
-  ROWTYPE j;
-  for (SIZE i = 0; i < size; i++) {
-    x[i] = b[i];
-    for (j = ai[i] - base; j < ai[i + 1] - base; j++) {
-      x[i] -= av[j] * x[aj[j] - base];
+  for (COLTYPE i = 0; i < size; i++) {
+    VALTYPE val = 0;
+    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+      val += av[j] * x[aj[j] - base];
     }
+    x[i] = b[i] - val;
+  }
+}
+
+/// @brief Backword-substitution algorithm for low triangular csr matrix L. Note
+/// that the diagonal term is assumed to be 1
+/// @brief
+/// @tparam ROWTYPE
+/// @tparam COLTYPE
+/// @tparam VALTYPE
+/// @param size
+/// @param base
+/// @param ai   csr of the strict upper triangular matrix
+/// @param aj
+/// @param av
+/// @param diag diagonal vector
+/// @param b
+/// @param x
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void BackwardSubstitution(const COLTYPE size, const int base, ROWTYPE const *ai,
+                          COLTYPE const *aj, VALTYPE const *av,
+                          VALTYPE const *diag, VALTYPE const *const b,
+                          VALTYPE *const x) {
+  for (COLTYPE i = size - 1; i >= 0; i--) {
+    VALTYPE val = 0;
+    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+      val += av[j] * x[aj[j] - base];
+    }
+    x[i] = (b[i] - val) / diag[i];
   }
 }
 
 /// @brief Forward-substitution algorithm for low triangular csr matrix L
 /// obtained by the transpose of a strict upper triangular csr matrix. Note that
 /// the diagonal term is assumed to be 1
-/// @tparam SIZE
 /// @tparam R
 /// @tparam C
 /// @tparam V
@@ -61,23 +85,22 @@ void ForwardSubstitution(const SIZE size, const int base, ROWTYPE const *ai,
 /// @param av
 /// @param rhs
 /// @param x
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ForwardSubstitutionT(const SIZE size, const int base, ROWTYPE const *ai,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void ForwardSubstitutionT(const COLTYPE size, const int base, ROWTYPE const *ai,
                           COLTYPE const *aj, VALTYPE const *av,
                           VALTYPE const *const b, VALTYPE *const x) {
   ROWTYPE j;
   std::copy(b, b + size, x);
-  for (SIZE i = 0; i < size; i++) {
+  for (COLTYPE i = 0; i < size; i++) {
     for (j = ai[i] - base; j < ai[i + 1] - base; j++) {
       x[aj[j] - base] -= av[j] * x[i];
     }
   }
 }
 
-template <typename SIZE, typename ROWTYPE, typename COLTYPE, typename VALTYPE,
-          typename VEC>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename VEC>
 void LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
-                                      const SIZE rows, const int base,
+                                      const COLTYPE rows, const int base,
                                       ROWTYPE const *ai, COLTYPE const *aj,
                                       VALTYPE const *av, VALTYPE const *const b,
                                       VALTYPE *const x) {
@@ -85,12 +108,37 @@ void LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
   {
     for (int l = 0; l < prefix.size() - 1; l++) {
 #pragma omp for
-      for (SIZE i = prefix[l]; i < prefix[l + 1]; i++) {
-        const SIZE idx = iperm[i] - base;
-        x[idx] = b[idx];
+      for (COLTYPE i = prefix[l]; i < prefix[l + 1]; i++) {
+        const COLTYPE idx = iperm[i] - base;
+        VALTYPE val = 0;
         for (auto j = ai[idx] - base; j < ai[idx + 1] - base; j++) {
-          x[idx] -= av[j] * x[aj[j] - base];
+          val += av[j] * x[aj[j] - base];
         }
+        x[idx] = b[idx] - val;
+      }
+#pragma omp barrier
+    }
+  }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename VEC>
+void LevelScheduleBackwardSubstitution(const VEC &iperm, const VEC &prefix,
+                                       const COLTYPE rows, const int base,
+                                       ROWTYPE const *ai, COLTYPE const *aj,
+                                       VALTYPE const *av, VALTYPE const *diag,
+                                       VALTYPE const *const b,
+                                       VALTYPE *const x) {
+#pragma omp parallel
+  {
+    for (int l = 0; l < prefix.size() - 1; l++) {
+#pragma omp for
+      for (COLTYPE i = prefix[l]; i < prefix[l + 1]; i++) {
+        const COLTYPE idx = iperm[i] - base;
+        VALTYPE val = 0;
+        for (auto j = ai[idx] - base; j < ai[idx + 1] - base; j++) {
+          val += av[j] * x[aj[j] - base];
+        }
+        x[idx] = (b[idx] - val) / diag[idx];
       }
 #pragma omp barrier
     }
@@ -100,211 +148,24 @@ void LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
 enum class FBSubstitutionType { Barrier, NoBarrier, NoBarrierSuperNode };
 
 template <FBSubstitutionType FBST = FBSubstitutionType::Barrier,
-          typename SIZE = int, typename ROWTYPE = int, typename COLTYPE = int,
-          typename VALTYPE = double>
-class OptimizedForwardSubstitution {
+          TriangularSolve TS = TriangularSolve::L, typename ROWTYPE = int,
+          typename COLTYPE = int, typename VALTYPE = double>
+class OptimizedTriangularSolve {
 public:
-  OptimizedForwardSubstitution() : _nthreads{omp_get_max_threads()} {}
+  OptimizedTriangularSolve(const int num_threads = omp_get_num_threads())
+      : _nthreads{num_threads} {}
 
-  void analysis(const SIZE rows, const int base, ROWTYPE const *ai,
-                COLTYPE const *aj, VALTYPE const *av) {
-    _size = rows;
-    _vec.resize(_size);
-    const auto nnz = ai[rows] - base;
-    _reorderedMat.ai.resize(rows + 1);
-    _reorderedMat.aj.resize(nnz);
-    _reorderedMat.av.resize(nnz);
-    _reorderedMat.base = base;
-    _reorderedMat.rows = rows;
-    _nthreads = omp_get_max_threads();
-    matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
-        rows, base, ai, aj, _iperm, _levelPrefix);
-    _levels = _levelPrefix.size() - 1;
-    _threadlevels.resize(_nthreads);
-    _threadiperm.resize(rows);
+  void analysis(const COLTYPE rows, const int base, ROWTYPE const *ai,
+                COLTYPE const *aj, VALTYPE const *av,
+                VALTYPE const *diag = nullptr);
 
-#pragma omp parallel num_threads(_nthreads)
-    {
-      const int tid = omp_get_thread_num();
-      const int nthreads = omp_get_num_threads();
-      // #pragma omp single
-      //       std::cout << "nthreads: " << nthreads << std::endl;
+  void operator()(const VALTYPE *const b, VALTYPE *const x) const;
 
-      _threadlevels[tid].resize(_levels + 1);
-      _threadlevels[tid][0] = 0;
+  void BarrierOp(const VALTYPE *const b, VALTYPE *const x) const;
 
-      for (COLTYPE l = 0; l < _levels; l++) {
-        // TODO: a better load balancing is needed
-        auto [start, end] = utils::LoadBalancedPartitionPos(
-            _levelPrefix[l + 1] - _levelPrefix[l], tid, nthreads);
-        const COLTYPE size = end - start;
-        // #pragma omp critical
-        //         std::cout << "tid: " << tid << " , size: " << size <<
-        //         std::endl;
-        _threadlevels[tid][l + 1] = _threadlevels[tid][l] + size;
-      }
+  void NoBarrierOp(const VALTYPE *const b, VALTYPE *const x) const;
 
-#pragma omp barrier
-#pragma omp single
-      {
-        COLTYPE size = 0;
-        for (int tid = 1; tid < nthreads; tid++) {
-          size += _threadlevels[tid - 1][_levels];
-          _threadlevels[tid][0] = size;
-        }
-      }
-
-      for (COLTYPE l = 0; l < _levels; l++) {
-        _threadlevels[tid][l + 1] += _threadlevels[tid][0];
-      }
-      // up to this point, _threadlevels becomes the prefix of size of each
-      // super task
-
-#pragma omp barrier
-      COLTYPE cur = _threadlevels[tid][0];
-
-      for (COLTYPE l = 0; l < _levels; l++) {
-        auto [start, end] = utils::LoadBalancedPartitionPos(
-            _levelPrefix[l + 1] - _levelPrefix[l], tid, nthreads);
-        for (auto i = start; i != end; i++) {
-          _threadiperm[cur++] = _iperm[i + _levelPrefix[l]];
-        }
-      }
-    }
-
-    utils::inversePermute(_threadperm, _threadiperm, base);
-
-    // matrix_utils::permute(rows, base, ai, aj, av, _threadiperm.data(),
-    //                       _threadperm.data(), _reorderedMat.ai.data(),
-    //                       _reorderedMat.aj.data(), _reorderedMat.av.data());
-
-    matrix_utils::permuteRow(rows, base, ai, aj, av, _threadiperm.data(),
-                             _reorderedMat.ai.data(), _reorderedMat.aj.data(),
-                             _reorderedMat.av.data());
-
-    if constexpr (FBST == FBSubstitutionType::NoBarrierSuperNode) {
-
-      build_task_graph();
-      // for (auto i = 0; i < _taskInvAdjGraph.rows; i++) {
-      //   std::cout << "taks " << i << ": ";
-      //   for (auto j = _taskInvAdjGraph.ai[i]; j < _taskInvAdjGraph.ai[i + 1];
-      //        j++) {
-      //     std::cout << _taskInvAdjGraph.aj[j] << " ";
-      //   }
-      //   std::cout << std::endl;
-      // }
-    }
-
-    if constexpr (FBST == FBSubstitutionType::NoBarrier)
-      _bv.resize(_size);
-    else if constexpr (FBST == FBSubstitutionType::NoBarrierSuperNode)
-      _bv.resize(_tasks);
-  }
-
-  void operator()(const VALTYPE *const b, VALTYPE *const x) const {
-    if constexpr (FBST == FBSubstitutionType::Barrier)
-      BarrierOp(b, x);
-    else if constexpr (FBST == FBSubstitutionType::NoBarrier)
-      NoBarrierOp(b, x);
-    else if constexpr (FBST == FBSubstitutionType::NoBarrierSuperNode)
-      NoBarrierSuperNodeOp(b, x);
-  }
-
-  void BarrierOp(const VALTYPE *const b, VALTYPE *const x) const {
-    // matrix_utils::permuteVec(_size, _reorderedMat.base, b,
-    // _threadiperm.data(),
-    //                          _vec.data());
-#pragma omp parallel num_threads(_nthreads)
-    {
-      const int tid = omp_get_thread_num();
-      const int nthreads = omp_get_num_threads();
-      for (COLTYPE l = 0; l < _levels; l++) {
-        const COLTYPE start = _threadlevels[tid][l];
-        const COLTYPE end = _threadlevels[tid][l + 1];
-        // std::cout << "tid: " << tid << " , start: " << start
-        //           << " , end: " << end << std::endl;
-        for (COLTYPE i = start; i < end; i++) {
-          const SIZE idx = _threadiperm[i] - _reorderedMat.base;
-          // std::cout << _reorderedMat.ai[i] << " " << _reorderedMat.ai[i +
-          // 1]
-          //           << std::endl;
-          x[idx] = b[idx];
-          for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
-               j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
-            const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
-            // _vec[i] -= _reorderedMat.av[j] * _vec[j_idx];
-            x[idx] -= _reorderedMat.av[j] * x[j_idx];
-          }
-        }
-#pragma omp barrier
-      }
-    }
-    // std::copy(_vec.begin(), _vec.end(), x);
-    // matrix_utils::permuteVec(_size, _reorderedMat.base, _vec.data(),
-    //                          _threadperm.data(), x);
-  }
-
-  void NoBarrierOp(const VALTYPE *const b, VALTYPE *const x) const {
-    _bv.clearAll();
-#pragma omp parallel num_threads(_nthreads)
-    {
-      const int tid = omp_get_thread_num();
-      const int nthreads = omp_get_num_threads();
-      for (COLTYPE l = 0; l < _levels; l++) {
-        const COLTYPE start = _threadlevels[tid][l];
-        const COLTYPE end = _threadlevels[tid][l + 1];
-        // std::cout << "tid: " << tid << " , start: " << start
-        //           << " , end: " << end << std::endl;
-        for (COLTYPE i = start; i < end; i++) {
-          const SIZE idx = _threadiperm[i] - _reorderedMat.base;
-          x[idx] = b[idx];
-          for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
-               j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
-            const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
-
-            while (!_bv.get(j_idx)) {
-              std::this_thread::yield();
-            }
-            x[idx] -= _reorderedMat.av[j] * x[j_idx];
-          }
-          _bv.set(idx);
-        }
-      }
-    }
-  }
-
-  void NoBarrierSuperNodeOp(const VALTYPE *const b, VALTYPE *const x) const {
-    _bv.clearAll();
-#pragma omp parallel num_threads(_nthreads)
-    {
-      const int tid = omp_get_thread_num();
-      const int nthreads = omp_get_num_threads();
-      for (COLTYPE task = _threadTaskPrefix[tid];
-           task < _threadTaskPrefix[tid + 1]; task++) {
-
-        for (COLTYPE i = _taskInvAdjGraph2.ai[task];
-             i < _taskInvAdjGraph2.ai[task + 1]; i++) {
-          const COLTYPE j_idx = _taskInvAdjGraph2.aj[i];
-          while (!_bv.get(j_idx)) {
-            std::this_thread::yield();
-            // std::this_thread::sleep_for(std::chrono::milliseconds(1));
-          }
-        }
-
-        for (COLTYPE i = _taskBoundaryPrefix[task];
-             i < _taskBoundaryPrefix[task + 1]; i++) {
-          const SIZE idx = _threadiperm[i] - _reorderedMat.base;
-          x[idx] = b[idx];
-          for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
-               j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
-            const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
-            x[idx] -= _reorderedMat.av[j] * x[j_idx];
-          }
-        }
-        _bv.set(task);
-      }
-    }
-  }
+  void NoBarrierSuperNodeOp(const VALTYPE *const b, VALTYPE *const x) const;
 
   void build_task_graph() {
     _taskInvAdj.resize(_nthreads);
@@ -314,7 +175,7 @@ public:
     // _threadPrefixSum2.resize(_nthreads + 1);
     // std::fill(_threadPrefixSum2.begin(), _threadPrefixSum2.end(), 0);
     _reorderedRowIdToTaskId.resize(_size);
-    std::cout << "levels: " << _levels << std::endl;
+    // std::cout << "levels: " << _levels << std::endl;
 
 #pragma omp parallel num_threads(_nthreads)
     {
@@ -339,7 +200,7 @@ public:
 
         // taskSizes.resize(_tasks);
 
-        std::cout << "tasks: " << _tasks << std::endl;
+        // std::cout << "tasks: " << _tasks << std::endl;
         _taskBoundaryPrefix.resize(_tasks + 1);
 
         _taskInvAdjGraph.rows = _tasks;
@@ -544,17 +405,16 @@ public:
     // }
 
     _taskAdjGraph.aj.resize(_taskInvAdjGraph.nnz());
-    // matrix_utils::ParallelTranspose(
-    //     _taskInvAdjGraph.rows, _taskInvAdjGraph.cols,
-    // _taskInvAdjGraph.base,
-    //     _taskInvAdjGraph.ai.data(), _taskInvAdjGraph.aj.data(),
-    //     (VALTYPE const *)nullptr, _taskAdjGraph.ai.data(),
-    //     _taskAdjGraph.aj.data(), (VALTYPE *)nullptr);
-    matrix_utils::SerialTranspose(
+    matrix_utils::ParallelTranspose2(
         _taskInvAdjGraph.rows, _taskInvAdjGraph.cols, _taskInvAdjGraph.base,
         _taskInvAdjGraph.ai.data(), _taskInvAdjGraph.aj.data(),
         (VALTYPE const *)nullptr, _taskAdjGraph.ai.data(),
         _taskAdjGraph.aj.data(), (VALTYPE *)nullptr);
+    // matrix_utils::SerialTranspose(
+    //     _taskInvAdjGraph.rows, _taskInvAdjGraph.cols, _taskInvAdjGraph.base,
+    //     _taskInvAdjGraph.ai.data(), _taskInvAdjGraph.aj.data(),
+    //     (VALTYPE const *)nullptr, _taskAdjGraph.ai.data(),
+    //     _taskAdjGraph.aj.data(), (VALTYPE *)nullptr);
 
     _taskInvAdjGraph2.rows = _tasks;
     _taskInvAdjGraph2.cols = _tasks;
@@ -747,9 +607,11 @@ public:
     // }
   }
 
+  int get_num_threads() const { return _nthreads; }
+
 protected:
   int _nthreads;
-  SIZE _size;
+  COLTYPE _size;
   std::vector<COLTYPE> _iperm;
   std::vector<COLTYPE> _levelPrefix;
   mutable std::vector<double> _vec;
@@ -760,6 +622,7 @@ protected:
   std::vector<COLTYPE> _threadiperm;
   std::vector<COLTYPE> _threadperm;
   CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _reorderedMat;
+  VALTYPE const *_diag{nullptr};
 
   // super node level scheduling data
   // always zero based
@@ -783,3 +646,5 @@ protected:
   // std::vector<COLTYPE> taskSizes;
 };
 } // namespace matrix_utils
+
+#include "trinagle_solve.tpp"

@@ -51,14 +51,14 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(Spectra)
 
-FetchContent_Declare(
-  cereal
-  GIT_REPOSITORY https://github.com/USCiLab/cereal.git
-  GIT_TAG master
-  GIT_SHALLOW TRUE
-)
-set(SKIP_PERFORMANCE_COMPARISON ON)
-FetchContent_MakeAvailable(cereal)
+# FetchContent_Declare(
+#   cereal
+#   GIT_REPOSITORY https://github.com/USCiLab/cereal.git
+#   GIT_TAG master
+#   GIT_SHALLOW TRUE
+# )
+# set(SKIP_PERFORMANCE_COMPARISON ON)
+# FetchContent_MakeAvailable(cereal)
 
 FetchContent_Declare(
   AMGCL

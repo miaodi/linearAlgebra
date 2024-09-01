@@ -166,7 +166,7 @@ std::pair<Iter, Iter> LoadBalancedPartition(Iter begin, Iter end, int tid,
   const size_t total_work = std::distance(begin, end);
   const size_t work_per_thread = total_work / nthreads;
   const size_t resid = total_work % nthreads;
-  return tid >= resid
+  return static_cast<size_t>(tid) >= resid
              ? std::make_pair(begin + tid * work_per_thread + resid,
                               begin + (tid + 1) * work_per_thread + resid)
              : std::make_pair(begin + tid * (work_per_thread + 1),
@@ -177,10 +177,11 @@ template <typename T>
 std::pair<T, T> LoadBalancedPartitionPos(T total_work, int tid, int nthreads) {
   const T work_per_thread = total_work / nthreads;
   const T resid = total_work % nthreads;
-  return tid >= resid ? std::make_pair(tid * work_per_thread + resid,
-                                       (tid + 1) * work_per_thread + resid)
-                      : std::make_pair(tid * (work_per_thread + 1),
-                                       (tid + 1) * (work_per_thread + 1));
+  return static_cast<size_t>(tid) >= resid
+             ? std::make_pair(tid * work_per_thread + resid,
+                              (tid + 1) * work_per_thread + resid)
+             : std::make_pair(tid * (work_per_thread + 1),
+                              (tid + 1) * (work_per_thread + 1));
 }
 
 template <typename Iter>

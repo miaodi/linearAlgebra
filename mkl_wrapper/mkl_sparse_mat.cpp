@@ -217,7 +217,7 @@ void mkl_sparse_mat::get_adjacency_graph(std::vector<MKL_INT> &xadj,
     auto [start1, end1] = utils::LoadPrefixBalancedPartition(
         _ai.get(), _ai.get() + rows(), tid, nthreads);
 
-    for (auto it = start; it != end; it++) {
+    for (auto it = start1; it != end1; it++) {
       const MKL_INT rowIdx = it - _ai.get() + base;
       MKL_INT pos = xadj[rowIdx - base] - base;
       for (MKL_INT j = *it - base; j != *(it + 1) - base; j++) {
