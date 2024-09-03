@@ -16,7 +16,8 @@ class triangular_solve_Test : public testing::Test {
 protected:
   std::vector<mkl_wrapper::mkl_sparse_mat> _mats;
 
-  const double _tol = 1e-11;
+  const double _tol = 1e-14;
+  const double _MKLtol = 1e-11;
 
   triangular_solve_Test() {
 
@@ -37,6 +38,12 @@ protected:
                                                 csr_rows.size() - 1, csr_rows,
                                                 csr_cols, csr_vals));
     f.open("data/s3rmt3m3.mtx");
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    f.close();
+    _mats.push_back(mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
+                                                csr_rows.size() - 1, csr_rows,
+                                                csr_cols, csr_vals));
+    f.open("data/bcsstk17.mtx");
     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.push_back(mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
@@ -107,7 +114,7 @@ TEST_F(triangular_solve_Test, forward_substitution) {
     matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
                                       L.av.get(), b.data(), x_serial.data());
     for (int i = 0; i < mat.rows(); i++) {
-      EXPECT_NEAR(x_serial[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+      EXPECT_NEAR(x_serial[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
     }
 
     std::vector<int> iperm(L.rows);
@@ -118,7 +125,7 @@ TEST_F(triangular_solve_Test, forward_substitution) {
         iperm, prefix, L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get(),
         b.data(), x_par.data());
     for (int i = 0; i < mat.rows(); i++) {
-      EXPECT_NEAR(x_par[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+      EXPECT_NEAR(x_par[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
     }
 
     auto Lt_data = matrix_utils::AllocateCSRData(L.cols, L.nnz);
@@ -134,7 +141,7 @@ TEST_F(triangular_solve_Test, forward_substitution) {
         std::get<2>(Lt_data).get(), b.data(), x_serial_t.data());
 
     for (int i = 0; i < mat.rows(); i++) {
-      EXPECT_NEAR(x_serial_t[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+      EXPECT_NEAR(x_serial_t[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
     }
   }
 }
@@ -177,7 +184,7 @@ TEST_F(triangular_solve_Test, backward_substitution) {
                                        U.av.get(), D.data(), b.data(),
                                        x_serial.data());
     for (int i = 0; i < mat.rows(); i++) {
-      EXPECT_NEAR(x_serial[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+      EXPECT_NEAR(x_serial[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
     }
 
     std::vector<int> iperm(U.rows);
@@ -189,7 +196,7 @@ TEST_F(triangular_solve_Test, backward_substitution) {
         iperm, prefix, U.rows, U.base, U.ai.get(), U.aj.get(), U.av.get(),
         D.data(), b.data(), x_par.data());
     for (int i = 0; i < mat.rows(); i++) {
-      EXPECT_NEAR(x_par[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+      EXPECT_NEAR(x_par[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
     }
   }
 }
@@ -212,14 +219,7 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
     std::vector<double> b(mat.rows());
     std::fill(std::begin(b), std::end(b), 1.);
     std::vector<double> x(mat.rows(), 0.0);
-    std::vector<double> x_mkl(mat.rows(), 0.0);
-
-    matrix_descr descr;
-    descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
-    descr.mode = SPARSE_FILL_MODE_LOWER;
-    descr.diag = SPARSE_DIAG_UNIT;
-    mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, prec.mkl_handler(),
-                      descr, b.data(), x_mkl.data());
+    std::vector<double> x_serial(mat.rows(), 0.0);
 
     matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
     std::vector<double> D;
@@ -227,6 +227,9 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
     matrix_utils::SplitLDU(prec.rows(), (int)prec.mkl_base(),
                            prec.get_ai().get(), prec.get_aj().get(),
                            prec.get_av().get(), L, D, U);
+
+    matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
+                                      L.av.get(), b.data(), x_serial.data());
 
     matrix_utils::OptimizedTriangularSolve<
         matrix_utils::FBSubstitutionType::Barrier,
@@ -237,7 +240,7 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
     for (int i = 0; i < 100; i++) {
       forwardsweep_barrier(b.data(), x.data());
       for (int i = 0; i < x.size(); i++) {
-        EXPECT_NEAR(x[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+        EXPECT_NEAR(x[i], x_serial[i], _tol * std::abs(x_serial[i]));
       }
     }
 
@@ -250,7 +253,7 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
     for (int i = 0; i < 100; i++) {
       forwardsweep_nobarrier(b.data(), x.data());
       for (int i = 0; i < x.size(); i++) {
-        EXPECT_NEAR(x[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+        EXPECT_NEAR(x[i], x_serial[i], _tol * std::abs(x_serial[i]));
       }
     }
 
@@ -263,7 +266,7 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
     for (int i = 0; i < 100; i++) {
       forwardsweep_nobarrier_sn(b.data(), x.data());
       for (int i = 0; i < x.size(); i++) {
-        EXPECT_NEAR(x[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+        EXPECT_NEAR(x[i], x_serial[i], _tol * std::abs(x_serial[i]));
       }
     }
   }
@@ -287,14 +290,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
     std::vector<double> b(mat.rows());
     std::fill(std::begin(b), std::end(b), 1.);
     std::vector<double> x(mat.rows(), 0.0);
-    std::vector<double> x_mkl(mat.rows(), 0.0);
-
-    matrix_descr descr;
-    descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
-    descr.mode = SPARSE_FILL_MODE_UPPER;
-    descr.diag = SPARSE_DIAG_NON_UNIT;
-    mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, prec.mkl_handler(),
-                      descr, b.data(), x_mkl.data());
+    std::vector<double> x_serial(mat.rows(), 0.0);
 
     matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
     std::vector<double> D;
@@ -302,6 +298,10 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
     matrix_utils::SplitLDU(prec.rows(), (int)prec.mkl_base(),
                            prec.get_ai().get(), prec.get_aj().get(),
                            prec.get_av().get(), L, D, U);
+
+    matrix_utils::BackwardSubstitution(U.rows, U.base, U.ai.get(), U.aj.get(),
+                                       U.av.get(), D.data(), b.data(),
+                                       x_serial.data());
 
     matrix_utils::OptimizedTriangularSolve<
         matrix_utils::FBSubstitutionType::Barrier,
@@ -312,7 +312,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
     for (int i = 0; i < 100; i++) {
       forwardsweep_barrier(b.data(), x.data());
       for (int i = 0; i < x.size(); i++) {
-        EXPECT_NEAR(x[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+        EXPECT_NEAR(x[i], x_serial[i], _tol * std::abs(x_serial[i]));
       }
     }
 
@@ -325,7 +325,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
     for (int i = 0; i < 100; i++) {
       forwardsweep_nobarrier(b.data(), x.data());
       for (int i = 0; i < x.size(); i++) {
-        EXPECT_NEAR(x[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+        EXPECT_NEAR(x[i], x_serial[i], _tol * std::abs(x_serial[i]));
       }
     }
 
@@ -338,7 +338,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
     for (int i = 0; i < 100; i++) {
       forwardsweep_nobarrier_sn(b.data(), x.data());
       for (int i = 0; i < x.size(); i++) {
-        EXPECT_NEAR(x[i], x_mkl[i], _tol * std::abs(x_mkl[i]));
+        EXPECT_NEAR(x[i], x_serial[i], _tol * std::abs(x_serial[i]));
       }
     }
   }

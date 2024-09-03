@@ -45,6 +45,17 @@ download_file(
 FetchContent_GetProperties(nos5 SOURCE_DIR FILE_SOURCE_DIR)
 file(CREATE_LINK ${FILE_SOURCE_DIR}/nos5.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/nos5.mtx SYMBOLIC)
 
+# https://sparse.tamu.edu/HB/bcsstk17
+# 10974
+# spd
+download_file( 
+   https://suitesparse-collection-website.herokuapp.com/MM/HB/bcsstk17.tar.gz
+   70657d5cab62f2947e861842013aff43e380bd37205701978016e30412d054e6
+   bcsstk17
+)
+FetchContent_GetProperties(bcsstk17 SOURCE_DIR FILE_SOURCE_DIR)
+file(CREATE_LINK ${FILE_SOURCE_DIR}/bcsstk17/bcsstk17.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/bcsstk17.mtx SYMBOLIC)
+
 # https://sparse.tamu.edu/Cylshell/s3rmt3m3
 # 5357
 # spd

@@ -44,7 +44,8 @@ file(CREATE_LINK ${FILE_SOURCE_DIR}/mcfe/mcfe.mtx ${CMAKE_CURRENT_BINARY_DIR}/da
 # 952,203
 # spd
 download_file( 
-   https://suitesparse-collection-website.herokuapp.com/MM/GHS_psdef/ldoor.tar.gz   bd50b2641d69adcda7be4f209939c5747af75b2bd7a2da8847f42ce328b2f98a
+   https://suitesparse-collection-website.herokuapp.com/MM/GHS_psdef/ldoor.tar.gz   
+   bd50b2641d69adcda7be4f209939c5747af75b2bd7a2da8847f42ce328b2f98a
    ldoor
 )
 

@@ -213,7 +213,8 @@ std::pair<Iter, Iter> LoadPrefixBalancedPartition(Iter begin, Iter end, int tid,
 }
 
 template <typename Iter>
-std::pair<typename Iter::difference_type, typename Iter::difference_type>
+std::pair<typename std::iterator_traits<Iter>::difference_type,
+          typename std::iterator_traits<Iter>::difference_type>
 LoadPrefixBalancedPartitionPos(Iter begin, Iter end, int tid, int nthreads) {
   auto [sIter, eIter] = LoadPrefixBalancedPartition(begin, end, tid, nthreads);
   return std::make_pair(std::distance(begin, sIter),
