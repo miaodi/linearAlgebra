@@ -1,0 +1,3 @@
+This is a project for me to learn numerical linear algebra (solvers, multigrid, sparse matrix, spmv, etc.) and high performance computing. Currently, I am focusing on OpenMP based Shared-Memory Parallelism (SMP). May start implementing GPU based algorithm once I finish OMSCS [CS 8803 O21: GPU Hardware and Software]([/guides/content/editing-an-existing-page](https://omscs.gatech.edu/cs-8803-o21-gpu-hardware-and-software)). 
+
+Algorithms I implemented are mainly from published articles or from other open source libraries. The performance of these algorithms will be tested by using Google Benchmark. 
