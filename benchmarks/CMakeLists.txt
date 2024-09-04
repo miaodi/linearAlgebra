@@ -51,3 +51,16 @@ download_file(
 
 FetchContent_GetProperties(ldoor SOURCE_DIR FILE_SOURCE_DIR)
 file(CREATE_LINK ${FILE_SOURCE_DIR}/ldoor/ldoor.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ldoor.mtx SYMBOLIC)
+
+
+# https://sparse.tamu.edu/Schmid/thermal2
+# 1228045,1228045
+# spd
+download_file( 
+   https://suitesparse-collection-website.herokuapp.com/MM/Schmid/thermal2.tar.gz  
+   02934a4b642b6829c33517e0b801b60ea894a6552c6cd7e3db6c709c776434ce
+   thermal2
+)
+
+FetchContent_GetProperties(thermal2 SOURCE_DIR FILE_SOURCE_DIR)
+file(CREATE_LINK ${FILE_SOURCE_DIR}/thermal2/thermal2.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/thermal2.mtx SYMBOLIC)

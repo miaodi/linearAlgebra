@@ -11,7 +11,7 @@
 #include <vector>
 
 static std::unique_ptr<mkl_wrapper::mkl_sparse_mat> mat;
-
+static int _num_threads = 32;
 class MyFixture : public benchmark::Fixture {
 public:
   MyFixture() {
@@ -30,7 +30,7 @@ public:
       //     size, size, csr_rows, csr_cols, csr_vals, SPARSE_INDEX_BASE_ONE));
       // mat->to_zero_based();
 
-      std::ifstream f("/home/dimiao/matrix_lib/thermal2.mtx");
+      std::ifstream f("data/thermal2.mtx");
       f.clear();
       f.seekg(0, std::ios::beg);
       std::vector<MKL_INT> csr_rows, csr_cols;
@@ -66,7 +66,7 @@ BENCHMARK_DEFINE_F(MyFixture, SerialForward)(benchmark::State &state) {
 BENCHMARK_REGISTER_F(MyFixture, SerialForward)->Arg(100)->Arg(1000);
 
 BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
-  omp_set_num_threads(10);
+  omp_set_num_threads(_num_threads);
   std::vector<double> x(mat->rows(), 0.0);
   std::vector<double> b(mat->rows(), 1.0);
 
@@ -114,7 +114,7 @@ BENCHMARK_REGISTER_F(MyFixture, MKLForwardSerial)->Arg(100)->Arg(1000);
 BENCHMARK_DEFINE_F(MyFixture, MKLForward)(benchmark::State &state) {
   std::vector<double> x(mat->rows(), 0.0);
   std::vector<double> b(mat->rows(), 1.0);
-  omp_set_num_threads(10);
+  omp_set_num_threads(_num_threads);
 
   matrix_descr descr;
   descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
@@ -134,7 +134,7 @@ BENCHMARK_REGISTER_F(MyFixture, MKLForward)->Arg(100)->Arg(1000);
 BENCHMARK_DEFINE_F(MyFixture, MKLForwardOpt)(benchmark::State &state) {
   std::vector<double> x(mat->rows(), 0.0);
   std::vector<double> b(mat->rows(), 1.0);
-  omp_set_num_threads(10);
+  omp_set_num_threads(_num_threads);
 
   matrix_descr descr;
   descr.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
@@ -158,7 +158,7 @@ BENCHMARK_REGISTER_F(MyFixture, MKLForwardOpt)->Arg(100)->Arg(1000);
 
 BENCHMARK_DEFINE_F(MyFixture, CacheParForward_barrier)
 (benchmark::State &state) {
-  omp_set_num_threads(10);
+  omp_set_num_threads(_num_threads);
   std::vector<double> x(mat->rows(), 0.0);
   std::vector<double> b(mat->rows(), 1.0);
 
@@ -171,7 +171,7 @@ BENCHMARK_DEFINE_F(MyFixture, CacheParForward_barrier)
   matrix_utils::OptimizedTriangularSolve<
       matrix_utils::FBSubstitutionType::Barrier,
       matrix_utils::TriangularSolve::L, int, int, double>
-      forwardsweep(10);
+      forwardsweep(_num_threads);
   forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
   for (auto _ : state) {
     for (int i = 0; i < state.range(0); i++) {
@@ -184,7 +184,7 @@ BENCHMARK_REGISTER_F(MyFixture, CacheParForward_barrier)->Arg(100)->Arg(1000);
 
 BENCHMARK_DEFINE_F(MyFixture, CacheParForward_nobarrier)
 (benchmark::State &state) {
-  omp_set_num_threads(10);
+  omp_set_num_threads(_num_threads);
   std::vector<double> x(mat->rows(), 0.0);
   std::vector<double> b(mat->rows(), 1.0);
 
@@ -197,7 +197,7 @@ BENCHMARK_DEFINE_F(MyFixture, CacheParForward_nobarrier)
   matrix_utils::OptimizedTriangularSolve<
       matrix_utils::FBSubstitutionType::NoBarrier,
       matrix_utils::TriangularSolve::L, int, int, double>
-      forwardsweep(10);
+      forwardsweep(_num_threads);
   forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
   for (auto _ : state) {
     for (int i = 0; i < state.range(0); i++) {
@@ -210,7 +210,7 @@ BENCHMARK_REGISTER_F(MyFixture, CacheParForward_nobarrier)->Arg(100)->Arg(1000);
 
 BENCHMARK_DEFINE_F(MyFixture, CacheParForward_nobarrier2)
 (benchmark::State &state) {
-  omp_set_num_threads(10);
+  omp_set_num_threads(_num_threads);
   std::vector<double> x(mat->rows(), 0.0);
   std::vector<double> b(mat->rows(), 1.0);
 
@@ -223,7 +223,7 @@ BENCHMARK_DEFINE_F(MyFixture, CacheParForward_nobarrier2)
   matrix_utils::OptimizedTriangularSolve<
       matrix_utils::FBSubstitutionType::NoBarrierSuperNode,
       matrix_utils::TriangularSolve::L, int, int, double>
-      forwardsweep(10);
+      forwardsweep(_num_threads);
   forwardsweep.analysis(L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get());
   for (auto _ : state) {
     for (int i = 0; i < state.range(0); i++) {
