@@ -30,14 +30,20 @@ template <typename R, typename C, typename V> struct CSRMatrix {
   using VALTYPE = V;
   COLTYPE rows;
   COLTYPE cols;
-  int base;
-  ROWTYPE nnz;
+
   size_t ai_size{0};
   size_t aj_size{0};
   size_t av_size{0};
   std::shared_ptr<ROWTYPE[]> ai;
   std::shared_ptr<COLTYPE[]> aj;
   std::shared_ptr<VALTYPE[]> av;
+
+  ROWTYPE Base() const { return ai[0]; }
+  ROWTYPE NNZ() const { return ai[rows] - ai[0]; }
+
+  ROWTYPE const *AI() const { return ai.get(); }
+  COLTYPE const *AJ() const { return aj.get(); }
+  VALTYPE const *AV() const { return av.get(); }
 
   CSRMatrix() = default;
 };
@@ -47,16 +53,70 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
   using VALTYPE = V;
   COLTYPE rows;
   COLTYPE cols;
-  int base;
+
   std::vector<ROWTYPE> ai;
   std::vector<COLTYPE> aj;
   std::vector<VALTYPE> av;
 
   CSRMatrixVec() = default;
-  ROWTYPE nnz() const { return ai[rows] - base; }
+
+  ROWTYPE Base() const { return ai[0]; }
+  ROWTYPE NNZ() const { return ai[rows] - ai[0]; }
+
+  ROWTYPE const *AI() const { return ai.data(); }
+  COLTYPE const *AJ() const { return aj.data(); }
+  VALTYPE const *AV() const { return av.data(); }
 
   template <class Archive> void serialize(Archive &ar) { ar(ai, aj, av); }
 };
+
+template <typename CSRMatrixType>
+void ResizeCSRAI(CSRMatrixType &mat, const size_t size) {
+  if constexpr (std::is_same_v<
+                    decltype(mat.ai),
+                    std::shared_ptr<typename CSRMatrixType::ROWTYPE[]>>) {
+    if (mat.ai_size < size) {
+      mat.ai.reset(new typename CSRMatrixType::ROWTYPE[size]);
+      mat.ai_size = size;
+    }
+  } else if constexpr (std::is_same_v<
+                           decltype(mat.ai),
+                           std::vector<typename CSRMatrixType::ROWTYPE>>) {
+    mat.ai.resize(size);
+  }
+}
+
+template <typename CSRMatrixType>
+void ResizeCSRAJ(CSRMatrixType &mat, const size_t size) {
+  if constexpr (std::is_same_v<
+                    decltype(mat.aj),
+                    std::shared_ptr<typename CSRMatrixType::COLTYPE[]>>) {
+    if (mat.aj_size < size) {
+      mat.aj.reset(new typename CSRMatrixType::COLTYPE[size]);
+      mat.aj_size = size;
+    }
+  } else if constexpr (std::is_same_v<
+                           decltype(mat.aj),
+                           std::vector<typename CSRMatrixType::COLTYPE>>) {
+    mat.aj.resize(size);
+  }
+}
+
+template <typename CSRMatrixType>
+void ResizeCSRAV(CSRMatrixType &mat, const size_t size) {
+  if constexpr (std::is_same_v<
+                    decltype(mat.av),
+                    std::shared_ptr<typename CSRMatrixType::VALTYPE[]>>) {
+    if (mat.av_size < size) {
+      mat.av.reset(new typename CSRMatrixType::VALTYPE[size]);
+      mat.av_size = size;
+    }
+  } else if constexpr (std::is_same_v<
+                           decltype(mat.av),
+                           std::vector<typename CSRMatrixType::VALTYPE>>) {
+    mat.av.resize(size);
+  }
+}
 
 template <typename ROWTYPE = int, typename COLTYPE = int,
           typename VALTYPE = double>
@@ -552,23 +612,30 @@ void TopologicalSort2(const COLTYPE nodes, const int base, ROWTYPE const *ai,
   prefix[0] = 0;
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VEC>
-bool DiagonalPosition(const COLTYPE rows, const int base, ROWTYPE const *ai,
-                      COLTYPE const *aj, VEC &diag) {
-  diag.resize(rows);
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename VECIDX,
+          typename VECVAL>
+bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
+              COLTYPE const *aj, VALTYPE const *av, VECIDX *diagpos,
+              VECVAL *diag) {
+  if (diagpos)
+    (*diagpos).resize(rows);
+  if (diag)
+    (*diag).resize(rows);
   volatile bool missing_diag = false;
 #pragma omp parallel for shared(missing_diag)
   for (COLTYPE i = 0; i < rows; i++) {
     if (missing_diag)
       continue;
     auto mid =
-        std::lower_bound(find_address_of(aj) + ai[i] - base,
-                         find_address_of(aj) + ai[i + 1] - base, i + base);
+        std::lower_bound(aj + ai[i] - base, aj + ai[i + 1] - base, i + base);
     if (*mid != i + base) {
       std::cerr << "Could not find diagonal!" << std::endl;
       missing_diag = true;
     }
-    diag[i] = mid - find_address_of(aj);
+    if (diagpos)
+      (*diagpos)[i] = mid - aj;
+    if (diag)
+      (*diag)[i] = av[mid - aj];
   }
   if (missing_diag)
     return false;
@@ -597,19 +664,11 @@ void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
   ROWTYPE nnz = ai[rows] - base;
   L.rows = rows;
   L.cols = rows;
-  L.base = base;
-  if (L.ai_size < static_cast<size_t>(rows) + 1) {
-    L.ai.reset(new ROWTYPE[rows + 1]);
-    L.ai_size = rows + 1;
-  }
+  ResizeCSRAI(L, rows + 1);
 
   U.rows = rows;
   U.cols = rows;
-  U.base = base;
-  if (U.ai_size < static_cast<size_t>(rows) + 1) {
-    U.ai.reset(new ROWTYPE[rows + 1]);
-    U.ai_size = rows + 1;
-  }
+  ResizeCSRAI(U, rows + 1);
 
   L.ai[0] = base;
   U.ai[0] = base;
@@ -647,25 +706,13 @@ void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
         LU_prefix[i].first += LU_prefix[i - 1].first;
         LU_prefix[i].second += LU_prefix[i - 1].second;
       }
-      L.nnz = LU_prefix[nthreads].first;
-      if (L.aj_size < static_cast<size_t>(L.nnz)) {
-        L.aj.reset(new COLTYPE[L.nnz]);
-        L.aj_size = L.nnz;
-      }
-      if (L.av_size < static_cast<size_t>(L.nnz)) {
-        L.av.reset(new VALTYPE[L.nnz]);
-        L.av_size = L.nnz;
-      }
+      const auto Lnnz = LU_prefix[nthreads].first;
+      ResizeCSRAJ(L, Lnnz);
+      ResizeCSRAV(L, Lnnz);
 
-      U.nnz = LU_prefix[nthreads].second;
-      if (U.aj_size < static_cast<size_t>(U.nnz)) {
-        U.aj.reset(new COLTYPE[U.nnz]);
-        U.aj_size = U.nnz;
-      }
-      if (U.av_size < static_cast<size_t>(U.nnz)) {
-        U.av.reset(new VALTYPE[U.nnz]);
-        U.av_size = U.nnz;
-      }
+      const auto Unnz = LU_prefix[nthreads].second;
+      ResizeCSRAJ(U, Unnz);
+      ResizeCSRAV(U, Unnz);
     }
 
     ROWTYPE L_pos = LU_prefix[tid].first - base;

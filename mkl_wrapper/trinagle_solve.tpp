@@ -26,7 +26,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::analysis(
   _reorderedMat.ai.resize(rows + 1);
   _reorderedMat.aj.resize(nnz);
   _reorderedMat.av.resize(nnz);
-  _reorderedMat.base = base;
+  _reorderedMat.ai[0] = base;
   _reorderedMat.rows = rows;
   matrix_utils::TopologicalSort2<TS>(rows, base, ai, aj, _iperm, _levelPrefix);
   _levels = _levelPrefix.size() - 1;
@@ -136,12 +136,12 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::BarrierOp(
       const COLTYPE start = _threadlevels[tid][l];
       const COLTYPE end = _threadlevels[tid][l + 1];
       for (COLTYPE i = start; i < end; i++) {
-        const COLTYPE idx = _threadiperm[i] - _reorderedMat.base;
+        const COLTYPE idx = _threadiperm[i] - _reorderedMat.Base();
         VALTYPE val = 0;
 #pragma unroll
-        for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
-             j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
-          const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
+        for (auto j = _reorderedMat.ai[i] - _reorderedMat.Base();
+             j < _reorderedMat.ai[i + 1] - _reorderedMat.Base(); j++) {
+          const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.Base();
           val += _reorderedMat.av[j] * x[j_idx];
         }
         x[idx] = _diag ? (b[idx] - val) / _diag[idx] : (b[idx] - val);
@@ -150,7 +150,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::BarrierOp(
     }
   }
   // std::copy(_vec.begin(), _vec.end(), x);
-  // matrix_utils::permuteVec(_size, _reorderedMat.base, _vec.data(),
+  // matrix_utils::permuteVec(_size, _reorderedMat.Base(), _vec.data(),
   //                          _threadperm.data(), x);
 }
 
@@ -167,11 +167,11 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::NoBarrierOp(
       const COLTYPE start = _threadlevels[tid][l];
       const COLTYPE end = _threadlevels[tid][l + 1];
       for (COLTYPE i = start; i < end; i++) {
-        const COLTYPE idx = _threadiperm[i] - _reorderedMat.base;
+        const COLTYPE idx = _threadiperm[i] - _reorderedMat.Base();
         VALTYPE val = 0;
-        for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
-             j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
-          const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
+        for (auto j = _reorderedMat.ai[i] - _reorderedMat.Base();
+             j < _reorderedMat.ai[i + 1] - _reorderedMat.Base(); j++) {
+          const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.Base();
           while (!_bv.get(j_idx)) {
             // std::cout << "tid: " << tid << "yield\n";
             // std::this_thread::yield();
@@ -210,12 +210,12 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::
 
       for (COLTYPE i = _taskBoundaryPrefix[task];
            i < _taskBoundaryPrefix[task + 1]; i++) {
-        const COLTYPE idx = _threadiperm[i] - _reorderedMat.base;
+        const COLTYPE idx = _threadiperm[i] - _reorderedMat.Base();
         VALTYPE val = 0;
 #pragma unroll
-        for (auto j = _reorderedMat.ai[i] - _reorderedMat.base;
-             j < _reorderedMat.ai[i + 1] - _reorderedMat.base; j++) {
-          const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.base;
+        for (auto j = _reorderedMat.ai[i] - _reorderedMat.Base();
+             j < _reorderedMat.ai[i + 1] - _reorderedMat.Base(); j++) {
+          const COLTYPE j_idx = _reorderedMat.aj[j] - _reorderedMat.Base();
           val += _reorderedMat.av[j] * x[j_idx];
         }
         x[idx] = _diag ? (b[idx] - val) / _diag[idx] : (b[idx] - val);
@@ -266,19 +266,17 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE,
 
       _taskInvAdjGraph.rows = _tasks;
       _taskInvAdjGraph.cols = _tasks;
-      _taskInvAdjGraph.base = 0;
       _taskInvAdjGraph.ai.resize(_tasks + 1);
       _taskInvAdjGraph.ai[0] = 0; // zero based
       _taskInvAdjGraph.aj.resize(
-          _reorderedMat.nnz() +
+          _reorderedMat.NNZ() +
           _tasks); // added _tasks for edges within super-tasks
 
       _taskAdjGraph.rows = _tasks;
       _taskAdjGraph.cols = _tasks;
-      _taskAdjGraph.base = 0;
       _taskAdjGraph.ai.resize(_tasks + 1);
       _taskAdjGraph.ai[0] = 0; // zero based
-      // _taskAdjGraph.aj.resize(_reorderedMat.nnz());
+      // _taskAdjGraph.aj.resize(_reorderedMat.NNZ());
     }
 
     // build task boundary prefix (prefix of task sizes)
@@ -383,11 +381,11 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE,
           _taskInvAdj[tid][maxInvAdjSize++] = task - 1;
         for (COLTYPE row = _taskBoundaryPrefix[task];
              row < _taskBoundaryPrefix[task + 1]; row++) {
-          for (COLTYPE i = _reorderedMat.ai[row] - _reorderedMat.base;
-               i < _reorderedMat.ai[row + 1] - _reorderedMat.base; i++) {
-            COLTYPE j = _reorderedMat.aj[i] - _reorderedMat.base;
+          for (COLTYPE i = _reorderedMat.ai[row] - _reorderedMat.Base();
+               i < _reorderedMat.ai[row + 1] - _reorderedMat.Base(); i++) {
+            COLTYPE j = _reorderedMat.aj[i] - _reorderedMat.Base();
             auto col =
-                _reorderedRowIdToTaskId[_threadperm[j] - _reorderedMat.base];
+                _reorderedRowIdToTaskId[_threadperm[j] - _reorderedMat.Base()];
             if (col < threadBegin || col >= threadEnd) {
               _taskInvAdj[tid][maxInvAdjSize++] = col;
             }
@@ -464,21 +462,20 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE,
   //   }
   // }
 
-  _taskAdjGraph.aj.resize(_taskInvAdjGraph.nnz());
+  _taskAdjGraph.aj.resize(_taskInvAdjGraph.NNZ());
   matrix_utils::ParallelTranspose2(
-      _taskInvAdjGraph.rows, _taskInvAdjGraph.cols, _taskInvAdjGraph.base,
+      _taskInvAdjGraph.rows, _taskInvAdjGraph.cols, _taskInvAdjGraph.Base(),
       _taskInvAdjGraph.ai.data(), _taskInvAdjGraph.aj.data(),
       (VALTYPE const *)nullptr, _taskAdjGraph.ai.data(),
       _taskAdjGraph.aj.data(), (VALTYPE *)nullptr);
   // matrix_utils::SerialTranspose(
-  //     _taskInvAdjGraph.rows, _taskInvAdjGraph.cols, _taskInvAdjGraph.base,
+  //     _taskInvAdjGraph.rows, _taskInvAdjGraph.cols, _taskInvAdjGraph.Base(),
   //     _taskInvAdjGraph.ai.data(), _taskInvAdjGraph.aj.data(),
   //     (VALTYPE const *)nullptr, _taskAdjGraph.ai.data(),
   //     _taskAdjGraph.aj.data(), (VALTYPE *)nullptr);
 
   _taskInvAdjGraph2.rows = _tasks;
   _taskInvAdjGraph2.cols = _tasks;
-  _taskInvAdjGraph2.base = 0;
   _taskInvAdjGraph2.ai.resize(_tasks + 1);
   _taskInvAdjGraph2.ai[0] = 0; // zero based
   // _taskInvAdjGraph2.aj.resize(_taskInvAdjGraph.aj.size());
@@ -487,14 +484,14 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE,
 #ifdef DEBUG
   std::cout << "_taskAdjGraph is valid: "
             << matrix_utils::ValidCSR(
-                   _taskAdjGraph.rows, _taskAdjGraph.cols, _taskAdjGraph.base,
+                   _taskAdjGraph.rows, _taskAdjGraph.cols, _taskAdjGraph.Base(),
                    _taskAdjGraph.ai.data(), _taskAdjGraph.aj.data())
             << std::endl;
 
   std::cout << "_taskInvAdjGraph is valid: "
             << matrix_utils::ValidCSR(
                    _taskInvAdjGraph.rows, _taskInvAdjGraph.cols,
-                   _taskInvAdjGraph.base, _taskInvAdjGraph.ai.data(),
+                   _taskInvAdjGraph.Base(), _taskInvAdjGraph.ai.data(),
                    _taskInvAdjGraph.aj.data())
             << std::endl;
 #endif
@@ -630,7 +627,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE,
   //   std::cout << "_taskInvAdjGraph2 is valid: "
   //             << matrix_utils::ValidCSR(
   //                    _taskInvAdjGraph2.rows, _taskInvAdjGraph2.cols,
-  //                    _taskInvAdjGraph2.base, _taskInvAdjGraph2.ai.data(),
+  //                    _taskInvAdjGraph2.Base(), _taskInvAdjGraph2.ai.data(),
   //                    _taskInvAdjGraph2.aj.data())
   //             << std::endl;
 
@@ -657,8 +654,8 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE,
   //       if (temp.ai[i] != _taskInvAdjGraph2.ai[i])
   //         std::cout << "fucked\n";
   //     }
-  //     std::cout << _taskInvAdjGraph.nnz() << " " <<
-  //     _taskInvAdjGraph2.nnz()
+  //     std::cout << _taskInvAdjGraph.NNZ() << " " <<
+  //     _taskInvAdjGraph2.NNZ()
   //               << std::endl;
   //     std::cout << "finished check\n";
   //   }

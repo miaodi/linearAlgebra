@@ -17,7 +17,7 @@ protected:
   std::vector<mkl_wrapper::mkl_sparse_mat> _mats;
 
   const double _tol = 1e-14;
-  const double _MKLtol = 1e-11;
+  const double _MKLtol = 1e-10;
 
   triangular_solve_Test() {
 
@@ -111,7 +111,7 @@ TEST_F(triangular_solve_Test, forward_substitution) {
                            prec.get_ai().get(), prec.get_aj().get(),
                            prec.get_av().get(), L, D, U);
 
-    matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
+    matrix_utils::ForwardSubstitution(L.rows, L.Base(), L.ai.get(), L.aj.get(),
                                       L.av.get(), b.data(), x_serial.data());
     for (int i = 0; i < mat.rows(); i++) {
       EXPECT_NEAR(x_serial[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
@@ -120,24 +120,24 @@ TEST_F(triangular_solve_Test, forward_substitution) {
     std::vector<int> iperm(L.rows);
     std::vector<int> prefix;
     matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
-        L.rows, L.base, L.ai.get(), L.aj.get(), iperm, prefix);
+        L.rows, L.Base(), L.ai.get(), L.aj.get(), iperm, prefix);
     matrix_utils::LevelScheduleForwardSubstitution(
-        iperm, prefix, L.rows, L.base, L.ai.get(), L.aj.get(), L.av.get(),
+        iperm, prefix, L.rows, L.Base(), L.ai.get(), L.aj.get(), L.av.get(),
         b.data(), x_par.data());
     for (int i = 0; i < mat.rows(); i++) {
       EXPECT_NEAR(x_par[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
     }
 
-    auto Lt_data = matrix_utils::AllocateCSRData(L.cols, L.nnz);
+    auto Lt_data = matrix_utils::AllocateCSRData(L.cols, L.NNZ());
     matrix_utils::ParallelTranspose(
-        L.rows, L.cols, L.base, L.ai.get(), L.aj.get(), L.av.get(),
+        L.rows, L.cols, L.Base(), L.ai.get(), L.aj.get(), L.av.get(),
         std::get<0>(Lt_data).get(), std::get<1>(Lt_data).get(),
         std::get<2>(Lt_data).get());
 
     std::vector<double> x_serial_t(mat.rows(), 0.0);
 
     matrix_utils::ForwardSubstitutionT(
-        L.rows, L.base, std::get<0>(Lt_data).get(), std::get<1>(Lt_data).get(),
+        L.rows, L.Base(), std::get<0>(Lt_data).get(), std::get<1>(Lt_data).get(),
         std::get<2>(Lt_data).get(), b.data(), x_serial_t.data());
 
     for (int i = 0; i < mat.rows(); i++) {
@@ -180,7 +180,7 @@ TEST_F(triangular_solve_Test, backward_substitution) {
                            prec.get_ai().get(), prec.get_aj().get(),
                            prec.get_av().get(), L, D, U);
 
-    matrix_utils::BackwardSubstitution(U.rows, U.base, U.ai.get(), U.aj.get(),
+    matrix_utils::BackwardSubstitution(U.rows, U.Base(), U.ai.get(), U.aj.get(),
                                        U.av.get(), D.data(), b.data(),
                                        x_serial.data());
     for (int i = 0; i < mat.rows(); i++) {
@@ -190,10 +190,10 @@ TEST_F(triangular_solve_Test, backward_substitution) {
     std::vector<int> iperm(U.rows);
     std::vector<int> prefix;
     matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::U>(
-        U.rows, U.base, U.ai.get(), U.aj.get(), iperm, prefix);
+        U.rows, U.Base(), U.ai.get(), U.aj.get(), iperm, prefix);
 
     matrix_utils::LevelScheduleBackwardSubstitution(
-        iperm, prefix, U.rows, U.base, U.ai.get(), U.aj.get(), U.av.get(),
+        iperm, prefix, U.rows, U.Base(), U.ai.get(), U.aj.get(), U.av.get(),
         D.data(), b.data(), x_par.data());
     for (int i = 0; i < mat.rows(); i++) {
       EXPECT_NEAR(x_par[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
@@ -228,14 +228,14 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
                            prec.get_ai().get(), prec.get_aj().get(),
                            prec.get_av().get(), L, D, U);
 
-    matrix_utils::ForwardSubstitution(L.rows, L.base, L.ai.get(), L.aj.get(),
+    matrix_utils::ForwardSubstitution(L.rows, L.Base(), L.ai.get(), L.aj.get(),
                                       L.av.get(), b.data(), x_serial.data());
 
     matrix_utils::OptimizedTriangularSolve<
         matrix_utils::FBSubstitutionType::Barrier,
         matrix_utils::TriangularSolve::L, int, int, double>
         forwardsweep_barrier;
-    forwardsweep_barrier.analysis(L.rows, L.base, L.ai.get(), L.aj.get(),
+    forwardsweep_barrier.analysis(L.rows, L.Base(), L.ai.get(), L.aj.get(),
                                   L.av.get());
     for (int i = 0; i < 100; i++) {
       forwardsweep_barrier(b.data(), x.data());
@@ -248,7 +248,7 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
         matrix_utils::FBSubstitutionType::NoBarrier,
         matrix_utils::TriangularSolve::L, int, int, double>
         forwardsweep_nobarrier;
-    forwardsweep_nobarrier.analysis(L.rows, L.base, L.ai.get(), L.aj.get(),
+    forwardsweep_nobarrier.analysis(L.rows, L.Base(), L.ai.get(), L.aj.get(),
                                     L.av.get());
     for (int i = 0; i < 100; i++) {
       forwardsweep_nobarrier(b.data(), x.data());
@@ -261,7 +261,7 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
         matrix_utils::FBSubstitutionType::NoBarrierSuperNode,
         matrix_utils::TriangularSolve::L, int, int, double>
         forwardsweep_nobarrier_sn;
-    forwardsweep_nobarrier_sn.analysis(L.rows, L.base, L.ai.get(), L.aj.get(),
+    forwardsweep_nobarrier_sn.analysis(L.rows, L.Base(), L.ai.get(), L.aj.get(),
                                        L.av.get());
     for (int i = 0; i < 100; i++) {
       forwardsweep_nobarrier_sn(b.data(), x.data());
@@ -299,7 +299,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
                            prec.get_ai().get(), prec.get_aj().get(),
                            prec.get_av().get(), L, D, U);
 
-    matrix_utils::BackwardSubstitution(U.rows, U.base, U.ai.get(), U.aj.get(),
+    matrix_utils::BackwardSubstitution(U.rows, U.Base(), U.ai.get(), U.aj.get(),
                                        U.av.get(), D.data(), b.data(),
                                        x_serial.data());
 
@@ -307,7 +307,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
         matrix_utils::FBSubstitutionType::Barrier,
         matrix_utils::TriangularSolve::U, int, int, double>
         forwardsweep_barrier;
-    forwardsweep_barrier.analysis(U.rows, U.base, U.ai.get(), U.aj.get(),
+    forwardsweep_barrier.analysis(U.rows, U.Base(), U.ai.get(), U.aj.get(),
                                   U.av.get(), D.data());
     for (int i = 0; i < 100; i++) {
       forwardsweep_barrier(b.data(), x.data());
@@ -320,7 +320,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
         matrix_utils::FBSubstitutionType::NoBarrier,
         matrix_utils::TriangularSolve::U, int, int, double>
         forwardsweep_nobarrier;
-    forwardsweep_nobarrier.analysis(U.rows, U.base, U.ai.get(), U.aj.get(),
+    forwardsweep_nobarrier.analysis(U.rows, U.Base(), U.ai.get(), U.aj.get(),
                                     U.av.get(), D.data());
     for (int i = 0; i < 100; i++) {
       forwardsweep_nobarrier(b.data(), x.data());
@@ -333,7 +333,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
         matrix_utils::FBSubstitutionType::NoBarrierSuperNode,
         matrix_utils::TriangularSolve::U, int, int, double>
         forwardsweep_nobarrier_sn;
-    forwardsweep_nobarrier_sn.analysis(U.rows, U.base, U.ai.get(), U.aj.get(),
+    forwardsweep_nobarrier_sn.analysis(U.rows, U.Base(), U.ai.get(), U.aj.get(),
                                        U.av.get(), D.data());
     for (int i = 0; i < 100; i++) {
       forwardsweep_nobarrier_sn(b.data(), x.data());

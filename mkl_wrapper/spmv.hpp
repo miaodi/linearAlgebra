@@ -2,70 +2,85 @@
 
 #include "BitVector.hpp"
 #include "matrix_utils.hpp"
+#include <concepts>
 #include <omp.h>
 
 namespace matrix_utils {
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void SPMV(const COLTYPE size, const int base, ROWTYPE const *ai,
-          COLTYPE const *aj, VALTYPE const *av, VALTYPE const *const b,
-          VALTYPE *const x) {
-  for (COLTYPE i = 0; i < size; i++) {
-    VALTYPE val = 0;
-    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
-      val += av[j] * b[aj[j] - base];
-    }
-    x[i] = val;
-  }
-}
+// compute y = alpha * A * x + beta * y
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ParallelSPMV(const COLTYPE size, const int base, ROWTYPE const *ai,
+struct SerialSPMV {
+  SerialSPMV() = default;
+
+  template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+  void operator()(const COLTYPE size, const int base, ROWTYPE const *ai,
                   COLTYPE const *aj, VALTYPE const *av, VALTYPE const *const b,
-                  VALTYPE *const x) {
-
-#pragma omp parallel
-  {
-    const int tid = omp_get_thread_num();
-    const int nthreads = omp_get_num_threads();
-
-    auto [start, end] =
-        utils::LoadPrefixBalancedPartitionPos(ai, ai + size, tid, nthreads);
-
-#pragma omp for
-    for (COLTYPE i = start; i < end; i++) {
-      VALTYPE val = 0;
+                  VALTYPE *const x, const VALTYPE alpha,
+                  const VALTYPE beta) const {
+    for (COLTYPE i = 0; i < size; i++) {
+      VALTYPE val = beta == 0 ? 0 : beta * x[i];
+#pragma unroll
       for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
-        val += av[j] * b[aj[j] - base];
+        val += alpha * av[j] * b[aj[j] - base];
       }
       x[i] = val;
     }
   }
-}
+};
+
+struct ParallelSPMV {
+  ParallelSPMV() {}
+
+  template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+  void operator()(const COLTYPE size, const int base, ROWTYPE const *ai,
+                  COLTYPE const *aj, VALTYPE const *av, VALTYPE const *const b,
+                  VALTYPE *const x, const VALTYPE alpha,
+                  const VALTYPE beta) const {
+#pragma omp parallel
+    {
+      const int tid = omp_get_thread_num();
+      const int nthreads = omp_get_num_threads();
+
+      auto [start, end] =
+          utils::LoadPrefixBalancedPartitionPos(ai, ai + size, tid, nthreads);
+
+      for (COLTYPE i = start; i < end; i++) {
+        VALTYPE val = beta == 0 ? 0 : beta * x[i];
+#pragma unroll
+        for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+          val += alpha * av[j] * b[aj[j] - base];
+        }
+        x[i] = val;
+      }
+    }
+  }
+};
+
 template <typename ROWTYPE = int, typename COLTYPE = int,
           typename VALTYPE = double>
 class SegSumSPMV {
 public:
   SegSumSPMV(const int num_threads = omp_get_num_threads())
-      : _nthreads{num_threads} {
+      : _nthreads{num_threads} {}
+
+  void setNumThreads(const int num_threads) { _nthreads = num_threads; }
+
+  void preprocess(const COLTYPE size, const int base, ROWTYPE const *ai,
+                  COLTYPE const *aj, VALTYPE const *av) {
     _threadBv.resize(_nthreads + 1);
     _threadProduct.resize(_nthreads + 1);
     _threadProduct[0] = 0;
+
+    const ROWTYPE nnz = ai[size] - base;
+    _bv.resize(nnz);
+    _product.resize(nnz);
   }
 
-  void set_mat(const COLTYPE size, const int base, ROWTYPE const *ai,
-               COLTYPE const *aj, VALTYPE const *av) {
-    _size = size;
-    _base = base;
-    _ai = ai;
-    _aj = aj;
-    _av = av;
-    _nnz = ai[size] - base;
-    _bv.resize(_nnz);
-    _product.resize(_nnz);
-  }
-
-  void operator()(const VALTYPE *const b, VALTYPE *const x) const {
+  void operator()(const COLTYPE size, const int base, ROWTYPE const *ai,
+                  COLTYPE const *aj, VALTYPE const *av, const VALTYPE *const b,
+                  VALTYPE *const x, const VALTYPE alpha,
+                  const VALTYPE beta) const {
+    const ROWTYPE nnz = ai[size] - base;
     _bv.clearAll();
     _threadBv.clearAll();
 #pragma omp parallel num_threads(_nthreads)
@@ -74,17 +89,17 @@ public:
       const int nthreads = omp_get_num_threads();
 
       auto [start_row, end_row] =
-          utils::LoadBalancedPartitionPos(_size, tid, nthreads);
+          utils::LoadBalancedPartitionPos(size, tid, nthreads);
 
       for (COLTYPE i = start_row; i < end_row; i++) {
-        _bv.set(_ai[i] - _base);
+        _bv.set(ai[i] - base);
       }
 
 #pragma omp barrier
-      auto [start, end] = utils::LoadBalancedPartitionPos(_nnz, tid, nthreads);
-
+      auto [start, end] = utils::LoadBalancedPartitionPos(nnz, tid, nthreads);
+#pragma unroll
       for (ROWTYPE i = start; i < end; i++) {
-        _product[i] = _av[i] * b[_aj[i] - _base];
+        _product[i] = alpha * av[i] * b[aj[i] - base];
         if (i > start && !_bv.get(i)) {
           _product[i] += _product[i - 1];
           if (_bv.get(i - 1)) {
@@ -150,13 +165,12 @@ public:
       //       }
 
 #pragma omp barrier
-
       for (COLTYPE i = start_row; i < end_row; i++) {
-        if (_ai[i + 1] > _ai[i]) {
-          const COLTYPE jIDX = _ai[i + 1] - _base - 1;
-          x[i] = _product[jIDX];
+        if (ai[i + 1] > ai[i]) {
+          const COLTYPE jIDX = ai[i + 1] - base - 1;
+          x[i] = _product[jIDX] + beta * x[i];
         } else {
-          x[i] = 0;
+          x[i] = beta * x[i];
         }
       }
     }
@@ -164,17 +178,42 @@ public:
 
 private:
   int _nthreads;
-  COLTYPE _size;
-  ROWTYPE _nnz;
-  int _base;
-  ROWTYPE const *_ai;
-  COLTYPE const *_aj;
-  VALTYPE const *_av;
-
   mutable utils::BitVector<ROWTYPE> _bv;
   mutable std::vector<VALTYPE> _product;
   mutable utils::BitVector<int> _threadBv;
   mutable std::vector<VALTYPE> _threadProduct;
+};
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename T>
+constexpr bool spmv_has_preprocess =
+    requires(const COLTYPE size, const int base, ROWTYPE const *ai,
+             COLTYPE const *aj, VALTYPE const *av,
+             T &t) { t.preprocess(size, base, ai, aj, av); };
+
+template <typename CSRMatrixType, typename SPMVType> struct SPMV {
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using VALTYPE = typename CSRMatrixType::VALTYPE;
+
+  SPMV() : _matrix{nullptr} {}
+
+  void setMatrix(CSRMatrixType const *matrix) { _matrix = matrix; }
+
+  void preprocess() {
+    if constexpr (spmv_has_preprocess<ROWTYPE, COLTYPE, VALTYPE, SPMVType>) {
+      _spmv.preprocess(_matrix->rows, _matrix->Base(), _matrix->AI(),
+                       _matrix->AJ(), _matrix->AV());
+    }
+  }
+
+  void operator()(const VALTYPE *const b, VALTYPE *const x,
+                  const VALTYPE alpha = 1., const VALTYPE beta = 0.) const {
+    _spmv(_matrix->rows, _matrix->Base(), _matrix->AI(), _matrix->AJ(),
+          _matrix->AV(), b, x, alpha, beta);
+  }
+
+  CSRMatrixType const *_matrix;
+  SPMVType _spmv;
 };
 
 } // namespace matrix_utils

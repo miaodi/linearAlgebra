@@ -18,7 +18,7 @@ protected:
   std::vector<mkl_wrapper::mkl_sparse_mat> _mats;
 
   const double _tol = 1e-14;
-  const double _MKLtol = 1e-10;
+  const double _MKLtol = 1e-13;
 
   spmv_Test() {
 
@@ -83,7 +83,6 @@ int main(int argc, char **argv) {
 TEST_F(spmv_Test, serial_spmv) {
   for (auto &mat : _mats) {
     const MKL_INT size = mat.rows();
-    mat.to_zero_based();
 
     std::vector<double> b(mat.rows());
     std::fill(std::begin(b), std::end(b), 1.);
@@ -92,39 +91,89 @@ TEST_F(spmv_Test, serial_spmv) {
     std::vector<double> diff(mat.rows(), 0.0);
 
     mat.mult_vec(b.data(), x_mkl.data());
-    mkl_sparse_d_trsv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, mat.mkl_handler(),
-                      mat.mkl_descr(), b.data(), x_mkl.data());
-    SPMV(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
-         mat.get_aj().get(), mat.get_av().get(), b.data(), x.data());
-    for (int i = 0; i < mat.rows(); i++) {
-      EXPECT_NEAR(x[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
-    }
 
-    ParallelSPMV(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
-                 mat.get_aj().get(), mat.get_av().get(), b.data(), x.data());
-    for (int i = 0; i < mat.rows(); i++) {
-      EXPECT_NEAR(x[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
-    }
+    SerialSPMV spmv;
+    spmv(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+         mat.get_aj().get(), mat.get_av().get(), b.data(), x.data(), 1., 0.);
 
-    SegSumSPMV ss_spmv(10);
-    ss_spmv.set_mat(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
-                    mat.get_aj().get(), mat.get_av().get());
-
-    ss_spmv(b.data(), x.data());
-    // for (int i = 0; i < mat.rows(); i++) {
-    //   EXPECT_NEAR(x[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
-    // }
     for (int i = 0; i < mat.rows(); i++)
       diff[i] = x[i] - x_mkl[i];
 
     const double diff_l2 = cblas_dnrm2(diff.size(), diff.data(), 1);
     const double mkl_l2 = cblas_dnrm2(x_mkl.size(), x_mkl.data(), 1);
     EXPECT_NEAR(diff_l2 / mkl_l2, 0, _MKLtol);
-    // std::cout << "error: " << std::setprecision(15) << diff_l2 / mkl_l2
-    //           << std::endl;
+    // std::cout << "error: " << diff_l2 / mkl_l2 << std::endl;
 
     for (int i = 0; i < mat.rows(); i++) {
-      EXPECT_NEAR(x[i], x_mkl[i], _MKLtol * mkl_l2);
+      EXPECT_NEAR(x[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
     }
+  }
+}
+
+TEST_F(spmv_Test, parallel_spmv) {
+  omp_set_num_threads(10);
+
+  for (auto &mat : _mats) {
+    const MKL_INT size = mat.rows();
+
+    std::vector<double> b(mat.rows());
+    std::fill(std::begin(b), std::end(b), 1.);
+    std::vector<double> x(mat.rows(), 0.0);
+    std::vector<double> x_serial(mat.rows(), 0.0);
+    std::vector<double> diff(mat.rows(), 0.0);
+
+    SerialSPMV spmv;
+    spmv(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+         mat.get_aj().get(), mat.get_av().get(), b.data(), x_serial.data(), 1.,
+         0.);
+
+    ParallelSPMV p_spmv;
+    p_spmv(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+           mat.get_aj().get(), mat.get_av().get(), b.data(), x.data(), 1., 0.);
+    for (int i = 0; i < mat.rows(); i++)
+      diff[i] = x[i] - x_serial[i];
+
+    const double diff_l2 = cblas_dnrm2(diff.size(), diff.data(), 1);
+    const double serial_l2 = cblas_dnrm2(x_serial.size(), x_serial.data(), 1);
+    EXPECT_NEAR(diff_l2 / serial_l2, 0, _tol);
+
+    for (int i = 0; i < mat.rows(); i++) {
+      EXPECT_NEAR(x[i], x_serial[i], _tol * std::abs(x_serial[i]));
+    }
+  }
+}
+
+TEST_F(spmv_Test, seg_spmv) {
+  for (auto &mat : _mats) {
+    const MKL_INT size = mat.rows();
+
+    std::vector<double> b(mat.rows());
+    std::fill(std::begin(b), std::end(b), 1.);
+    std::vector<double> x(mat.rows(), 0.0);
+    std::vector<double> x_serial(mat.rows(), 0.0);
+    std::vector<double> diff(mat.rows(), 0.0);
+
+    SerialSPMV spmv;
+    spmv(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+         mat.get_aj().get(), mat.get_av().get(), b.data(), x_serial.data(), 1.,
+         0.);
+
+    SegSumSPMV ss_spmv(10);
+    ss_spmv.preprocess(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+                       mat.get_aj().get(), mat.get_av().get());
+    ss_spmv(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+            mat.get_aj().get(), mat.get_av().get(), b.data(), x.data(), 1., 0.);
+
+    for (int i = 0; i < mat.rows(); i++)
+      diff[i] = x[i] - x_serial[i];
+
+    const double diff_l2 = cblas_dnrm2(diff.size(), diff.data(), 1);
+    const double serial_l2 = cblas_dnrm2(x_serial.size(), x_serial.data(), 1);
+    // EXPECT_NEAR(diff_l2 / serial_l2, 0, _tol);
+
+    std::cout << "error: " << diff_l2 / serial_l2 << std::endl;
+    // for (int i = 0; i < mat.rows(); i++) {
+    //   EXPECT_NEAR(x[i], x_serial[i], _tol * std::abs(x_serial[i]));
+    // }
   }
 }

@@ -558,8 +558,9 @@ void mkl_sparse_mat::DtAD(const std::vector<double> &diag) {
 }
 
 bool mkl_sparse_mat::diag_pos(std::vector<MKL_INT> &diag) const {
-  return matrix_utils::DiagonalPosition(_nrow, (MKL_INT)_mkl_base, _ai.get(),
-                                        _aj.get(), diag);
+  return matrix_utils::Diagonal(_nrow, (MKL_INT)_mkl_base, _ai.get(), _aj.get(),
+                                _av.get(), &diag,
+                                static_cast<std::vector<double> *>(nullptr));
 }
 
 void mkl_sparse_mat::randomVals() {
