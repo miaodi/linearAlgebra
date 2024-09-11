@@ -47,6 +47,7 @@ template <typename R, typename C, typename V> struct CSRMatrix {
 
   CSRMatrix() = default;
 };
+
 template <typename R, typename C, typename V> struct CSRMatrixVec {
   using ROWTYPE = R;
   using COLTYPE = C;
@@ -616,7 +617,7 @@ template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename VECIDX,
           typename VECVAL>
 bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
               COLTYPE const *aj, VALTYPE const *av, VECIDX *diagpos,
-              VECVAL *diag) {
+              VECVAL *diag, const bool invert = false) {
   if (diagpos)
     (*diagpos).resize(rows);
   if (diag)
@@ -634,8 +635,17 @@ bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
     }
     if (diagpos)
       (*diagpos)[i] = mid - aj;
-    if (diag)
-      (*diag)[i] = av[mid - aj];
+    if (diag) {
+      VALTYPE val = av[mid - aj];
+      if (invert) {
+        if (val == 0) {
+          val = 1.;
+        } else {
+          val = 1. / val;
+        }
+      }
+      (*diag)[i] = val;
+    }
   }
   if (missing_diag)
     return false;
@@ -765,5 +775,22 @@ bool ValidCSR(const COLTYPE rows, const COLTYPE cols, const int base,
     }
   }
   return true;
+}
+
+// alpha * diag * x + beta * y
+template <typename COLTYPE, typename VALTYPE>
+void DiagVecMul(const COLTYPE n, const VALTYPE alpha, VALTYPE const *diag,
+                VALTYPE const *x, const VALTYPE beta, VALTYPE *y) {
+  if (beta) {
+#pragma omp parallel for
+    for (COLTYPE i = 0; i < n; ++i) {
+      y[i] = alpha * x[i] * diag[i] + beta * y[i];
+    }
+  } else {
+#pragma omp parallel for
+    for (COLTYPE i = 0; i < n; ++i) {
+      y[i] = alpha * x[i] * diag[i];
+    }
+  }
 }
 } // namespace matrix_utils
