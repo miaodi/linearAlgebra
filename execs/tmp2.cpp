@@ -2,7 +2,7 @@
 #include "../mkl_wrapper/amgcl_precond.h"
 #include "../mkl_wrapper/incomplete_cholesky.h"
 #include "../mkl_wrapper/incomplete_lu.h"
-#include "../mkl_wrapper/matrix_utils.hpp"
+#include "../sparse_mat_op/matrix_utils.hpp"
 #include "../mkl_wrapper/mkl_eigen.h"
 #include "../mkl_wrapper/mkl_solver.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"

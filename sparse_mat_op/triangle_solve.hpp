@@ -208,4 +208,4 @@ protected:
 };
 } // namespace matrix_utils
 
-#include "trinagle_solve.tpp"
+#include "triangle_solve.tpp"

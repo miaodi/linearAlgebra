@@ -125,6 +125,7 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 
 add_subdirectory(utils)
+add_subdirectory(sparse_mat_op)
 add_subdirectory(mkl_wrapper)
 add_subdirectory(reordering)
 

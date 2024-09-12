@@ -166,7 +166,7 @@ void SerialTranspose(const COLTYPE rows, const COLTYPE cols, const int base,
     for (COLTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
       const COLTYPE idx = ai_transpose[aj[j] - base + 1]++ - base;
       aj_transpose[idx] = i + base;
-      if (av != nullptr)
+      if (update_av)
         av_transpose[idx] = av[j];
     }
   }
