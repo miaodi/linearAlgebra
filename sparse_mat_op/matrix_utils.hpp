@@ -1,5 +1,6 @@
 #pragma once
 
+#include "sparse_mat_traits.hpp"
 #include "utils.h"
 #include <execution>
 #include <iostream>
@@ -48,6 +49,32 @@ template <typename R, typename C, typename V> struct CSRMatrix {
   CSRMatrix() = default;
 };
 
+/// @brief only holds (does not own no need to destory) the raw pointers of the
+/// CSR matrix, not resizable
+/// @tparam R
+/// @tparam C
+/// @tparam V
+template <typename R, typename C, typename V> struct CSRMatrixRawPtr {
+  using ROWTYPE = R;
+  using COLTYPE = C;
+  using VALTYPE = V;
+
+  COLTYPE rows;
+  COLTYPE cols;
+  ROWTYPE const *ai;
+  COLTYPE const *aj;
+  VALTYPE const *av;
+
+  ROWTYPE Base() const { return ai[0]; }
+  ROWTYPE NNZ() const { return ai[rows] - ai[0]; }
+
+  ROWTYPE const *AI() const { return ai; }
+  COLTYPE const *AJ() const { return aj; }
+  VALTYPE const *AV() const { return av; }
+
+  CSRMatrixRawPtr() = default;
+};
+
 template <typename R, typename C, typename V> struct CSRMatrixVec {
   using ROWTYPE = R;
   using COLTYPE = C;
@@ -73,6 +100,8 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
 
 template <typename CSRMatrixType>
 void ResizeCSRAI(CSRMatrixType &mat, const size_t size) {
+  static_assert(CSRResizable<CSRMatrixType>::value,
+                "CSRMatrixType must have a resizable method");
   if constexpr (std::is_same_v<
                     decltype(mat.ai),
                     std::shared_ptr<typename CSRMatrixType::ROWTYPE[]>>) {
@@ -89,6 +118,8 @@ void ResizeCSRAI(CSRMatrixType &mat, const size_t size) {
 
 template <typename CSRMatrixType>
 void ResizeCSRAJ(CSRMatrixType &mat, const size_t size) {
+  static_assert(CSRResizable<CSRMatrixType>::value,
+                "CSRMatrixType must have a resizable method");
   if constexpr (std::is_same_v<
                     decltype(mat.aj),
                     std::shared_ptr<typename CSRMatrixType::COLTYPE[]>>) {
@@ -105,6 +136,8 @@ void ResizeCSRAJ(CSRMatrixType &mat, const size_t size) {
 
 template <typename CSRMatrixType>
 void ResizeCSRAV(CSRMatrixType &mat, const size_t size) {
+  static_assert(CSRResizable<CSRMatrixType>::value,
+                "CSRMatrixType must have a resizable method");
   if constexpr (std::is_same_v<
                     decltype(mat.av),
                     std::shared_ptr<typename CSRMatrixType::VALTYPE[]>>) {
@@ -523,9 +556,9 @@ void permuteVec(const COLTYPE rows, const int base, VALTYPE const *const v,
 template <class Array>
 using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
 
-enum TriangularSolve { L = 0, U = 1 };
+enum TriangularMatrix { L = 0, U = 1 };
 
-template <TriangularSolve TS = L, typename ROWTYPE, typename COLTYPE,
+template <TriangularMatrix TS = L, typename ROWTYPE, typename COLTYPE,
           typename VEC>
 void TopologicalSort(const COLTYPE nodes, const int base, ROWTYPE const *ai,
                      COLTYPE const *aj, VEC &iperm, VEC &prefix) {
@@ -574,7 +607,7 @@ void TopologicalSort(const COLTYPE nodes, const int base, ROWTYPE const *ai,
   }
 }
 
-template <TriangularSolve TS = L, typename ROWTYPE, typename COLTYPE,
+template <TriangularMatrix TS = L, typename ROWTYPE, typename COLTYPE,
           typename VEC>
 void TopologicalSort2(const COLTYPE nodes, const int base, ROWTYPE const *ai,
                       COLTYPE const *aj, VEC &iperm, VEC &prefix) {
@@ -666,11 +699,21 @@ bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
 /// @param D diagonal matrix, stored as a vector. Note that zero diagonal is
 /// allowed
 /// @param U strictly upper triangular matrix
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
+          typename CSRMatrixType>
 void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
-              COLTYPE const *aj, VALTYPE const *av,
-              CSRMatrix<ROWTYPE, COLTYPE, VALTYPE> &L, std::vector<VALTYPE> &D,
-              CSRMatrix<ROWTYPE, COLTYPE, VALTYPE> &U) {
+              COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &L,
+              std::vector<VALTYPE> &D, CSRMatrixType &U) {
+  static_assert(std::is_same_v<typename CSRMatrixType::ROWTYPE, ROWTYPE> ==
+                true);
+  static_assert(std::is_same_v<typename CSRMatrixType::COLTYPE, COLTYPE> ==
+                true);
+  static_assert(std::is_same_v<typename CSRMatrixType::VALTYPE, VALTYPE> ==
+                true);
+
+  static_assert(CSRResizable<CSRMatrixType>::value,
+                "CSRMatrixType must have a resizable method");
+
   ROWTYPE nnz = ai[rows] - base;
   L.rows = rows;
   L.cols = rows;
@@ -744,6 +787,126 @@ void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
       }
     }
   }
+}
+
+template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
+          typename VALTYPE, typename CSRMatrixType>
+void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
+                   COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &U) {
+  static_assert(TS == TriangularMatrix::U);
+  static_assert(std::is_same_v<typename CSRMatrixType::ROWTYPE, ROWTYPE> ==
+                true);
+  static_assert(std::is_same_v<typename CSRMatrixType::COLTYPE, COLTYPE> ==
+                true);
+  static_assert(std::is_same_v<typename CSRMatrixType::VALTYPE, VALTYPE> ==
+                true);
+
+  static_assert(CSRResizable<CSRMatrixType>::value,
+                "CSRMatrixType must have a resizable method");
+
+  U.rows = rows;
+  U.cols = rows;
+  ResizeCSRAI(U, rows + 1);
+
+  U.ai[0] = base;
+  std::vector<ROWTYPE> start_pos(rows);
+  std::vector<ROWTYPE> prefix(omp_get_max_threads() + 1);
+  prefix[0] = base;
+
+#pragma omp parallel
+  {
+    const int tid = omp_get_thread_num();
+    const int nthreads = omp_get_num_threads();
+    auto [start, end] =
+        utils::LoadPrefixBalancedPartition(ai, ai + rows, tid, nthreads);
+    prefix[tid + 1] = 0;
+    for (auto it = start; it < end; it++) {
+      COLTYPE i = it - ai;
+      auto mid =
+          std::lower_bound(aj + *it - base, aj + *(it + 1) - base, i + base);
+      const bool zero_diag = (mid == aj + *(it + 1) - base || *mid != i + base);
+      start_pos[i] = mid - aj;
+      const ROWTYPE U_size = *(it + 1) - base - start_pos[i];
+      prefix[tid + 1] += U_size;
+      U.ai[i + 1] = prefix[tid + 1];
+    }
+#pragma omp barrier
+#pragma omp single
+    {
+      for (size_t i = 1; i < prefix.size(); i++) {
+        prefix[i] += prefix[i - 1];
+      }
+
+      const auto Unnz = prefix[nthreads];
+      ResizeCSRAJ(U, Unnz);
+      ResizeCSRAV(U, Unnz);
+    }
+
+    ROWTYPE U_pos = prefix[tid] - base;
+    for (auto it = start; it < end; it++) {
+      COLTYPE i = it - ai;
+      U.ai[i + 1] += prefix[tid];
+
+      for (ROWTYPE j = start_pos[i]; j < *(it + 1) - base; j++) {
+        U.aj[U_pos] = aj[j];
+        U.av[U_pos++] = av[j];
+      }
+    }
+  }
+}
+
+template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
+          typename VALTYPE, typename CSRMatrixType>
+void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
+                      COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &F) {
+//   static_assert(TS == TriangularMatrix::U);
+//   static_assert(std::is_same_v<typename CSRMatrixType::ROWTYPE, ROWTYPE> ==
+//                 true);
+//   static_assert(std::is_same_v<typename CSRMatrixType::COLTYPE, COLTYPE> ==
+//                 true);
+//   static_assert(std::is_same_v<typename CSRMatrixType::VALTYPE, VALTYPE> ==
+//                 true);
+
+//   static_assert(CSRResizable<CSRMatrixType>::value,
+//                 "CSRMatrixType must have a resizable method");
+
+//   F.rows = rows;
+//   F.cols = rows;
+//   ResizeCSRAI(F, rows + 1);
+
+//   std::vector<std::unique_ptr<ROWTYPE[]>> threadPrefixSum(
+//       omp_get_max_threads());
+
+//   std::vector<ROWTYPE> prefix(omp_get_max_threads() + 1, 0);
+//   prefix[0] = base;
+
+// #pragma omp parallel
+//   {
+//     const int tid = omp_get_thread_num();
+//     const int nthreads = omp_get_num_threads();
+
+//     auto [start, end] = utils::LoadPrefixBalancedPartition(
+//         find_address_of(ai), find_address_of(ai) + rows, tid, nthreads);
+//     threadPrefixSum[tid].reset(new ROWTYPE[rows]());
+
+//     for (auto it = start; it < end; it++) {
+//       for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
+//         threadPrefixSum[tid][aj[j] - base]++;
+//       }
+//     }
+
+//     auto [start_row, end_row] =
+//         utils::LoadBalancedPartitionPos(rows, tid, nthreads);
+//     for (COLTYPE i = start_row; i < end_row; i++) {
+//       F.ai[i + 1] = (i == start_row) ? 0 : F.ai[i];
+//       for (int t = 0; t < nthreads; t++) {
+//         F.ai[i + 1] += threadPrefixSum[t][i];
+//       }
+//     }
+//     prefix[tid + 1] = ai_transpose[endt - ai_transpose];
+
+// #pragma omp barrier
+//   }
 }
 
 template <typename ROWTYPE, typename COLTYPE>

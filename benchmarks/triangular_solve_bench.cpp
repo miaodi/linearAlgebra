@@ -78,7 +78,7 @@ BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
 
   std::vector<int> iperm(L.rows);
   std::vector<int> prefix;
-  matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
+  matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::L>(
       L.rows, L.Base(), L.ai.get(), L.aj.get(), iperm, prefix);
   for (auto _ : state) {
     for (int i = 0; i < state.range(0); i++) {
@@ -170,7 +170,7 @@ BENCHMARK_DEFINE_F(MyFixture, CacheParForward_barrier)
 
   matrix_utils::OptimizedTriangularSolve<
       matrix_utils::FBSubstitutionType::Barrier,
-      matrix_utils::TriangularSolve::L, int, int, double>
+      matrix_utils::TriangularMatrix::L, int, int, double>
       forwardsweep(_num_threads);
   forwardsweep.analysis(L.rows, L.Base(), L.ai.get(), L.aj.get(), L.av.get());
   for (auto _ : state) {
@@ -196,7 +196,7 @@ BENCHMARK_DEFINE_F(MyFixture, CacheParForward_nobarrier)
 
   matrix_utils::OptimizedTriangularSolve<
       matrix_utils::FBSubstitutionType::NoBarrier,
-      matrix_utils::TriangularSolve::L, int, int, double>
+      matrix_utils::TriangularMatrix::L, int, int, double>
       forwardsweep(_num_threads);
   forwardsweep.analysis(L.rows, L.Base(), L.ai.get(), L.aj.get(), L.av.get());
   for (auto _ : state) {
@@ -222,7 +222,7 @@ BENCHMARK_DEFINE_F(MyFixture, CacheParForward_nobarrier2)
 
   matrix_utils::OptimizedTriangularSolve<
       matrix_utils::FBSubstitutionType::NoBarrierSuperNode,
-      matrix_utils::TriangularSolve::L, int, int, double>
+      matrix_utils::TriangularMatrix::L, int, int, double>
       forwardsweep(_num_threads);
   forwardsweep.analysis(L.rows, L.Base(), L.ai.get(), L.aj.get(), L.av.get());
   for (auto _ : state) {

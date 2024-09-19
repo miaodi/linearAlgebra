@@ -119,7 +119,7 @@ TEST_F(triangular_solve_Test, forward_substitution) {
 
     std::vector<int> iperm(L.rows);
     std::vector<int> prefix;
-    matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::L>(
+    matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::L>(
         L.rows, L.Base(), L.ai.get(), L.aj.get(), iperm, prefix);
     matrix_utils::LevelScheduleForwardSubstitution(
         iperm, prefix, L.rows, L.Base(), L.ai.get(), L.aj.get(), L.av.get(),
@@ -189,7 +189,7 @@ TEST_F(triangular_solve_Test, backward_substitution) {
 
     std::vector<int> iperm(U.rows);
     std::vector<int> prefix;
-    matrix_utils::TopologicalSort2<matrix_utils::TriangularSolve::U>(
+    matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::U>(
         U.rows, U.Base(), U.ai.get(), U.aj.get(), iperm, prefix);
 
     matrix_utils::LevelScheduleBackwardSubstitution(
@@ -233,7 +233,7 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
 
     matrix_utils::OptimizedTriangularSolve<
         matrix_utils::FBSubstitutionType::Barrier,
-        matrix_utils::TriangularSolve::L, int, int, double>
+        matrix_utils::TriangularMatrix::L, int, int, double>
         forwardsweep_barrier;
     forwardsweep_barrier.analysis(L.rows, L.Base(), L.ai.get(), L.aj.get(),
                                   L.av.get());
@@ -246,7 +246,7 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
 
     matrix_utils::OptimizedTriangularSolve<
         matrix_utils::FBSubstitutionType::NoBarrier,
-        matrix_utils::TriangularSolve::L, int, int, double>
+        matrix_utils::TriangularMatrix::L, int, int, double>
         forwardsweep_nobarrier;
     forwardsweep_nobarrier.analysis(L.rows, L.Base(), L.ai.get(), L.aj.get(),
                                     L.av.get());
@@ -259,7 +259,7 @@ TEST_F(triangular_solve_Test, forward_substitution_optimized) {
 
     matrix_utils::OptimizedTriangularSolve<
         matrix_utils::FBSubstitutionType::NoBarrierSuperNode,
-        matrix_utils::TriangularSolve::L, int, int, double>
+        matrix_utils::TriangularMatrix::L, int, int, double>
         forwardsweep_nobarrier_sn;
     forwardsweep_nobarrier_sn.analysis(L.rows, L.Base(), L.ai.get(), L.aj.get(),
                                        L.av.get());
@@ -305,7 +305,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
 
     matrix_utils::OptimizedTriangularSolve<
         matrix_utils::FBSubstitutionType::Barrier,
-        matrix_utils::TriangularSolve::U, int, int, double>
+        matrix_utils::TriangularMatrix::U, int, int, double>
         forwardsweep_barrier;
     forwardsweep_barrier.analysis(U.rows, U.Base(), U.ai.get(), U.aj.get(),
                                   U.av.get(), D.data());
@@ -318,7 +318,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
 
     matrix_utils::OptimizedTriangularSolve<
         matrix_utils::FBSubstitutionType::NoBarrier,
-        matrix_utils::TriangularSolve::U, int, int, double>
+        matrix_utils::TriangularMatrix::U, int, int, double>
         forwardsweep_nobarrier;
     forwardsweep_nobarrier.analysis(U.rows, U.Base(), U.ai.get(), U.aj.get(),
                                     U.av.get(), D.data());
@@ -331,7 +331,7 @@ TEST_F(triangular_solve_Test, backward_substitution_optimized) {
 
     matrix_utils::OptimizedTriangularSolve<
         matrix_utils::FBSubstitutionType::NoBarrierSuperNode,
-        matrix_utils::TriangularSolve::U, int, int, double>
+        matrix_utils::TriangularMatrix::U, int, int, double>
         forwardsweep_nobarrier_sn;
     forwardsweep_nobarrier_sn.analysis(U.rows, U.Base(), U.ai.get(), U.aj.get(),
                                        U.av.get(), D.data());

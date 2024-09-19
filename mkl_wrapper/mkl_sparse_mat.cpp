@@ -688,37 +688,16 @@ mkl_sparse_mat_sym::mkl_sparse_mat_sym(const mkl_sparse_mat &A)
   auto ai = A.get_ai();
   auto aj = A.get_aj();
   auto av = A.get_av();
-  _nnz = 0;
-  _ai[0] = _mkl_base;
 
-  std::vector<MKL_INT> diag_pos(_nrow); // record the diag pos
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> csr;
+  matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
+      _nrow, _mkl_base, ai.get(), aj.get(), av.get(), csr);
 
-#pragma omp parallel for
-  for (MKL_INT i = 0; i < _nrow; i++) {
-    auto begin = ai[i] - _mkl_base;
-    auto end = ai[i + 1] - _mkl_base;
-    auto mid =
-        std::find(aj.get() + begin, aj.get() + end, i + (MKL_INT)_mkl_base);
-    if (mid == aj.get() + end) {
-      std::cerr << "Could not find diagonal!" << std::endl;
-    } else {
-      diag_pos[i] = mid - aj.get();
-      _ai[i + 1] = end - diag_pos[i];
-    }
-  }
-  std::inclusive_scan(std::execution::seq, _ai.get(), _ai.get() + _nrow + 1,
-                      _ai.get(), std::plus<>());
-  _nnz = _ai[_nrow] - _mkl_base;
+  _nnz = csr.NNZ();
+  _ai = csr.ai;
+  _aj = csr.aj;
+  _av = csr.av;
 
-  _aj.reset(new MKL_INT[_nnz]);
-  _av.reset(new double[_nnz]);
-
-  for (MKL_INT i = 0; i < _nrow; i++) {
-    std::copy(std::execution::seq, aj.get() + diag_pos[i],
-              aj.get() + ai[i + 1] - _mkl_base, _aj.get() + _ai[i] - _mkl_base);
-    std::copy(std::execution::seq, av.get() + diag_pos[i],
-              av.get() + ai[i + 1] - _mkl_base, _av.get() + _ai[i] - _mkl_base);
-  }
   sp_fill();
 }
 

@@ -147,7 +147,7 @@ void LevelScheduleBackwardSubstitution(const VEC &iperm, const VEC &prefix,
 enum class FBSubstitutionType { Barrier, NoBarrier, NoBarrierSuperNode };
 
 template <FBSubstitutionType FBST = FBSubstitutionType::Barrier,
-          TriangularSolve TS = TriangularSolve::L, typename ROWTYPE = int,
+          TriangularMatrix TS = TriangularMatrix::L, typename ROWTYPE = int,
           typename COLTYPE = int, typename VALTYPE = double>
 class OptimizedTriangularSolve {
 public:

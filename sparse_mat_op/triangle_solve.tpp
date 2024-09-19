@@ -14,7 +14,7 @@
 #include "matrix_utils.hpp"
 
 namespace matrix_utils {
-template <FBSubstitutionType FBST, TriangularSolve TS, typename ROWTYPE,
+template <FBSubstitutionType FBST, TriangularMatrix TS, typename ROWTYPE,
           typename COLTYPE, typename VALTYPE>
 void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::analysis(
     const COLTYPE rows, const int base, ROWTYPE const *ai, COLTYPE const *aj,
@@ -112,7 +112,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::analysis(
     _bv.resize(_tasks);
 }
 
-template <FBSubstitutionType FBST, TriangularSolve TS, typename ROWTYPE,
+template <FBSubstitutionType FBST, TriangularMatrix TS, typename ROWTYPE,
           typename COLTYPE, typename VALTYPE>
 void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::operator()(
     const VALTYPE *const b, VALTYPE *const x) const {
@@ -124,7 +124,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::operator()(
     NoBarrierSuperNodeOp(b, x);
 }
 
-template <FBSubstitutionType FBST, TriangularSolve TS, typename ROWTYPE,
+template <FBSubstitutionType FBST, TriangularMatrix TS, typename ROWTYPE,
           typename COLTYPE, typename VALTYPE>
 void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::BarrierOp(
     const VALTYPE *const b, VALTYPE *const x) const {
@@ -154,7 +154,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::BarrierOp(
   //                          _threadperm.data(), x);
 }
 
-template <FBSubstitutionType FBST, TriangularSolve TS, typename ROWTYPE,
+template <FBSubstitutionType FBST, TriangularMatrix TS, typename ROWTYPE,
           typename COLTYPE, typename VALTYPE>
 void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::NoBarrierOp(
     const VALTYPE *const b, VALTYPE *const x) const {
@@ -186,7 +186,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::NoBarrierOp(
   }
 }
 
-template <FBSubstitutionType FBST, TriangularSolve TS, typename ROWTYPE,
+template <FBSubstitutionType FBST, TriangularMatrix TS, typename ROWTYPE,
           typename COLTYPE, typename VALTYPE>
 void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::
     NoBarrierSuperNodeOp(const VALTYPE *const b, VALTYPE *const x) const {
@@ -225,7 +225,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::
   }
 }
 
-template <FBSubstitutionType FBST, TriangularSolve TS, typename ROWTYPE,
+template <FBSubstitutionType FBST, TriangularMatrix TS, typename ROWTYPE,
           typename COLTYPE, typename VALTYPE>
 void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE,
                               VALTYPE>::build_task_graph() {
