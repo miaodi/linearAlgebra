@@ -300,65 +300,68 @@ void ParallelTranspose2(const COLTYPE rows, const COLTYPE cols, const int base,
   ai_transpose[0] = base;
   const bool update_av = av_transpose != nullptr && av != nullptr;
 
-  std::vector<std::unique_ptr<ROWTYPE[]>> threadPrefixSum(
-      omp_get_max_threads());
+  std::unique_ptr<ROWTYPE[]> threadPrefixSum(nullptr);
 
   std::vector<ROWTYPE> prefix(omp_get_max_threads() + 1, 0);
   prefix[0] = base;
 
+  int nthreads;
+  auto IdxMap = [&nthreads](const int tid, const COLTYPE rid) {
+    return nthreads * rid + tid;
+  };
+
 #pragma omp parallel
   {
     const int tid = omp_get_thread_num();
-    const int nthreads = omp_get_num_threads();
 
-    auto [start, end] = utils::LoadPrefixBalancedPartition(
-        find_address_of(ai), find_address_of(ai) + rows, tid, nthreads);
-    threadPrefixSum[tid].reset(new ROWTYPE[rows_transpose]());
+#pragma omp single
+    {
+      nthreads = omp_get_num_threads();
+      threadPrefixSum.reset(new ROWTYPE[nthreads * rows_transpose]());
+    }
+
+    auto [start, end] =
+        utils::LoadPrefixBalancedPartition(ai, ai + rows, tid, nthreads);
 
     for (auto it = start; it < end; it++) {
       for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
-        threadPrefixSum[tid][aj[j] - base]++;
+        threadPrefixSum[IdxMap(tid, aj[j] - base)]++;
       }
     }
 
 #pragma omp barrier
-    auto [startt, endt] = utils::LoadBalancedPartition(
-        ai_transpose, ai_transpose + rows_transpose, tid, nthreads);
-    for (auto it = startt; it < endt; it++) {
-      const ROWTYPE rowID = it - ai_transpose;
-      ai_transpose[rowID + 1] = (it == startt) ? 0 : ai_transpose[rowID];
-      for (int t = 0; t < nthreads; t++) {
-        ai_transpose[rowID + 1] += threadPrefixSum[t][rowID];
+    auto [start_row, end_row] =
+        utils::LoadBalancedPartitionPos(rows_transpose, tid, nthreads);
+
+    ROWTYPE tmp = 0;
+    for (COLTYPE i = start_row; i < end_row; i++) {
+      threadPrefixSum[IdxMap(0, i)] += tmp;
+      for (int t = 1; t < nthreads; t++) {
+        threadPrefixSum[IdxMap(t, i)] += threadPrefixSum[IdxMap(t - 1, i)];
       }
+      tmp = threadPrefixSum[IdxMap(nthreads - 1, i)];
+      ai_transpose[i + 1] = threadPrefixSum[IdxMap(nthreads - 1, i)];
     }
-    prefix[tid + 1] = ai_transpose[endt - ai_transpose];
+    prefix[tid + 1] = ai_transpose[end_row];
 
 #pragma omp barrier
-
 #pragma omp single
     std::inclusive_scan(prefix.begin(), prefix.end(), prefix.begin());
 
-    for (auto it = startt; it < endt; it++) {
-      const ROWTYPE rowID = it - ai_transpose;
-      ai_transpose[rowID + 1] += prefix[tid];
-    }
-
-#pragma omp barrier
-    for (auto it = startt; it < endt; it++) {
-      const ROWTYPE rowID = it - ai_transpose;
-      ROWTYPE tmp = threadPrefixSum[0][rowID];
-      threadPrefixSum[0][rowID] = ai_transpose[rowID];
-      for (int t = 1; t < nthreads; t++) {
-        std::swap(threadPrefixSum[t][rowID], tmp);
-        threadPrefixSum[t][rowID] += threadPrefixSum[t - 1][rowID];
+    tmp = 0;
+    for (COLTYPE i = start_row; i < end_row; i++) {
+      ai_transpose[i + 1] += prefix[tid];
+      for (int t = 0; t < nthreads; t++) {
+        std::swap(threadPrefixSum[IdxMap(t, i)], tmp);
+        threadPrefixSum[IdxMap(t, i)] += prefix[tid];
       }
     }
 
 #pragma omp barrier
     for (auto it = start; it < end; it++) {
       for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
-        const ROWTYPE rowID = it - ai;
-        const COLTYPE idx = threadPrefixSum[tid][aj[j] - base]++ - base;
+        const COLTYPE rowID = it - ai;
+        const COLTYPE idx = threadPrefixSum[IdxMap(tid, aj[j] - base)]++ - base;
         aj_transpose[idx] = rowID + base;
         if (update_av)
           av_transpose[idx] = av[j];
@@ -759,11 +762,11 @@ void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
         LU_prefix[i].first += LU_prefix[i - 1].first;
         LU_prefix[i].second += LU_prefix[i - 1].second;
       }
-      const auto Lnnz = LU_prefix[nthreads].first;
+      const auto Lnnz = LU_prefix[nthreads].first - base;
       ResizeCSRAJ(L, Lnnz);
       ResizeCSRAV(L, Lnnz);
 
-      const auto Unnz = LU_prefix[nthreads].second;
+      const auto Unnz = LU_prefix[nthreads].second - base;
       ResizeCSRAJ(U, Unnz);
       ResizeCSRAV(U, Unnz);
     }
@@ -837,7 +840,7 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
         prefix[i] += prefix[i - 1];
       }
 
-      const auto Unnz = prefix[nthreads];
+      const auto Unnz = prefix[nthreads] - base;
       ResizeCSRAJ(U, Unnz);
       ResizeCSRAV(U, Unnz);
     }
@@ -855,10 +858,11 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
   }
 }
 
-template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
-          typename VALTYPE, typename CSRMatrixType>
-void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
-                      COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &F) {
+// template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
+//           typename VALTYPE, typename CSRMatrixType>
+// void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
+//                       COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &F)
+//                       {
 //   static_assert(TS == TriangularMatrix::U);
 //   static_assert(std::is_same_v<typename CSRMatrixType::ROWTYPE, ROWTYPE> ==
 //                 true);
@@ -907,7 +911,7 @@ void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
 
 // #pragma omp barrier
 //   }
-}
+// }
 
 template <typename ROWTYPE, typename COLTYPE>
 bool ValidCSR(const COLTYPE rows, const COLTYPE cols, const int base,
