@@ -234,3 +234,55 @@ TEST(SplitLDU, base1) {
   // matD.print_svg(myfile);
   // myfile.close();
 }
+
+TEST(UpperTrigToFull, small) {
+  omp_set_num_threads(5);
+  for (int i = 0; i < 20; i++) {
+    auto mat = mkl_wrapper::random_sparse(50, 13);
+    mat.randomVals();
+    if (i % 2 == 0)
+      mat.to_one_based();
+    else
+      mat.to_zero_based();
+    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, F;
+    matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
+        mat.rows(), mat.mkl_base(), mat.get_ai().get(), mat.get_aj().get(),
+        mat.get_av().get(), U);
+    matrix_utils::TriangularToFull<matrix_utils::TriangularMatrix::U>(
+        U.rows, U.Base(), U.AI(), U.AJ(), U.AV(), F);
+
+    mkl_wrapper::mkl_sparse_mat full(mat.rows(), mat.rows(), F.ai, F.aj, F.av,
+                                     mat.mkl_base());
+    mkl_wrapper::mkl_sparse_mat transpose_full = full;
+    transpose_full.transpose();
+    for (int i = 0; i <= full.rows(); i++) {
+      EXPECT_EQ(full.get_ai()[i], transpose_full.get_ai()[i]);
+    }
+  }
+}
+
+TEST(UpperTrigToFull, medium) {
+  omp_set_num_threads(10);
+  for (int i = 0; i < 10; i++) {
+    auto mat = mkl_wrapper::random_sparse(10000, 30);
+    mat.randomVals();
+    if (i % 2 == 0)
+      mat.to_one_based();
+    else
+      mat.to_zero_based();
+    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, F;
+    matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
+        mat.rows(), mat.mkl_base(), mat.get_ai().get(), mat.get_aj().get(),
+        mat.get_av().get(), U);
+    matrix_utils::TriangularToFull<matrix_utils::TriangularMatrix::U>(
+        U.rows, U.Base(), U.AI(), U.AJ(), U.AV(), F);
+
+    mkl_wrapper::mkl_sparse_mat full(mat.rows(), mat.rows(), F.ai, F.aj, F.av,
+                                     mat.mkl_base());
+    mkl_wrapper::mkl_sparse_mat transpose_full = full;
+    transpose_full.transpose();
+    for (int i = 0; i <= full.rows(); i++) {
+      EXPECT_EQ(full.get_ai()[i], transpose_full.get_ai()[i]);
+    }
+  }
+}

@@ -97,15 +97,16 @@ void ForwardSubstitutionT(const COLTYPE size, const int base, ROWTYPE const *ai,
   }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename VEC>
-void LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void LevelScheduleForwardSubstitution(COLTYPE const *iperm,
+                                      COLTYPE const *prefix, const COLTYPE lvls,
                                       const COLTYPE rows, const int base,
                                       ROWTYPE const *ai, COLTYPE const *aj,
                                       VALTYPE const *av, VALTYPE const *const b,
                                       VALTYPE *const x) {
 #pragma omp parallel
   {
-    for (int l = 0; l < prefix.size() - 1; l++) {
+    for (int l = 0; l < lvls; l++) {
 #pragma omp for
       for (COLTYPE i = prefix[l]; i < prefix[l + 1]; i++) {
         const COLTYPE idx = iperm[i] - base;
@@ -120,16 +121,15 @@ void LevelScheduleForwardSubstitution(const VEC &iperm, const VEC &prefix,
   }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename VEC>
-void LevelScheduleBackwardSubstitution(const VEC &iperm, const VEC &prefix,
-                                       const COLTYPE rows, const int base,
-                                       ROWTYPE const *ai, COLTYPE const *aj,
-                                       VALTYPE const *av, VALTYPE const *diag,
-                                       VALTYPE const *const b,
-                                       VALTYPE *const x) {
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void LevelScheduleBackwardSubstitution(
+    COLTYPE const *iperm, COLTYPE const *prefix, const COLTYPE lvls,
+    const COLTYPE rows, const int base, ROWTYPE const *ai, COLTYPE const *aj,
+    VALTYPE const *av, VALTYPE const *diag, VALTYPE const *const b,
+    VALTYPE *const x) {
 #pragma omp parallel
   {
-    for (int l = 0; l < prefix.size() - 1; l++) {
+    for (int l = 0; l < lvls; l++) {
 #pragma omp for
       for (COLTYPE i = prefix[l]; i < prefix[l + 1]; i++) {
         const COLTYPE idx = iperm[i] - base;
@@ -167,7 +167,7 @@ public:
   void NoBarrierSuperNodeOp(const VALTYPE *const b, VALTYPE *const x) const;
 
   void build_task_graph();
-  
+
   int get_num_threads() const { return _nthreads; }
 
 protected:

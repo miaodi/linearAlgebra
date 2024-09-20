@@ -119,11 +119,12 @@ TEST_F(triangular_solve_Test, forward_substitution) {
 
     std::vector<int> iperm(L.rows);
     std::vector<int> prefix;
-    matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::L>(
-        L.rows, L.Base(), L.ai.get(), L.aj.get(), iperm, prefix);
+    auto lvls =
+        matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::L>(
+            L.rows, L.Base(), L.ai.get(), L.aj.get(), iperm, prefix);
     matrix_utils::LevelScheduleForwardSubstitution(
-        iperm, prefix, L.rows, L.Base(), L.ai.get(), L.aj.get(), L.av.get(),
-        b.data(), x_par.data());
+        iperm.data(), prefix.data(), lvls, L.rows, L.Base(), L.ai.get(),
+        L.aj.get(), L.av.get(), b.data(), x_par.data());
     for (int i = 0; i < mat.rows(); i++) {
       EXPECT_NEAR(x_par[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
     }
@@ -137,8 +138,9 @@ TEST_F(triangular_solve_Test, forward_substitution) {
     std::vector<double> x_serial_t(mat.rows(), 0.0);
 
     matrix_utils::ForwardSubstitutionT(
-        L.rows, L.Base(), std::get<0>(Lt_data).get(), std::get<1>(Lt_data).get(),
-        std::get<2>(Lt_data).get(), b.data(), x_serial_t.data());
+        L.rows, L.Base(), std::get<0>(Lt_data).get(),
+        std::get<1>(Lt_data).get(), std::get<2>(Lt_data).get(), b.data(),
+        x_serial_t.data());
 
     for (int i = 0; i < mat.rows(); i++) {
       EXPECT_NEAR(x_serial_t[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
@@ -189,12 +191,13 @@ TEST_F(triangular_solve_Test, backward_substitution) {
 
     std::vector<int> iperm(U.rows);
     std::vector<int> prefix;
-    matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::U>(
-        U.rows, U.Base(), U.ai.get(), U.aj.get(), iperm, prefix);
+    auto lvls =
+        matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::U>(
+            U.rows, U.Base(), U.ai.get(), U.aj.get(), iperm, prefix);
 
     matrix_utils::LevelScheduleBackwardSubstitution(
-        iperm, prefix, U.rows, U.Base(), U.ai.get(), U.aj.get(), U.av.get(),
-        D.data(), b.data(), x_par.data());
+        iperm.data(), prefix.data(), lvls, U.rows, U.Base(), U.ai.get(),
+        U.aj.get(), U.av.get(), D.data(), b.data(), x_par.data());
     for (int i = 0; i < mat.rows(); i++) {
       EXPECT_NEAR(x_par[i], x_mkl[i], _MKLtol * std::abs(x_mkl[i]));
     }

@@ -13,7 +13,7 @@
 
 namespace matrix_utils {
 
-template <class T> auto find_address_of(T &&p) { return p.get(); }
+template <typename T> auto find_address_of(T &&p) { return p.get(); }
 
 template <typename T> auto find_address_of(T *p) { return p; }
 
@@ -21,33 +21,13 @@ template <typename T> auto find_address_of(const std::vector<T> &p) {
   return p.cbegin();
 }
 
+template <typename T> auto find_address_of(std::vector<T> &p) {
+  return p.begin();
+}
+
 template <typename T> T const *find_address_of(std::span<const T> p) {
   return p.data();
 }
-
-template <typename R, typename C, typename V> struct CSRMatrix {
-  using ROWTYPE = R;
-  using COLTYPE = C;
-  using VALTYPE = V;
-  COLTYPE rows;
-  COLTYPE cols;
-
-  size_t ai_size{0};
-  size_t aj_size{0};
-  size_t av_size{0};
-  std::shared_ptr<ROWTYPE[]> ai;
-  std::shared_ptr<COLTYPE[]> aj;
-  std::shared_ptr<VALTYPE[]> av;
-
-  ROWTYPE Base() const { return ai[0]; }
-  ROWTYPE NNZ() const { return ai[rows] - ai[0]; }
-
-  ROWTYPE const *AI() const { return ai.get(); }
-  COLTYPE const *AJ() const { return aj.get(); }
-  VALTYPE const *AV() const { return av.get(); }
-
-  CSRMatrix() = default;
-};
 
 /// @brief only holds (does not own no need to destory) the raw pointers of the
 /// CSR matrix, not resizable
@@ -75,6 +55,30 @@ template <typename R, typename C, typename V> struct CSRMatrixRawPtr {
   CSRMatrixRawPtr() = default;
 };
 
+template <typename R, typename C, typename V> struct CSRMatrix {
+  using ROWTYPE = R;
+  using COLTYPE = C;
+  using VALTYPE = V;
+  COLTYPE rows;
+  COLTYPE cols;
+
+  size_t ai_size{0};
+  size_t aj_size{0};
+  size_t av_size{0};
+  std::shared_ptr<ROWTYPE[]> ai;
+  std::shared_ptr<COLTYPE[]> aj;
+  std::shared_ptr<VALTYPE[]> av;
+
+  ROWTYPE Base() const { return ai[0]; }
+  ROWTYPE NNZ() const { return ai[rows] - ai[0]; }
+
+  ROWTYPE const *AI() const { return ai.get(); }
+  COLTYPE const *AJ() const { return aj.get(); }
+  VALTYPE const *AV() const { return av.get(); }
+
+  CSRMatrix() = default;
+};
+
 template <typename R, typename C, typename V> struct CSRMatrixVec {
   using ROWTYPE = R;
   using COLTYPE = C;
@@ -98,15 +102,20 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
   template <class Archive> void serialize(Archive &ar) { ar(ai, aj, av); }
 };
 
-template <typename CSRMatrixType>
+template <typename CSRMatrixType, bool preserve = false>
 void ResizeCSRAI(CSRMatrixType &mat, const size_t size) {
   static_assert(CSRResizable<CSRMatrixType>::value,
                 "CSRMatrixType must have a resizable method");
   if constexpr (std::is_same_v<
                     decltype(mat.ai),
                     std::shared_ptr<typename CSRMatrixType::ROWTYPE[]>>) {
-    if (mat.ai_size < size) {
-      mat.ai.reset(new typename CSRMatrixType::ROWTYPE[size]);
+    if (mat.ai_size < size || mat.ai == nullptr) {
+      std::shared_ptr<typename CSRMatrixType::ROWTYPE[]> tmp(
+          new CSRMatrixType::ROWTYPE[size]);
+      if constexpr (preserve) {
+        std::copy(mat.ai.get(), mat.ai.get() + mat.ai_size, tmp.get());
+      }
+      std::swap(mat.ai, tmp);
       mat.ai_size = size;
     }
   } else if constexpr (std::is_same_v<
@@ -116,15 +125,20 @@ void ResizeCSRAI(CSRMatrixType &mat, const size_t size) {
   }
 }
 
-template <typename CSRMatrixType>
+template <typename CSRMatrixType, bool preserve = false>
 void ResizeCSRAJ(CSRMatrixType &mat, const size_t size) {
   static_assert(CSRResizable<CSRMatrixType>::value,
                 "CSRMatrixType must have a resizable method");
   if constexpr (std::is_same_v<
                     decltype(mat.aj),
                     std::shared_ptr<typename CSRMatrixType::COLTYPE[]>>) {
-    if (mat.aj_size < size) {
-      mat.aj.reset(new typename CSRMatrixType::COLTYPE[size]);
+    if (mat.aj_size < size || mat.aj == nullptr) {
+      std::shared_ptr<typename CSRMatrixType::COLTYPE[]> tmp(
+          new CSRMatrixType::COLTYPE[size]);
+      if constexpr (preserve) {
+        std::copy(mat.aj.get(), mat.aj.get() + mat.aj_size, tmp.get());
+      }
+      std::swap(mat.aj, tmp);
       mat.aj_size = size;
     }
   } else if constexpr (std::is_same_v<
@@ -134,15 +148,20 @@ void ResizeCSRAJ(CSRMatrixType &mat, const size_t size) {
   }
 }
 
-template <typename CSRMatrixType>
+template <typename CSRMatrixType, bool preserve = false>
 void ResizeCSRAV(CSRMatrixType &mat, const size_t size) {
   static_assert(CSRResizable<CSRMatrixType>::value,
                 "CSRMatrixType must have a resizable method");
   if constexpr (std::is_same_v<
                     decltype(mat.av),
                     std::shared_ptr<typename CSRMatrixType::VALTYPE[]>>) {
-    if (mat.av_size < size) {
-      mat.av.reset(new typename CSRMatrixType::VALTYPE[size]);
+    if (mat.av_size < size || mat.av == nullptr) {
+      std::shared_ptr<typename CSRMatrixType::VALTYPE[]> tmp(
+          new CSRMatrixType::VALTYPE[size]);
+      if constexpr (preserve) {
+        std::copy(mat.av.get(), mat.av.get() + mat.av_size, tmp.get());
+      }
+      std::swap(mat.av, tmp);
       mat.av_size = size;
     }
   } else if constexpr (std::is_same_v<
@@ -563,8 +582,8 @@ enum TriangularMatrix { L = 0, U = 1 };
 
 template <TriangularMatrix TS = L, typename ROWTYPE, typename COLTYPE,
           typename VEC>
-void TopologicalSort(const COLTYPE nodes, const int base, ROWTYPE const *ai,
-                     COLTYPE const *aj, VEC &iperm, VEC &prefix) {
+COLTYPE TopologicalSort(const COLTYPE nodes, const int base, ROWTYPE const *ai,
+                        COLTYPE const *aj, VEC &iperm, VEC &prefix) {
   iperm.reserve(nodes);
   iperm.clear();
   std::vector<int> degrees(nodes);
@@ -591,10 +610,14 @@ void TopologicalSort(const COLTYPE nodes, const int base, ROWTYPE const *ai,
     }
   }
 
-  auto t_csr = matrix_utils::ParallelTranspose2(
-      nodes, nodes, ai[nodes] - base, base, ai, aj, (double *)nullptr);
-  const auto &[t_ai, t_aj, t_av] = t_csr;
-  size_t level = 0;
+  const ROWTYPE nnz = ai[nodes] - base;
+  std::vector<ROWTYPE> t_ai(nodes + 1);
+  std::vector<COLTYPE> t_aj(nnz);
+
+  ParallelTranspose2(nodes, nodes, base, ai, aj, (double *)nullptr, t_ai.data(),
+                     t_aj.data(), (double *)nullptr);
+
+  COLTYPE level = 0;
   while (iperm.size() != nodes) {
     prefix.push_back(prefix.back());
     for (size_t i = prefix[level]; i < prefix[level + 1]; i++) {
@@ -608,12 +631,13 @@ void TopologicalSort(const COLTYPE nodes, const int base, ROWTYPE const *ai,
     }
     level++;
   }
+  return level;
 }
 
 template <TriangularMatrix TS = L, typename ROWTYPE, typename COLTYPE,
           typename VEC>
-void TopologicalSort2(const COLTYPE nodes, const int base, ROWTYPE const *ai,
-                      COLTYPE const *aj, VEC &iperm, VEC &prefix) {
+COLTYPE TopologicalSort2(const COLTYPE nodes, const int base, ROWTYPE const *ai,
+                         COLTYPE const *aj, VEC &iperm, VEC &prefix) {
   std::vector<int> degrees(nodes, 0);
   COLTYPE start, end, inc;
   if constexpr (TS == L) {
@@ -647,22 +671,16 @@ void TopologicalSort2(const COLTYPE nodes, const int base, ROWTYPE const *ai,
   }
   std::rotate(prefix.rbegin(), prefix.rbegin() + 1, prefix.rend());
   prefix[0] = 0;
+  return level;
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename VECIDX,
-          typename VECVAL>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
-              COLTYPE const *aj, VALTYPE const *av, VECIDX *diagpos,
-              VECVAL *diag, const bool invert = false) {
-  if (diagpos)
-    (*diagpos).resize(rows);
-  if (diag)
-    (*diag).resize(rows);
+              COLTYPE const *aj, VALTYPE const *av, ROWTYPE *diagpos,
+              VALTYPE *diag, const bool invert = false) {
   volatile bool missing_diag = false;
 #pragma omp parallel for shared(missing_diag)
   for (COLTYPE i = 0; i < rows; i++) {
-    if (missing_diag)
-      continue;
     auto mid =
         std::lower_bound(aj + ai[i] - base, aj + ai[i + 1] - base, i + base);
     if (*mid != i + base) {
@@ -670,7 +688,7 @@ bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
       missing_diag = true;
     }
     if (diagpos)
-      (*diagpos)[i] = mid - aj;
+      diagpos[i] = mid - aj + base;
     if (diag) {
       VALTYPE val = av[mid - aj];
       if (invert) {
@@ -680,12 +698,10 @@ bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
           val = 1. / val;
         }
       }
-      (*diag)[i] = val;
+      diag[i] = val;
     }
   }
-  if (missing_diag)
-    return false;
-  return true;
+  return !missing_diag;
 }
 
 /// @brief Split a matrix into strictly lower triangular matrix L, diagonal D,
@@ -707,13 +723,8 @@ template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
 void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
               COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &L,
               std::vector<VALTYPE> &D, CSRMatrixType &U) {
-  static_assert(std::is_same_v<typename CSRMatrixType::ROWTYPE, ROWTYPE> ==
-                true);
-  static_assert(std::is_same_v<typename CSRMatrixType::COLTYPE, COLTYPE> ==
-                true);
-  static_assert(std::is_same_v<typename CSRMatrixType::VALTYPE, VALTYPE> ==
-                true);
-
+  static_assert(
+      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
   static_assert(CSRResizable<CSRMatrixType>::value,
                 "CSRMatrixType must have a resizable method");
 
@@ -797,13 +808,8 @@ template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
 void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
                    COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &U) {
   static_assert(TS == TriangularMatrix::U);
-  static_assert(std::is_same_v<typename CSRMatrixType::ROWTYPE, ROWTYPE> ==
-                true);
-  static_assert(std::is_same_v<typename CSRMatrixType::COLTYPE, COLTYPE> ==
-                true);
-  static_assert(std::is_same_v<typename CSRMatrixType::VALTYPE, VALTYPE> ==
-                true);
-
+  static_assert(
+      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
   static_assert(CSRResizable<CSRMatrixType>::value,
                 "CSRMatrixType must have a resizable method");
 
@@ -858,60 +864,109 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
   }
 }
 
-// template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
-//           typename VALTYPE, typename CSRMatrixType>
-// void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
-//                       COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &F)
-//                       {
-//   static_assert(TS == TriangularMatrix::U);
-//   static_assert(std::is_same_v<typename CSRMatrixType::ROWTYPE, ROWTYPE> ==
-//                 true);
-//   static_assert(std::is_same_v<typename CSRMatrixType::COLTYPE, COLTYPE> ==
-//                 true);
-//   static_assert(std::is_same_v<typename CSRMatrixType::VALTYPE, VALTYPE> ==
-//                 true);
+template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
+          typename VALTYPE, typename CSRMatrixType>
+void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
+                      COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &F) {
+  static_assert(TS == TriangularMatrix::U);
+  static_assert(
+      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
 
-//   static_assert(CSRResizable<CSRMatrixType>::value,
-//                 "CSRMatrixType must have a resizable method");
+  static_assert(CSRResizable<CSRMatrixType>::value,
+                "CSRMatrixType must have a resizable method");
 
-//   F.rows = rows;
-//   F.cols = rows;
-//   ResizeCSRAI(F, rows + 1);
+  F.rows = rows;
+  F.cols = rows;
+  ResizeCSRAI(F, rows + 1);
 
-//   std::vector<std::unique_ptr<ROWTYPE[]>> threadPrefixSum(
-//       omp_get_max_threads());
+  F.ai[0] = base;
 
-//   std::vector<ROWTYPE> prefix(omp_get_max_threads() + 1, 0);
-//   prefix[0] = base;
+  std::unique_ptr<ROWTYPE[]> threadPrefixSum(nullptr);
+  std::unique_ptr<ROWTYPE[]> prefix{nullptr};
 
-// #pragma omp parallel
-//   {
-//     const int tid = omp_get_thread_num();
-//     const int nthreads = omp_get_num_threads();
+  int nthreads;
+  auto IdxMap = [&nthreads](const int tid, const COLTYPE rid) {
+    return (nthreads + 1) * rid + tid;
+  };
 
-//     auto [start, end] = utils::LoadPrefixBalancedPartition(
-//         find_address_of(ai), find_address_of(ai) + rows, tid, nthreads);
-//     threadPrefixSum[tid].reset(new ROWTYPE[rows]());
+#pragma omp parallel
+  {
+    const int tid = omp_get_thread_num();
 
-//     for (auto it = start; it < end; it++) {
-//       for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
-//         threadPrefixSum[tid][aj[j] - base]++;
-//       }
-//     }
+#pragma omp single
+    {
+      nthreads = omp_get_num_threads();
+      threadPrefixSum.reset(new ROWTYPE[(nthreads + 1) * rows]());
+      prefix.reset(new ROWTYPE[nthreads + 1]());
+      prefix[0] = base;
+    }
 
-//     auto [start_row, end_row] =
-//         utils::LoadBalancedPartitionPos(rows, tid, nthreads);
-//     for (COLTYPE i = start_row; i < end_row; i++) {
-//       F.ai[i + 1] = (i == start_row) ? 0 : F.ai[i];
-//       for (int t = 0; t < nthreads; t++) {
-//         F.ai[i + 1] += threadPrefixSum[t][i];
-//       }
-//     }
-//     prefix[tid + 1] = ai_transpose[endt - ai_transpose];
+    auto [start, end] =
+        utils::LoadPrefixBalancedPartition(ai, ai + rows, tid, nthreads);
 
-// #pragma omp barrier
-//   }
-// }
+    for (auto it = start; it < end; it++) {
+      COLTYPE i = it - ai;
+      ROWTYPE j = aj[ai[i] - base] - base == i ? *it - base + 1 : *it - base;
+      for (; j < *(it + 1) - base; j++) {
+        threadPrefixSum[IdxMap(tid, aj[j] - base)]++;
+      }
+    }
+
+#pragma omp barrier
+    auto [start_row, end_row] =
+        utils::LoadBalancedPartitionPos(rows, tid, nthreads);
+
+    ROWTYPE tmp = 0;
+    for (COLTYPE i = start_row; i < end_row; i++) {
+      if (i != start_row)
+        threadPrefixSum[IdxMap(0, i)] +=
+            threadPrefixSum[IdxMap(nthreads, i - 1)];
+      for (int t = 1; t < nthreads; t++) {
+        threadPrefixSum[IdxMap(t, i)] += threadPrefixSum[IdxMap(t - 1, i)];
+      }
+      threadPrefixSum[IdxMap(nthreads, i)] =
+          threadPrefixSum[IdxMap(nthreads - 1, i)] + ai[i + 1] - ai[i];
+      F.ai[i + 1] = threadPrefixSum[IdxMap(nthreads, i)];
+    }
+    prefix[tid + 1] = F.ai[end_row];
+
+#pragma omp barrier
+#pragma omp single
+    {
+      std::inclusive_scan(prefix.get(), prefix.get() + nthreads + 1,
+                          prefix.get());
+      const ROWTYPE nnz = prefix[nthreads] - base;
+      ResizeCSRAJ(F, nnz);
+      ResizeCSRAV(F, nnz);
+    }
+
+    tmp = 0;
+    for (COLTYPE i = start_row; i < end_row; i++) {
+      F.ai[i + 1] += prefix[tid];
+      for (int t = 0; t < nthreads + 1; t++) {
+        std::swap(threadPrefixSum[IdxMap(t, i)], tmp);
+        threadPrefixSum[IdxMap(t, i)] += prefix[tid];
+      }
+    }
+
+#pragma omp barrier
+    for (auto it = start; it < end; it++) {
+      const COLTYPE i = it - ai;
+      ROWTYPE j = aj[ai[i] - base] - base == i ? *it - base + 1 : *it - base;
+      for (; j < *(it + 1) - base; j++) {
+        const COLTYPE idx = threadPrefixSum[IdxMap(tid, aj[j] - base)]++ - base;
+        F.aj[idx] = i + base;
+        F.av[idx] = av[j];
+      }
+      std::copy(aj + ai[i] - base, aj + ai[i + 1] - base,
+                find_address_of(F.aj) + threadPrefixSum[IdxMap(nthreads, i)] -
+                    base);
+      std::copy(av + ai[i] - base, av + ai[i + 1] - base,
+                find_address_of(F.av) + threadPrefixSum[IdxMap(nthreads, i)] -
+                    base);
+    }
+  }
+}
 
 template <typename ROWTYPE, typename COLTYPE>
 bool ValidCSR(const COLTYPE rows, const COLTYPE cols, const int base,
@@ -939,6 +994,32 @@ bool ValidCSR(const COLTYPE rows, const COLTYPE cols, const int base,
         (aj[ai[i] - base] < base || aj[ai[i + 1] - base - 1] >= cols + base)) {
       std::cout << "Column index out of range in row " << i << std::endl;
       return false;
+    }
+  }
+  return true;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+bool Symmetry(const COLTYPE size, const int base, ROWTYPE const *ai,
+              COLTYPE const *aj, VALTYPE const *av) {
+  const ROWTYPE nnz = ai[size] - base;
+  std::vector<ROWTYPE> tai(size + 1);
+  std::vector<COLTYPE> taj(nnz);
+  std::vector<VALTYPE> tav(nnz);
+
+  ParallelTranspose2(size, size, base, ai, aj, av, tai.data(), taj.data(),
+                     tav.data());
+  for (COLTYPE i = 0; i < size; i++) {
+    if (ai[i + 1] - ai[i] != tai[i + 1] - tai[i]) {
+      std::cout << "Row " << i << " has different number of nonzeros"
+                << std::endl;
+      return false;
+    }
+    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+      if (aj[j] != taj[j] || av[j] != tav[j]) {
+        std::cout << "Row " << i << " is not symmetric" << std::endl;
+        return false;
+      }
     }
   }
   return true;

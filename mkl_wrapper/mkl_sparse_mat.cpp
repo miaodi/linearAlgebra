@@ -45,6 +45,9 @@ mkl_sparse_mat::mkl_sparse_mat(const mkl_sparse_mat &other) {
   _nrow = other._nrow;
   _ncol = other._ncol;
   _nnz = other._nnz;
+  _mkl_base = other._mkl_base;
+  _mkl_descr = other._mkl_descr;
+  _pd = other._pd;
 
   _ai.reset(new MKL_INT[_nrow + 1]);
   _aj.reset(new MKL_INT[_nnz]);
@@ -416,31 +419,16 @@ int mkl_sparse_mat::check() const {
 
 // https://stackoverflow.com/questions/49395986/compressed-sparse-row-transpose
 void mkl_sparse_mat::transpose() {
-  mkl_sparse_mat tmp(_ncol + 1, _nrow, _nnz);
-  tmp._nrow--;
-  // count per column
-  for (MKL_INT i = 0; i < _nnz; ++i) {
-    ++tmp._ai[_aj[i] + 2];
-  }
+  auto csr_data = matrix_utils::AllocateCSRData(_ncol, _nnz);
 
-  // from count per column generate new rowPtr (but shifted)
-  for (MKL_INT i = 2; i <= tmp._nrow; ++i) {
-    // create incremental sum
-    tmp._ai[i] += tmp._ai[i - 1];
-  }
-
-  // perform the main part
-  for (MKL_INT i = 0; i < _nrow; ++i) {
-    for (MKL_INT j = _ai[i]; j < _ai[i + 1]; ++j) {
-      // calculate index to transposed matrix at which we should place current
-      // element, and at the same time build final rowPtr
-      const size_t new_index = tmp._ai[_aj[j] + 1]++;
-      tmp._av[new_index] = _av[j];
-      tmp._aj[new_index] = i;
-    }
-  }
-  tmp.sp_fill();
-  this->swap(tmp);
+  matrix_utils::ParallelTranspose2(
+      _nrow, _ncol, _mkl_base, _ai.get(), _aj.get(), _av.get(),
+      std::get<0>(csr_data).get(), std::get<1>(csr_data).get(),
+      std::get<2>(csr_data).get());
+  _ai = std::move(std::get<0>(csr_data));
+  _aj = std::move(std::get<1>(csr_data));
+  _av = std::move(std::get<2>(csr_data));
+  sp_fill();
 }
 
 void mkl_sparse_mat::clear() {
@@ -558,9 +546,12 @@ void mkl_sparse_mat::DtAD(const std::vector<double> &diag) {
 }
 
 bool mkl_sparse_mat::diag_pos(std::vector<MKL_INT> &diag) const {
+  diag.resize(_nrow);
   return matrix_utils::Diagonal(_nrow, (MKL_INT)_mkl_base, _ai.get(), _aj.get(),
-                                _av.get(), &diag,
-                                static_cast<std::vector<double> *>(nullptr));
+                                _av.get(), diag.data(),
+                                static_cast<double *>(nullptr));
+  std::for_each(std::execution::par, diag.begin(), diag.end(),
+                [&](auto &d) { d -= _mkl_base; });
 }
 
 void mkl_sparse_mat::randomVals() {

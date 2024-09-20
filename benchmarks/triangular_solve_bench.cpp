@@ -57,8 +57,9 @@ BENCHMARK_DEFINE_F(MyFixture, SerialForward)(benchmark::State &state) {
 
   for (auto _ : state) {
     for (int i = 0; i < state.range(0); i++) {
-      matrix_utils::ForwardSubstitution(L.rows, L.Base(), L.ai.get(), L.aj.get(),
-                                        L.av.get(), b.data(), x.data());
+      matrix_utils::ForwardSubstitution(L.rows, L.Base(), L.ai.get(),
+                                        L.aj.get(), L.av.get(), b.data(),
+                                        x.data());
     }
   }
 }
@@ -78,13 +79,13 @@ BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
 
   std::vector<int> iperm(L.rows);
   std::vector<int> prefix;
-  matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::L>(
+  auto lvls = matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::L>(
       L.rows, L.Base(), L.ai.get(), L.aj.get(), iperm, prefix);
   for (auto _ : state) {
     for (int i = 0; i < state.range(0); i++) {
       matrix_utils::LevelScheduleForwardSubstitution(
-          iperm, prefix, L.rows, L.Base(), L.ai.get(), L.aj.get(), L.av.get(),
-          b.data(), x.data());
+          iperm.data(), prefix.data(), lvls, L.rows, L.Base(), L.ai.get(),
+          L.aj.get(), L.av.get(), b.data(), x.data());
     }
   }
 }
