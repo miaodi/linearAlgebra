@@ -1,4 +1,5 @@
 
+#include "incomplete_cholesky.h"
 #include "matrix_utils.hpp"
 #include "mkl_sparse_mat.h"
 #include "precond_symbolic.hpp"
@@ -25,7 +26,7 @@ protected:
     std::vector<double> csr_vals;
 
     std::ifstream f;
-    f.open("data/ex5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
+    f.open("data/nos5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.push_back(mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
@@ -61,18 +62,29 @@ int main(int argc, char **argv) {
 
 TEST_F(precond_Test, icc_level_symbolic_factorize) {
   for (auto &mat : _mats) {
-
+    std::cout << "size: " << mat.rows() << std::endl;
     matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC;
     matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
         mat.rows(), mat.mkl_base(), mat.get_ai().get(), mat.get_aj().get(),
         mat.get_av().get(), U);
+
+    mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av,
+                                     mat.mkl_base());
     matrix_utils::ICCLevelSymbolic(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                   U.aj.get(), U.aj.get(), 1, ICC);
-    for(int i = 0;i<ICC.ai[mat.rows()];i++){
-      std::cout << ICC.aj[i] << " ";
-    }
-    // mkl_wrapper::mkl_sparse_mat matICC(mat.rows(), mat.rows(), ICC.ai, ICC.aj,
-    //                                    ICC.av, mat.mkl_base());
-    // matICC.print();
+                                   U.aj.get(), U.ai.get(), 2, ICC);
+    mkl_wrapper::mkl_sparse_mat matICC(mat.rows(), mat.rows(), ICC.ai, ICC.aj,
+                                       ICC.av, mat.mkl_base());
+    std::ofstream myfile;
+    myfile.open("icc.svg");
+    matICC.print_svg(myfile);
+    myfile.close();
+
+    auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();
+    prec->set_level(2);
+    prec->symbolic_factorize(&matU);
+
+    myfile.open("icc2.svg");
+    prec->print_svg(myfile);
+    myfile.close();
   }
 }

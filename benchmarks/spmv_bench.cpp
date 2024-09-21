@@ -1,4 +1,3 @@
-#include "../config.h"
 #include "incomplete_lu.h"
 #include "matrix_utils.hpp"
 #include "mkl_sparse_mat.h"

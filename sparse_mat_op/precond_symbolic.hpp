@@ -49,20 +49,20 @@ void ICCLevelSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
   std::vector<COLTYPE> llist(size, NONE);
-  std::vector<ROWTYPE> cur_diag_pos(diag_pos, diag_pos + size);
+  std::vector<ROWTYPE> jk(size);
   ROWTYPE nnz_icc = nnz;
   std::vector<COLTYPE> av_lvls(nnz_icc);
   ResizeCSRAJ(icc, nnz_icc);
   std::forward_list<std::pair<COLTYPE, COLTYPE>> current_row; // <col, lvl>
+  typename std::forward_list<std::pair<COLTYPE, COLTYPE>>::iterator cur_row_it;
 
-  COLTYPE list_size;
+  COLTYPE list_size, lidx, k, i, lik, next_i, level, llist_next;
   ROWTYPE i_idx, i_idx_end;
-  COLTYPE k, i, lik, next_i, level;
   icc.ai[0] = base;
   for (COLTYPE j = 0; j < size; j++) {
     i_idx = diag_pos[j];
     i_idx_end = ai[j + 1];
-    auto cur_row_it = current_row.before_begin();
+    cur_row_it = current_row.before_begin();
     list_size = i_idx_end - i_idx;
 
     // initialize the current row's nonzeros
@@ -73,29 +73,33 @@ void ICCLevelSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
 
     // use max as the list end to prevent from branch prediction
     current_row.insert_after(cur_row_it, std::make_pair(NONE, 0));
+
     // iterate for k from 0 to j-1
     k = llist[j];
     while (k < j) {
-      i_idx = cur_diag_pos[k];
-      i_idx_end = ai[k + 1];
+      i_idx = jk[k]++;
+      i_idx_end = icc.ai[k + 1];
+
+      llist_next = llist[k];
       //   update llist if necessary
-      if (i_idx + 1 != i_idx_end) {
-        llist[k] = llist[aj[i_idx + 1 - base] - base];
-        llist[aj[i_idx + 1 - base] - base] = k;
-        cur_diag_pos[k]++;
+      if (i_idx + 1 < i_idx_end) {
+        llist[k] = llist[icc.aj[i_idx + 1 - base] - base];
+        llist[icc.aj[i_idx + 1 - base] - base] = k;
       }
+      k = llist_next;
 
       lik = av_lvls[i_idx - base];
       cur_row_it = current_row.begin();
       next_i = std::next(cur_row_it)->first;
+      // merge row k to row j
       for (; i_idx < i_idx_end; i_idx++) {
-        i = aj[i_idx - base];
-        level = lik + av_lvls[i_idx] + 1;
+        i = icc.aj[i_idx - base];
 
         while (next_i <= i) {
           cur_row_it = std::next(cur_row_it);
           next_i = std::next(cur_row_it)->first;
         }
+        level = lik + av_lvls[i_idx - base] + 1;
         if (level <= lvl) {
           if (cur_row_it->first == i) {
             cur_row_it->second = std::min(cur_row_it->second, level);
@@ -103,35 +107,43 @@ void ICCLevelSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
             cur_row_it =
                 current_row.insert_after(cur_row_it, std::make_pair(i, level));
             next_i = std::next(cur_row_it)->first;
+
             list_size++;
           }
         }
       }
-
-      icc.ai[j + 1] = icc.ai[j] + list_size;
-      //   resize if needed
-      if (icc.ai[j + 1] - base > nnz_icc) {
-        // estimate the new size
-        if (2 * (j - base) >= size)
-          nnz_icc *= 2;
-        else
-          nnz_icc = nnz_icc * std::ceil(size * 1. / (j - base));
-        av_lvls.resize(nnz_icc);
-        ResizeCSRAJ<CSRMatrixType, true>(icc, nnz_icc);
-      }
-
-      //   copy the current row to icc
-      cur_row_it = current_row.begin();
-
-      i_idx = icc.ai[j];
-      while (cur_row_it != current_row.end()) {
-        icc.aj[i_idx - base] = cur_row_it->first;
-        av_lvls[i_idx - base] = cur_row_it->second;
-        i_idx++;
-        cur_row_it++;
-      }
-      current_row.clear();
     }
+    icc.ai[j + 1] = icc.ai[j] + list_size;
+
+    //   resize if needed
+    if (icc.ai[j + 1] - base > nnz_icc) {
+      // estimate the new size
+      if (2 * (j - base) >= size)
+        nnz_icc *= 2;
+      else
+        nnz_icc = nnz_icc * std::ceil(size * 1. / (j - base));
+      av_lvls.resize(nnz_icc);
+      ResizeCSRAJ<CSRMatrixType, true>(icc, nnz_icc);
+    }
+
+    cur_row_it = current_row.begin();
+    i_idx = icc.ai[j];
+
+    //   copy the current row to icc
+    for (lidx = 0; lidx < list_size; lidx++) {
+      icc.aj[i_idx - base] = cur_row_it->first;
+      av_lvls[i_idx - base] = cur_row_it->second;
+      i_idx++;
+      cur_row_it++;
+    }
+
+    //   update llist if necessary
+    if (icc.ai[j] + 1 < icc.ai[j + 1]) {
+      llist[j] = llist[icc.aj[icc.ai[j] + 1 - base] - base];
+      llist[icc.aj[icc.ai[j] + 1 - base] - base] = j;
+      jk[j] = icc.ai[j] + 1;
+    }
+    current_row.clear();
     ResizeCSRAV(icc, icc.ai[size] - base);
   }
 }
