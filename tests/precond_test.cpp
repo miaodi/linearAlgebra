@@ -26,7 +26,7 @@ protected:
     std::vector<double> csr_vals;
 
     std::ifstream f;
-    f.open("data/nos5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
+    f.open("data/nos5.mtx");
     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.push_back(mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
 TEST_F(precond_Test, icc_level_symbolic_factorize) {
   for (auto &mat : _mats) {
     std::cout << "size: " << mat.rows() << std::endl;
-    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC;
+    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC, ICC2;
     matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
         mat.rows(), mat.mkl_base(), mat.get_ai().get(), mat.get_aj().get(),
         mat.get_av().get(), U);
@@ -71,16 +71,22 @@ TEST_F(precond_Test, icc_level_symbolic_factorize) {
     mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av,
                                      mat.mkl_base());
     matrix_utils::ICCLevelVecSymbolic(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                      U.aj.get(), U.ai.get(), 2, ICC);
+                                      U.aj.get(), U.ai.get(), 3, ICC);
     mkl_wrapper::mkl_sparse_mat matICC(mat.rows(), mat.rows(), ICC.ai, ICC.aj,
                                        ICC.av, mat.mkl_base());
+
+    matrix_utils::ICCLevelVec2Symbolic(mat.rows(), mat.mkl_base(), U.ai.get(),
+                                       U.aj.get(), U.ai.get(), 3, ICC2);
+    mkl_wrapper::mkl_sparse_mat matICC2(mat.rows(), mat.rows(), ICC2.ai,
+                                        ICC2.aj, ICC2.av, mat.mkl_base());
+
     std::ofstream myfile;
     myfile.open("icc.svg");
     matICC.print_svg(myfile);
     myfile.close();
 
     auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();
-    prec->set_level(2);
+    prec->set_level(3);
     prec->symbolic_factorize(&matU);
 
     myfile.open("icc2.svg");
@@ -93,6 +99,14 @@ TEST_F(precond_Test, icc_level_symbolic_factorize) {
 
     for (int i = 0; i < prec->nnz(); i++) {
       EXPECT_EQ(prec->get_aj()[i], ICC.aj[i]);
+    }
+
+    for (int i = 0; i < mat.rows() + 1; i++) {
+      EXPECT_EQ(prec->get_ai()[i], ICC2.ai[i]);
+    }
+
+    for (int i = 0; i < prec->nnz(); i++) {
+      EXPECT_EQ(prec->get_aj()[i], ICC2.aj[i]);
     }
   }
 }
