@@ -26,7 +26,7 @@ public:
       //     size, size, csr_rows, csr_cols, csr_vals, SPARSE_INDEX_BASE_ONE));
       // mat->to_zero_based();
       mat.reset(new matrix_utils::CSRMatrixVec<int, int, double>());
-      std::ifstream f("data/thermal2.mtx");
+      std::ifstream f("data/mcfe.mtx");
       f.clear();
       f.seekg(0, std::ios::beg);
       utils::read_matrix_market_csr(f, mat->ai, mat->aj, mat->av);
@@ -36,7 +36,7 @@ public:
   }
 };
 
-BENCHMARK_DEFINE_F(MyFixture, Serial)(benchmark::State &state) {
+BENCHMARK_DEFINE_F(MyFixture, llist_small)(benchmark::State &state) {
   std::vector<double> x(mat->rows, 0.0);
   std::vector<double> b(mat->rows, 1.0);
 
@@ -50,6 +50,23 @@ BENCHMARK_DEFINE_F(MyFixture, Serial)(benchmark::State &state) {
   }
 }
 
-BENCHMARK_REGISTER_F(MyFixture, Serial)->Arg(1)->Arg(2)->Arg(3);
+BENCHMARK_REGISTER_F(MyFixture, llist_small)->Arg(1)->Arg(3)->Arg(5)->Arg(7);
+
+BENCHMARK_DEFINE_F(MyFixture, vector_small)(benchmark::State &state) {
+  std::vector<double> x(mat->rows, 0.0);
+  std::vector<double> b(mat->rows, 1.0);
+
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC;
+  matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
+      mat->rows, mat->ai[0], mat->AI(), mat->AJ(), mat->AV(), U);
+
+  for (auto _ : state) {
+    matrix_utils::ICCLevelVecSymbolic(mat->rows, mat->ai[0], U.ai.get(),
+                                      U.aj.get(), U.ai.get(), state.range(0),
+                                      ICC);
+  }
+}
+
+BENCHMARK_REGISTER_F(MyFixture, vector_small)->Arg(1)->Arg(3)->Arg(5)->Arg(7);
 
 BENCHMARK_MAIN();

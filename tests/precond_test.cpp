@@ -70,8 +70,8 @@ TEST_F(precond_Test, icc_level_symbolic_factorize) {
 
     mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av,
                                      mat.mkl_base());
-    matrix_utils::ICCLevelSymbolic(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                   U.aj.get(), U.ai.get(), 2, ICC);
+    matrix_utils::ICCLevelVecSymbolic(mat.rows(), mat.mkl_base(), U.ai.get(),
+                                      U.aj.get(), U.ai.get(), 2, ICC);
     mkl_wrapper::mkl_sparse_mat matICC(mat.rows(), mat.rows(), ICC.ai, ICC.aj,
                                        ICC.av, mat.mkl_base());
     std::ofstream myfile;
@@ -86,5 +86,13 @@ TEST_F(precond_Test, icc_level_symbolic_factorize) {
     myfile.open("icc2.svg");
     prec->print_svg(myfile);
     myfile.close();
+
+    for (int i = 0; i < mat.rows() + 1; i++) {
+      EXPECT_EQ(prec->get_ai()[i], ICC.ai[i]);
+    }
+
+    for (int i = 0; i < prec->nnz(); i++) {
+      EXPECT_EQ(prec->get_aj()[i], ICC.aj[i]);
+    }
   }
 }
