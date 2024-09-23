@@ -289,26 +289,42 @@ void ICCMerge(OutVec &out_vec, In1Iter in1_begin, In1Iter in1_end,
 }
 
 template <typename OutVec, typename In1PosIter, typename In1LvlIter,
-          typename In2PosIter, typename In2LvlIter>
-void ICCMerge(OutVec &out_vec, In1Iter in1_begin, In1Iter in1_end,
-              In2Iter in2_begin, In2Iter in2_end) {
-  while (in1_begin != in1_end && in2_begin != in2_end) {
-    if (in1_begin->first < in2_begin->first) {
-      out_vec.emplace_back(*in1_begin++);
-    } else if (in1_begin->first > in2_begin->first) {
-      out_vec.emplace_back(*in2_begin++);
+          typename In2PosIter, typename In2LvlIter, typename Level>
+void ICCFirstMerge(OutVec &out_vec, In1PosIter in1p_begin, In1PosIter in1p_end,
+                   In1LvlIter in1l_iter, In2PosIter in2p_begin,
+                   In2PosIter in2p_end, In2LvlIter in2l_iter, Level lvl) {
+  while (in1p_begin != in1p_end && in2p_begin != in2p_end) {
+    if (*in1p_begin < *in2p_begin) {
+      if (*in1l_iter <= lvl)
+        out_vec.emplace_back(std::make_pair(*in1p_begin, *in1l_iter));
+      in1p_begin++;
+      in1l_iter++;
+    } else if (*in1p_begin > *in2p_begin) {
+      if (*in2l_iter <= lvl)
+        out_vec.emplace_back(std::make_pair(*in2p_begin, *in2l_iter));
+      in2p_begin++;
+      in2l_iter++;
     } else {
-      out_vec.emplace_back(std::make_pair(
-          in1_begin->first, std::min(in1_begin->second, in2_begin->second)));
-      in1_begin++;
-      in2_begin++;
+      auto l = std::min(*in1l_iter, *in2l_iter);
+      if (l <= lvl)
+        out_vec.emplace_back(std::make_pair(*in1p_begin, l));
+      in1p_begin++;
+      in2p_begin++;
+      in1l_iter++;
+      in2l_iter++;
     }
   }
-  while (in1_begin != in1_end) {
-    out_vec.emplace_back(*in1_begin++);
+  while (in1p_begin != in1p_end) {
+    if (*in1l_iter <= lvl)
+      out_vec.emplace_back(std::make_pair(*in1p_begin, *in1l_iter));
+    in1p_begin++;
+    in1l_iter++;
   }
-  while (in2_begin != in2_end) {
-    out_vec.emplace_back(*in2_begin++);
+  while (in2p_begin != in2p_end) {
+    if (*in2l_iter <= lvl)
+      out_vec.emplace_back(std::make_pair(*in2p_begin, *in2l_iter));
+    in2p_begin++;
+    in2l_iter++;
   }
 }
 
@@ -328,6 +344,9 @@ void ICCLevelVec2Symbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
   std::vector<COLTYPE> llist(size, NONE);
   std::vector<ROWTYPE> jk(size);
+  std::vector<std::pair<ROWTYPE, size_t>> merge_spans;
+  merge_spans.reserve(size);
+
   ROWTYPE nnz_icc = nnz;
   std::vector<COLTYPE> av_lvls(nnz_icc);
   ResizeCSRAJ(icc, nnz_icc);
@@ -339,8 +358,15 @@ void ICCLevelVec2Symbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
   span_prefix1.reserve(size);
   span_prefix2.reserve(size);
 
-  COLTYPE lidx, k, i, lik, next_i, level, llist_next;
+  COLTYPE lidx, k, i, lik, next_i, level, llist_next, lik1, lik2;
   ROWTYPE i_idx, i_idx_end;
+
+  auto lvlTransform1 =
+      std::views::transform([&lik1](const COLTYPE i) { return i + lik1 + 1; });
+
+  auto lvlTransform2 =
+      std::views::transform([&lik2](const COLTYPE i) { return i + lik2 + 1; });
+
   icc.ai[0] = base;
   for (COLTYPE j = 0; j < size; j++) {
     span_prefix1.push_back(0);
@@ -366,18 +392,52 @@ void ICCLevelVec2Symbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
         llist[icc.aj[i_idx + 1 - base] - base] = k;
       }
       k = llist_next;
-      lik = av_lvls[i_idx - base];
-      for (; i_idx < i_idx_end; i_idx++) {
-        level = lik + av_lvls[i_idx - base] + 1;
-        if (level <= lvl) {
-          current_row1.emplace_back(
-              std::make_pair(icc.aj[i_idx - base], level));
-        }
-      }
+      merge_spans.emplace_back(i_idx, i_idx_end - i_idx);
+      // span_prefix1.push_back(current_row1.size());
+    }
+
+    COLTYPE span_pos = 0;
+    for (; span_pos + 1 < merge_spans.size(); span_pos += 2) {
+      lik1 = av_lvls[merge_spans[span_pos].first - base];
+      lik2 = av_lvls[merge_spans[span_pos + 1].first - base];
+      std::span<COLTYPE> sp1{av_lvls.begin() + merge_spans[span_pos].first -
+                                 base,
+                             merge_spans[span_pos].second};
+      std::span<COLTYPE> sp2{av_lvls.begin() + merge_spans[span_pos + 1].first -
+                                 base,
+                             merge_spans[span_pos + 1].second};
+      auto tsp1 = lvlTransform1(sp1);
+      auto tsp2 = lvlTransform2(sp2);
+      ICCFirstMerge(
+          current_row1, icc.aj.get() + merge_spans[span_pos].first - base,
+          icc.aj.get() + merge_spans[span_pos].first +
+              merge_spans[span_pos].second - base,
+          tsp1.begin(), icc.aj.get() + merge_spans[span_pos + 1].first - base,
+          icc.aj.get() + merge_spans[span_pos + 1].first +
+              merge_spans[span_pos + 1].second - base,
+          tsp2.begin(), lvl);
       span_prefix1.push_back(current_row1.size());
     }
+
+    if (span_pos < merge_spans.size()) {
+      lik1 = av_lvls[merge_spans[span_pos].first - base];
+      std::span<COLTYPE> sp1{av_lvls.begin() + merge_spans[span_pos].first -
+                                 base,
+                             merge_spans[span_pos].second};
+      auto tsp1 = lvlTransform1((sp1));
+
+      ICCFirstMerge(
+          current_row1, icc.aj.get() + merge_spans[span_pos].first - base,
+          icc.aj.get() + merge_spans[span_pos].first +
+              merge_spans[span_pos].second - base,
+          tsp1.begin(), icc.aj.get() + merge_spans[span_pos].first - base,
+          icc.aj.get() + merge_spans[span_pos].first - base, tsp1.begin(), lvl);
+      span_prefix1.push_back(current_row1.size());
+    }
+    merge_spans.clear();
+
     while (span_prefix1.size() > 2) {
-      COLTYPE span_pos = 0;
+      span_pos = 0;
       span_prefix2.push_back(0);
       for (; span_pos + 2 < span_prefix1.size(); span_pos += 2) {
         ICCMerge(current_row2, current_row1.begin() + span_prefix1[span_pos],
