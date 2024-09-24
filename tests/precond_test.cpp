@@ -2,7 +2,7 @@
 #include "incomplete_cholesky.h"
 #include "matrix_utils.hpp"
 #include "mkl_sparse_mat.h"
-#include "precond_symbolic.hpp"
+#include "precond.hpp"
 #include "utils.h"
 #include <algorithm>
 #include <fstream>
@@ -62,43 +62,51 @@ int main(int argc, char **argv) {
 
 TEST_F(precond_Test, icc_level_symbolic_factorize) {
   for (auto &mat : _mats) {
+    const int lvl = 3;
     std::cout << "size: " << mat.rows() << std::endl;
-    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC, ICC2;
+    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC0, ICC1, ICC2, ICC3;
     matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
         mat.rows(), mat.mkl_base(), mat.get_ai().get(), mat.get_aj().get(),
         mat.get_av().get(), U);
 
     mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av,
                                      mat.mkl_base());
-    matrix_utils::ICCLevelVecSymbolic(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                      U.aj.get(), U.ai.get(), 3, ICC);
-    mkl_wrapper::mkl_sparse_mat matICC(mat.rows(), mat.rows(), ICC.ai, ICC.aj,
-                                       ICC.av, mat.mkl_base());
 
-    matrix_utils::ICCLevelVec2Symbolic(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                       U.aj.get(), U.ai.get(), 3, ICC2);
+    matrix_utils::ICCLevelSymbolic0(mat.rows(), mat.mkl_base(), U.ai.get(),
+                                    U.aj.get(), U.ai.get(), lvl, ICC0);
+    mkl_wrapper::mkl_sparse_mat matICC0(mat.rows(), mat.rows(), ICC0.ai,
+                                        ICC0.aj, ICC0.av, mat.mkl_base());
+    matrix_utils::ICCLevelSymbolic1(mat.rows(), mat.mkl_base(), U.ai.get(),
+                                    U.aj.get(), U.ai.get(), lvl, ICC1);
+    mkl_wrapper::mkl_sparse_mat matICC1(mat.rows(), mat.rows(), ICC1.ai,
+                                        ICC1.aj, ICC1.av, mat.mkl_base());
+    matrix_utils::ICCLevelSymbolic2(mat.rows(), mat.mkl_base(), U.ai.get(),
+                                    U.aj.get(), U.ai.get(), lvl, ICC2);
     mkl_wrapper::mkl_sparse_mat matICC2(mat.rows(), mat.rows(), ICC2.ai,
                                         ICC2.aj, ICC2.av, mat.mkl_base());
-
-    std::ofstream myfile;
-    myfile.open("icc.svg");
-    matICC.print_svg(myfile);
-    myfile.close();
+    matrix_utils::ICCLevelSymbolic3(mat.rows(), mat.mkl_base(), U.ai.get(),
+                                    U.aj.get(), U.ai.get(), lvl, ICC3);
+    mkl_wrapper::mkl_sparse_mat matICC3(mat.rows(), mat.rows(), ICC3.ai,
+                                        ICC3.aj, ICC3.av, mat.mkl_base());
 
     auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();
-    prec->set_level(3);
+    prec->set_level(lvl);
     prec->symbolic_factorize(&matU);
 
-    myfile.open("icc2.svg");
-    prec->print_svg(myfile);
-    myfile.close();
-
     for (int i = 0; i < mat.rows() + 1; i++) {
-      EXPECT_EQ(prec->get_ai()[i], ICC.ai[i]);
+      EXPECT_EQ(prec->get_ai()[i], ICC0.ai[i]);
     }
 
     for (int i = 0; i < prec->nnz(); i++) {
-      EXPECT_EQ(prec->get_aj()[i], ICC.aj[i]);
+      EXPECT_EQ(prec->get_aj()[i], ICC0.aj[i]);
+    }
+
+    for (int i = 0; i < mat.rows() + 1; i++) {
+      EXPECT_EQ(prec->get_ai()[i], ICC1.ai[i]);
+    }
+
+    for (int i = 0; i < prec->nnz(); i++) {
+      EXPECT_EQ(prec->get_aj()[i], ICC1.aj[i]);
     }
 
     for (int i = 0; i < mat.rows() + 1; i++) {
@@ -107,6 +115,14 @@ TEST_F(precond_Test, icc_level_symbolic_factorize) {
 
     for (int i = 0; i < prec->nnz(); i++) {
       EXPECT_EQ(prec->get_aj()[i], ICC2.aj[i]);
+    }
+
+    for (int i = 0; i < mat.rows() + 1; i++) {
+      EXPECT_EQ(prec->get_ai()[i], ICC3.ai[i]);
+    }
+
+    for (int i = 0; i < prec->nnz(); i++) {
+      EXPECT_EQ(prec->get_aj()[i], ICC3.aj[i]);
     }
   }
 }

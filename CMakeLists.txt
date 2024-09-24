@@ -2,9 +2,12 @@ cmake_minimum_required(VERSION 3.5...3.20)
 
 project(Linear_Algebra CXX Fortran)
 
+set(CMAKE_CXX_STANDARD 20)
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # set(CMAKE_CXX_FLAGS "-g -O0 -Wall -Wextra -Wno-unused-variable -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -DDEBUG")
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -13,8 +16,6 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
   set(CMAKE_CXX_FLAGS "-Wno-unused-variable")
 endif()
 # set(CMAKE_CXX_FLAGS_RELEASE "-O3")
-
-set(CMAKE_CXX_STANDARD 20)
 
 option(USE_AMGCL_LIB "Use the amg library amgcl" OFF)
 

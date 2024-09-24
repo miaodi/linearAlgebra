@@ -1,5 +1,5 @@
 #include "matrix_utils.hpp"
-#include "precond_symbolic.hpp"
+#include "precond.hpp"
 #include <algorithm>
 #include <benchmark/benchmark.h>
 #include <memory>
@@ -45,14 +45,15 @@ BENCHMARK_DEFINE_F(MyFixture, llist_small)(benchmark::State &state) {
       mat->rows, mat->ai[0], mat->AI(), mat->AJ(), mat->AV(), U);
 
   for (auto _ : state) {
-    matrix_utils::ICCLevelSymbolic(mat->rows, mat->ai[0], U.ai.get(),
-                                   U.aj.get(), U.ai.get(), state.range(0), ICC);
+    matrix_utils::ICCLevelSymbolic0(mat->rows, mat->ai[0], U.ai.get(),
+                                    U.aj.get(), U.ai.get(), state.range(0),
+                                    ICC);
   }
 }
 
 BENCHMARK_REGISTER_F(MyFixture, llist_small)->Arg(1)->Arg(3)->Arg(5)->Arg(7);
 
-BENCHMARK_DEFINE_F(MyFixture, vector_small)(benchmark::State &state) {
+BENCHMARK_DEFINE_F(MyFixture, vector_merge_small)(benchmark::State &state) {
   std::vector<double> x(mat->rows, 0.0);
   std::vector<double> b(mat->rows, 1.0);
 
@@ -61,15 +62,20 @@ BENCHMARK_DEFINE_F(MyFixture, vector_small)(benchmark::State &state) {
       mat->rows, mat->ai[0], mat->AI(), mat->AJ(), mat->AV(), U);
 
   for (auto _ : state) {
-    matrix_utils::ICCLevelVecSymbolic(mat->rows, mat->ai[0], U.ai.get(),
-                                      U.aj.get(), U.ai.get(), state.range(0),
-                                      ICC);
+    matrix_utils::ICCLevelSymbolic1(mat->rows, mat->ai[0], U.ai.get(),
+                                    U.aj.get(), U.ai.get(), state.range(0),
+                                    ICC);
   }
 }
 
-BENCHMARK_REGISTER_F(MyFixture, vector_small)->Arg(1)->Arg(3)->Arg(5)->Arg(7);
+BENCHMARK_REGISTER_F(MyFixture, vector_merge_small)
+    ->Arg(1)
+    ->Arg(3)
+    ->Arg(5)
+    ->Arg(7);
 
-BENCHMARK_DEFINE_F(MyFixture, vector2_small)(benchmark::State &state) {
+BENCHMARK_DEFINE_F(MyFixture, vector_balanced_merge_small)
+(benchmark::State &state) {
   std::vector<double> x(mat->rows, 0.0);
   std::vector<double> b(mat->rows, 1.0);
 
@@ -78,12 +84,38 @@ BENCHMARK_DEFINE_F(MyFixture, vector2_small)(benchmark::State &state) {
       mat->rows, mat->ai[0], mat->AI(), mat->AJ(), mat->AV(), U);
 
   for (auto _ : state) {
-    matrix_utils::ICCLevelVec2Symbolic(mat->rows, mat->ai[0], U.ai.get(),
-                                       U.aj.get(), U.ai.get(), state.range(0),
-                                       ICC);
+    matrix_utils::ICCLevelSymbolic2(mat->rows, mat->ai[0], U.ai.get(),
+                                    U.aj.get(), U.ai.get(), state.range(0),
+                                    ICC);
   }
 }
 
-BENCHMARK_REGISTER_F(MyFixture, vector2_small)->Arg(1)->Arg(3)->Arg(5)->Arg(7);
+BENCHMARK_REGISTER_F(MyFixture, vector_balanced_merge_small)
+    ->Arg(1)
+    ->Arg(3)
+    ->Arg(5)
+    ->Arg(7);
+
+BENCHMARK_DEFINE_F(MyFixture, vector_merge_1st_balanced_merge_small)
+(benchmark::State &state) {
+  std::vector<double> x(mat->rows, 0.0);
+  std::vector<double> b(mat->rows, 1.0);
+
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC;
+  matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
+      mat->rows, mat->ai[0], mat->AI(), mat->AJ(), mat->AV(), U);
+
+  for (auto _ : state) {
+    matrix_utils::ICCLevelSymbolic3(mat->rows, mat->ai[0], U.ai.get(),
+                                    U.aj.get(), U.ai.get(), state.range(0),
+                                    ICC);
+  }
+}
+
+BENCHMARK_REGISTER_F(MyFixture, vector_merge_1st_balanced_merge_small)
+    ->Arg(1)
+    ->Arg(3)
+    ->Arg(5)
+    ->Arg(7);
 
 BENCHMARK_MAIN();

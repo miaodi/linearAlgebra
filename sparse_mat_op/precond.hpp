@@ -37,9 +37,9 @@ void ICCLevel0SymSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
-                      COLTYPE const *aj, COLTYPE const *diag_pos, const int lvl,
-                      CSRMatrixType &icc) {
+void ICCLevelSymbolic0(const COLTYPE size, const int base, ROWTYPE const *ai,
+                       COLTYPE const *aj, COLTYPE const *diag_pos,
+                       const int lvl, CSRMatrixType &icc) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
                       CSRMatrixType>::value == true);
@@ -151,9 +151,9 @@ void ICCLevelSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelVecSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
-                         COLTYPE const *aj, COLTYPE const *diag_pos,
-                         const int lvl, CSRMatrixType &icc) {
+void ICCLevelSymbolic1(const COLTYPE size, const int base, ROWTYPE const *ai,
+                       COLTYPE const *aj, COLTYPE const *diag_pos,
+                       const int lvl, CSRMatrixType &icc) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
                       CSRMatrixType>::value == true);
@@ -246,7 +246,7 @@ void ICCLevelVecSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
     }
 
     //   update llist if necessary
-    if (current_row_size_before > 1) {
+    if (current_row_size_after > 1) {
       llist[j] = llist[current_row[1].first - base];
       llist[current_row[1].first - base] = j;
       jk[j] = icc.ai[j] + 1;
@@ -286,6 +286,126 @@ void ICCMerge(OutVec &out_vec, In1Iter in1_begin, In1Iter in1_end,
   while (in2_begin != in2_end) {
     out_vec.emplace_back(*in2_begin++);
   }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
+void ICCLevelSymbolic2(const COLTYPE size, const int base, ROWTYPE const *ai,
+                       COLTYPE const *aj, COLTYPE const *diag_pos,
+                       const int lvl, CSRMatrixType &icc) {
+  static_assert(
+      CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
+                      CSRMatrixType>::value == true);
+  static_assert(CSRResizable<CSRMatrixType>::value,
+                "CSRMatrixType must have a resizable method");
+  icc.rows = size;
+  icc.cols = size;
+  ResizeCSRAI(icc, size + 1);
+  const ROWTYPE nnz = ai[size] - base;
+  const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
+  std::vector<COLTYPE> llist(size, NONE);
+  std::vector<ROWTYPE> jk(size);
+  ROWTYPE nnz_icc = nnz;
+  std::vector<COLTYPE> av_lvls(nnz_icc);
+  ResizeCSRAJ(icc, nnz_icc);
+  std::vector<std::pair<COLTYPE, COLTYPE>> current_row1,
+      current_row2; // <col, lvl>
+  std::vector<ROWTYPE> span_prefix1, span_prefix2;
+  current_row1.reserve(ai[size] - base);
+  current_row2.reserve(ai[size] - base);
+  span_prefix1.reserve(size);
+  span_prefix2.reserve(size);
+
+  COLTYPE lidx, k, i, lik, next_i, level, llist_next;
+  ROWTYPE i_idx, i_idx_end;
+  icc.ai[0] = base;
+  for (COLTYPE j = 0; j < size; j++) {
+    span_prefix1.push_back(0);
+    i_idx = diag_pos[j];
+    i_idx_end = ai[j + 1];
+
+    // initialize the current row's nonzeros
+    for (; i_idx != i_idx_end; i_idx++) {
+      current_row1.emplace_back(std::make_pair(aj[i_idx - base], 0));
+    }
+    span_prefix1.push_back(current_row1.size());
+
+    // iterate for k from 0 to j-1
+    k = llist[j];
+    while (k < j) {
+      i_idx = jk[k]++;
+      i_idx_end = icc.ai[k + 1];
+
+      llist_next = llist[k];
+      //   update llist if necessary
+      if (i_idx + 1 < i_idx_end) {
+        llist[k] = llist[icc.aj[i_idx + 1 - base] - base];
+        llist[icc.aj[i_idx + 1 - base] - base] = k;
+      }
+      k = llist_next;
+      lik = av_lvls[i_idx - base];
+      for (; i_idx < i_idx_end; i_idx++) {
+        level = lik + av_lvls[i_idx - base] + 1;
+        if (level <= lvl) {
+          current_row1.emplace_back(
+              std::make_pair(icc.aj[i_idx - base], level));
+        }
+      }
+      span_prefix1.push_back(current_row1.size());
+    }
+    while (span_prefix1.size() > 2) {
+      COLTYPE span_pos = 0;
+      span_prefix2.push_back(0);
+      for (; span_pos + 2 < span_prefix1.size(); span_pos += 2) {
+        ICCMerge(current_row2, current_row1.begin() + span_prefix1[span_pos],
+                 current_row1.begin() + span_prefix1[span_pos + 1],
+                 current_row1.begin() + span_prefix1[span_pos + 1],
+                 current_row1.begin() + span_prefix1[span_pos + 2]);
+        span_prefix2.push_back(current_row2.size());
+      }
+      if (span_pos + 1 < span_prefix1.size()) {
+        current_row2.insert(current_row2.end(),
+                            current_row1.begin() + span_prefix1[span_pos],
+                            current_row1.begin() + span_prefix1[span_pos + 1]);
+        span_prefix2.push_back(current_row2.size());
+      }
+
+      std::swap(span_prefix1, span_prefix2);
+      std::swap(current_row1, current_row2);
+      span_prefix2.clear();
+      current_row2.clear();
+    }
+
+    icc.ai[j + 1] = icc.ai[j] + current_row1.size();
+
+    //   resize if needed
+    if (icc.ai[j + 1] - base > nnz_icc) {
+      // estimate the new size
+      if (2 * (j - base) >= size)
+        nnz_icc *= 2;
+      else
+        nnz_icc = nnz_icc * std::ceil(size * 1. / (j - base));
+      av_lvls.resize(nnz_icc);
+      ResizeCSRAJ<CSRMatrixType, true>(icc, nnz_icc);
+    }
+
+    //   update llist if necessary
+    if (span_prefix1[1] > 1) {
+      llist[j] = llist[current_row1[1].first - base];
+      llist[current_row1[1].first - base] = j;
+      jk[j] = icc.ai[j] + 1;
+    }
+
+    i_idx = icc.ai[j];
+    //   copy the current row to icc
+    for (const auto &p : current_row1) {
+      icc.aj[i_idx - base] = p.first;
+      av_lvls[i_idx - base] = p.second;
+      i_idx++;
+    }
+    span_prefix1.clear();
+    current_row1.clear();
+  }
+  ResizeCSRAV(icc, icc.ai[size] - base);
 }
 
 template <typename OutVec, typename In1PosIter, typename In1LvlIter,
@@ -329,9 +449,9 @@ void ICCFirstMerge(OutVec &out_vec, In1PosIter in1p_begin, In1PosIter in1p_end,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelVec2Symbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
-                          COLTYPE const *aj, COLTYPE const *diag_pos,
-                          const int lvl, CSRMatrixType &icc) {
+void ICCLevelSymbolic3(const COLTYPE size, const int base, ROWTYPE const *ai,
+                       COLTYPE const *aj, COLTYPE const *diag_pos,
+                       const int lvl, CSRMatrixType &icc) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
                       CSRMatrixType>::value == true);
@@ -490,6 +610,83 @@ void ICCLevelVec2Symbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
     current_row1.clear();
   }
   ResizeCSRAV(icc, icc.ai[size] - base);
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
+          typename CSRMatrixType>
+void ICCLevelNumeric(const COLTYPE size, const int base, ROWTYPE const *ai,
+                     COLTYPE const *aj, VALTYPE const *av,
+                     COLTYPE const *diag_pos, const int lvl,
+                     CSRMatrixType &icc) {
+  static_assert(
+      CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
+                      CSRMatrixType>::value == true);
+
+  icc.rows = size;
+  icc.cols = size;
+  const ROWTYPE nnz = ai[size] - base;
+  const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
+  std::vector<COLTYPE> llist(size, NONE);
+  std::vector<ROWTYPE> jk(size);
+
+  COLTYPE lidx, k, i, lik, next_i, level, llist_next;
+  ROWTYPE i_idx, i_idx_end, prec_i_idx_start, prec_i_idx, prec_i_idx_end;
+
+  for (COLTYPE j = 0; j < size; j++) {
+    i_idx = diag_pos[j] - base;
+    i_idx_end = ai[j + 1] - base;
+    prec_i_idx = prec_i_idx_start = icc.ai[j] - base;
+    prec_i_idx_end = icc.ai[j + 1] - base;
+
+    // copy initial value to current jth row
+    for (; prec_i_idx < prec_i_idx_end; prec_i_idx++) {
+      if (i_idx == i_idx_end || icc.aj[prec_i_idx] != aj[i_idx])
+        icc.av[prec_i_idx] = 0;
+      else
+        icc.av[prec_i_idx] = av[i_idx++];
+    }
+
+    // iterate for k from 0 to j-1
+    k = llist[j];
+    while (k < j) {
+      i_idx = jk[k]++;
+      i_idx_end = icc.ai[k + 1] - base;
+
+      // jump k to the next row
+      llist_next = llist[k];
+      //   update llist if necessary
+      if (i_idx + 1 < i_idx_end) {
+        llist[k] = llist[icc.aj[i_idx + 1] - base];
+        llist[icc.aj[i_idx + 1] - base] = k;
+      }
+      k = llist_next;
+
+      // a_ij = a_ij - a_ik * a_kj
+      const VALTYPE ajk = av[i_idx];
+      for (prec_i_idx = prec_i_idx_start;
+           i_idx < i_idx_end && prec_i_idx != prec_i_idx_end;) {
+        if (aj[i_idx] == icc.aj[prec_i_idx]) {
+          icc.av[prec_i_idx++] -= ajk * icc.av[prec_i_idx++];
+        } else if (aj[i_idx] < icc.aj[prec_i_idx]) {
+          i_idx++;
+        } else {
+          prec_i_idx++;
+        }
+      }
+    }
+
+    //   update llist if necessary
+    if (prec_i_idx_end - prec_i_idx_start > 1) {
+      llist[j] = llist[icc.aj[prec_i_idx_start + 1] - base];
+      llist[icc.aj[prec_i_idx_start + 1] - base] = j;
+      jk[j] = prec_i_idx_start + 1;
+    }
+
+    const VALTYPE aii = std::sqrt(icc.av[prec_i_idx_start]);
+    icc.av[prec_i_idx_start++] = aii;
+    for (; prec_i_idx_start != prec_i_idx_end; prec_i_idx_start++)
+      _av[prec_i_idx_start] /= aii;
+  }
 }
 
 } // namespace matrix_utils

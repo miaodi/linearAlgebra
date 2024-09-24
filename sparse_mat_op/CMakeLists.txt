@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(sparse_mat_op CXX)
 
-set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond_symbolic.cpp)
+set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp)
 
 set(DEPENDENCIES Utils OpenMP::OpenMP_CXX cereal)
 
