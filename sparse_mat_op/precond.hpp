@@ -633,41 +633,41 @@ void ICCLevelNumeric(const COLTYPE size, const int base, ROWTYPE const *ai,
   ROWTYPE i_idx, i_idx_end, prec_i_idx_start, prec_i_idx, prec_i_idx_end;
 
   for (COLTYPE j = 0; j < size; j++) {
-    i_idx = diag_pos[j] - base;
-    i_idx_end = ai[j + 1] - base;
-    prec_i_idx = prec_i_idx_start = icc.ai[j] - base;
-    prec_i_idx_end = icc.ai[j + 1] - base;
+    i_idx = diag_pos[j];
+    i_idx_end = ai[j + 1];
+    prec_i_idx = prec_i_idx_start = icc.ai[j];
+    prec_i_idx_end = icc.ai[j + 1];
 
     // copy initial value to current jth row
     for (; prec_i_idx < prec_i_idx_end; prec_i_idx++) {
-      if (i_idx == i_idx_end || icc.aj[prec_i_idx] != aj[i_idx])
-        icc.av[prec_i_idx] = 0;
+      if (i_idx == i_idx_end || icc.aj[prec_i_idx - base] != aj[i_idx - base])
+        icc.av[prec_i_idx - base] = 0;
       else
-        icc.av[prec_i_idx] = av[i_idx++];
+        icc.av[prec_i_idx - base] = av[i_idx++ - base];
     }
 
     // iterate for k from 0 to j-1
     k = llist[j];
     while (k < j) {
-      i_idx = jk[k]++;
-      i_idx_end = icc.ai[k + 1] - base;
+      i_idx = jk[k]++; // here i_idx become i index for k = 0:j
+      i_idx_end = icc.ai[k + 1];
 
       // jump k to the next row
       llist_next = llist[k];
       //   update llist if necessary
       if (i_idx + 1 < i_idx_end) {
-        llist[k] = llist[icc.aj[i_idx + 1] - base];
-        llist[icc.aj[i_idx + 1] - base] = k;
+        llist[k] = llist[icc.aj[i_idx + 1 - base] - base];
+        llist[icc.aj[i_idx + 1 - base] - base] = k;
       }
       k = llist_next;
 
       // a_ij = a_ij - a_ik * a_kj
-      const VALTYPE ajk = av[i_idx];
+      const VALTYPE ajk = icc.av[i_idx - base];
       for (prec_i_idx = prec_i_idx_start;
-           i_idx < i_idx_end && prec_i_idx != prec_i_idx_end;) {
-        if (aj[i_idx] == icc.aj[prec_i_idx]) {
-          icc.av[prec_i_idx++] -= ajk * icc.av[prec_i_idx++];
-        } else if (aj[i_idx] < icc.aj[prec_i_idx]) {
+           i_idx < i_idx_end && prec_i_idx < prec_i_idx_end;) {
+        if (icc.aj[i_idx - base] == icc.aj[prec_i_idx - base]) {
+          icc.av[prec_i_idx++ - base] -= ajk * icc.av[i_idx++ - base];
+        } else if (icc.aj[i_idx - base] < icc.aj[prec_i_idx - base]) {
           i_idx++;
         } else {
           prec_i_idx++;
@@ -677,15 +677,15 @@ void ICCLevelNumeric(const COLTYPE size, const int base, ROWTYPE const *ai,
 
     //   update llist if necessary
     if (prec_i_idx_end - prec_i_idx_start > 1) {
-      llist[j] = llist[icc.aj[prec_i_idx_start + 1] - base];
-      llist[icc.aj[prec_i_idx_start + 1] - base] = j;
+      llist[j] = llist[icc.aj[prec_i_idx_start + 1 - base] - base];
+      llist[icc.aj[prec_i_idx_start + 1 - base] - base] = j;
       jk[j] = prec_i_idx_start + 1;
     }
 
-    const VALTYPE aii = std::sqrt(icc.av[prec_i_idx_start]);
-    icc.av[prec_i_idx_start++] = aii;
-    for (; prec_i_idx_start != prec_i_idx_end; prec_i_idx_start++)
-      _av[prec_i_idx_start] /= aii;
+    const VALTYPE aii = std::sqrt(icc.av[prec_i_idx_start - base]);
+    icc.av[prec_i_idx_start++ - base] = aii;
+    for (; prec_i_idx_start < prec_i_idx_end; prec_i_idx_start++)
+      icc.av[prec_i_idx_start - base] /= aii;
   }
 }
 

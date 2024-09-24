@@ -228,7 +228,8 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
         }
       }
       k_idx = _ai[i] - base;
-      _av[k_idx] += shift;
+      if (_shift)
+        _av[k_idx] += shift;
       for (auto &k_pair : jKRow[i]) {
         k = k_pair.first;
         j_idx = k_pair.second;

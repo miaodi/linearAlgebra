@@ -88,7 +88,6 @@ TEST_F(precond_Test, icc_level_symbolic_factorize) {
                                     U.aj.get(), U.ai.get(), lvl, ICC3);
     mkl_wrapper::mkl_sparse_mat matICC3(mat.rows(), mat.rows(), ICC3.ai,
                                         ICC3.aj, ICC3.av, mat.mkl_base());
-
     auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();
     prec->set_level(lvl);
     prec->symbolic_factorize(&matU);
@@ -123,6 +122,49 @@ TEST_F(precond_Test, icc_level_symbolic_factorize) {
 
     for (int i = 0; i < prec->nnz(); i++) {
       EXPECT_EQ(prec->get_aj()[i], ICC3.aj[i]);
+    }
+  }
+}
+
+TEST_F(precond_Test, icc_level_numeric_factorize) {
+  for (auto &mat : _mats) {
+    const int lvl = 3;
+    std::cout << "size: " << mat.rows() << std::endl;
+    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC0, ICC1, ICC2, ICC3;
+    matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
+        mat.rows(), mat.mkl_base(), mat.get_ai().get(), mat.get_aj().get(),
+        mat.get_av().get(), U);
+
+    mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av,
+                                     mat.mkl_base());
+
+    matrix_utils::ICCLevelSymbolic0(mat.rows(), mat.mkl_base(), U.ai.get(),
+                                    U.aj.get(), U.ai.get(), lvl, ICC0);
+    matrix_utils::ICCLevelNumeric(mat.rows(), mat.mkl_base(), U.ai.get(),
+                                  U.aj.get(), U.av.get(), U.ai.get(), lvl,
+                                  ICC0);
+    mkl_wrapper::mkl_sparse_mat matICC0(mat.rows(), mat.rows(), ICC0.ai,
+                                        ICC0.aj, ICC0.av, mat.mkl_base());
+    std::cout << std::endl;
+    auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();
+    prec->set_level(lvl);
+    prec->symbolic_factorize(&matU);
+    prec->numeric_factorize(&matU);
+    prec->to_zero_based();
+
+    for (int i = 0; i < mat.rows() + 1; i++) {
+      EXPECT_EQ(prec->get_ai()[i], ICC0.ai[i]);
+    }
+
+    for (int i = 0; i < prec->nnz(); i++) {
+      EXPECT_EQ(prec->get_aj()[i], ICC0.aj[i]);
+    }
+
+    for (int i = 0; i < prec->nnz(); i++) {
+      if (prec->get_av()[i] != ICC0.av[i])
+        std::cout << std::setprecision(16) << i << " " << prec->get_av()[i]
+                  << " " << ICC0.av[i] << std::endl;
+      // EXPECT_EQ(prec->get_av()[i], ICC0.av[i]);
     }
   }
 }
