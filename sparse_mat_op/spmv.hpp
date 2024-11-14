@@ -7,7 +7,7 @@
 
 namespace matrix_utils {
 
-// compute y = alpha * A * x + beta * y
+// compute x = alpha * A * b + beta * x
 
 struct SerialSPMV {
   SerialSPMV() = default;
@@ -18,12 +18,12 @@ struct SerialSPMV {
                   VALTYPE *const x, const VALTYPE alpha,
                   const VALTYPE beta) const {
     for (COLTYPE i = 0; i < size; i++) {
-      VALTYPE val = beta == 0 ? 0 : beta * x[i];
+      VALTYPE val = 0;
 #pragma unroll
       for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
-        val += alpha * av[j] * b[aj[j] - base];
+        val += av[j] * b[aj[j] - base];
       }
-      x[i] = val;
+      x[i] = alpha * val + (beta == 0 ? 0 : beta * x[i]);
     }
   }
 };
@@ -45,12 +45,12 @@ struct ParallelSPMV {
           utils::LoadPrefixBalancedPartitionPos(ai, ai + size, tid, nthreads);
 
       for (COLTYPE i = start; i < end; i++) {
-        VALTYPE val = beta == 0 ? 0 : beta * x[i];
+        VALTYPE val = 0;
 #pragma unroll
         for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
-          val += alpha * av[j] * b[aj[j] - base];
+          val += av[j] * b[aj[j] - base];
         }
-        x[i] = val;
+        x[i] = alpha * val + (beta == 0 ? 0 : beta * x[i]);
       }
     }
   }
@@ -183,12 +183,129 @@ private:
   mutable utils::BitVector<int> _threadBv;
   mutable std::vector<VALTYPE> _threadProduct;
 };
+template <typename ROWTYPE = int, typename COLTYPE = int,
+          typename VALTYPE = double>
+class ALBUSSPMV {
+public:
+  ALBUSSPMV(const int num_threads = omp_get_num_threads())
+      : _nthreads{num_threads} {}
+
+  void setNumThreads(const int num_threads) { _nthreads = num_threads; }
+
+  void preprocess(const COLTYPE size, const int base, ROWTYPE const *ai,
+                  COLTYPE const *aj, VALTYPE const *av) {
+
+    const ROWTYPE nnz = ai[size] - base;
+    _threadBlockSizePrefix.resize(_nthreads + 1);
+    _threadBlockSizePrefix[0] = 0;
+
+    const ROWTYPE work_per_thread = nnz / _nthreads;
+    const int resid = nnz % _nthreads;
+    for (int i = 0; i < _nthreads; i++) {
+      _threadBlockSizePrefix[i + 1] = i >= resid
+                                          ? ((i + 1) * work_per_thread + resid)
+                                          : ((i + 1) * (work_per_thread + 1));
+    }
+
+    _threadStartRow.resize(_nthreads + 1);
+    for (size_t i = 0; i < _threadBlockSizePrefix.size(); i++) {
+      _threadStartRow[i] =
+          std::distance(ai,
+                        std::upper_bound(ai, ai + size + 1,
+                                         _threadBlockSizePrefix[i] + base)) -
+          1;
+    }
+    // for (int i = 0; i <= size; i++)
+    //   std::cout << ai[i] - base << " ";
+    // std::cout << std::endl;
+    // for (auto i : _threadBlockSizePrefix)
+    //   std::cout << i << " ";
+    // std::cout << std::endl;
+    // for (auto i : _threadStartRow)
+    //   std::cout << i << " ";
+    // std::cout << std::endl;
+    _threadBoundaryValue.resize(2 * _nthreads);
+  }
+
+  void operator()(const COLTYPE size, const int base, ROWTYPE const *ai,
+                  COLTYPE const *aj, VALTYPE const *av, const VALTYPE *const b,
+                  VALTYPE *const x, const VALTYPE alpha,
+                  const VALTYPE beta) const {
+
+#pragma omp parallel num_threads(_nthreads)
+    {
+      const int tid = omp_get_thread_num();
+      const int nthreads = omp_get_num_threads();
+      COLTYPE start = _threadStartRow[tid], end = _threadStartRow[tid + 1];
+      VALTYPE val;
+      if (start < end) {
+        val = 0;
+#pragma unroll
+        for (ROWTYPE j = _threadBlockSizePrefix[tid]; j < ai[start + 1] - base;
+             j++) {
+          val += av[j] * b[aj[j] - base];
+        }
+        start++;
+        _threadBoundaryValue[2 * tid] = alpha * val;
+        for (COLTYPE i = start; i < end; i++) {
+          val = 0;
+#pragma unroll
+          for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+            val += av[j] * b[aj[j] - base];
+          }
+          x[i] = alpha * val + (beta == 0 ? 0 : beta * x[i]);
+        }
+        val = 0;
+#pragma unroll
+        for (ROWTYPE j = ai[end] - base; j < _threadBlockSizePrefix[tid + 1];
+             j++) {
+          val += av[j] * b[aj[j] - base];
+        }
+        _threadBoundaryValue[2 * tid + 1] = alpha * val;
+      } else {
+        val = 0;
+        for (ROWTYPE j = _threadBlockSizePrefix[tid];
+             j < _threadBlockSizePrefix[tid + 1]; j++) {
+          val += av[j] * b[aj[j] - base];
+        }
+        _threadBoundaryValue[2 * tid] = alpha * val;
+        _threadBoundaryValue[2 * tid + 1] = 0;
+      }
+    }
+    COLTYPE idx = -1;
+#pragma unroll
+    for (int tid = 0; tid < _nthreads; tid++) {
+      if (_threadStartRow[tid] != idx) {
+        idx = _threadStartRow[tid];
+        x[idx] *= beta;
+      }
+      x[idx] += _threadBoundaryValue[2 * tid];
+      // std::cout << "tid: " << 2 * tid << "idx: " << idx << std::endl;
+      if (tid == _nthreads - 1)
+        break;
+      if (_threadStartRow[tid + 1] != idx) {
+        idx = _threadStartRow[tid + 1];
+        x[idx] *= beta;
+      }
+      x[idx] += _threadBoundaryValue[2 * tid + 1];
+      // std::cout << "tid: " << 2 * tid + 1 << "idx: " << idx << std::endl;
+    }
+  }
+
+private:
+  int _nthreads;
+  mutable std::vector<ROWTYPE> _threadBlockSizePrefix;
+  mutable std::vector<COLTYPE> _threadStartRow;
+  mutable std::vector<VALTYPE> _threadBoundaryValue;
+};
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename T>
-constexpr bool spmv_has_preprocess =
-    requires(const COLTYPE size, const int base, ROWTYPE const *ai,
-             COLTYPE const *aj, VALTYPE const *av,
-             T &t) { t.preprocess(size, base, ai, aj, av); };
+constexpr bool spmv_has_preprocess = requires(const COLTYPE size,
+                                              const int base, ROWTYPE const *ai,
+                                              COLTYPE const *aj,
+                                              VALTYPE const *av, T &t) {
+  t.preprocess(size, base, ai, aj, av);
+};
 
 template <typename CSRMatrixType, typename SPMVType> struct SPMV {
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;

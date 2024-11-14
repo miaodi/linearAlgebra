@@ -177,3 +177,41 @@ TEST_F(spmv_Test, seg_spmv) {
     // }
   }
 }
+
+TEST_F(spmv_Test, ALBUS_spmv) {
+  for (auto &mat : _mats) {
+    const MKL_INT size = mat.rows();
+    // std::cout << "size: " << size << std::endl;
+
+    std::vector<double> b(mat.rows());
+    std::fill(std::begin(b), std::end(b), 1.);
+    std::vector<double> x(mat.rows(), 0.0);
+    std::vector<double> x_serial(mat.rows(), 0.0);
+    std::vector<double> diff(mat.rows(), 0.0);
+
+    SerialSPMV spmv;
+    spmv(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+         mat.get_aj().get(), mat.get_av().get(), b.data(), x_serial.data(), 1.,
+         0.);
+
+    ALBUSSPMV albus_spmv(7);
+    albus_spmv.preprocess(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+                          mat.get_aj().get(), mat.get_av().get());
+    albus_spmv(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
+               mat.get_aj().get(), mat.get_av().get(), b.data(), x.data(), 1.,
+               0.);
+
+    for (int i = 0; i < mat.rows(); i++)
+      diff[i] = x[i] - x_serial[i];
+
+    const double diff_l2 = cblas_dnrm2(diff.size(), diff.data(), 1);
+    const double serial_l2 = cblas_dnrm2(x_serial.size(), x_serial.data(), 1);
+    // EXPECT_NEAR(diff_l2 / serial_l2, 0, _tol);
+
+    std::cout << "error: " << diff_l2 / serial_l2 << std::endl;
+    // for (int i = 0; i < mat.rows(); i++) {
+    //   EXPECT_NEAR(x[i], x_serial[i], _tol * std::abs(x_serial[i]));
+    // }
+    // break;
+  }
+}

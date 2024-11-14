@@ -10,7 +10,7 @@
 #include <vector>
 
 static std::unique_ptr<matrix_utils::CSRMatrixVec<int, int, double>> mat;
-static int _num_threads = 32;
+static int _num_threads = 8;
 class MyFixture : public benchmark::Fixture {
 public:
   MyFixture() {
@@ -94,6 +94,25 @@ BENCHMARK_DEFINE_F(MyFixture, SegSum)(benchmark::State &state) {
 }
 
 BENCHMARK_REGISTER_F(MyFixture, SegSum)->Arg(100)->Arg(1000);
+
+BENCHMARK_DEFINE_F(MyFixture, ALBUSSum)(benchmark::State &state) {
+  std::vector<double> x(mat->rows, 0.0);
+  std::vector<double> b(mat->rows, 1.0);
+
+  matrix_utils::SPMV<matrix_utils::CSRMatrixVec<MKL_INT, MKL_INT, double>,
+                     matrix_utils::ALBUSSPMV<MKL_INT, MKL_INT, double>>
+      spmv;
+  spmv._spmv.setNumThreads(_num_threads);
+  spmv.setMatrix(mat.get());
+  spmv.preprocess();
+  for (auto _ : state) {
+    for (int i = 0; i < state.range(0); i++) {
+      spmv(b.data(), x.data());
+    }
+  }
+}
+
+BENCHMARK_REGISTER_F(MyFixture, ALBUSSum)->Arg(100)->Arg(1000);
 
 // BENCHMARK_DEFINE_F(MyFixture, MKLForwardSerial)(benchmark::State &state) {
 //   std::vector<double> x(mat->rows(), 0.0);
