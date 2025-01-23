@@ -141,8 +141,8 @@ TEST_F(precond_Test, icc_level_numeric_factorize) {
     matrix_utils::ICCLevelSymbolic0(mat.rows(), mat.mkl_base(), U.ai.get(),
                                     U.aj.get(), U.ai.get(), lvl, ICC0);
     matrix_utils::ICCLevelNumeric(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                  U.aj.get(), U.av.get(), U.ai.get(), lvl,
-                                  ICC0);
+                                  U.aj.get(), U.av.get(), U.ai.get(), lvl, 0.,
+                                  ICC0.ai.get(), ICC0.aj.get(), ICC0.av.get());
     mkl_wrapper::mkl_sparse_mat matICC0(mat.rows(), mat.rows(), ICC0.ai,
                                         ICC0.aj, ICC0.av, mat.mkl_base());
     std::cout << std::endl;

@@ -45,6 +45,21 @@ protected:
   int _level;
 };
 
+// Incomplete Cholesky k level
+class incomplete_cholesky_k_2 : public incomplete_choleksy_base {
+public:
+  incomplete_cholesky_k_2();
+
+  virtual bool symbolic_factorize(mkl_sparse_mat const *const A) override;
+
+  virtual bool numeric_factorize(mkl_sparse_mat const *const A) override;
+
+  void set_level(const int level) { _level = level; }
+
+protected:
+  int _level;
+};
+
 class incomplete_cholesky_fm : public incomplete_choleksy_base {
 public:
   incomplete_cholesky_fm();

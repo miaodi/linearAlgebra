@@ -1,4 +1,6 @@
 #include "incomplete_cholesky.h"
+#include "matrix_utils.hpp"
+#include "precond.hpp"
 #include <cmath>
 #include <cstdio>
 #include <execution>
@@ -269,6 +271,67 @@ bool incomplete_cholesky_k::numeric_factorize(mkl_sparse_mat const *const A) {
     }
     if (i == n)
       success_flag = true;
+  } while (!success_flag);
+
+  if (_mkl_base == SPARSE_INDEX_BASE_ONE)
+    sp_fill();
+  else
+    to_one_based();
+  return true;
+}
+
+incomplete_cholesky_k_2::incomplete_cholesky_k_2()
+    : incomplete_choleksy_base() {}
+
+bool incomplete_cholesky_k_2::symbolic_factorize(
+    mkl_sparse_mat const *const A) {
+  _nrow = A->rows();
+  _ncol = A->cols();
+  _mkl_base = A->mkl_base();
+  _interm_vec.resize(_nrow);
+  const MKL_INT n = A->rows();
+  const MKL_INT base = A->mkl_base();
+  auto ai = A->get_ai();
+  auto aj = A->get_aj();
+  _diagPos.resize(_nrow);
+
+  bool success = matrix_utils::Diagonal(_nrow, (MKL_INT)_mkl_base, ai.get(),
+                                        aj.get(), _av.get(), _diagPos.data(),
+                                        static_cast<double *>(nullptr));
+  if (!success) {
+    std::cerr << "Failed to get diagonal" << std::endl;
+    return false;
+  }
+
+  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> ICC;
+  matrix_utils::ICCLevelSymbolic1(rows(), mkl_base(), ai.get(), aj.get(),
+                                  _diagPos.data(), _level, ICC);
+  _ai = ICC.ai;
+  _aj = ICC.aj;
+  _av = ICC.av;
+  return true;
+}
+
+bool incomplete_cholesky_k_2::numeric_factorize(mkl_sparse_mat const *const A) {
+  auto ai = A->get_ai();
+  auto aj = A->get_aj();
+  auto av = A->get_av();
+
+  bool success_flag = false;
+  int iter = 0;
+  double shift = 0.;
+
+  do {
+    if (!matrix_utils::ICCLevelNumeric(rows(), mkl_base(), ai.get(), aj.get(),
+                                       av.get(), _diagPos.data(), _level, shift,
+                                       _ai.get(), _aj.get(), _av.get())) {
+      if (!_shift || ++iter > _nrestart)
+        return false;
+      shift = std::max(2 * shift, _initial_shift);
+      std::cout << "shift: " << shift << std::endl;
+    } else {
+      success_flag = true;
+    }
   } while (!success_flag);
 
   if (_mkl_base == SPARSE_INDEX_BASE_ONE)

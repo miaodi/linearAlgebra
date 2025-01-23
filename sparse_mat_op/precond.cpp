@@ -22,8 +22,8 @@ template void ICCLevelSymbolic3<int, int, CSRMatrix<int, int, double>>(
     const int rows, const int base, int const *ai, int const *aj,
     int const *diag_pos, const int lvl, CSRMatrix<int, int, double> &icc);
 
-template void ICCLevelNumeric<int, int, double, CSRMatrix<int, int, double>>(
+template bool ICCLevelNumeric<int, int, double>(
     const int rows, const int base, int const *ai, int const *aj,
-    double const *av, int const *diag_pos, const int lvl,
-    CSRMatrix<int, int, double> &icc);
+    double const *av, int const *diag_pos, const int lvl, const double omega,
+    int const *icc_ai, int const *icc_aj, double *icc_av);
 } // namespace matrix_utils

@@ -53,9 +53,12 @@ BENCHMARK_DEFINE_F(MyFixture, Serial)(benchmark::State &state) {
       spmv(b.data(), x.data());
     }
   }
+
+  state.SetBytesProcessed(int64_t(state.iterations()) *
+                          int64_t(state.range(0)) * 2 * mat->NNZ());
 }
 
-BENCHMARK_REGISTER_F(MyFixture, Serial)->Arg(100)->Arg(1000);
+BENCHMARK_REGISTER_F(MyFixture, Serial)->Arg(100);
 
 BENCHMARK_DEFINE_F(MyFixture, Parallel)(benchmark::State &state) {
   omp_set_num_threads(_num_threads);
@@ -72,9 +75,12 @@ BENCHMARK_DEFINE_F(MyFixture, Parallel)(benchmark::State &state) {
       spmv(b.data(), x.data());
     }
   }
+
+  state.SetBytesProcessed(int64_t(state.iterations()) *
+                          int64_t(state.range(0)) * 2 * mat->NNZ());
 }
 
-BENCHMARK_REGISTER_F(MyFixture, Parallel)->Arg(100)->Arg(1000);
+BENCHMARK_REGISTER_F(MyFixture, Parallel)->Arg(100);
 
 BENCHMARK_DEFINE_F(MyFixture, SegSum)(benchmark::State &state) {
   std::vector<double> x(mat->rows, 0.0);
@@ -91,9 +97,12 @@ BENCHMARK_DEFINE_F(MyFixture, SegSum)(benchmark::State &state) {
       spmv(b.data(), x.data());
     }
   }
+
+  state.SetBytesProcessed(int64_t(state.iterations()) *
+                          int64_t(state.range(0)) * 2 * mat->NNZ());
 }
 
-BENCHMARK_REGISTER_F(MyFixture, SegSum)->Arg(100)->Arg(1000);
+BENCHMARK_REGISTER_F(MyFixture, SegSum)->Arg(100);
 
 BENCHMARK_DEFINE_F(MyFixture, ALBUSSum)(benchmark::State &state) {
   std::vector<double> x(mat->rows, 0.0);
@@ -110,9 +119,12 @@ BENCHMARK_DEFINE_F(MyFixture, ALBUSSum)(benchmark::State &state) {
       spmv(b.data(), x.data());
     }
   }
+
+  state.SetBytesProcessed(int64_t(state.iterations()) *
+                          int64_t(state.range(0)) * 2 * mat->NNZ());
 }
 
-BENCHMARK_REGISTER_F(MyFixture, ALBUSSum)->Arg(100)->Arg(1000);
+BENCHMARK_REGISTER_F(MyFixture, ALBUSSum)->Arg(100);
 
 // BENCHMARK_DEFINE_F(MyFixture, MKLForwardSerial)(benchmark::State &state) {
 //   std::vector<double> x(mat->rows(), 0.0);

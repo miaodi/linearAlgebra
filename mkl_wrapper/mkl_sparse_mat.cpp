@@ -547,11 +547,12 @@ void mkl_sparse_mat::DtAD(const std::vector<double> &diag) {
 
 bool mkl_sparse_mat::diag_pos(std::vector<MKL_INT> &diag) const {
   diag.resize(_nrow);
-  return matrix_utils::Diagonal(_nrow, (MKL_INT)_mkl_base, _ai.get(), _aj.get(),
-                                _av.get(), diag.data(),
-                                static_cast<double *>(nullptr));
+  bool success = matrix_utils::Diagonal(_nrow, (MKL_INT)_mkl_base, _ai.get(),
+                                        _aj.get(), _av.get(), diag.data(),
+                                        static_cast<double *>(nullptr));
   std::for_each(std::execution::par, diag.begin(), diag.end(),
                 [&](auto &d) { d -= _mkl_base; });
+  return success;
 }
 
 void mkl_sparse_mat::randomVals() {

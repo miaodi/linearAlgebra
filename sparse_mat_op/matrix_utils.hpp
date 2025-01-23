@@ -684,7 +684,6 @@ bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
     auto mid =
         std::lower_bound(aj + ai[i] - base, aj + ai[i + 1] - base, i + base);
     if (*mid != i + base) {
-      std::cerr << "Could not find diagonal!" << std::endl;
       missing_diag = true;
     }
     if (diagpos)

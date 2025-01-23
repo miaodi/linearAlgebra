@@ -612,18 +612,12 @@ void ICCLevelSymbolic3(const COLTYPE size, const int base, ROWTYPE const *ai,
   ResizeCSRAV(icc, icc.ai[size] - base);
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
-          typename CSRMatrixType>
-void ICCLevelNumeric(const COLTYPE size, const int base, ROWTYPE const *ai,
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+bool ICCLevelNumeric(const COLTYPE size, const int base, ROWTYPE const *ai,
                      COLTYPE const *aj, VALTYPE const *av,
                      COLTYPE const *diag_pos, const int lvl,
-                     CSRMatrixType &icc) {
-  static_assert(
-      CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
-                      CSRMatrixType>::value == true);
-
-  icc.rows = size;
-  icc.cols = size;
+                     const VALTYPE omega, ROWTYPE const *icc_ai,
+                     COLTYPE const *icc_aj, VALTYPE *icc_av) {
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
   std::vector<COLTYPE> llist(size, NONE);
@@ -635,39 +629,44 @@ void ICCLevelNumeric(const COLTYPE size, const int base, ROWTYPE const *ai,
   for (COLTYPE j = 0; j < size; j++) {
     i_idx = diag_pos[j];
     i_idx_end = ai[j + 1];
-    prec_i_idx = prec_i_idx_start = icc.ai[j];
-    prec_i_idx_end = icc.ai[j + 1];
+    prec_i_idx = prec_i_idx_start = icc_ai[j];
+    prec_i_idx_end = icc_ai[j + 1];
+
+    // NOTE: assume diagonal always exists
+    icc_av[prec_i_idx++ - base] =
+        av[i_idx++ - base] *
+        (static_cast<VALTYPE>(1) + omega); // shift the diagonal
 
     // copy initial value to current jth row
     for (; prec_i_idx < prec_i_idx_end; prec_i_idx++) {
-      if (i_idx == i_idx_end || icc.aj[prec_i_idx - base] != aj[i_idx - base])
-        icc.av[prec_i_idx - base] = 0;
+      if (i_idx == i_idx_end || icc_aj[prec_i_idx - base] != aj[i_idx - base])
+        icc_av[prec_i_idx - base] = 0;
       else
-        icc.av[prec_i_idx - base] = av[i_idx++ - base];
+        icc_av[prec_i_idx - base] = av[i_idx++ - base];
     }
 
     // iterate for k from 0 to j-1
     k = llist[j];
     while (k < j) {
       i_idx = jk[k]++; // here i_idx become i index for k = 0:j
-      i_idx_end = icc.ai[k + 1];
+      i_idx_end = icc_ai[k + 1];
 
       // jump k to the next row
       llist_next = llist[k];
       //   update llist if necessary
       if (i_idx + 1 < i_idx_end) {
-        llist[k] = llist[icc.aj[i_idx + 1 - base] - base];
-        llist[icc.aj[i_idx + 1 - base] - base] = k;
+        llist[k] = llist[icc_aj[i_idx + 1 - base] - base];
+        llist[icc_aj[i_idx + 1 - base] - base] = k;
       }
       k = llist_next;
 
       // a_ij = a_ij - a_ik * a_kj
-      const VALTYPE ajk = icc.av[i_idx - base];
+      const VALTYPE ajk = icc_av[i_idx - base];
       for (prec_i_idx = prec_i_idx_start;
            i_idx < i_idx_end && prec_i_idx < prec_i_idx_end;) {
-        if (icc.aj[i_idx - base] == icc.aj[prec_i_idx - base]) {
-          icc.av[prec_i_idx++ - base] -= ajk * icc.av[i_idx++ - base];
-        } else if (icc.aj[i_idx - base] < icc.aj[prec_i_idx - base]) {
+        if (icc_aj[i_idx - base] == icc_aj[prec_i_idx - base]) {
+          icc_av[prec_i_idx++ - base] -= ajk * icc_av[i_idx++ - base];
+        } else if (icc_aj[i_idx - base] < icc_aj[prec_i_idx - base]) {
           i_idx++;
         } else {
           prec_i_idx++;
@@ -677,16 +676,20 @@ void ICCLevelNumeric(const COLTYPE size, const int base, ROWTYPE const *ai,
 
     //   update llist if necessary
     if (prec_i_idx_end - prec_i_idx_start > 1) {
-      llist[j] = llist[icc.aj[prec_i_idx_start + 1 - base] - base];
-      llist[icc.aj[prec_i_idx_start + 1 - base] - base] = j;
+      llist[j] = llist[icc_aj[prec_i_idx_start + 1 - base] - base];
+      llist[icc_aj[prec_i_idx_start + 1 - base] - base] = j;
       jk[j] = prec_i_idx_start + 1;
     }
+    // negative diagonal detected, needs more shift
+    if (icc_av[prec_i_idx_start - base] < 0)
+      return false;
 
-    const VALTYPE aii = std::sqrt(icc.av[prec_i_idx_start - base]);
-    icc.av[prec_i_idx_start++ - base] = aii;
+    const VALTYPE aii = std::sqrt(icc_av[prec_i_idx_start - base]);
+    icc_av[prec_i_idx_start++ - base] = aii;
     for (; prec_i_idx_start < prec_i_idx_end; prec_i_idx_start++)
-      icc.av[prec_i_idx_start - base] /= aii;
+      icc_av[prec_i_idx_start - base] /= aii;
   }
+  return true;
 }
 
 } // namespace matrix_utils
