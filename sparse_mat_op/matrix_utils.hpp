@@ -1040,4 +1040,72 @@ void DiagVecMul(const COLTYPE n, const VALTYPE alpha, VALTYPE const *diag,
     }
   }
 }
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
+          typename CSRMatrixType>
+void Block(const COLTYPE rows, const int base, ROWTYPE const *ai,
+           COLTYPE const *aj, VALTYPE const *av, const COLTYPE i,
+           const COLTYPE j, const COLTYPE p, const COLTYPE q,
+           CSRMatrixType &subMat) {
+  static_assert(
+      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
+  static_assert(CSRResizable<CSRMatrixType>::value,
+                "CSRMatrixType must have a resizable method");
+
+  if (i + p > rows) {
+    std::cerr << "Block size exceeds matrix size" << std::endl;
+    return;
+  }
+
+  subMat.rows = p;
+  subMat.cols = q;
+  ResizeCSRAI(subMat, subMat.rows + 1);
+
+  subMat.ai[0] = base;
+
+  std::vector<ROWTYPE> fronts(p);
+  std::vector<ROWTYPE> ends(p);
+
+#pragma omp parallel
+  {
+    const int tid = omp_get_thread_num();
+    const int nthreads = omp_get_num_threads();
+    auto [start, end] =
+        utils::LoadPrefixBalancedPartition(ai + i, ai + i + p, tid, nthreads);
+
+    for (auto it = start; it < end; it++) {
+      COLTYPE row = it - ai;
+      COLTYPE block_row = row - i;
+      fronts[block_row] = std::distance(
+          aj, std::lower_bound(aj + ai[row] - base, aj + ai[row + 1] - base,
+                               j + base));
+      ends[block_row] = std::distance(
+          aj, std::lower_bound(aj + ai[row] - base, aj + ai[row + 1] - base,
+                               j + q + base));
+      subMat.ai[block_row + 1] = ends[block_row] - fronts[block_row];
+    }
+#pragma omp barrier
+#pragma omp single
+    {
+      for (size_t _i = 0; _i < p; _i++) {
+        subMat.ai[_i + 1] += subMat.ai[_i];
+      }
+
+      const auto nnz = subMat.ai[p] - base;
+      ResizeCSRAJ(subMat, nnz);
+      ResizeCSRAV(subMat, nnz);
+    }
+
+    const auto nnz = subMat.ai[p] - base;
+
+    ROWTYPE pos = subMat.ai[start - ai - i] - base;
+    for (auto it = start; it < end; it++) {
+      COLTYPE block_row = it - ai - i;
+      for (ROWTYPE _j = fronts[block_row]; _j < ends[block_row]; _j++) {
+        subMat.aj[pos] = aj[_j] - j;
+        subMat.av[pos++] = av[_j];
+      }
+    }
+  }
+}
 } // namespace matrix_utils

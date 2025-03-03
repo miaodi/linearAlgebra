@@ -286,3 +286,44 @@ TEST(UpperTrigToFull, medium) {
     }
   }
 }
+
+TEST(Block, Submatrix) {
+  omp_set_num_threads(7);
+  for (int i = 0; i < 10; i++) {
+    auto mat = mkl_wrapper::random_sparse(10000, 30);
+    mat.randomVals();
+    if (i % 2 == 0)
+      mat.to_one_based();
+    else
+      mat.to_zero_based();
+    int start_row = 20;
+    int start_col = 32;
+    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> block;
+    matrix_utils::Block(mat.rows(), mat.mkl_base(), mat.get_ai().get(),
+                        mat.get_aj().get(), mat.get_av().get(), 20, 32, 1000,
+                        100, block);
+
+    auto ai = mat.get_ai().get();
+    auto aj = mat.get_aj().get();
+    auto base = static_cast<int>(mat.mkl_base());
+    auto av = mat.get_av().get();
+    EXPECT_EQ(block.rows, 1000);
+    EXPECT_EQ(block.cols, 100);
+    EXPECT_EQ(block.Base(), base);
+
+    for (int i = 0; i < block.rows; i++) {
+      if (block.ai[i] != block.ai[i + 1]) {
+        EXPECT_LT(block.aj[block.ai[i + 1] - 1 - block.Base()] - block.Base(),
+                  100);
+      }
+      auto it =
+          std::lower_bound(aj + ai[start_row + i] - base,
+                           aj + ai[start_row + i + 1] - base, start_col + base);
+      for (int j = block.ai[i] - base; j < block.ai[i + 1] - base; j++) {
+        EXPECT_EQ(block.aj[j], *it - start_col);
+        EXPECT_EQ(block.av[j], av[it - aj]);
+        it++;
+      }
+    }
+  }
+}

@@ -88,4 +88,9 @@ template void TriangularToFull<TriangularMatrix::U, int, int, double,
                                CSRMatrixVec<int, int, double>>(
     const int rows, const int base, int const *ai, int const *aj,
     double const *av, CSRMatrixVec<int, int, double> &F);
+
+template void Block<int, int, double, CSRMatrixVec<int, int, double>>(
+    const int rows, const int base, int const *ai, int const *aj,
+    double const *av, const int i, const int j, const int p, const int q,
+    CSRMatrixVec<int, int, double> &);
 } // namespace matrix_utils
