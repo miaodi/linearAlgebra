@@ -805,19 +805,19 @@ void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
 template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
           typename VALTYPE, typename CSRMatrixType>
 void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
-                   COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &U) {
-  static_assert(TS == TriangularMatrix::U);
+                   COLTYPE const *aj, VALTYPE const *av,
+                   CSRMatrixType &tri_mat) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
   static_assert(CSRResizable<CSRMatrixType>::value,
                 "CSRMatrixType must have a resizable method");
 
-  U.rows = rows;
-  U.cols = rows;
-  ResizeCSRAI(U, rows + 1);
+  tri_mat.rows = rows;
+  tri_mat.cols = rows;
+  ResizeCSRAI(tri_mat, rows + 1);
 
-  U.ai[0] = base;
-  std::vector<ROWTYPE> start_pos(rows);
+  tri_mat.ai[0] = base;
+  std::vector<ROWTYPE> mid_pos(rows);
   std::vector<ROWTYPE> prefix(omp_get_max_threads() + 1);
   prefix[0] = base;
 
@@ -828,15 +828,23 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
     auto [start, end] =
         utils::LoadPrefixBalancedPartition(ai, ai + rows, tid, nthreads);
     prefix[tid + 1] = 0;
+    COLTYPE const *mid;
+    ROWTYPE row_size;
     for (auto it = start; it < end; it++) {
       COLTYPE i = it - ai;
-      auto mid =
-          std::lower_bound(aj + *it - base, aj + *(it + 1) - base, i + base);
-      const bool zero_diag = (mid == aj + *(it + 1) - base || *mid != i + base);
-      start_pos[i] = mid - aj;
-      const ROWTYPE U_size = *(it + 1) - base - start_pos[i];
-      prefix[tid + 1] += U_size;
-      U.ai[i + 1] = prefix[tid + 1];
+      if constexpr (TS == TriangularMatrix::U) {
+        mid =
+            std::lower_bound(aj + *it - base, aj + *(it + 1) - base, i + base);
+        mid_pos[i] = mid - aj;
+        row_size = *(it + 1) - base - mid_pos[i];
+      } else {
+        mid =
+            std::upper_bound(aj + *it - base, aj + *(it + 1) - base, i + base);
+        mid_pos[i] = mid - aj;
+        row_size = mid_pos[i] - (*it - base);
+      }
+      prefix[tid + 1] += row_size;
+      tri_mat.ai[i + 1] = prefix[tid + 1];
     }
 #pragma omp barrier
 #pragma omp single
@@ -845,19 +853,26 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
         prefix[i] += prefix[i - 1];
       }
 
-      const auto Unnz = prefix[nthreads] - base;
-      ResizeCSRAJ(U, Unnz);
-      ResizeCSRAV(U, Unnz);
+      const auto nnz = prefix[nthreads] - base;
+      ResizeCSRAJ(tri_mat, nnz);
+      ResizeCSRAV(tri_mat, nnz);
     }
 
-    ROWTYPE U_pos = prefix[tid] - base;
+    ROWTYPE pos = prefix[tid] - base;
     for (auto it = start; it < end; it++) {
       COLTYPE i = it - ai;
-      U.ai[i + 1] += prefix[tid];
+      tri_mat.ai[i + 1] += prefix[tid];
 
-      for (ROWTYPE j = start_pos[i]; j < *(it + 1) - base; j++) {
-        U.aj[U_pos] = aj[j];
-        U.av[U_pos++] = av[j];
+      if constexpr (TS == TriangularMatrix::U) {
+        for (ROWTYPE j = mid_pos[i]; j < *(it + 1) - base; j++) {
+          tri_mat.aj[pos] = aj[j];
+          tri_mat.av[pos++] = av[j];
+        }
+      } else {
+        for (ROWTYPE j = *it - base; j < mid_pos[i]; j++) {
+          tri_mat.aj[pos] = aj[j];
+          tri_mat.av[pos++] = av[j];
+        }
       }
     }
   }

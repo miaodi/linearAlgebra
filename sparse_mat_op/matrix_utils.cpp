@@ -79,6 +79,16 @@ template void SplitTriangle<TriangularMatrix::U, int, int, double,
     const int rows, const int base, int const *ai, int const *aj,
     double const *av, CSRMatrixVec<int, int, double> &U);
 
+template void SplitTriangle<TriangularMatrix::L, int, int, double,
+                            CSRMatrix<int, int, double>>(
+    const int rows, const int base, int const *ai, int const *aj,
+    double const *av, CSRMatrix<int, int, double> &U);
+
+template void SplitTriangle<TriangularMatrix::L, int, int, double,
+                            CSRMatrixVec<int, int, double>>(
+    const int rows, const int base, int const *ai, int const *aj,
+    double const *av, CSRMatrixVec<int, int, double> &U);
+
 template void TriangularToFull<TriangularMatrix::U, int, int, double,
                                CSRMatrix<int, int, double>>(
     const int rows, const int base, int const *ai, int const *aj,

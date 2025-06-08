@@ -235,6 +235,75 @@ TEST(SplitLDU, base1) {
   // myfile.close();
 }
 
+TEST(LowerTri, small) {
+  omp_set_num_threads(5);
+  for (int i = 0; i < 20; i++) {
+    auto mat = mkl_wrapper::random_sparse(50, 13);
+    mat.randomVals();
+    if (i % 2 == 0)
+      mat.to_one_based();
+    else
+      mat.to_zero_based();
+    MKL_INT base = mat.mkl_base();
+    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> T;
+    matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::L>(
+        mat.rows(), base, mat.get_ai().get(), mat.get_aj().get(),
+        mat.get_av().get(), T);
+
+    mkl_wrapper::mkl_sparse_mat triangle(mat.rows(), mat.rows(), T.ai, T.aj,
+                                         T.av, mat.mkl_base());
+    for (int i = 0; i < triangle.rows(); i++) {
+      if (triangle.get_ai()[i] != triangle.get_ai()[i + 1]) {
+        int last_index = triangle.get_aj()[triangle.get_ai()[i + 1] - base - 1];
+        EXPECT_TRUE(last_index - base <= i);
+      }
+    }
+    for (int i = 0; i <= triangle.rows(); i++) {
+      for (int j = triangle.get_ai()[i] - base;
+           j < triangle.get_ai()[i + 1] - base; j++) {
+        int mat_j =
+            j - (triangle.get_ai()[i] - base) + (mat.get_ai()[i] - base);
+        EXPECT_EQ(triangle.get_aj()[j], mat.get_aj()[mat_j]);
+        EXPECT_EQ(triangle.get_av()[j], mat.get_av()[mat_j]);
+      }
+    }
+  }
+}
+
+TEST(UpperTri, small) {
+  omp_set_num_threads(5);
+  for (int i = 0; i < 20; i++) {
+    auto mat = mkl_wrapper::random_sparse(50, 13);
+    mat.randomVals();
+    if (i % 2 == 0)
+      mat.to_one_based();
+    else
+      mat.to_zero_based();
+    MKL_INT base = mat.mkl_base();
+    matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> T;
+    matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
+        mat.rows(), base, mat.get_ai().get(), mat.get_aj().get(),
+        mat.get_av().get(), T);
+
+    mkl_wrapper::mkl_sparse_mat triangle(mat.rows(), mat.rows(), T.ai, T.aj,
+                                         T.av, mat.mkl_base());
+    for (int i = 0; i < triangle.rows(); i++) {
+      if (triangle.get_ai()[i] != triangle.get_ai()[i + 1]) {
+        EXPECT_TRUE(triangle.get_aj()[triangle.get_ai()[i] - base] - base >= i);
+      }
+    }
+    for (int i = 0; i <= triangle.rows(); i++) {
+      for (int j = 1; j <= triangle.get_ai()[i + 1] - triangle.get_ai()[i];
+           j++) {
+        EXPECT_EQ(triangle.get_aj()[triangle.get_ai()[i + 1] - base - j],
+                  mat.get_aj()[mat.get_ai()[i + 1] - base - j]);
+        EXPECT_EQ(triangle.get_av()[triangle.get_ai()[i + 1] - base - j],
+                  mat.get_av()[mat.get_ai()[i + 1] - base - j]);
+      }
+    }
+  }
+}
+
 TEST(UpperTrigToFull, small) {
   omp_set_num_threads(5);
   for (int i = 0; i < 20; i++) {

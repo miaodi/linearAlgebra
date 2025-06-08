@@ -54,6 +54,16 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(Spectra)
+
+FetchContent_Declare(
+  cxxopts
+  GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
+  GIT_TAG master
+  GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(cxxopts)
+
 FetchContent_Declare(
   cereal
   GIT_REPOSITORY https://github.com/USCiLab/cereal.git
