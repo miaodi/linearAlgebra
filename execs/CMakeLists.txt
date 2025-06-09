@@ -21,3 +21,7 @@ target_link_libraries(tmp2 PRIVATE Utils fast_matrix_market::fast_matrix_market 
 add_executable(test1 test1.cpp)
 # target_include_directories(test1 PRIVATE Utils)
 target_link_libraries(test1 PRIVATE Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper reordering TBB::tbb)
+
+add_executable(temp_test temp_test.cpp)
+# target_include_directories(test1 PRIVATE Utils)
+target_link_libraries(temp_test PRIVATE Utils sparse_mat_op fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper reordering)

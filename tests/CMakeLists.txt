@@ -27,12 +27,11 @@ endforeach()
 # configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/rdist1.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/rdist1.mtx COPYONLY)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/data)
-file(CREATE_LINK ${CMAKE_CURRENT_SOURCE_DIR}/data/ex5.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ex5.mtx SYMBOLIC)
-
-# https://sparse.tamu.edu/Zitney/rdist1
-# 4134
-# no symmetry
-file(CREATE_LINK ${CMAKE_CURRENT_SOURCE_DIR}/data/rdist1.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/rdist1.mtx SYMBOLIC)
+file(GLOB MATRIX_FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/*.mtx)
+foreach(MATRIX_FILE ${MATRIX_FILES})
+   get_filename_component(FILENAME ${MATRIX_FILE} NAME)
+   file(CREATE_LINK ${MATRIX_FILE} ${CMAKE_CURRENT_BINARY_DIR}/data/${FILENAME} SYMBOLIC)
+endforeach()
 
 # https://sparse.tamu.edu/HB/nos5
 # 468

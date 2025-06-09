@@ -146,6 +146,13 @@ add_subdirectory(execs)
 enable_testing()
 add_subdirectory(tests)
 
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/data)
+file(GLOB MATRIX_FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/*)
+foreach(MATRIX_FILE ${MATRIX_FILES})
+   get_filename_component(FILENAME ${MATRIX_FILE} NAME)
+   file(CREATE_LINK ${MATRIX_FILE} ${CMAKE_CURRENT_BINARY_DIR}/data/${FILENAME} SYMBOLIC)
+endforeach()
+
 if(BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif(BUILD_BENCHMARKS)
