@@ -144,4 +144,25 @@ void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
 void Metis(mkl_wrapper::mkl_sparse_mat const *const mat,
            std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm);
 #endif
+
+template <typename COLTYPE> class QuotientGraph {
+  struct Node {
+
+    COLTYPE id; // node id
+    COLTYPE degree; // node degree
+
+    std::vector<COLTYPE> adjacent_variables; // indices of the adjacent variables
+    std::vector<COLTYPE> adjacent_elements; // indices of the adjacent elements
+    std::vector<COLTYPE> simple_variables; // indices of the simple variables
+  };
+
+public:
+
+  QuotientGraph(COLTYPE rows, COLTYPE cols, int base = 0)
+      : rows_(rows), cols_(cols), base_(base) {}
+
+  COLTYPE rows() const { return rows_; }
+  COLTYPE cols() const { return cols_; }
+  int base() const { return base_; }
+};
 } // namespace reordering
