@@ -157,12 +157,12 @@ template <typename COLTYPE> class QuotientGraph {
   };
 
 public:
+  template<typename ROWTYPE>
+  QuotientGraph(const COLTYPE nnodes,  ROWTYPE const *ai,
+                 COLTYPE const *aj);
+  void reorder(COLTYPE *iperm, COLTYPE *perm);
 
-  QuotientGraph(COLTYPE rows, COLTYPE cols, int base = 0)
-      : rows_(rows), cols_(cols), base_(base) {}
-
-  COLTYPE rows() const { return rows_; }
-  COLTYPE cols() const { return cols_; }
-  int base() const { return base_; }
+protected:
+  std::vector<Node> _nodes;
 };
 } // namespace reordering

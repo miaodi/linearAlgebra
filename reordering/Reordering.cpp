@@ -154,4 +154,28 @@ void Metis(mkl_wrapper::mkl_sparse_mat const *const mat,
                iperm.data(), perm.data());
 }
 #endif
+
+template <typename COLTYPE>
+template <typename ROWTYPE>
+QuotientGraph<COLTYPE>::QuotientGraph(const COLTYPE nnodes, ROWTYPE const *ai,
+                                      COLTYPE const *aj):_nodes(nnodes)
+{
+  const ROWTYPE base = ai[0];
+  for (COLTYPE i = 0; i < nnodes; i++) {
+    _nodes[i].id = i;
+    _nodes[i].reserve(ai[i + 1] - ai[i]);
+    for (ROWTYPE j_idx = ai[i] - base; j_idx < ai[i + 1] - base; j_idx++) {
+      COLTYPE j = aj[j_idx] - base;
+      if (j == i)
+        continue;
+      _nodes[i].adjacent_variables.push_back(j);
+    }
+    _nodes[i].degree = _nodes[i].adjacent_variables.size();
+    _nodes[i].simple_variables.push_back(i);
+  }
+}
+
+
+
+template class QuotientGraph<int>;
 } // namespace reordering
