@@ -9,6 +9,74 @@
 
 namespace reordering {
 
+template <typename T> T Find(T *parents, T x) {
+  while (x != parents[x]) {
+    parents[x] = parents[parents[x]];
+    x = parents[x];
+  }
+  return x;
+};
+
+template MKL_INT Find(MKL_INT *parents, MKL_INT x);
+
+template <typename T> T UniteByRank(T *rank, T *parent, const T i, const T j) {
+  T pi = Find(parent, i);
+  T pj = Find(parent, j);
+  if (pi == pj)
+    return pi;
+  if (rank[pi] < rank[pj]) {
+    parent[pi] = pj;
+    return pj;
+  } else if (rank[pi] > rank[pj]) {
+    parent[pj] = pi;
+    return pi;
+  } else {
+    parent[pi] = pj;
+    rank[pj]++;
+    return pj;
+  }
+}
+
+template MKL_INT UniteByRank(MKL_INT *rank, MKL_INT *parent, const MKL_INT i,
+                             const MKL_INT j);
+
+template <typename T> T Unite(T *parents, const T i, const T j) {
+  T pi = Find(parents, i);
+  T pj = Find(parents, j);
+  if (pi == pj)
+    return pi;
+  parents[pj] = pi;
+  return pi;
+}
+template int Unite(int *parent, const int i, const int j);
+
+template <typename T, bool Rank>
+UnionFind<T, Rank>::UnionFind(T size) : _parents(size) {
+  if constexpr (Rank) {
+    _ranks.resize(size);
+  }
+  for (T i = 0; i < size; ++i) {
+    _parents[i] = i;
+    if constexpr (Rank)
+      _ranks[i] = 0;
+  }
+}
+
+template <typename T, bool Rank> void UnionFind<T, Rank>::reset(const T size) {
+  _parents.resize(size);
+  if constexpr (Rank) {
+    _ranks.resize(size);
+  }
+  for (T i = 0; i < size; ++i) {
+    _parents[i] = i;
+    if constexpr (Rank)
+      _ranks[i] = 0;
+  }
+}
+
+template class UnionFind<int, false>;
+template class UnionFind<int, true>;
+
 std::vector<MKL_INT>
 UnionFindRank(mkl_wrapper::mkl_sparse_mat const *const mat) {
   const MKL_INT base = mat->mkl_base();
@@ -16,26 +84,12 @@ UnionFindRank(mkl_wrapper::mkl_sparse_mat const *const mat) {
   std::vector<MKL_INT> ranks(mat->rows());
   std::iota(parents.begin(), parents.end(), 0);
   std::fill(ranks.begin(), ranks.end(), 0);
-  auto unite = [&parents, &ranks](MKL_INT x, MKL_INT y) {
-    MKL_INT px = Find(parents, x);
-    MKL_INT py = Find(parents, y);
-    if (px == py)
-      return;
-    if (ranks[px] < ranks[py]) {
-      parents[px] = py;
-    } else if (ranks[px] > ranks[py]) {
-      parents[py] = px;
-    } else {
-      parents[px] = py;
-      ranks[py]++;
-    }
-  };
   auto ai = mat->get_ai();
   auto aj = mat->get_aj();
   for (MKL_INT i = 0; i < mat->rows(); i++) {
     for (MKL_INT j = ai[i] - base; j < ai[i + 1] - base; j++) {
 
-      unite(i, aj[j] - base);
+      UniteByRank(ranks.data(), parents.data(), i, aj[j] - base);
     }
   }
   return parents;
@@ -208,7 +262,7 @@ int CountComponents(std::vector<MKL_INT> &parents) {
   int sum = 0;
 #pragma omp parallel for reduction(+ : sum)
   for (MKL_INT i = 0; i < parents.size(); i++) {
-    if (Find(parents, i) == i)
+    if (Find(parents.data(), i) == i)
       sum++;
   }
   return sum;
@@ -232,7 +286,7 @@ void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
     // find roots
     for (auto it = start; it != end; it++) {
       const MKL_INT index = it - parents.begin();
-      if (Find(parents, index) == index)
+      if (Find(parents.data(), index) == index)
         rootsOfThread[tid].push_back(index);
     }
 
@@ -265,7 +319,7 @@ void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
     for (auto it = start; it != end; it++) {
       const MKL_INT index = it - parents.begin();
       compSizePrefixSum[(tid + 1) * compRoots.size() +
-                        rootToInd[Find(parents, index)]]++;
+                        rootToInd[Find(parents.data(), index)]]++;
     }
 
     // prefix sum
@@ -286,7 +340,7 @@ void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
     for (auto it = start; it != end; it++) {
       const MKL_INT index = it - parents.begin();
       sortedComp[compSizePrefixSum[tid * compRoots.size() +
-                                   rootToInd[Find(parents, index)]]++] =
+                                   rootToInd[Find(parents.data(), index)]]++] =
           index + base;
     }
   }

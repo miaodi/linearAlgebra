@@ -1,8 +1,8 @@
 #include "../config.h"
 #include "Reordering.h"
 #include "UnionFind.h"
-#include "mkl_sparse_mat.h"
 #include "matrix_utils.hpp"
+#include "mkl_sparse_mat.h"
 #include "utils.h"
 #include <algorithm>
 #include <deque>
@@ -137,21 +137,21 @@ TEST(UnionFind, rank_vs_rem) {
     std::unordered_map<MKL_INT, MKL_INT> rank_to_rem;
     std::unordered_map<MKL_INT, MKL_INT> rem_to_rank;
     for (int i = 0; i < mat.rows(); i++) {
-      if (rank_to_rem.find(reordering::Find(parents_rem, i)) ==
+      if (rank_to_rem.find(reordering::Find(parents_rem.data(), i)) ==
           rank_to_rem.end()) {
-        rank_to_rem[reordering::Find(parents_rem, i)] =
-            reordering::Find(parents_rank, i);
+        rank_to_rem[reordering::Find(parents_rem.data(), i)] =
+            reordering::Find(parents_rank.data(), i);
       } else {
-        EXPECT_EQ(rank_to_rem[reordering::Find(parents_rem, i)],
-                  reordering::Find(parents_rank, i));
+        EXPECT_EQ(rank_to_rem[reordering::Find(parents_rem.data(), i)],
+                  reordering::Find(parents_rank.data(), i));
       }
-      if (rem_to_rank.find(reordering::Find(parents_rank, i)) ==
+      if (rem_to_rank.find(reordering::Find(parents_rank.data(), i)) ==
           rem_to_rank.end()) {
-        rem_to_rank[reordering::Find(parents_rank, i)] =
-            reordering::Find(parents_rem, i);
+        rem_to_rank[reordering::Find(parents_rank.data(), i)] =
+            reordering::Find(parents_rem.data(), i);
       } else {
-        EXPECT_EQ(rem_to_rank[reordering::Find(parents_rank, i)],
-                  reordering::Find(parents_rem, i));
+        EXPECT_EQ(rem_to_rank[reordering::Find(parents_rank.data(), i)],
+                  reordering::Find(parents_rem.data(), i));
       }
     }
   }
@@ -167,21 +167,21 @@ TEST(UnionFind, rem_vs_parrem) {
       std::unordered_map<MKL_INT, MKL_INT> rank_to_rem;
       std::unordered_map<MKL_INT, MKL_INT> rem_to_rank;
       for (int i = 0; i < mat.rows(); i++) {
-        if (rank_to_rem.find(reordering::Find(parents_rem, i)) ==
+        if (rank_to_rem.find(reordering::Find(parents_rem.data(), i)) ==
             rank_to_rem.end()) {
-          rank_to_rem[reordering::Find(parents_rem, i)] =
-              reordering::Find(parants_parrem, i);
+          rank_to_rem[reordering::Find(parents_rem.data(), i)] =
+              reordering::Find(parants_parrem.data(), i);
         } else {
-          EXPECT_EQ(rank_to_rem[reordering::Find(parents_rem, i)],
-                    reordering::Find(parants_parrem, i));
+          EXPECT_EQ(rank_to_rem[reordering::Find(parents_rem.data(), i)],
+                    reordering::Find(parants_parrem.data(), i));
         }
-        if (rem_to_rank.find(reordering::Find(parants_parrem, i)) ==
+        if (rem_to_rank.find(reordering::Find(parants_parrem.data(), i)) ==
             rem_to_rank.end()) {
-          rem_to_rank[reordering::Find(parants_parrem, i)] =
-              reordering::Find(parents_rem, i);
+          rem_to_rank[reordering::Find(parants_parrem.data(), i)] =
+              reordering::Find(parents_rem.data(), i);
         } else {
-          EXPECT_EQ(rem_to_rank[reordering::Find(parants_parrem, i)],
-                    reordering::Find(parents_rem, i));
+          EXPECT_EQ(rem_to_rank[reordering::Find(parants_parrem.data(), i)],
+                    reordering::Find(parents_rem.data(), i));
         }
       }
       // std::cout << rank_to_rem.size() << " " << rem_to_rank.size() <<
@@ -214,21 +214,21 @@ TEST(UnionFind, parrem_base) {
     std::unordered_map<MKL_INT, MKL_INT> zero_to_one;
     std::unordered_map<MKL_INT, MKL_INT> one_to_zero;
     for (int i = 0; i < mat.rows(); i++) {
-      if (zero_to_one.find(reordering::Find(parants_parrem, i)) ==
+      if (zero_to_one.find(reordering::Find(parants_parrem.data(), i)) ==
           zero_to_one.end()) {
-        zero_to_one[reordering::Find(parants_parrem, i)] =
-            reordering::Find(parants_parrem1, i);
+        zero_to_one[reordering::Find(parants_parrem.data(), i)] =
+            reordering::Find(parants_parrem1.data(), i);
       } else {
-        EXPECT_EQ(zero_to_one[reordering::Find(parants_parrem1, i)],
-                  reordering::Find(parants_parrem1, i));
+        EXPECT_EQ(zero_to_one[reordering::Find(parants_parrem1.data(), i)],
+                  reordering::Find(parants_parrem1.data(), i));
       }
-      if (one_to_zero.find(reordering::Find(parants_parrem1, i)) ==
+      if (one_to_zero.find(reordering::Find(parants_parrem1.data(), i)) ==
           one_to_zero.end()) {
-        one_to_zero[reordering::Find(parants_parrem1, i)] =
-            reordering::Find(parants_parrem, i);
+        one_to_zero[reordering::Find(parants_parrem1.data(), i)] =
+            reordering::Find(parants_parrem.data(), i);
       } else {
-        EXPECT_EQ(one_to_zero[reordering::Find(parants_parrem1, i)],
-                  reordering::Find(parants_parrem, i));
+        EXPECT_EQ(one_to_zero[reordering::Find(parants_parrem1.data(), i)],
+                  reordering::Find(parants_parrem.data(), i));
       }
     }
   }
@@ -245,18 +245,18 @@ TEST(UnionFind, rem_vs_parrank) {
       std::unordered_map<MKL_INT, MKL_INT> rem_to_parrank;
       std::unordered_map<MKL_INT, MKL_INT> parrank_to_rem;
       for (int i = 0; i < mat.rows(); i++) {
-        if (rem_to_parrank.find(reordering::Find(parents_rem, i)) ==
+        if (rem_to_parrank.find(reordering::Find(parents_rem.data(), i)) ==
             rem_to_parrank.end()) {
-          rem_to_parrank[reordering::Find(parents_rem, i)] = ds.find(i);
+          rem_to_parrank[reordering::Find(parents_rem.data(), i)] = ds.find(i);
         } else {
-          EXPECT_EQ(rem_to_parrank[reordering::Find(parents_rem, i)],
+          EXPECT_EQ(rem_to_parrank[reordering::Find(parents_rem.data(), i)],
                     ds.find(i));
         }
         if (parrank_to_rem.find(ds.find(i)) == parrank_to_rem.end()) {
-          parrank_to_rem[ds.find(i)] = reordering::Find(parents_rem, i);
+          parrank_to_rem[ds.find(i)] = reordering::Find(parents_rem.data(), i);
         } else {
           EXPECT_EQ(parrank_to_rem[ds.find(i)],
-                    reordering::Find(parents_rem, i));
+                    reordering::Find(parents_rem.data(), i));
         }
       }
     }

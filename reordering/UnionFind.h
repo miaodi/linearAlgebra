@@ -5,6 +5,8 @@
 #include <mkl_types.h>
 #include <utility>
 #include <vector>
+#include <type_traits>
+#include <variant>
 
 namespace mkl_wrapper {
 class mkl_sparse_mat;
@@ -12,12 +14,34 @@ class mkl_sparse_mat;
 
 namespace reordering {
 
-template <typename T> T Find(std::vector<T> &parents, T x) {
-  while (x != parents[x]) {
-    parents[x] = parents[parents[x]];
-    x = parents[x];
+template <typename T> T Find(T *parents, const T x);
+
+template <typename T> T UniteByRank(T *rank, T *parent, const T i, const T j);
+
+// Always use i as the root
+template <typename T> T Unite(T *parents, const T i, const T j);
+
+template <typename T, bool Rank> class UnionFind {
+public:
+  UnionFind() = default;
+  UnionFind(T size);
+
+  T Find(const T x) { return reordering::Find(_parents.data(), x); }
+
+  T Unite(const T i, const T j) {
+    if constexpr (Rank) {
+      return reordering::UniteByRank(_ranks.data(), _parents.data(), i, j);
+    } else {
+      return reordering::Unite(_parents.data(), i, j);
+    }
   }
-  return x;
+
+  void reset(const T size);
+
+private:
+  std::vector<T> _parents;
+
+  std::conditional_t<Rank, std::vector<T>, std::monostate> _ranks;
 };
 
 // template <typename T> T Find(std::vector<std::atomic<T>> &parents, T x) {
@@ -30,7 +54,8 @@ template <typename T> T Find(std::vector<T> &parents, T x) {
 //   return x;
 // };
 
-// NOTE: no matter the base of mat, the output parents vector is always 0 based
+// NOTE: no matter the base of mat, the output parents vector is always 0
+// based
 
 std::vector<MKL_INT>
 UnionFindRank(mkl_wrapper::mkl_sparse_mat const *const mat);
