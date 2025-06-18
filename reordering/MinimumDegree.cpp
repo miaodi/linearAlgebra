@@ -92,98 +92,120 @@ bool QuotientGraph<COLTYPE>::isDistinguishable(const COLTYPE i,
       l++;
     }
   }
-  return false;
+  if (k < _nodes[i].adjacent_elements.size() ||
+      l < _nodes[j].adjacent_elements.size())
+    return true; // different neighbours
+  return false;  // distinguishable
 }
 
 template <typename COLTYPE>
-void QuotientGraph<COLTYPE>::updateNode(const COLTYPE i) {
+void QuotientGraph<COLTYPE>::updateNode(const COLTYPE i,
+                                        std::vector<COLTYPE> &temp) {
   assert(i == _union_find.Find(i));
-  principleVector(_nodes[i].simple_variables);
-  principleVector(_nodes[i].adjacent_variables);
-  principleVector(_nodes[i].adjacent_elements);
+  principleVector(_nodes[i].simple_variables, temp);
+  principleVector(_nodes[i].adjacent_variables, temp);
+  principleVector(_nodes[i].adjacent_elements, temp);
 }
 
 template <typename COLTYPE>
-std::vector<COLTYPE> &QuotientGraph<COLTYPE>::getFillins(const COLTYPE i) {
+void QuotientGraph<COLTYPE>::getFillins(const COLTYPE i,
+                                        std::vector<COLTYPE> &temp1,
+                                        std::vector<COLTYPE> &temp2) {
   // TODO: check if really needed
-  updateNode(i);
+  updateNode(i, temp2);
 
-  __temp1.clear();
+  temp1.clear();
   __vectors.clear();
   __vectors.push_back(&_nodes[i].adjacent_variables);
 
   for(auto j: _nodes[i].adjacent_elements) {
-    updateNode(j);
+    updateNode(j, temp2);
     __vectors.push_back(&_nodes[j].adjacent_variables);
   }
 
-  mergeKVectors(__vectors, __temp1);
-  vectorSubtract(__temp1, _nodes[i].simple_variables);
-  return __temp1;
+  mergeKVectors(__vectors, temp1);
+  vectorSubtract(temp1, _nodes[i].simple_variables);
 }
 
 template <typename COLTYPE>
 void QuotientGraph<COLTYPE>::merge(const COLTYPE i, const COLTYPE j) {
-  auto principle_i = _union_find.Find(i);
-  auto principle_j = _union_find.Find(j);
-  if (principle_i == principle_j) {
-    return; // already merged
-  }
-  auto parent = _union_find.Unite(principle_i, principle_j);
-  if (principle_j != parent) {
-    std::swap(principle_i, principle_j);
-  }
-  auto VectorMerge = [this](std::vector<COLTYPE> &v1,
-                             const std::vector<COLTYPE> &v2) {
-    if (v2.empty())
-      return;
-    if (v1.empty()) {
-      v1 = v2;
-      return;
-    }
-    auto it1 = v1.begin();
-    auto it2 = v2.begin();
-    while (it1 != v1.end() && it2 != v2.end()) {
-      if (*it1 < *it2) {
-        ++it1;
-      } else if (*it1 > *it2) {
-        it1 = v1.insert(it1, *it2++);
-      } else {
-        ++it2;
-      }
-    }
-    while (it2 != v2.end()) {
-      it1 = v1.insert(it1, *it2++);
-    }
-  };
+  assert(_union_find.Find(i) !=
+         _union_find.Find(j)); // cannot merge the same element
+
+  _union_find.Unite(i, j);
+  std::vector<COLTYPE> temp(_nodes[i].simple_variables.size() +
+                            _nodes[j].simple_variables.size());
+  auto it = std::set_union(_nodes[i].simple_variables.begin(),
+                           _nodes[i].simple_variables.end(),
+                           _nodes[j].simple_variables.begin(),
+                           _nodes[j].simple_variables.end(), temp.begin());
+  std::swap(_nodes[i].simple_variables, temp);
+  _nodes[i].degree -= static_cast<COLTYPE>(_nodes[j].simple_variables.size());
+  _nodes[j].simple_variables.clear();
+  _nodes[j].adjacent_elements.clear();
+  _nodes[j].adjacent_variables.clear();
 }
 
-
 template <typename COLTYPE>
-void QuotientGraph<COLTYPE>::massElimination(const COLTYPE i) {
-  auto& fill_ins = getFillins(i);
-  for (auto j : fill_ins) {
+void QuotientGraph<COLTYPE>::massElimination(const COLTYPE p) {
+  getFillins(p, __temp1, __temp2);
+  auto &fill_ins = __temp1;
+  for (auto i : fill_ins) {
     // remove redundant variables
-    vectorSubtract(_nodes[j].adjacent_variables, fill_ins);
-    vectorSubtract(_nodes[j].adjacent_variables, _nodes[i].simple_variables);
+    vectorSubtract(_nodes[i].adjacent_variables, fill_ins);
+    vectorSubtract(_nodes[i].adjacent_variables, _nodes[p].simple_variables);
 
     // element absorption
-
-
+    vectorSubtract(_nodes[i].adjacent_elements, _nodes[p].adjacent_elements);
+    _nodes[i].adjacent_elements.insert(
+        std::upper_bound(_nodes[i].adjacent_elements.begin(),
+                         _nodes[i].adjacent_elements.end(), p),
+        p);
+    _nodes[i].degree = getExternalDegree(i);
   }
 }
 
+template <typename COLTYPE>
+void QuotientGraph<COLTYPE>::supervariableMerge(
+    const std::vector<COLTYPE> &fillins) {
+  std::map<COLTYPE, std::vector<COLTYPE>> supervariables;
+  for (auto i : fillins) {
+    auto [it, inserted] = supervariables.emplace(i, std::vector<COLTYPE>());
+    it->second.push_back(i);
+  }
+  for (const auto &pair : supervariables) {
+    const auto &i = pair.first;
+    const auto &fillin = pair.second;
+    for (size_t j = 0; j < fillin.size(); ++j) {
+      for (size_t k = j + 1; k < fillin.size(); ++k) {
+        auto j_elem = fillin[j];
+        auto k_elem = fillin[k];
+        if (isDistinguishable(j_elem, k_elem)) {
+          continue; // cannot merge
+        }
+        merge(j_elem, k_elem);
 
+      }
+    }
+  }
+}
 
 template <typename COLTYPE>
-void QuotientGraph<COLTYPE>::principleVector(std::vector<COLTYPE> &vec) {
-  __temp2.clear();
+COLTYPE QuotientGraph<COLTYPE>::getExternalDegree(const COLTYPE i) {
+  getFillins(i, __temp2, __temp3);
+  return static_cast<COLTYPE>(__temp2.size());
+}
+
+template <typename COLTYPE>
+void QuotientGraph<COLTYPE>::principleVector(std::vector<COLTYPE> &vec,
+                                             std::vector<COLTYPE> &temp) {
+  temp.clear();
   for (auto i : vec) {
-    __temp2.push_back(_union_find.Find(i));
+    temp.push_back(_union_find.Find(i));
   }
-  std::sort(__temp2.begin(), __temp2.end());
+  std::sort(temp.begin(), temp.end());
   vec.clear();
-  for (auto i : __temp2) {
+  for (auto i : temp) {
     if (vec.empty() || vec.back() != i) {
       vec.push_back(i);
     }

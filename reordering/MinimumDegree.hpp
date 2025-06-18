@@ -28,19 +28,24 @@ protected:
   // check if two nodes are distinguishable
   bool isDistinguishable(const COLTYPE i, const COLTYPE j) const;
 
-  // Adj_G(i)
-  std::vector<COLTYPE> &getFillins(const COLTYPE i);
+  // Adj_G(i) output from temp1
+  void getFillins(const COLTYPE i, std::vector<COLTYPE> &temp1,
+                  std::vector<COLTYPE> &temp2);
 
   void merge(const COLTYPE i, const COLTYPE j);
 
   void massElimination(const COLTYPE i);
 
-  void principleVector(std::vector<COLTYPE> &vec);
+  void supervariableMerge(const std::vector<COLTYPE> &fillins);
 
-  void updateNode(const COLTYPE i);
+  void principleVector(std::vector<COLTYPE> &vec, std::vector<COLTYPE> &temp);
+
+  void updateNode(const COLTYPE i, std::vector<COLTYPE> &temp);
 
   template <typename ROWTYPE>
   void initialize(const COLTYPE nnodes, ROWTYPE const *ai, COLTYPE const *aj);
+
+  COLTYPE getExternalDegree(const COLTYPE i);
 
 protected:
   std::vector<Node> _nodes;
@@ -49,7 +54,8 @@ protected:
       _degree_to_principle; // map variable to element
 
   std::vector<COLTYPE> __temp1;
-  std::vector<COLTYPE> __temp2; // temporary vectors for sorting
+  std::vector<COLTYPE> __temp2; // temporary vectors
+  std::vector<COLTYPE> __temp3; // temporary vectors 
   std::vector<std::vector<COLTYPE> *> __vectors;
 };
 
