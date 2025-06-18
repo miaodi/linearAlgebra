@@ -1,11 +1,13 @@
 #pragma once
 #include "../config.h"
-#include <UnionFind.h>
+#include "UnionFind.h"
 #include <map>
 #include <set>
 #include <utility>
 #include <vector>
 #include <queue>
+#include "ObjectPool.hpp"
+
 namespace reordering {
 
 template <typename COLTYPE> class QuotientGraph {
@@ -32,6 +34,7 @@ protected:
   void getFillins(const COLTYPE i, std::vector<COLTYPE> &temp1,
                   std::vector<COLTYPE> &temp2);
 
+  // merge two nodes in the quotient graph i = {i, j}
   void merge(const COLTYPE i, const COLTYPE j);
 
   void massElimination(const COLTYPE i);
@@ -47,15 +50,15 @@ protected:
 
   COLTYPE getExternalDegree(const COLTYPE i);
 
+  COLTYPE hash(const COLTYPE i) const;
+
 protected:
   std::vector<Node> _nodes;
-  UnionFind<COLTYPE, false> _union_find; // union-find structure
+  reordering::UnionFind<COLTYPE, false> _union_find; // union-find structure
   std::map<COLTYPE, std::set<COLTYPE>>
       _degree_to_principle; // map variable to element
 
-  std::vector<COLTYPE> __temp1;
-  std::vector<COLTYPE> __temp2; // temporary vectors
-  std::vector<COLTYPE> __temp3; // temporary vectors 
+  utils::ObjectPool<std::vector<COLTYPE>> _pool; // object pool of vectors of size nnodes
   std::vector<std::vector<COLTYPE> *> __vectors;
 };
 
