@@ -1,12 +1,15 @@
 
 #include "../sparse_mat_op/matrix_utils.hpp"
 #include "MinimumDegree.hpp"
+#include "ObjectPool.hpp"
 #include "aat.hpp"
+#include "circularbuffer.hpp"
 #include "mkl_sparse_mat.h"
 #include <vector>
 
 int main() {
 
+  // std::string filename = "../tests/data/rdist1.mtx";
   std::string filename = "../data/GD01_c.mtx";
 
   std::ifstream f(filename);
@@ -42,5 +45,9 @@ int main() {
   std::vector<int> iperm(size);
   std::vector<int> perm(size);
   qg(size, ai_AAT.data(), aj_AAT.data(), iperm.data(), perm.data());
+
+  for(auto& it: qg._degree_to_principle){
+    std::cout << it.first << " " << it.second->size() << std::endl;
+  }
   return 0;
 }

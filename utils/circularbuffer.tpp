@@ -58,6 +58,13 @@ template <typename T> bool CircularBuffer<T>::push(const T &value) {
   }
 }
 
+template <typename T> void CircularBuffer<T>::nonOverwritePush(const T &value) {
+  if (!available()) {
+    resizePreserve(_buffer.size() * 2);
+  }
+  push(value);
+}
+
 template <typename T> const T &CircularBuffer<T>::shift() {
   if (_count == 0)
     return *_head;

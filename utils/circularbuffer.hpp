@@ -43,7 +43,7 @@ public:
   /**
    * @brief Create an empty circular buffer.
    */
-  constexpr CircularBuffer(const size_t S);
+  constexpr CircularBuffer(const size_t S = 0);
 
   // disable the copy constructor
   /** @private */
@@ -71,6 +71,9 @@ public:
    element.
    */
   bool push(const T &value);
+
+
+  void nonOverwritePush(const T &value);
 
   /**
    * @brief Removes an element from the beginning of the buffer.

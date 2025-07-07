@@ -1,4 +1,5 @@
 
+#include "ObjectPool.hpp"
 #include "incomplete_lu.h"
 #include "matrix_utils.hpp"
 #include "mkl_sparse_mat.h"
@@ -393,6 +394,35 @@ TEST(Block, Submatrix) {
         EXPECT_EQ(block.av[j], av[it - aj]);
         it++;
       }
+    }
+  }
+}
+
+TEST(ObjectPool, vector) {
+  utils::ObjectPool<std::vector<int>> pool;
+  using DataType = decltype(pool)::value_type;
+  pool.setObjectPrep([](DataType *obj) {
+    obj->reserve(20);
+    obj->clear();
+  });
+  auto obj1 = pool.acquire();
+  EXPECT_EQ(obj1->capacity(), 20);
+  EXPECT_EQ(pool.size(), 0);
+  {
+    auto obj2 = pool.acquire();
+    EXPECT_EQ(obj2->capacity(), 20);
+    EXPECT_EQ(pool.size(), 0);
+    {
+      auto obj3 = pool.acquire();
+      EXPECT_EQ(obj3->capacity(), 20);
+      EXPECT_EQ(pool.size(), 0);
+      obj3->reserve(50);
+    }
+    EXPECT_EQ(pool.size(), 1);
+    {
+      auto obj4 = pool.acquire();
+      EXPECT_EQ(obj4->capacity(), 50);
+      EXPECT_EQ(pool.size(), 0);
     }
   }
 }
