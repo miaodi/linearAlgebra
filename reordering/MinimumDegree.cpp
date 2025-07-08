@@ -29,14 +29,14 @@ void QuotientGraph<COLTYPE, MD>::initialize(const COLTYPE nnodes,
   for (COLTYPE i = 0; i < nnodes; i++) {
     COLTYPE row_size = ai[i + 1] - ai[i];
 
-    if (row_size < 2) {
+    if (row_size == 0) {
       *perm++ = i + base;
       continue;
     }
 
     _nodes[i].adjacent_variables.reserve(row_size);
     for (ROWTYPE j_idx = ai[i] - base; j_idx < ai[i + 1] - base; j_idx++) {
-      COLTYPE j = aj[j_idx] - base;
+      COLTYPE j = aj[j_idx] - base; //internally use 0-based indexing
       if (j == i)
         continue;
       _nodes[i].adjacent_variables.push_back(j);
@@ -47,15 +47,7 @@ void QuotientGraph<COLTYPE, MD>::initialize(const COLTYPE nnodes,
     auto it = _degree_to_principle.try_emplace(_nodes[i].degree,
                                                std::move(_cb_pool.acquire()));
     it.first->second->nonOverwritePush(i);
-    std::cout<<"Node " << i << " has degree " << _nodes[i].degree << std::endl;
     // _degree_to_principle[_nodes[i].degree].insert(i);
-  }
-  for(COLTYPE i = 0; i < nnodes; i++) {
-    std::cout<<"Node " << i << " simple_variables: ";
-    for(auto j : _nodes[i].simple_variables) {
-      std::cout << j << " ";
-    }
-    std::cout << " degree: " << _nodes[i].degree << std::endl;
   }
 }
 
@@ -102,6 +94,8 @@ bool QuotientGraph<COLTYPE, MD>::isDistinguishable(const COLTYPE i,
     return true;
   if (_nodes[i].adjacent_elements.size() != _nodes[j].adjacent_elements.size())
     return true;
+  if (_nodes[i].adjacent_variables.size() == 0 && _nodes[i].adjacent_elements.size() == 0)
+    return true; // both nodes are empty, distinguishable
   // std::cout << "hello!\n";
   // check if they have the same adjacent variables
   size_t k = 0, l = 0;
@@ -136,21 +130,9 @@ bool QuotientGraph<COLTYPE, MD>::isDistinguishable(const COLTYPE i,
     return true; // different neighbours
 
   // check if they have the same adjacent elements
-  k = 0;
-  l = 0;
-  while (k < _nodes[i].adjacent_elements.size() &&
-         l < _nodes[j].adjacent_elements.size()) {
-    if (_nodes[i].adjacent_elements[k] != _nodes[j].adjacent_elements[l]) {
-      return true;
-    } else {
-      k++;
-      l++;
-    }
-  }
-  if (k < _nodes[i].adjacent_elements.size() ||
-      l < _nodes[j].adjacent_elements.size())
-    return true; // different neighbours
-  return false;  // distinguishable
+  if (_nodes[i].adjacent_elements == _nodes[j].adjacent_elements)
+    return false; // same adjacent elements, distinguishable
+  return true; // different adjacent elements
 }
 
 template <typename COLTYPE, MinimumDegree MD>
@@ -181,7 +163,8 @@ void QuotientGraph<COLTYPE, MD>::getFillins(const COLTYPE p,
 
 template <typename COLTYPE, MinimumDegree MD>
 void QuotientGraph<COLTYPE, MD>::merge(const COLTYPE i, const COLTYPE j) {
-  std::cout << "merging " << i << " and " << j << std::endl;
+  // std::cout << "merging " << i << " degree: " << _nodes[i].degree
+  //           << " with " << j << " degree: " << _nodes[j].degree << std::endl;
   assert(_union_find.Find(i) !=
          _union_find.Find(j)); // cannot merge the same element
   std::vector<COLTYPE> temp;
@@ -194,7 +177,7 @@ void QuotientGraph<COLTYPE, MD>::merge(const COLTYPE i, const COLTYPE j) {
   assert(std::is_sorted(temp.begin(), temp.end()));
   assert(std::adjacent_find(temp.begin(), temp.end()) == temp.end());
   std::swap(_nodes[i].simple_variables, temp);
-  _nodes[i].degree -= static_cast<COLTYPE>(_nodes[j].simple_variables.size());
+  _nodes[i].degree -= 1;
   clearNode(j);
   assert(i == _union_find.Unite(i, j));
 }
@@ -208,12 +191,6 @@ void QuotientGraph<COLTYPE, MD>::eliminatePrincipleNode(const COLTYPE p,
   for (auto j : _nodes[p].simple_variables) {
     *perm++ = j;
   }
-
-  std::cout << p << " fillins: ";
-  for (auto i : *Lp_ptr) {
-    std::cout << i << " ";
-  }
-  std::cout << std::endl;
   supervariableMerge(*Lp_ptr);
   toElementNode(p);
 }
@@ -231,7 +208,6 @@ auto QuotientGraph<COLTYPE, MD>::massElimination(const COLTYPE p) {
   for (auto i : *Lp) {
     // remove redundant variables
     vectorSubtract(_nodes[i].adjacent_variables, *Lp, std::optional<COLTYPE>(p));
-    // vectorSubtract(_nodes[i].adjacent_variables, _nodes[p].simple_variables);
 
     // element absorption
     vectorSubtract(_nodes[i].adjacent_elements,
@@ -259,9 +235,9 @@ void QuotientGraph<COLTYPE, MD>::supervariableMerge(
         _hash_table.try_emplace(hash(fillins[i]), std::move(_pool.acquire()));
     it.first->second->push_back(fillins[i]); // insert fillin to hash table
   }
+  auto temp = _pool.acquire();
 
   for (auto &it : _hash_table) {
-    std::cout << "hash: " << it.first << std::endl;
     auto &vec = *(it.second);
     for (size_t i = 0; i < vec.size(); ++i) {
       const COLTYPE node = vec[i];
@@ -271,6 +247,7 @@ void QuotientGraph<COLTYPE, MD>::supervariableMerge(
       }
       auto degree = _nodes[node].degree;
       for (size_t j = i + 1; j < vec.size(); ++j) {
+        principleVector(_nodes[j].adjacent_variables, *temp);
         if (isDistinguishable(node, vec[j])) {
           continue; // distinguishable
         }
@@ -280,7 +257,7 @@ void QuotientGraph<COLTYPE, MD>::supervariableMerge(
 
       // if node degree is changed, reinsert to principle map
       if (_nodes[node].degree != degree) {
-        std::cout << "update degree " << _nodes[node].degree << std::endl;
+        std::cout << "Node: " << node << " update degree " << _nodes[node].degree << " original degree " << degree << std::endl;
         auto it2 = _degree_to_principle.try_emplace(
             _nodes[node].degree, std::move(_cb_pool.acquire()));
         it2.first->second->nonOverwritePush(node);
@@ -350,17 +327,33 @@ template <typename COLTYPE, MinimumDegree MD>
 void QuotientGraph<COLTYPE, MD>::principleVector(std::vector<COLTYPE> &vec,
                                                  std::vector<COLTYPE> &temp) {
   temp.clear();
-  for (auto i : vec) {
+  bool modified = false;
+  for (auto i : vec)
+  {
     auto principleNode = _union_find.Find(i);
-    if (_nodes[principleNode].degree != invalid) {
+    if (!modified && principleNode != i)
+    {
+      modified = true; // at least one node is not a principle node
+    }
+    if (_nodes[principleNode].degree != invalid)
+    {
       temp.push_back(principleNode);
     }
+    else
+    {
+      modified = true; // principle node is invalid, so we need to remove it
+    }
   }
-  std::sort(temp.begin(), temp.end());
-  vec.clear();
-  for (auto i : temp) {
-    if (vec.empty() || vec.back() != i) {
-      vec.push_back(i);
+  if (modified)
+  {
+    std::sort(temp.begin(), temp.end());
+    vec.clear();
+    for (auto i : temp)
+    {
+      if (vec.empty() || vec.back() != i)
+      {
+        vec.push_back(i);
+      }
     }
   }
 }
@@ -369,6 +362,8 @@ template <typename COLTYPE, MinimumDegree MD>
 void QuotientGraph<COLTYPE, MD>::removeElementNode(const COLTYPE i) {
   assert(i == _union_find.Find(i));
   assert(_nodes[i].degree == element);
+  assert(_nodes[i].adjacent_elements.empty());
+  assert(_nodes[i].simple_variables.empty());
   _nodes[i].adjacent_variables.clear();
   _nodes[i].adjacent_variables.shrink_to_fit();
   _nodes[i].degree = invalid;
