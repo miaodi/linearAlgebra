@@ -10,6 +10,7 @@
 #include <set>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 // An implementation of the minimum degree reordering algorithm
 // (10.1137/S0895479894278952)
@@ -119,7 +120,9 @@ public:
       _cb_pool; // object pool of circular buffers of size nnodes
   std::vector<std::vector<COLTYPE> *> __vectors;
 
-  std::vector<std::pair<COLTYPE, COLTYPE>> _hash_table;
+  std::unordered_map<COLTYPE,
+                     typename utils::ObjectPool<std::vector<COLTYPE>>::ptr_type>
+      _hash_table;
 };
 
 template <typename COLTYPE>
@@ -186,6 +189,10 @@ void vectorSubtract(std::vector<COLTYPE> &op1, const std::vector<COLTYPE> &op2,
     }
   }
   while (it1_run != op1.end()) {
+    if (disregard_value.has_value() && *it1_run == disregard_value.value()) {
+      it1_run++;
+      continue; // skip the disregarded value in op1
+    }
     *it1 = *it1_run;
     it1++;
     it1_run++;

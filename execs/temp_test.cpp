@@ -11,6 +11,7 @@ int main() {
 
   // std::string filename = "../tests/data/rdist1.mtx";
   std::string filename = "../data/GD01_c.mtx";
+  // std::string filename = "/home/dimiao/matrix_lib/thermal1.mtx";
 
   std::ifstream f(filename);
   f.clear();
@@ -40,14 +41,19 @@ int main() {
   std::ofstream out1("mat_AAT.svg");
   mat1.print_svg(out1);
   out1.close();
-
+  std::cout << "start\n";
   reordering::QuotientGraph<int> qg;
   std::vector<int> iperm(size);
   std::vector<int> perm(size);
-  qg(size, ai_AAT.data(), aj_AAT.data(), iperm.data(), perm.data());
+  qg(size, ai_AAT.data(), aj_AAT.data(), perm.data(), iperm.data());
 
   for(auto& it: qg._degree_to_principle){
     std::cout << it.first << " " << it.second->size() << std::endl;
   }
+  std::cout << "base: " << csr_rows[0] << std::endl;
+  std::cout << "is permutation: " << utils::isPermutation(perm) << "\n";
+  for (auto i : perm)
+    std::cout << i << " ";
+  std::cout << std::endl;
   return 0;
 }
