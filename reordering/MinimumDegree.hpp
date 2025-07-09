@@ -38,9 +38,9 @@ class QuotientGraph {
     std::vector<COLTYPE> adjacent_elements; // indices of the adjacent elements
     std::vector<COLTYPE> simple_variables;  // indices of the simple variables
   };
-  static const COLTYPE invalid{std::numeric_limits<COLTYPE>::max()};
-  static const COLTYPE element{std::numeric_limits<COLTYPE>::max() - 1};
-  static const COLTYPE eliminated{std::numeric_limits<COLTYPE>::max()};
+  static const COLTYPE INVALID{std::numeric_limits<COLTYPE>::max()};
+  static const COLTYPE ELEMENT{std::numeric_limits<COLTYPE>::max() - 1};
+  static const COLTYPE ELIMINATED{std::numeric_limits<COLTYPE>::max()};
 
 public:
   QuotientGraph() = default;
@@ -58,8 +58,7 @@ protected:
   bool isDistinguishable(const COLTYPE i, const COLTYPE j) const;
 
   // Adj_G(i) output from Lp
-  void getFillins(const COLTYPE p, std::vector<COLTYPE> &Lp,
-                  std::vector<COLTYPE> &temp);
+  void getFillins(const COLTYPE p, std::vector<COLTYPE> &Lp);
 
   // merge two nodes in the quotient graph i = {i, j}
   void merge(const COLTYPE i, const COLTYPE j);
@@ -70,7 +69,7 @@ protected:
 
   void supervariableMerge(const std::vector<COLTYPE> &fillins);
 
-  void principleVector(std::vector<COLTYPE> &vec, std::vector<COLTYPE> &temp);
+  void principleVector(std::vector<COLTYPE> &vec);
 
   template <typename ROWTYPE>
   void initialize(const COLTYPE nnodes, ROWTYPE const *ai, COLTYPE const *aj,
@@ -84,7 +83,7 @@ protected:
     } else if constexpr (MD == MinimumDegree::Approximate) {
       return getApproximateDegree(i);
     } else {
-      return invalid;
+      return INVALID;
     }
   }
 
