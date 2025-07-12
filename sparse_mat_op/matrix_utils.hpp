@@ -559,22 +559,6 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
   }
 }
 
-template <typename COLTYPE, typename VALTYPE>
-void permuteVec(const COLTYPE rows, const int base, VALTYPE const *const v,
-                COLTYPE const *const iperm, VALTYPE *const permed_v) {
-  if (iperm) {
-#pragma omp parallel for
-    for (COLTYPE i = 0; i < rows; i++) {
-      permed_v[i] = v[iperm[i] - base];
-    }
-  } else {
-#pragma omp parallel for
-    for (COLTYPE i = 0; i < rows; i++) {
-      permed_v[i] = v[i];
-    }
-  }
-}
-
 template <class Array>
 using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
 

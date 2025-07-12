@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
+#include "../sparse_mat_op/permutation.hpp"
 
 mkl_wrapper::mkl_sparse_mat identity(const MKL_INT size) {
   std::vector<MKL_INT> ai(size + 1);
@@ -193,7 +194,9 @@ int main(int argc, char **argv) {
   std::vector<MKL_INT> iperm, perm;
   reordering::SerialCM(&mat, iperm, perm);
   std::cout << "is permutation: "
-            << (utils::isPermutation(iperm, mat.mkl_base())) << std::endl;
+            << (matrix_utils::isPermutation(mat.rows(), static_cast<int>(mat.mkl_base()),
+                                            iperm.data()))
+            << std::endl;
   auto [ai, aj, av] = matrix_utils::AllocateCSRData(mat.rows(), mat.nnz());
   matrix_utils::permute(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
                         mat.get_aj().get(), mat.get_av().get(), iperm.data(),

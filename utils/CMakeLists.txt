@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(Utils CXX)
 
-set(UtilsSRC utils.cpp timer.cpp)
+set(UtilsSRC utils.cpp timer.cpp variadic_sort.cpp)
 
 add_library(${PROJECT_NAME} ${UtilsSRC})
 

@@ -1,4 +1,3 @@
-
 #include "../sparse_mat_op/matrix_utils.hpp"
 #include "MinimumDegree.hpp"
 #include "ObjectPool.hpp"
@@ -6,6 +5,7 @@
 #include "circularbuffer.hpp"
 #include "mkl_sparse_mat.h"
 #include <vector>
+#include "../sparse_mat_op/permutation.hpp"
 
 int main() {
 
@@ -51,7 +51,8 @@ int main() {
     std::cout << it.first << " " << it.second->size() << std::endl;
   }
   std::cout << "base: " << csr_rows[0] << std::endl;
-  std::cout << "is permutation: " << utils::isPermutation(perm) << "\n";
+  std::cout << "is permutation: " << matrix_utils::isPermutation(size, static_cast<int>(mat.mkl_base()),
+                                            perm.data()) << "\n"; 
   for (auto i : perm)
     std::cout << i << " ";
   std::cout << std::endl;

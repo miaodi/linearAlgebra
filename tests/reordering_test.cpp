@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <omp.h>
 #include <unordered_map>
+#include "permutation.hpp"
 
 TEST(global_min_degree, parallel_vs_serial) {
   std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
@@ -282,7 +283,9 @@ TEST(Reordering, SerialCM) {
               << std::endl;
     std::vector<MKL_INT> inv_perm, perm;
     reordering::SerialCM(&mat, inv_perm, perm);
-    EXPECT_EQ(utils::isPermutation(inv_perm, mat.mkl_base()), true);
+    EXPECT_EQ(matrix_utils::isPermutation(mat.rows(), static_cast<int>(mat.mkl_base()),
+                                          inv_perm.data()),
+              true);
 
     auto [ai, aj, av] = matrix_utils::AllocateCSRData(mat.rows(), mat.nnz());
     matrix_utils::permute(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
@@ -301,7 +304,9 @@ TEST(Reordering, SerialCM) {
 
     std::vector<MKL_INT> inv_perm1, perm1;
     reordering::SerialCM(&mat, inv_perm1, perm1);
-    EXPECT_EQ(utils::isPermutation(inv_perm1, mat.mkl_base()), true);
+    EXPECT_EQ(matrix_utils::isPermutation(mat.rows(), static_cast<int>(mat.mkl_base()),
+                                          inv_perm1.data()),
+              true);
     for (int i = 0; i < mat.rows(); i++) {
       EXPECT_EQ(inv_perm[i], inv_perm1[i] - 1);
     }

@@ -16,6 +16,8 @@
 #include <omp.h>
 #include <random>
 #include <vector>
+#include "../sparse_mat_op/permutation.hpp"
+
 
 void register_solvers() {
   using solver_ptr = typename mkl_wrapper::solver_factory::solver_ptr;
@@ -166,7 +168,9 @@ int main() {
 
   std::vector<MKL_INT> iperm, perm;
   reordering::SerialCM(&mat, iperm, perm);
-  std::cout << (utils::isPermutation(iperm, mat.mkl_base())) << std::endl;
+  std::cout << (matrix_utils::isPermutation(mat.rows(), static_cast<int>(mat.mkl_base()),
+                                            iperm.data()))
+            << std::endl;
   std::cout << "permute matrix\n";
   auto [ai, aj, av] = matrix_utils::AllocateCSRData(mat.rows(), mat.nnz());
   matrix_utils::permute(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),

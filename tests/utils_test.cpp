@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <memory>
+#include <vector>
+#include "../utils/variadic_sort.hpp"
 
 TEST(Utils, knuth_s) {
   std::random_device dev;
@@ -46,4 +48,62 @@ TEST(Utils, MaxHeap) {
       EXPECT_EQ(9, *max_heap.top());
     }
   }
+}
+
+TEST(sort, insertion_sort){
+  int size = 100;
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int> dis(std::numeric_limits<int>::min(),
+                                         std::numeric_limits<int>::max());
+  std::vector<int> vec(size);
+  std::generate(vec.begin(), vec.end(), [&]{ return dis(gen); });
+
+  utils::variadic_insertion_sort(0, size, vec.data());
+  EXPECT_TRUE(std::is_sorted(vec.begin(), vec.end()));
+}
+
+TEST(sort, partition){
+  int size = 100;
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int> dis(std::numeric_limits<int>::min(),
+                                         std::numeric_limits<int>::max());
+  std::vector<int> vec(size);
+  std::generate(vec.begin(), vec.end(), [&]{ return dis(gen); });
+  int pivot_val = vec[size - 1];
+  auto pivot = utils::variadic_partition(0, size, vec.data());
+  for(int i = 0; i < pivot; i++){
+    EXPECT_LE(vec[i], pivot_val);
+  }
+  for(int i = pivot + 1; i < size; i++){
+    EXPECT_GE(vec[i], pivot_val);
+  }
+}
+
+TEST(sort, quicksort) {
+  int size = std::rand() % 1000;
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int> dis(std::numeric_limits<int>::min(),
+                                         std::numeric_limits<int>::max());
+  std::vector<int> vec(size);
+  std::generate(vec.begin(), vec.end(), [&] { return dis(gen); });
+
+  utils::variadic_quick_sort(0, size, vec.data());
+  EXPECT_TRUE(std::is_sorted(vec.begin(), vec.end()));
+}
+
+TEST(sort, quicksort_2) {
+  int size = 10000;
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int> dis(std::numeric_limits<int>::min(),
+                                         std::numeric_limits<int>::max());
+  std::vector<int> vec(size);
+  std::generate(vec.begin(), vec.end(), [&] { return dis(gen); });
+  std::vector<int> val(vec);
+
+  utils::variadic_quick_sort(0, size, vec.data(), val.data());
+  EXPECT_TRUE(vec == val);
 }
