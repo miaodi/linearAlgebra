@@ -53,21 +53,60 @@ void invPerm(const COLTYPE rows, const COLTYPE base, COLTYPE const *const perm,
 template <typename COLTYPE>
 bool isPermutation(const COLTYPE rows, const COLTYPE base,
                    COLTYPE const *const perm) {
-  if (perm == nullptr)
-    return false;
-  std::vector<char> seen(rows,
-                         0); // Initialize all to 0, use char for false sharing
-  volatile bool flag = true;
-#pragma omp parallel for shared(flag)
-  for (COLTYPE i = 0; i < rows; i++) {
-    if (flag == false)
-      continue;
-    if (perm[i] < base || perm[i] >= base + rows || seen[perm[i] - base]) {
-      flag = false;
-    }
-    seen[perm[i] - base] = 1;
+  std::vector<std::atomic<int>> seen(rows);
+  for (COLTYPE i = 0; i < rows; ++i) {
+    seen[i] = 0;
   }
-  return flag;
+
+  bool is_perm = true;
+
+  // #pragma omp parallel for shared(seen, is_perm)
+  //   for (COLTYPE i = 0; i < rows; ++i) {
+  //     if (!is_perm)
+  //       continue; //  if we already found an error, skip further checks
+  //     auto val = perm[i] - base;
+  //     if (val < 0 || val >= rows) {
+  //       is_perm = false; // value out of bounds
+  //       continue;
+  //     }
+  //     int expected = 0;
+  //     if (!seen[val].compare_exchange_strong(expected, 1)) {
+  //       is_perm = false; // duplicate value found
+  //     }
+  //   }
+#pragma omp parallel for shared(seen, is_perm)
+  for (COLTYPE i = 0; i < rows; ++i) {
+    if (!is_perm)
+      continue; //  if we already found an error, skip further checks
+    auto val = perm[i] - base;
+    if (val < 0 || val >= rows) {
+      is_perm = false; // value out of bounds
+      continue;
+    }
+    if (++seen[val] > 1) {
+      is_perm = false; // duplicate value found
+    }
+  }
+
+  return is_perm;
+}
+
+template <typename COLTYPE>
+bool isPermutationSerial(const COLTYPE rows, const COLTYPE base,
+                         COLTYPE const *const perm) {
+  std::vector<bool> seen(rows, false);
+  for (COLTYPE i = 0; i < rows; ++i) {
+    auto val = perm[i] - base;
+    if (val < 0 || val >= rows) {
+      return false; // value out of bounds
+    }
+    if (seen[val]) {
+      return false; // duplicate value found
+    } else {
+      seen[val] = true;
+    }
+  }
+  return true;
 }
 
 template <typename COLTYPE>
@@ -116,50 +155,49 @@ void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
   }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename... Args1,
-          typename... Args2>
-void permuteMat(const COLTYPE rows, const COLTYPE cols, ROWTYPE const *const ai,
-                COLTYPE const *const aj, Args1... args,
+template <typename ROWTYPE, typename COLTYPE, typename... Args>
+void permuteMat(const COLTYPE rows, const COLTYPE cols,
                 COLTYPE const *const permP, COLTYPE const *const ipermQ,
-                ROWTYPE *const perm_ai, COLTYPE *const perm_aj,
-                Args2... perm_args) {
-  static_assert(sizeof...(Args1) == sizeof...(Args2),
-                "The number of arguments must be the same");
-  //   permRowPtr(rows, ai, permP, perm_ai, perm_args...);
-  //   const auto base = ai[0];
-  //   const auto nnz = ai[rows] - base;
+                ROWTYPE const *const ai, COLTYPE const *const aj,
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, Args *...args) {
+  static_assert(sizeof...(Args) % 2 == 0,
+                "Number of additional arguments must be even (pairs of "
+                "argument types and their corresponding permuted types).");
+  permRowPtr(rows, ai, permP, perm_ai);
+  const auto base = ai[0];
+  const auto nnz = ai[rows] - base;
 
-  // #pragma omp parallel
-  //   {
-  //     const int tid = omp_get_thread_num();
-  //     const int nthreads = omp_get_num_threads();
-  //     auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
-  //         perm_ai, perm_ai + rows, tid, nthreads);
+#pragma omp parallel
+  {
+    const int tid = omp_get_thread_num();
+    const int nthreads = omp_get_num_threads();
+    auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
+        perm_ai, perm_ai + rows, tid, nthreads);
 
-  //     for (auto perm_i = start; perm_i < end; perm_i++) {
-  //       // moving pinv_i'th row to i'th row
-  //       auto i = permP ? (permP[perm_i] - base) : perm_i;
-  //       for (auto j = ai[i] - base; j < ai[i + 1] - base; j++) {
-  //         auto perm_j = perm_ai[i] - ai[i] + j;
-  //         perm_aj[perm_j] = ipermQ ? ipermQ[aj[j] - base] : aj[j];
-  //         if constexpr (sizeof...(Args1) > 0) {
-  //           utils::variadic_assign_uninterleave(j, perm_j, args...,
-  //           perm_args...);
-  //         }
-  //       }
-  //       if (ipermQ == nullptr)
-  //         continue;
-  //       utils::variadic_quick_sort(perm_ai[perm_i] - base,
-  //                                  perm_aj[perm_i + 1] - base, perm_aj,
-  //                                  perm_args...);
-  //     }
-  //   }
-}
+    for (auto perm_i = start; perm_i < end; perm_i++) {
+      // moving pinv_i'th row to i'th row
+      auto i = permP ? (permP[perm_i] - base) : perm_i;
+      for (auto j = ai[i] - base; j < ai[i + 1] - base; j++) {
+        auto perm_j = perm_ai[i] - ai[i] + j;
+        perm_aj[perm_j] = ipermQ ? ipermQ[aj[j] - base] : aj[j];
+        if constexpr (sizeof...(Args) > 0) {
+          utils::variadic_assign(j, perm_j, args...);
+        }
+      }
+      if (ipermQ == nullptr)
+        continue;
 
-template <typename COLTYPE, typename... Args1, typename... Args2>
-void test(COLTYPE const *const aj, Args1... args, COLTYPE const *const perm_aj,
-          Args2... perm_args) {
-  utils::variadic_assign_uninterleave(0, 1, args..., perm_args...);
+      auto oddArgsTuple = utils::extractOdd(args...);
+      std::apply(
+          [&](auto &&...odd_args) {
+            utils::variadic_quick_sort(
+                perm_ai[perm_i] - base, perm_aj[perm_i + 1] - base,
+                std::forward<decltype(perm_aj)>(perm_aj),
+                std::forward<decltype(odd_args)>(odd_args)...);
+          },
+          oddArgsTuple);
+    }
+  }
 }
 
 #define INSTANTIATE_PERM_FUNCS(COLTYPE, VALTYPE)                               \
@@ -177,6 +215,9 @@ void test(COLTYPE const *const aj, Args1... args, COLTYPE const *const perm_aj,
 #define INSTANTIATE_ISPERM_FUNC(COLTYPE)                                       \
   template bool isPermutation<COLTYPE>(const COLTYPE, const COLTYPE,           \
                                        COLTYPE const *const);
+#define INSTANTIATE_ISPERM_SERIAL_FUNC(COLTYPE)                                \
+  template bool isPermutationSerial<COLTYPE>(const COLTYPE, const COLTYPE,     \
+                                             COLTYPE const *const);
 
 #define INSTANTIATE_RANDPERM_FUNC(COLTYPE)                                     \
   template void randPerm<COLTYPE>(const COLTYPE, const COLTYPE, COLTYPE *const);
@@ -185,17 +226,17 @@ void test(COLTYPE const *const aj, Args1... args, COLTYPE const *const perm_aj,
   template void permRowPtr<COLTYPE>(const COLTYPE, COLTYPE const *const,       \
                                     COLTYPE const *const, COLTYPE *const);
 
-#define INSTANTIATE_PERMUTEMAT_STRUCT_FUNC(ROWTYPE, COLTYPE)                   \
+#define INSTANTIATE_PERMUTE_MAT_STRUCT_FUNC(ROWTYPE, COLTYPE)                  \
   template void permuteMat<ROWTYPE, COLTYPE>(                                  \
-      const COLTYPE, const COLTYPE, ROWTYPE const *const,                      \
-      COLTYPE const *const, COLTYPE const *const, COLTYPE const *const,        \
+      const COLTYPE, const COLTYPE, COLTYPE const *const,                      \
+      COLTYPE const *const, ROWTYPE const *const, COLTYPE const *const,        \
       ROWTYPE *const, COLTYPE *const);
 
-// #define INSTANTIATE_PERMUTEMAT_FUNC(ROWTYPE, COLTYPE, VALTYPE1, VALTYPE2)      \
-//   template void permuteMat<ROWTYPE, COLTYPE, VALTYPE1, VALTYPE2>(              \
-//       const COLTYPE, const COLTYPE, ROWTYPE const *const,                      \
-//       COLTYPE const *const, VALTYPE1, COLTYPE const *const,                    \
-//       COLTYPE const *const, ROWTYPE *const, COLTYPE *const, VALTYPE2);
+#define INSTANTIATE_PERMUTE_MAT_FUNC(ROWTYPE, COLTYPE, VALTYPE1, VALTYPE2)     \
+  template void permuteMat<ROWTYPE, COLTYPE>(                                  \
+      const COLTYPE, const COLTYPE, COLTYPE const *const,                      \
+      COLTYPE const *const, ROWTYPE const *const, COLTYPE const *const,        \
+      ROWTYPE *const, COLTYPE *const, VALTYPE1 *const, VALTYPE2 *const);
 
 // Example instantiations:
 INSTANTIATE_PERM_FUNCS(int, double)
@@ -203,10 +244,9 @@ INSTANTIATE_PERM_FUNCS(int, float)
 INSTANTIATE_PERM_FUNCS(int, int)
 INSTANTIATE_INVPERM_FUNC(int)
 INSTANTIATE_ISPERM_FUNC(int)
+INSTANTIATE_ISPERM_SERIAL_FUNC(int)
 INSTANTIATE_RANDPERM_FUNC(int)
 INSTANTIATE_PERM_ROW_PTR_FUNC(int)
-INSTANTIATE_PERMUTEMAT_STRUCT_FUNC(int, int)
-
-template void test<int, int *, int *>(int const *const, int *, int const *const,
-                                      int *);
+INSTANTIATE_PERMUTE_MAT_STRUCT_FUNC(int, int)
+INSTANTIATE_PERMUTE_MAT_FUNC(int, int, const double, double)
 } // namespace matrix_utils

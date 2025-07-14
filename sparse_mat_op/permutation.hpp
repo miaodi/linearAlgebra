@@ -57,6 +57,10 @@ void invPerm(const COLTYPE rows, const COLTYPE base, COLTYPE const *const perm,
 template <typename COLTYPE>
 bool isPermutation(const COLTYPE rows, const COLTYPE base,
                    COLTYPE const *const perm);
+                   
+template <typename COLTYPE>
+bool isPermutationSerial(const COLTYPE rows, const COLTYPE base,
+                         COLTYPE const *const perm);
 
 /** @brief Generate a random permutation
  *  @param rows Number of rows in the permutation vector
@@ -100,14 +104,10 @@ void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
  *  @tparam ROWTYPE Type of the row indices (e.g., int, long)
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
-template <typename ROWTYPE, typename COLTYPE, typename... Args1,
-          typename... Args2>
-void permuteMat(const COLTYPE rows, const COLTYPE cols, ROWTYPE const * const ai,
-                COLTYPE const * const aj, Args1... args, COLTYPE const * const permP,
-                COLTYPE const * const ipermQ, ROWTYPE * const perm_ai, COLTYPE * const perm_aj,
-                Args2... perm_args);
-
-template <typename COLTYPE, typename... Args1, typename... Args2>
-void test(COLTYPE const * const aj, Args1... args, COLTYPE const * const perm_aj, Args2... perm_args);
+template <typename ROWTYPE, typename COLTYPE, typename... Args>
+void permuteMat(const COLTYPE rows, const COLTYPE cols,
+                COLTYPE const *const permP, COLTYPE const *const ipermQ,
+                ROWTYPE const *const ai, COLTYPE const *const aj,
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, Args *...args);
 
 } // namespace matrix_utils

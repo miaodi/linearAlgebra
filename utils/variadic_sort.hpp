@@ -3,7 +3,7 @@
 #include "traits.hpp"
 #include <cstddef>
 #include <utility>
-
+#include <tuple>
 namespace utils {
 
 /**
@@ -44,8 +44,11 @@ void variadic_assign(const Idx i, const Idx j, First first, Second second,
                      Args &&...args) {
   static_assert(sizeof...(Args) % 2 == 0,
                 "The number of arguments must be even");
-  static_assert(std::is_same_v<std::decay_t<First>, std::decay_t<Second>>,
-                "The first and second arguments must be the same type");
+                
+  using FirstBase = std::remove_const_t<std::remove_pointer_t<std::decay_t<First>>>;
+  using SecondBase = std::remove_const_t<std::remove_pointer_t<std::decay_t<Second>>>;
+  static_assert(std::is_same_v<FirstBase, SecondBase>,
+                "The first and second arguments must be the same base type");
   static_assert(utils::has_subscript_operator_v<First>,
                 "All arguments must have a subscript operator");
 
@@ -55,21 +58,18 @@ void variadic_assign(const Idx i, const Idx j, First first, Second second,
   }
 }
 
-template <typename Idx, typename T1, typename T2, typename... Args1,
-          typename... Args2>
-void variadic_assign_uninterleave(const Idx i, const Idx j, T1 first,
-                                  Args1... args1, T2 second, Args2... args2) {
-  static_assert(sizeof...(Args1) == sizeof...(Args2),
-                "The number of arguments must be the same");
-  static_assert(utils::has_subscript_operator_v<T1>,
-                "All arguments must have a subscript operator");
-  static_assert(std::is_same_v<std::decay_t<T1>, std::decay_t<T2>>,
-                "The first and second arguments must be the same type");
-  second[j] = first[i];
-  if constexpr (sizeof...(Args1) > 0) {
-    variadic_assign_uninterleave(i, j, std::forward<Args1>(args1)...,
-                                 std::forward<Args2>(args2)...);
-  }
+// Helper function to extract odd-indexed elements
+template <typename Tuple, std::size_t... Indices>
+auto extractOddImpl(const Tuple& tup, std::index_sequence<Indices...>) {
+    return std::make_tuple(std::get<2 * Indices + 1>(tup)...);
+}
+
+// Main function to extract odd arguments
+template <typename... Args>
+auto extractOdd(Args&&... args) {
+    constexpr std::size_t N = sizeof...(Args) / 2; // Number of odd elements
+    auto tup = std::forward_as_tuple(std::forward<Args>(args)...);
+    return extractOddImpl(tup, std::make_index_sequence<N>{});
 }
 
 /**
