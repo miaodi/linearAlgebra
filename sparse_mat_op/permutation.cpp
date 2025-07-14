@@ -3,6 +3,7 @@
 #include "variadic_sort.hpp"
 #include <algorithm>
 #include <cassert>
+#include <iostream>
 #include <numeric>
 #include <omp.h>
 #include <vector>
@@ -177,11 +178,12 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
     for (auto perm_i = start; perm_i < end; perm_i++) {
       // moving pinv_i'th row to i'th row
       auto i = permP ? (permP[perm_i] - base) : perm_i;
-      for (auto j = ai[i] - base; j < ai[i + 1] - base; j++) {
-        auto perm_j = perm_ai[i] - ai[i] + j;
-        perm_aj[perm_j] = ipermQ ? ipermQ[aj[j] - base] : aj[j];
+      for (auto j_idx = ai[i] - base; j_idx < ai[i + 1] - base; j_idx++) {
+        auto perm_j_idx = perm_ai[perm_i] - ai[i] + j_idx;
+        auto j = aj[j_idx];
+        perm_aj[perm_j_idx] = ipermQ ? ipermQ[j - base] : j;
         if constexpr (sizeof...(Args) > 0) {
-          utils::variadic_assign(j, perm_j, args...);
+          utils::variadic_assign(j_idx, perm_j_idx, args...);
         }
       }
       if (ipermQ == nullptr)
@@ -191,7 +193,7 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
       std::apply(
           [&](auto &&...odd_args) {
             utils::variadic_quick_sort(
-                perm_ai[perm_i] - base, perm_aj[perm_i + 1] - base,
+                perm_ai[perm_i] - base, perm_ai[perm_i + 1] - base,
                 std::forward<decltype(perm_aj)>(perm_aj),
                 std::forward<decltype(odd_args)>(odd_args)...);
           },
@@ -248,5 +250,5 @@ INSTANTIATE_ISPERM_SERIAL_FUNC(int)
 INSTANTIATE_RANDPERM_FUNC(int)
 INSTANTIATE_PERM_ROW_PTR_FUNC(int)
 INSTANTIATE_PERMUTE_MAT_STRUCT_FUNC(int, int)
-INSTANTIATE_PERMUTE_MAT_FUNC(int, int, const double, double)
+INSTANTIATE_PERMUTE_MAT_FUNC(int, int, double, double)
 } // namespace matrix_utils

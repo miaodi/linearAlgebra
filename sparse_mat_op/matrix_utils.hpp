@@ -52,6 +52,10 @@ template <typename R, typename C, typename V> struct CSRMatrixRawPtr {
   COLTYPE const *AJ() const { return aj; }
   VALTYPE const *AV() const { return av; }
 
+  ROWTYPE *AI() { return ai; }
+  COLTYPE *AJ() { return aj; }
+  VALTYPE *AV() { return av; }
+
   CSRMatrixRawPtr() = default;
 };
 
@@ -75,6 +79,10 @@ template <typename R, typename C, typename V> struct CSRMatrix {
   ROWTYPE const *AI() const { return ai.get(); }
   COLTYPE const *AJ() const { return aj.get(); }
   VALTYPE const *AV() const { return av.get(); }
+
+  ROWTYPE *AI() { return ai.get(); }
+  COLTYPE *AJ() { return aj.get(); }
+  VALTYPE *AV() { return av.get(); }
 
   CSRMatrix() = default;
 };

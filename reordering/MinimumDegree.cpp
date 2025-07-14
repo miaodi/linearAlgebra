@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <assert.h>
 #include <limits> // Required for std::numeric_limits
+#include "permutation.hpp"
 namespace reordering {
 
 template <typename COLTYPE, MinimumDegree MD>
@@ -83,6 +84,7 @@ void QuotientGraph<COLTYPE, MD>::operator()(const COLTYPE nnodes,
       eliminatePrincipleNode(idx, perm);
     }
   }
+  matrix_utils::invPerm(nnodes, base, perm - nnodes, iperm);
 }
 
 template <typename COLTYPE, MinimumDegree MD>
