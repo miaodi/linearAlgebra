@@ -1,3 +1,4 @@
+#include "../reordering/quotient_graph.h"
 #include "../sparse_mat_op/io.hpp"
 #include "../sparse_mat_op/matrix_utils.hpp"
 #include "../sparse_mat_op/permutation.hpp"
@@ -7,7 +8,6 @@
 #include "circularbuffer.hpp"
 #include "mkl_sparse_mat.h"
 #include <vector>
-
 int main() {
 
   std::string filename = "../tests/data/rdist1.mtx";
@@ -52,17 +52,6 @@ int main() {
   std::cout << "is permutation: "
             << matrix_utils::isPermutation(size, ai_AAT[0], perm.data())
             << "\n";
-  std::cout << "first row size: " << ai_AAT[1] - ai_AAT[0] << "\n";
-  std::cout << "second row size: " << ai_AAT[2] - ai_AAT[1] << "\n";
-  std::cout << "third row size: " << ai_AAT[3] - ai_AAT[2] << "\n";
-  std::cout << "fourth row size: " << ai_AAT[4] - ai_AAT[3] << "\n";
-  std::cout << "fifth row size: " << ai_AAT[5] - ai_AAT[4] << "\n";
-  std::cout << "sixth row size: " << ai_AAT[6] - ai_AAT[5] << "\n";
-  std::cout << "seventh row size: " << ai_AAT[7] - ai_AAT[6] << "\n";
-  std::cout << "eighth row size: " << ai_AAT[8] - ai_AAT[7] << "\n";
-  std::cout << "ninth row size: " << ai_AAT[9] - ai_AAT[8] << "\n";
-  std::cout << "tenth row size: " << ai_AAT[10] - ai_AAT[9] << "\n";
-
   std::vector<int> perm_ai(size + 1);
   std::vector<int> perm_aj(ai_AAT.back());
   std::vector<double> perm_av(ai_AAT.back(), 1.);
@@ -76,17 +65,6 @@ int main() {
                                   perm_av.data(), out2);
   out2.close();
 
-  std::cout << "first row size: " << perm_ai[1] - perm_ai[0] << "\n";
-  std::cout << "second row size: " << perm_ai[2] - perm_ai[1] << "\n";
-  std::cout << "third row size: " << perm_ai[3] - perm_ai[2] << "\n";
-  std::cout << "fourth row size: " << perm_ai[4] - perm_ai[3] << "\n";
-  std::cout << "fifth row size: " << perm_ai[5] - perm_ai[4] << "\n";
-  std::cout << "sixth row size: " << perm_ai[6] - perm_ai[5] << "\n";
-  std::cout << "seventh row size: " << perm_ai[7] - perm_ai[6] << "\n";
-  std::cout << "eighth row size: " << perm_ai[8] - perm_ai[7] << "\n";
-  std::cout << "ninth row size: " << perm_ai[9] - perm_ai[8] << "\n";
-  std::cout << "tenth row size: " << perm_ai[10] - perm_ai[9] << "\n";
-
   std::ofstream out3("mat_AAT_iperm.mtx");
   matrix_utils::permuteMat(size, size, iperm.data(), perm.data(),
                            perm_ai.data(), perm_aj.data(), ai_AAT.data(),
@@ -94,4 +72,32 @@ int main() {
   matrix_utils::writeMatrixMarket(size, size, ai_AAT.data(), aj_AAT.data(),
                                   av_AAT.data(), out3);
   out3.close();
+
+  {
+    std::vector<std::pair<int, int>> pairs;
+    for (int i = 0; i < size; i++) {
+      for (int j = ai_AAT[i]; j < ai_AAT[i + 1]; j++) {
+        pairs.emplace_back(i, aj_AAT[j]);
+      }
+    }
+    srrg2_solver::QuotientGraph qg2(pairs, size);
+    std::vector<int> perm2(size);
+    std::vector<int> iperm2(size);
+    qg2.setPolicy(srrg2_solver::QuotientGraph::External);
+    qg2.mdo(perm2);
+    for (int i = 0; i < size; i++) {
+      iperm2[perm2[i]] = i;
+    }
+
+    std::cout << "is permutation: "
+              << matrix_utils::isPermutation(size, ai_AAT[0], perm2.data())
+              << "\n";
+    std::ofstream out4("mat_AAT_qg.mtx");
+    matrix_utils::permuteMat(size, size, perm2.data(), iperm2.data(),
+                             ai_AAT.data(), aj_AAT.data(), perm_ai.data(),
+                             perm_aj.data(), av_AAT.data(), perm_av.data());
+    matrix_utils::writeMatrixMarket(size, size, perm_ai.data(), perm_aj.data(),
+                                    perm_av.data(), out4);
+    out4.close();
+  }
 }
