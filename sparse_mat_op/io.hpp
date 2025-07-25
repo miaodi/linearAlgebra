@@ -1,7 +1,6 @@
 #pragma once
 #include "sparse_mat_traits.hpp"
 #include <fast_matrix_market/fast_matrix_market.hpp>
-#include <fstream>
 #include <istream>
 namespace matrix_utils {
 template <typename CSRMatrixType>
@@ -20,4 +19,8 @@ void writeMatrixMarket(const CSRMatrixType &csr_matrix, std::ostream &outstream,
   writeMatrixMarket(csr_matrix.rows, csr_matrix.cols, csr_matrix.AI(),
                     csr_matrix.AJ(), csr_matrix.AV(), outstream, options);
 }
+
+template <typename ROWTYPE, typename COLTYPE>
+void writeSVG(const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,
+              const COLTYPE *aj, std::ostream &outstream);
 } // namespace matrix_utils
