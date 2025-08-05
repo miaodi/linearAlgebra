@@ -22,4 +22,16 @@ struct CSRMatrixFormat {
       std::is_same_v<typename CSRMatrixType::VALTYPE, V>;
 };
 
+template <typename T> struct CSRMatrixRowType {
+  using type = typename T::ROWTYPE;
+};
+
+template <typename T> struct CSRMatrixIndexType {
+  using type = typename T::COLTYPE;
+};
+
+template <typename T> struct CSRMatrixValueType {
+  using type = typename T::VALTYPE;
+};
+
 } // namespace matrix_utils
