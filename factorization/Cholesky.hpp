@@ -20,4 +20,15 @@ void EliminationTree(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
 template <typename ROWTYPE, typename COLTYPE>
 void RowSubtreeSize(const COLTYPE nnodes, const ROWTYPE base,
                     const COLTYPE *parent, ROWTYPE *row_size);
+
+// @brief Compute the row count of each row in L of the Cholesky factorization
+/// @tparam ROWTYPE row index type
+/// @tparam COLTYPE column index type
+/// @param nnodes number of nodes
+/// @param base base index of the matrix (usually 0 or 1)
+/// @param parent parent vector from the elimination tree
+/// @param row_count output vector containing the count of rows in L
+template <typename ROWTYPE, typename COLTYPE>
+void RowCount(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
+              const COLTYPE *parent, ROWTYPE *row_count, COLTYPE *mark);
 } // namespace factorization

@@ -32,7 +32,8 @@ int main() {
   }
 
   std::vector<int> row_size(csr_matrix.rows);
-  factorization::RowSubtreeSize(csr_matrix.rows, csr_matrix.AI()[0], parent.data(), row_size.data());
+  factorization::RowCount(csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
+                          parent.data(), row_size.data(), ancestor.data());
   for (size_t i = 0; i < csr_matrix.rows; i++) {
     std::cout << i + 1 << "->" << row_size[i] << std::endl;
   }
