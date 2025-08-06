@@ -692,4 +692,19 @@ bool ICCLevelNumeric(const COLTYPE size, const int base, ROWTYPE const *ai,
   return true;
 }
 
+template <typename VT> class IdentityPrec {
+public:
+  using VALTYPE = VT;
+  IdentityPrec(const std::size_t size) : _size(size) {}
+
+  std::size_t size() const { return _size; }
+
+  bool operator()(VALTYPE const *const b, VALTYPE *const x) const {
+    for (std::size_t i = 0; i < _size; i++) {
+      x[i] = b[i];
+    }
+    return true;
+  }
+  std::size_t _size;
+};
 } // namespace matrix_utils

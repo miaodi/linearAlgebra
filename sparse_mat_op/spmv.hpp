@@ -322,7 +322,14 @@ template <typename CSRMatrixType, typename SPMVType> struct SPMV {
                        _matrix->AJ(), _matrix->AV());
     }
   }
-
+  COLTYPE size() const {
+    if (_matrix) {
+      return _matrix->rows;
+    } else {
+      return 0;
+    }
+  }
+  
   void operator()(const VALTYPE *const b, VALTYPE *const x,
                   const VALTYPE alpha = 1., const VALTYPE beta = 0.) const {
     _spmv(_matrix->rows, _matrix->Base(), _matrix->AI(), _matrix->AJ(),

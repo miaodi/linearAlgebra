@@ -1,4 +1,5 @@
 #pragma once
+#include <concepts>
 #include <type_traits>
 
 namespace matrix_utils {
@@ -34,4 +35,21 @@ template <typename T> struct CSRMatrixValueType {
   using type = typename T::VALTYPE;
 };
 
+template <typename T>
+concept SpmvOpType = requires(const T op, typename T::VALTYPE const *const b,
+                              typename T::VALTYPE *const x,
+                              const T::VALTYPE alpha, const T::VALTYPE beta) {
+  { op.size() } -> std::convertible_to<std::size_t>;
+  {op(b, x, alpha, beta)};
+  typename T::VALTYPE;
+}
+&&std::floating_point<typename T::VALTYPE>;
+
+template <typename T>
+concept PrecOpType = requires(const T prec, typename T::VALTYPE const *const b,
+                              typename T::VALTYPE *const x) {
+  { prec.size() } -> std::convertible_to<std::size_t>;
+  { prec(b, x) } -> std::same_as<bool>;
+  typename T::VALTYPE;
+};
 } // namespace matrix_utils
