@@ -22,12 +22,14 @@ void givens_rotation(VALTYPE *const R, VALTYPE *const g, VALTYPE *const c,
   }
   // compute Givens rotation for R_col_j
   auto div_r = VALTYPE(1) / std::hypot(R_col_j[j], beta);
+  // auto div_r = VALTYPE(1) / std::sqrt(R_col_j[j] * R_col_j[j] + beta * beta);
   c[j] = div_r * R_col_j[j];
   s[j] = -div_r * beta;
   if (std::abs(s[j]) < 1e-16) {
     c[j] = 1;
     s[j] = 0;
   }
+  std::cout << s[j] * R_col_j[j] + c[j] * beta << std::endl;
   R_col_j[j] = c[j] * R_col_j[j] - s[j] * beta;
   // apply Givens rotation to g
   auto tmp = c[j] * g[j] - s[j] * g[j + 1];
@@ -64,11 +66,12 @@ public:
     _H.resize(_restart, _restart);
     _H.setZero();
     _Q.resize(size, restart1);
+    _Q.setZero();
 
     _tmp.resize(size);
     _g.resize(restart1);
-    _c.resize(restart1);
-    _s.resize(restart1);
+    _c.resize(_restart);
+    _s.resize(_restart);
     _y.resize(_restart);
 
     Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>> x_vec(x, size);
@@ -79,9 +82,11 @@ public:
     vec_ops::copy_vec(size, b, _tmp.data());
     // b-= Ax_0
     (*op)(x, _tmp.data(), (VALTYPE)(-1), (VALTYPE)(1));
+    std::cout << _tmp << std::endl;
+
     // resid_0 = M^{-1}(b - Ax_0)
     (*prec)(_tmp.data(), _Q.col(0).data());
-
+    std::cout << _Q << std::endl;
     int j, iter;
     for (iter = 0; iter < _max_iter;) {
       init_resid = _g[0] = _Q.col(0).norm();
@@ -90,13 +95,11 @@ public:
       }
       _Q.col(0) = _Q.col(0) / init_resid;
 
-      for (j = 0; j < _restart; j++) {
-        iter++;
+      for (j = 0; j < _restart; j++, iter++) {
         if (iter >= _max_iter) {
           error_code = ErrorType::MAX_ITER_REACHED;
           break;
         }
-
         // v_j_ptr = A * v_j_ptr
         (*op)(_Q.col(j).data(), _tmp.data(), (VALTYPE)(1), (VALTYPE)(0));
         // Apply preconditioner
@@ -116,23 +119,22 @@ public:
                         _restart, j);
         resid = std::abs(_g[j]);
         std::cout << "iter: " << iter << " "
-                  << "resid: " << resid << " " << _abs_tol << " "
-                  << _rel_tol * init_resid << std::endl;
+                  << "resid: " << resid << " "
+                  << "relative resid: " << resid / init_resid << std::endl;
         if (resid < _abs_tol || resid < _rel_tol * init_resid) {
           error_code = ErrorType::NO_ERROR;
           break;
         }
       }
-      // std::cout<<_H<<std::endl;
-      // std::cout << _Q << std::endl;
-      // Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>
-      //     upper_triangle = _H.block(0, 0, j, j).template
-      //     triangularView<Eigen::Upper>();
-      // std::cout<<upper_triangle<<std::endl;
-      // std::cout<<(Eigen::MatrixXd)(_H.triangularView<Eigen::Upper>())<<std::endl;
       _y.head(j) = _H.block(0, 0, j, j)
                        .template triangularView<Eigen::Upper>()
                        .solve(_g.head(j));
+
+      // _y.head(j) = _H.block(0, 0, j, j).colPivHouseholderQr().solve(_g.head(j));
+      std::cout << "error: "
+                << (_H.block(0, 0, j, j) * _y.head(j) - _g.head(j)).norm() /
+                       _g.head(j).norm()
+                << std::endl;
       // std::cout << _y << std::endl;
       x_vec += _Q.leftCols(j) * _y.head(j);
 
@@ -147,16 +149,16 @@ public:
   }
 
 private:
-  int _max_iter{20};
+  int _max_iter{100};
   VALTYPE _abs_tol{0.0};
-  VALTYPE _rel_tol{1e-14};
-  int _restart{20};
+  VALTYPE _rel_tol{1e-8};
+  int _restart{27};
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _H;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _Q;
-  Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _tmp;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _g;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _c;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _s;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _y;
+  Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _tmp;
 };
 } // namespace iterative_solver

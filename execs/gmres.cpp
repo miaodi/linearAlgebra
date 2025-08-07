@@ -17,7 +17,7 @@ int main() {
   f.seekg(0, std::ios::beg);
   matrix_utils::CSRMatrix<int, int, double> csr_matrix;
   matrix_utils::readMatrixMarket(f, csr_matrix);
-
+  std::cout << "size: " << csr_matrix.rows << std::endl;
   std::ofstream out0("mat_csr.svg");
   matrix_utils::writeSVG(csr_matrix.rows, csr_matrix.cols, csr_matrix.AI(),
                          csr_matrix.AJ(), out0);
@@ -31,14 +31,10 @@ int main() {
   matrix_utils::IdentityPrec<double> identity_prec(csr_matrix.rows);
 
   std::vector<double> b(csr_matrix.rows, 1.0);
-  std::vector<double> x(csr_matrix.rows, 1.0);
+  std::vector<double> x(csr_matrix.rows, 0.0);
 
   iterative_solver::GMRES<double> gmres_solver;
   gmres_solver(&spmv, &identity_prec, b.data(), x.data());
-  for (auto i : x) {
-    std::cout << i << " ";
-  }
-  std::cout << std::endl;
 
   {
     // Upper triangular matrix A (row-major)
