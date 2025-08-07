@@ -1,9 +1,40 @@
 #pragma once
 #include "sparse_mat_traits.hpp"
 #include "vec_ops.hpp"
+#include <Eigen/Dense>
+#include <cmath>
+#include <cstring>
+#include <iostream>
 #include <vector>
 
 namespace iterative_solver {
+
+template <typename VALTYPE>
+void givens_rotation(VALTYPE *const R, VALTYPE *const g, VALTYPE *const c,
+                     VALTYPE *const s, const VALTYPE beta, const int lda,
+                     const int j) {
+  auto R_col_j = R + j * lda;
+  // apply Givens rotation to R_col_j
+  for (int i = 0; i < j; i++) {
+    auto tmp = c[i] * R_col_j[i] - s[i] * R_col_j[i + 1];
+    R_col_j[i + 1] = s[i] * R_col_j[i] + c[i] * R_col_j[i + 1];
+    R_col_j[i] = tmp;
+  }
+  // compute Givens rotation for R_col_j
+  auto div_r = VALTYPE(1) / std::hypot(R_col_j[j], beta);
+  c[j] = div_r * R_col_j[j];
+  s[j] = -div_r * beta;
+  if (std::abs(s[j]) < 1e-16) {
+    c[j] = 1;
+    s[j] = 0;
+  }
+  R_col_j[j] = c[j] * R_col_j[j] - s[j] * beta;
+  // apply Givens rotation to g
+  auto tmp = c[j] * g[j] - s[j] * g[j + 1];
+  g[j + 1] = s[j] * g[j] + c[j] * g[j + 1];
+  g[j] = tmp;
+}
+
 template <typename VALTYPE> class GMRES {
 public:
   enum class ErrorType : int {
@@ -29,29 +60,37 @@ public:
                   "PrecOp::VALTYPE must be the same as VALTYPE");
 
     const auto size = op->size();
-    _H.resize(_restart * _restart);
-    _Q.resize(size * (_restart + 1));
-    _tmp.resize(size);
-    _g.resize(_restart + 1);
+    const auto restart1 = _restart + 1;
+    _H.resize(_restart, _restart);
+    _H.setZero();
+    _Q.resize(size, restart1);
 
-    VALTYPE resid = 1;
+    _tmp.resize(size);
+    _g.resize(restart1);
+    _c.resize(restart1);
+    _s.resize(restart1);
+    _y.resize(_restart);
+
+    Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>> x_vec(x, size);
+
+    VALTYPE resid, init_resid, beta;
     ErrorType error_code = ErrorType::NO_ERROR;
 
     vec_ops::copy_vec(size, b, _tmp.data());
-    VALTYPE *v_j_ptr = _Q.data();
     // b-= Ax_0
     (*op)(x, _tmp.data(), (VALTYPE)(-1), (VALTYPE)(1));
-    // resid = ||b - Ax_0||
-    (*prec)(_tmp.data(), v_j_ptr);
-    
-    _g[0] = vec_ops::vec_l2_norm(size, v_j_ptr);
-    for (int iter = 0; iter < _max_iter;) {
-      v_j_ptr = _Q.data();
-      if (_g[0] < _abs_tol) {
+    // resid_0 = M^{-1}(b - Ax_0)
+    (*prec)(_tmp.data(), _Q.col(0).data());
+
+    int j, iter;
+    for (iter = 0; iter < _max_iter;) {
+      init_resid = _g[0] = _Q.col(0).norm();
+      if (init_resid < _abs_tol) {
         return error_code;
       }
-      vec_ops::scale_vec(size, (VALTYPE)(1) / _g[0], v_j_ptr);
-      for (int j = 0; j < _restart; j++) {
+      _Q.col(0) = _Q.col(0) / init_resid;
+
+      for (j = 0; j < _restart; j++) {
         iter++;
         if (iter >= _max_iter) {
           error_code = ErrorType::MAX_ITER_REACHED;
@@ -59,51 +98,65 @@ public:
         }
 
         // v_j_ptr = A * v_j_ptr
-        (*op)(v_j_ptr, _tmp.data(), (VALTYPE)(1), (VALTYPE)(0));
-        v_j_ptr += size;
+        (*op)(_Q.col(j).data(), _tmp.data(), (VALTYPE)(1), (VALTYPE)(0));
         // Apply preconditioner
-        (*prec)(_tmp.data(), v_j_ptr);
+        (*prec)(_tmp.data(), _Q.col(j + 1).data());
 
-        VALTYPE *v_i_ptr = _Q.data();
         for (int i = 0; i <= j; i++) {
           // H[i][j] = v_i^T * v_j
-          _H[i + j * _restart] = vec_ops::dot_product(size, v_j_ptr, v_i_ptr);
+          _H(i, j) = _Q.col(i).dot(_Q.col(j + 1));
           // w -= H[i][j] * v_i
-          vec_ops::axpy(size, -_H[i + j * _restart], v_i_ptr, v_j_ptr);
-
-          v_i_ptr += size;
+          _Q.col(j + 1) -= _H(i, j) * _Q.col(i);
         }
 
         // H[j+1][j] = ||v_j_ptr||
-        _H[j * _restart + j + 1] = vec_ops::vec_l2_norm(size, v_j_ptr);
-
-        // // Update residual
-        // beta = std::sqrt(beta * beta -
-        //                  _H[i * _restart + i] * _H[i * _restart + i]);
+        beta = _Q.col(j + 1).norm();
+        _Q.col(j + 1) = _Q.col(j + 1) / beta;
+        givens_rotation(_H.data(), _g.data(), _c.data(), _s.data(), beta,
+                        _restart, j);
+        resid = std::abs(_g[j]);
+        std::cout << "iter: " << iter << " "
+                  << "resid: " << resid << " " << _abs_tol << " "
+                  << _rel_tol * init_resid << std::endl;
+        if (resid < _abs_tol || resid < _rel_tol * init_resid) {
+          error_code = ErrorType::NO_ERROR;
+          break;
+        }
       }
-      v_j_ptr += size;
+      // std::cout<<_H<<std::endl;
+      // std::cout << _Q << std::endl;
+      // Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>
+      //     upper_triangle = _H.block(0, 0, j, j).template
+      //     triangularView<Eigen::Upper>();
+      // std::cout<<upper_triangle<<std::endl;
+      // std::cout<<(Eigen::MatrixXd)(_H.triangularView<Eigen::Upper>())<<std::endl;
+      _y.head(j) = _H.block(0, 0, j, j)
+                       .template triangularView<Eigen::Upper>()
+                       .solve(_g.head(j));
+      // std::cout << _y << std::endl;
+      x_vec += _Q.leftCols(j) * _y.head(j);
+
+      vec_ops::copy_vec(size, b, _tmp.data());
+      // b-= Ax_i
+      (*op)(x, _tmp.data(), (VALTYPE)(-1), (VALTYPE)(1));
+      // resid_i = b - Ax_i
+      (*prec)(_tmp.data(), _Q.col(0).data());
     }
 
-    // while (true) {
-    //   if (rel_err < _rel_tol)
-    //     break;
-    //   if (iter >= _max_iter) {
-    //     error = ErrorType::MAX_ITER_REACHED;
-    //     break;
-    //   }
-    // }
-    std::copy(_tmp.begin(), _tmp.end(), x);
     return error_code;
   }
 
 private:
-  int _max_iter{100};
+  int _max_iter{20};
   VALTYPE _abs_tol{0.0};
-  VALTYPE _rel_tol{1e-6};
-  int _restart{10};
-  std::vector<VALTYPE> _H;
-  std::vector<VALTYPE> _Q;
-  std::vector<VALTYPE> _tmp;
-  std::vector<VALTYPE> _g;
+  VALTYPE _rel_tol{1e-14};
+  int _restart{20};
+  Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _H;
+  Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _Q;
+  Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _tmp;
+  Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _g;
+  Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _c;
+  Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _s;
+  Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _y;
 };
 } // namespace iterative_solver

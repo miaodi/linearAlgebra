@@ -6,6 +6,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <mkl.h>
 
 int main() {
 
@@ -38,5 +39,22 @@ int main() {
     std::cout << i << " ";
   }
   std::cout << std::endl;
+
+  {
+    // Upper triangular matrix A (row-major)
+    double A[9] = {2, 3, 0, 0, 4, 0, 0, 0, 0}; // 2x2 matrix: [2 3; 0 4]
+    double b[2] = {5, 8};       // Right-hand side
+    int n = 2;
+    int incx = 1;
+
+    // Solve A*x = b (A is upper triangular)
+    // The solution will overwrite b
+    cblas_dtrsv(CblasRowMajor, CblasUpper, CblasNoTrans, CblasNonUnit, n, A, 3,
+                b, incx);
+    std::cout << "Solution x:\n";
+    for (int i = 0; i < n; ++i) {
+      std::cout << b[i] << "\n";
+    }
+  }
   return 0;
 }
