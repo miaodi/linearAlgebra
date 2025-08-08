@@ -11,8 +11,8 @@ namespace iterative_solver {
 
 template <typename VALTYPE>
 void givens_rotation(VALTYPE *const R, VALTYPE *const g, VALTYPE *const c,
-                     VALTYPE *const s, const VALTYPE beta, const int lda,
-                     const int j) {
+                     VALTYPE *const s, const VALTYPE beta, VALTYPE &resid,
+                     const int lda, const int j) {
   auto R_col_j = R + j * lda;
   // apply Givens rotation to R_col_j
   for (int i = 0; i < j; i++) {
@@ -29,12 +29,11 @@ void givens_rotation(VALTYPE *const R, VALTYPE *const g, VALTYPE *const c,
     c[j] = 1;
     s[j] = 0;
   }
-  std::cout << s[j] * R_col_j[j] + c[j] * beta << std::endl;
+
   R_col_j[j] = c[j] * R_col_j[j] - s[j] * beta;
   // apply Givens rotation to g
-  auto tmp = c[j] * g[j] - s[j] * g[j + 1];
-  g[j + 1] = s[j] * g[j] + c[j] * g[j + 1];
-  g[j] = tmp;
+  g[j] = c[j] * resid;
+  resid *= s[j];
 }
 
 template <typename VALTYPE> class GMRES {
@@ -69,11 +68,9 @@ public:
     _Q.setZero();
 
     _tmp.resize(size);
-    _g.resize(restart1);
+    _g.resize(_restart);
     _c.resize(_restart);
     _s.resize(_restart);
-    _y.resize(_restart);
-
     Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>> x_vec(x, size);
 
     VALTYPE resid, init_resid, beta;
@@ -89,7 +86,7 @@ public:
     std::cout << _Q << std::endl;
     int j, iter;
     for (iter = 0; iter < _max_iter;) {
-      init_resid = _g[0] = _Q.col(0).norm();
+      init_resid = resid = _Q.col(0).norm();
       if (init_resid < _abs_tol) {
         return error_code;
       }
@@ -115,28 +112,21 @@ public:
         // H[j+1][j] = ||v_j_ptr||
         beta = _Q.col(j + 1).norm();
         _Q.col(j + 1) = _Q.col(j + 1) / beta;
-        givens_rotation(_H.data(), _g.data(), _c.data(), _s.data(), beta,
+        givens_rotation(_H.data(), _g.data(), _c.data(), _s.data(), beta, resid,
                         _restart, j);
-        resid = std::abs(_g[j]);
         std::cout << "iter: " << iter << " "
-                  << "resid: " << resid << " "
-                  << "relative resid: " << resid / init_resid << std::endl;
-        if (resid < _abs_tol || resid < _rel_tol * init_resid) {
+                  << "resid: " << std::abs(resid) << " "
+                  << "relative resid: " << std::abs(resid) / init_resid << std::endl;
+        if (std::abs(resid) < _abs_tol ||
+            std::abs(resid) < _rel_tol * init_resid) {
           error_code = ErrorType::NO_ERROR;
           break;
         }
       }
-      _y.head(j) = _H.block(0, 0, j, j)
-                       .template triangularView<Eigen::Upper>()
-                       .solve(_g.head(j));
-
-      // _y.head(j) = _H.block(0, 0, j, j).colPivHouseholderQr().solve(_g.head(j));
-      std::cout << "error: "
-                << (_H.block(0, 0, j, j) * _y.head(j) - _g.head(j)).norm() /
-                       _g.head(j).norm()
-                << std::endl;
-      // std::cout << _y << std::endl;
-      x_vec += _Q.leftCols(j) * _y.head(j);
+      _H.block(0, 0, j, j)
+          .template triangularView<Eigen::Upper>()
+          .solveInPlace(_g.head(j));
+      x_vec += _Q.leftCols(j) * _g.head(j);
 
       vec_ops::copy_vec(size, b, _tmp.data());
       // b-= Ax_i
@@ -149,16 +139,15 @@ public:
   }
 
 private:
-  int _max_iter{100};
+  int _max_iter{1000};
   VALTYPE _abs_tol{0.0};
   VALTYPE _rel_tol{1e-8};
-  int _restart{27};
+  int _restart{100};
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _H;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _Q;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _g;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _c;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _s;
-  Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _y;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _tmp;
 };
 } // namespace iterative_solver
