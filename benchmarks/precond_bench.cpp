@@ -45,9 +45,8 @@ BENCHMARK_DEFINE_F(MyFixture, llist_small)(benchmark::State &state) {
       mat->rows, mat->ai[0], mat->AI(), mat->AJ(), mat->AV(), U);
 
   for (auto _ : state) {
-    matrix_utils::ICCLevelSymbolic0(mat->rows, mat->ai[0], U.ai.get(),
-                                    U.aj.get(), U.ai.get(), state.range(0),
-                                    ICC);
+    matrix_utils::ICCLevelSymbolic0(mat->rows, U.ai.get(), U.aj.get(),
+                                    U.ai.get(), state.range(0), ICC);
   }
 }
 
@@ -62,9 +61,8 @@ BENCHMARK_DEFINE_F(MyFixture, vector_merge_small)(benchmark::State &state) {
       mat->rows, mat->ai[0], mat->AI(), mat->AJ(), mat->AV(), U);
 
   for (auto _ : state) {
-    matrix_utils::ICCLevelSymbolic1(mat->rows, mat->ai[0], U.ai.get(),
-                                    U.aj.get(), U.ai.get(), state.range(0),
-                                    ICC);
+    matrix_utils::ICCLevelSymbolic1(mat->rows, U.ai.get(), U.aj.get(),
+                                    U.ai.get(), state.range(0), ICC);
   }
 }
 
@@ -84,9 +82,8 @@ BENCHMARK_DEFINE_F(MyFixture, vector_balanced_merge_small)
       mat->rows, mat->ai[0], mat->AI(), mat->AJ(), mat->AV(), U);
 
   for (auto _ : state) {
-    matrix_utils::ICCLevelSymbolic2(mat->rows, mat->ai[0], U.ai.get(),
-                                    U.aj.get(), U.ai.get(), state.range(0),
-                                    ICC);
+    matrix_utils::ICCLevelSymbolic2(mat->rows, U.ai.get(), U.aj.get(),
+                                    U.ai.get(), state.range(0), ICC);
   }
 }
 
@@ -106,9 +103,8 @@ BENCHMARK_DEFINE_F(MyFixture, vector_merge_1st_balanced_merge_small)
       mat->rows, mat->ai[0], mat->AI(), mat->AJ(), mat->AV(), U);
 
   for (auto _ : state) {
-    matrix_utils::ICCLevelSymbolic3(mat->rows, mat->ai[0], U.ai.get(),
-                                    U.aj.get(), U.ai.get(), state.range(0),
-                                    ICC);
+    matrix_utils::ICCLevelSymbolic3(mat->rows, U.ai.get(), U.aj.get(),
+                                    U.ai.get(), state.range(0), ICC);
   }
 }
 

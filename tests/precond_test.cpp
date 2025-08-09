@@ -72,20 +72,20 @@ TEST_F(precond_Test, icc_level_symbolic_factorize) {
     mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av,
                                      mat.mkl_base());
 
-    matrix_utils::ICCLevelSymbolic0(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                    U.aj.get(), U.ai.get(), lvl, ICC0);
+    matrix_utils::ICCLevelSymbolic0(mat.rows(), U.ai.get(), U.aj.get(),
+                                    U.ai.get(), lvl, ICC0);
     mkl_wrapper::mkl_sparse_mat matICC0(mat.rows(), mat.rows(), ICC0.ai,
                                         ICC0.aj, ICC0.av, mat.mkl_base());
-    matrix_utils::ICCLevelSymbolic1(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                    U.aj.get(), U.ai.get(), lvl, ICC1);
+    matrix_utils::ICCLevelSymbolic1(mat.rows(), U.ai.get(), U.aj.get(),
+                                    U.ai.get(), lvl, ICC1);
     mkl_wrapper::mkl_sparse_mat matICC1(mat.rows(), mat.rows(), ICC1.ai,
                                         ICC1.aj, ICC1.av, mat.mkl_base());
-    matrix_utils::ICCLevelSymbolic2(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                    U.aj.get(), U.ai.get(), lvl, ICC2);
+    matrix_utils::ICCLevelSymbolic2(mat.rows(), U.ai.get(), U.aj.get(),
+                                    U.ai.get(), lvl, ICC2);
     mkl_wrapper::mkl_sparse_mat matICC2(mat.rows(), mat.rows(), ICC2.ai,
                                         ICC2.aj, ICC2.av, mat.mkl_base());
-    matrix_utils::ICCLevelSymbolic3(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                    U.aj.get(), U.ai.get(), lvl, ICC3);
+    matrix_utils::ICCLevelSymbolic3(mat.rows(), U.ai.get(), U.aj.get(),
+                                    U.ai.get(), lvl, ICC3);
     mkl_wrapper::mkl_sparse_mat matICC3(mat.rows(), mat.rows(), ICC3.ai,
                                         ICC3.aj, ICC3.av, mat.mkl_base());
     auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();
@@ -138,10 +138,10 @@ TEST_F(precond_Test, icc_level_numeric_factorize) {
     mkl_wrapper::mkl_sparse_mat matU(mat.rows(), mat.rows(), U.ai, U.aj, U.av,
                                      mat.mkl_base());
 
-    matrix_utils::ICCLevelSymbolic0(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                    U.aj.get(), U.ai.get(), lvl, ICC0);
-    matrix_utils::ICCLevelNumeric(mat.rows(), mat.mkl_base(), U.ai.get(),
-                                  U.aj.get(), U.av.get(), U.ai.get(), lvl, 0.,
+    matrix_utils::ICCLevelSymbolic0(mat.rows(), U.ai.get(), U.aj.get(),
+                                    U.ai.get(), lvl, ICC0);
+    matrix_utils::ICCLevelNumeric(mat.rows(), U.ai.get(), U.aj.get(),
+                                  U.av.get(), U.ai.get(), lvl, 0.,
                                   ICC0.ai.get(), ICC0.aj.get(), ICC0.av.get());
     mkl_wrapper::mkl_sparse_mat matICC0(mat.rows(), mat.rows(), ICC0.ai,
                                         ICC0.aj, ICC0.av, mat.mkl_base());

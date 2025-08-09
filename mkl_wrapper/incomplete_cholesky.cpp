@@ -304,8 +304,8 @@ bool incomplete_cholesky_k_2::symbolic_factorize(
   }
 
   matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> ICC;
-  matrix_utils::ICCLevelSymbolic1(rows(), mkl_base(), ai.get(), aj.get(),
-                                  _diagPos.data(), _level, ICC);
+  matrix_utils::ICCLevelSymbolic1(rows(), ai.get(), aj.get(), _diagPos.data(),
+                                  _level, ICC);
   _ai = ICC.ai;
   _aj = ICC.aj;
   _av = ICC.av;
@@ -322,8 +322,8 @@ bool incomplete_cholesky_k_2::numeric_factorize(mkl_sparse_mat const *const A) {
   double shift = 0.;
 
   do {
-    if (!matrix_utils::ICCLevelNumeric(rows(), mkl_base(), ai.get(), aj.get(),
-                                       av.get(), _diagPos.data(), _level, shift,
+    if (!matrix_utils::ICCLevelNumeric(rows(), ai.get(), aj.get(), av.get(),
+                                       _diagPos.data(), _level, shift,
                                        _ai.get(), _aj.get(), _av.get())) {
       if (!_shift || ++iter > _nrestart)
         return false;

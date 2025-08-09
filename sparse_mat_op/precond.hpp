@@ -12,7 +12,7 @@ namespace matrix_utils {
 
 // NOTE: for level 0 ICC with Symmetric matrix input
 template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevel0SymSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
+void ICCLevel0SymSymbolic(const COLTYPE size, ROWTYPE const *ai,
                           COLTYPE const *aj, CSRMatrixType &icc) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
@@ -22,6 +22,7 @@ void ICCLevel0SymSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
   icc.rows = size;
   icc.cols = size;
   ResizeCSRAI(icc, size + 1);
+  const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
 
   ResizeCSRAJ(icc, nnz);
@@ -37,7 +38,7 @@ void ICCLevel0SymSymbolic(const COLTYPE size, const int base, ROWTYPE const *ai,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelSymbolic0(const COLTYPE size, const int base, ROWTYPE const *ai,
+void ICCLevelSymbolic0(const COLTYPE size, ROWTYPE const *ai,
                        COLTYPE const *aj, COLTYPE const *diag_pos,
                        const int lvl, CSRMatrixType &icc) {
   static_assert(
@@ -48,6 +49,7 @@ void ICCLevelSymbolic0(const COLTYPE size, const int base, ROWTYPE const *ai,
   icc.rows = size;
   icc.cols = size;
   ResizeCSRAI(icc, size + 1);
+  const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
   std::vector<COLTYPE> llist(size, NONE);
@@ -151,7 +153,7 @@ void ICCLevelSymbolic0(const COLTYPE size, const int base, ROWTYPE const *ai,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelSymbolic1(const COLTYPE size, const int base, ROWTYPE const *ai,
+void ICCLevelSymbolic1(const COLTYPE size, ROWTYPE const *ai,
                        COLTYPE const *aj, COLTYPE const *diag_pos,
                        const int lvl, CSRMatrixType &icc) {
   static_assert(
@@ -162,6 +164,7 @@ void ICCLevelSymbolic1(const COLTYPE size, const int base, ROWTYPE const *ai,
   icc.rows = size;
   icc.cols = size;
   ResizeCSRAI(icc, size + 1);
+  const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
   std::vector<COLTYPE> llist(size, NONE);
@@ -289,7 +292,7 @@ void ICCMerge(OutVec &out_vec, In1Iter in1_begin, In1Iter in1_end,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelSymbolic2(const COLTYPE size, const int base, ROWTYPE const *ai,
+void ICCLevelSymbolic2(const COLTYPE size, ROWTYPE const *ai,
                        COLTYPE const *aj, COLTYPE const *diag_pos,
                        const int lvl, CSRMatrixType &icc) {
   static_assert(
@@ -300,6 +303,7 @@ void ICCLevelSymbolic2(const COLTYPE size, const int base, ROWTYPE const *ai,
   icc.rows = size;
   icc.cols = size;
   ResizeCSRAI(icc, size + 1);
+  const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
   std::vector<COLTYPE> llist(size, NONE);
@@ -449,7 +453,7 @@ void ICCFirstMerge(OutVec &out_vec, In1PosIter in1p_begin, In1PosIter in1p_end,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelSymbolic3(const COLTYPE size, const int base, ROWTYPE const *ai,
+void ICCLevelSymbolic3(const COLTYPE size, ROWTYPE const *ai,
                        COLTYPE const *aj, COLTYPE const *diag_pos,
                        const int lvl, CSRMatrixType &icc) {
   static_assert(
@@ -460,6 +464,7 @@ void ICCLevelSymbolic3(const COLTYPE size, const int base, ROWTYPE const *ai,
   icc.rows = size;
   icc.cols = size;
   ResizeCSRAI(icc, size + 1);
+  const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
   std::vector<COLTYPE> llist(size, NONE);
@@ -613,11 +618,12 @@ void ICCLevelSymbolic3(const COLTYPE size, const int base, ROWTYPE const *ai,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool ICCLevelNumeric(const COLTYPE size, const int base, ROWTYPE const *ai,
+bool ICCLevelNumeric(const COLTYPE size, ROWTYPE const *ai,
                      COLTYPE const *aj, VALTYPE const *av,
                      COLTYPE const *diag_pos, const int lvl,
                      const VALTYPE omega, ROWTYPE const *icc_ai,
                      COLTYPE const *icc_aj, VALTYPE *icc_av) {
+  const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
   std::vector<COLTYPE> llist(size, NONE);
