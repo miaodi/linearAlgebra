@@ -63,6 +63,7 @@ template <typename R, typename C, typename V> struct CSRMatrix {
   using ROWTYPE = R;
   using COLTYPE = C;
   using VALTYPE = V;
+
   COLTYPE rows;
   COLTYPE cols;
 
@@ -84,6 +85,39 @@ template <typename R, typename C, typename V> struct CSRMatrix {
   COLTYPE *AJ() { return aj.get(); }
   VALTYPE *AV() { return av.get(); }
 
+  void ResizeAI(const size_t size) {
+    if (ai_size < size || ai == nullptr) {
+      std::shared_ptr<ROWTYPE[]> tmp(new ROWTYPE[size]);
+      if (ai != nullptr) {
+        std::copy(ai.get(), ai.get() + ai_size, tmp.get());
+      }
+      std::swap(ai, tmp);
+      ai_size = size;
+    }
+  }
+
+  void ResizeAJ(const size_t size) {
+    if (aj_size < size || aj == nullptr) {
+      std::shared_ptr<COLTYPE[]> tmp(new COLTYPE[size]);
+      if (aj != nullptr) {
+        std::copy(aj.get(), aj.get() + aj_size, tmp.get());
+      }
+      std::swap(aj, tmp);
+      aj_size = size;
+    }
+  }
+
+  void ResizeAV(const size_t size) {
+    if (av_size < size || av == nullptr) {
+      std::shared_ptr<VALTYPE[]> tmp(new VALTYPE[size]);
+      if (av != nullptr) {
+        std::copy(av.get(), av.get() + av_size, tmp.get());
+      }
+      std::swap(av, tmp);
+      av_size = size;
+    }
+  }
+
   CSRMatrix() = default;
 };
 
@@ -91,6 +125,7 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
   using ROWTYPE = R;
   using COLTYPE = C;
   using VALTYPE = V;
+
   COLTYPE rows;
   COLTYPE cols;
 
@@ -107,77 +142,30 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
   COLTYPE const *AJ() const { return aj.data(); }
   VALTYPE const *AV() const { return av.data(); }
 
+  ROWTYPE *AI() { return ai.data(); }
+  COLTYPE *AJ() { return aj.data(); }
+  VALTYPE *AV() { return av.data(); }
+
+  void ResizeAI(const size_t size) {
+    if (ai.size() < size) {
+      ai.resize(size);
+    }
+  }
+
+  void ResizeAJ(const size_t size) {
+    if (aj.size() < size) {
+      aj.resize(size);
+    }
+  }
+
+  void ResizeAV(const size_t size) {
+    if (av.size() < size) {
+      av.resize(size);
+    }
+  }
+
   template <class Archive> void serialize(Archive &ar) { ar(ai, aj, av); }
 };
-
-template <typename CSRMatrixType, bool preserve = false>
-void ResizeCSRAI(CSRMatrixType &mat, const size_t size) {
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
-  if constexpr (std::is_same_v<
-                    decltype(mat.ai),
-                    std::shared_ptr<typename CSRMatrixType::ROWTYPE[]>>) {
-    if (mat.ai_size < size || mat.ai == nullptr) {
-      std::shared_ptr<typename CSRMatrixType::ROWTYPE[]> tmp(
-          new CSRMatrixType::ROWTYPE[size]);
-      if constexpr (preserve) {
-        std::copy(mat.ai.get(), mat.ai.get() + mat.ai_size, tmp.get());
-      }
-      std::swap(mat.ai, tmp);
-      mat.ai_size = size;
-    }
-  } else if constexpr (std::is_same_v<
-                           decltype(mat.ai),
-                           std::vector<typename CSRMatrixType::ROWTYPE>>) {
-    mat.ai.resize(size);
-  }
-}
-
-template <typename CSRMatrixType, bool preserve = false>
-void ResizeCSRAJ(CSRMatrixType &mat, const size_t size) {
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
-  if constexpr (std::is_same_v<
-                    decltype(mat.aj),
-                    std::shared_ptr<typename CSRMatrixType::COLTYPE[]>>) {
-    if (mat.aj_size < size || mat.aj == nullptr) {
-      std::shared_ptr<typename CSRMatrixType::COLTYPE[]> tmp(
-          new CSRMatrixType::COLTYPE[size]);
-      if constexpr (preserve) {
-        std::copy(mat.aj.get(), mat.aj.get() + mat.aj_size, tmp.get());
-      }
-      std::swap(mat.aj, tmp);
-      mat.aj_size = size;
-    }
-  } else if constexpr (std::is_same_v<
-                           decltype(mat.aj),
-                           std::vector<typename CSRMatrixType::COLTYPE>>) {
-    mat.aj.resize(size);
-  }
-}
-
-template <typename CSRMatrixType, bool preserve = false>
-void ResizeCSRAV(CSRMatrixType &mat, const size_t size) {
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
-  if constexpr (std::is_same_v<
-                    decltype(mat.av),
-                    std::shared_ptr<typename CSRMatrixType::VALTYPE[]>>) {
-    if (mat.av_size < size || mat.av == nullptr) {
-      std::shared_ptr<typename CSRMatrixType::VALTYPE[]> tmp(
-          new CSRMatrixType::VALTYPE[size]);
-      if constexpr (preserve) {
-        std::copy(mat.av.get(), mat.av.get() + mat.av_size, tmp.get());
-      }
-      std::swap(mat.av, tmp);
-      mat.av_size = size;
-    }
-  } else if constexpr (std::is_same_v<
-                           decltype(mat.av),
-                           std::vector<typename CSRMatrixType::VALTYPE>>) {
-    mat.av.resize(size);
-  }
-}
 
 template <typename ROWTYPE = int, typename COLTYPE = int,
           typename VALTYPE = double>
@@ -710,23 +698,21 @@ bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
 /// allowed
 /// @param U strictly upper triangular matrix
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
-          typename CSRMatrixType>
+          ResizableCSRMatrixType CSRMatrixType>
 void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
               COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &L,
               std::vector<VALTYPE> &D, CSRMatrixType &U) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
 
   ROWTYPE nnz = ai[rows] - base;
   L.rows = rows;
   L.cols = rows;
-  ResizeCSRAI(L, rows + 1);
+  L.ResizeAI(rows + 1);
 
   U.rows = rows;
   U.cols = rows;
-  ResizeCSRAI(U, rows + 1);
+  U.ResizeAI(rows + 1);
 
   L.ai[0] = base;
   U.ai[0] = base;
@@ -765,12 +751,12 @@ void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
         LU_prefix[i].second += LU_prefix[i - 1].second;
       }
       const auto Lnnz = LU_prefix[nthreads].first - base;
-      ResizeCSRAJ(L, Lnnz);
-      ResizeCSRAV(L, Lnnz);
+      L.ResizeAJ(Lnnz);
+      L.ResizeAV(Lnnz);
 
       const auto Unnz = LU_prefix[nthreads].second - base;
-      ResizeCSRAJ(U, Unnz);
-      ResizeCSRAV(U, Unnz);
+      U.ResizeAJ(Unnz);
+      U.ResizeAV(Unnz);
     }
 
     ROWTYPE L_pos = LU_prefix[tid].first - base;
@@ -795,18 +781,16 @@ void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
 }
 
 template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
-          typename VALTYPE, typename CSRMatrixType>
+          typename VALTYPE, ResizableCSRMatrixType CSRMatrixType>
 void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
                    COLTYPE const *aj, VALTYPE const *av,
                    CSRMatrixType &tri_mat) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
 
   tri_mat.rows = rows;
   tri_mat.cols = rows;
-  ResizeCSRAI(tri_mat, rows + 1);
+  tri_mat.ResizeAI(rows + 1);
 
   tri_mat.ai[0] = base;
   std::vector<ROWTYPE> mid_pos(rows);
@@ -846,8 +830,8 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
       }
 
       const auto nnz = prefix[nthreads] - base;
-      ResizeCSRAJ(tri_mat, nnz);
-      ResizeCSRAV(tri_mat, nnz);
+      tri_mat.ResizeAJ(nnz);
+      tri_mat.ResizeAV(nnz);
     }
 
     ROWTYPE pos = prefix[tid] - base;
@@ -871,19 +855,16 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
 }
 
 template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
-          typename VALTYPE, typename CSRMatrixType>
+          typename VALTYPE, ResizableCSRMatrixType CSRMatrixType>
 void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
                       COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &F) {
   static_assert(TS == TriangularMatrix::U);
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
 
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
-
   F.rows = rows;
   F.cols = rows;
-  ResizeCSRAI(F, rows + 1);
+  F.ResizeAI(rows + 1);
 
   F.ai[0] = base;
 
@@ -942,8 +923,8 @@ void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
       std::inclusive_scan(prefix.get(), prefix.get() + nthreads + 1,
                           prefix.get());
       const ROWTYPE nnz = prefix[nthreads] - base;
-      ResizeCSRAJ(F, nnz);
-      ResizeCSRAV(F, nnz);
+      F.ResizeAJ(nnz);
+      F.ResizeAV(nnz);
     }
 
     tmp = 0;
@@ -1049,15 +1030,13 @@ void DiagVecMul(const COLTYPE n, const VALTYPE alpha, VALTYPE const *diag,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
-          typename CSRMatrixType>
+          ResizableCSRMatrixType CSRMatrixType>
 void Block(const COLTYPE rows, const int base, ROWTYPE const *ai,
            COLTYPE const *aj, VALTYPE const *av, const COLTYPE i,
            const COLTYPE j, const COLTYPE p, const COLTYPE q,
            CSRMatrixType &subMat) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
 
   if (i + p > rows) {
     std::cerr << "Block size exceeds matrix size" << std::endl;
@@ -1066,7 +1045,7 @@ void Block(const COLTYPE rows, const int base, ROWTYPE const *ai,
 
   subMat.rows = p;
   subMat.cols = q;
-  ResizeCSRAI(subMat, subMat.rows + 1);
+  subMat.ResizeAI(p + 1);
 
   subMat.ai[0] = base;
 
@@ -1099,8 +1078,8 @@ void Block(const COLTYPE rows, const int base, ROWTYPE const *ai,
       }
 
       const auto nnz = subMat.ai[p] - base;
-      ResizeCSRAJ(subMat, nnz);
-      ResizeCSRAV(subMat, nnz);
+      subMat.ResizeAJ(nnz);
+      subMat.ResizeAV(nnz);
     }
 
     const auto nnz = subMat.ai[p] - base;

@@ -1,32 +1,34 @@
 #pragma once
 
 #include "matrix_utils.hpp"
+#include "sparse_mat_traits.hpp"
 #include <forward_list>
 #include <omp.h>
 #include <ranges>
 #include <span>
-#include <type_traits>
 #include <vector>
 
+// for all preconditioner operators, assuming the diagonal entries are filled.
+// In other words, a zero value should be provided for the diagonal entries if
+// it is a void entry in A.
 namespace matrix_utils {
 
 // NOTE: for level 0 ICC with Symmetric matrix input
-template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
+template <typename ROWTYPE, typename COLTYPE,
+          ResizableCSRMatrixType CSRMatrixType>
 void ICCLevel0SymSymbolic(const COLTYPE size, ROWTYPE const *ai,
                           COLTYPE const *aj, CSRMatrixType &icc) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
                       CSRMatrixType>::value == true);
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
   icc.rows = size;
   icc.cols = size;
-  ResizeCSRAI(icc, size + 1);
+  icc.ResizeAI(size + 1);
   const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
 
-  ResizeCSRAJ(icc, nnz);
-  ResizeCSRAV(icc, nnz);
+  icc.ResizeAJ(nnz);
+  icc.ResizeAV(nnz);
 #pragma omp parallel for
   for (COLTYPE i = 0; i < size + 1; i++) {
     icc.ai[i] = ai[i];
@@ -38,17 +40,15 @@ void ICCLevel0SymSymbolic(const COLTYPE size, ROWTYPE const *ai,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelSymbolic0(const COLTYPE size, ROWTYPE const *ai,
-                       COLTYPE const *aj, COLTYPE const *diag_pos,
-                       const int lvl, CSRMatrixType &icc) {
+void ICCLevelSymbolic0(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                       COLTYPE const *diag_pos, const int lvl,
+                       CSRMatrixType &icc) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
                       CSRMatrixType>::value == true);
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
   icc.rows = size;
   icc.cols = size;
-  ResizeCSRAI(icc, size + 1);
+  icc.ResizeAI(size + 1);
   const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
@@ -56,7 +56,7 @@ void ICCLevelSymbolic0(const COLTYPE size, ROWTYPE const *ai,
   std::vector<ROWTYPE> jk(size);
   ROWTYPE nnz_icc = nnz;
   std::vector<COLTYPE> av_lvls(nnz_icc);
-  ResizeCSRAJ(icc, nnz_icc);
+  icc.ResizeAJ(nnz_icc);
   std::forward_list<std::pair<COLTYPE, COLTYPE>> current_row; // <col, lvl>
   typename std::forward_list<std::pair<COLTYPE, COLTYPE>>::iterator cur_row_it;
 
@@ -127,7 +127,7 @@ void ICCLevelSymbolic0(const COLTYPE size, ROWTYPE const *ai,
       else
         nnz_icc = nnz_icc * std::ceil(size * 1. / (j - base));
       av_lvls.resize(nnz_icc);
-      ResizeCSRAJ<CSRMatrixType, true>(icc, nnz_icc);
+      icc.ResizeAJ(nnz_icc);
     }
 
     cur_row_it = current_row.begin();
@@ -149,21 +149,20 @@ void ICCLevelSymbolic0(const COLTYPE size, ROWTYPE const *ai,
     }
     current_row.clear();
   }
-  ResizeCSRAV(icc, icc.ai[size] - base);
+  icc.ResizeAV(icc.ai[size] - base);
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelSymbolic1(const COLTYPE size, ROWTYPE const *ai,
-                       COLTYPE const *aj, COLTYPE const *diag_pos,
-                       const int lvl, CSRMatrixType &icc) {
+template <typename ROWTYPE, typename COLTYPE,
+          ResizableCSRMatrixType CSRMatrixType>
+void ICCLevelSymbolic1(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                       COLTYPE const *diag_pos, const int lvl,
+                       CSRMatrixType &icc) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
                       CSRMatrixType>::value == true);
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
   icc.rows = size;
   icc.cols = size;
-  ResizeCSRAI(icc, size + 1);
+  icc.ResizeAI(size + 1);
   const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
@@ -171,7 +170,7 @@ void ICCLevelSymbolic1(const COLTYPE size, ROWTYPE const *ai,
   std::vector<ROWTYPE> jk(size);
   ROWTYPE nnz_icc = nnz;
   std::vector<COLTYPE> av_lvls(nnz_icc);
-  ResizeCSRAJ(icc, nnz_icc);
+  icc.ResizeAJ(nnz_icc);
   std::vector<std::pair<COLTYPE, COLTYPE>> current_row; // <col, lvl>
   COLTYPE current_row_size_before, current_row_size_after, current_row_pos;
   typename std::vector<std::pair<COLTYPE, COLTYPE>>::iterator cur_row_it;
@@ -245,7 +244,7 @@ void ICCLevelSymbolic1(const COLTYPE size, ROWTYPE const *ai,
       else
         nnz_icc = nnz_icc * std::ceil(size * 1. / (j - base));
       av_lvls.resize(nnz_icc);
-      ResizeCSRAJ<CSRMatrixType, true>(icc, nnz_icc);
+      icc.ResizeAJ(nnz_icc);
     }
 
     //   update llist if necessary
@@ -265,7 +264,7 @@ void ICCLevelSymbolic1(const COLTYPE size, ROWTYPE const *ai,
 
     current_row.clear();
   }
-  ResizeCSRAV(icc, icc.ai[size] - base);
+  icc.ResizeAV(icc.ai[size] - base);
 }
 
 template <typename OutVec, typename In1Iter, typename In2Iter>
@@ -291,18 +290,17 @@ void ICCMerge(OutVec &out_vec, In1Iter in1_begin, In1Iter in1_end,
   }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelSymbolic2(const COLTYPE size, ROWTYPE const *ai,
-                       COLTYPE const *aj, COLTYPE const *diag_pos,
-                       const int lvl, CSRMatrixType &icc) {
+template <typename ROWTYPE, typename COLTYPE,
+          ResizableCSRMatrixType CSRMatrixType>
+void ICCLevelSymbolic2(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                       COLTYPE const *diag_pos, const int lvl,
+                       CSRMatrixType &icc) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
                       CSRMatrixType>::value == true);
-  static_assert(CSRResizable<CSRMatrixType>::value,
-                "CSRMatrixType must have a resizable method");
   icc.rows = size;
   icc.cols = size;
-  ResizeCSRAI(icc, size + 1);
+  icc.ResizeAI(size + 1);
   const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
@@ -310,7 +308,7 @@ void ICCLevelSymbolic2(const COLTYPE size, ROWTYPE const *ai,
   std::vector<ROWTYPE> jk(size);
   ROWTYPE nnz_icc = nnz;
   std::vector<COLTYPE> av_lvls(nnz_icc);
-  ResizeCSRAJ(icc, nnz_icc);
+  icc.ResizeAJ(nnz_icc);
   std::vector<std::pair<COLTYPE, COLTYPE>> current_row1,
       current_row2; // <col, lvl>
   std::vector<ROWTYPE> span_prefix1, span_prefix2;
@@ -389,7 +387,7 @@ void ICCLevelSymbolic2(const COLTYPE size, ROWTYPE const *ai,
       else
         nnz_icc = nnz_icc * std::ceil(size * 1. / (j - base));
       av_lvls.resize(nnz_icc);
-      ResizeCSRAJ<CSRMatrixType, true>(icc, nnz_icc);
+      icc.ResizeAJ(nnz_icc);
     }
 
     //   update llist if necessary
@@ -409,7 +407,7 @@ void ICCLevelSymbolic2(const COLTYPE size, ROWTYPE const *ai,
     span_prefix1.clear();
     current_row1.clear();
   }
-  ResizeCSRAV(icc, icc.ai[size] - base);
+  icc.ResizeAV(icc.ai[size] - base);
 }
 
 template <typename OutVec, typename In1PosIter, typename In1LvlIter,
@@ -452,10 +450,11 @@ void ICCFirstMerge(OutVec &out_vec, In1PosIter in1p_begin, In1PosIter in1p_end,
   }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename CSRMatrixType>
-void ICCLevelSymbolic3(const COLTYPE size, ROWTYPE const *ai,
-                       COLTYPE const *aj, COLTYPE const *diag_pos,
-                       const int lvl, CSRMatrixType &icc) {
+template <typename ROWTYPE, typename COLTYPE,
+          ResizableCSRMatrixType CSRMatrixType>
+void ICCLevelSymbolic3(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                       COLTYPE const *diag_pos, const int lvl,
+                       CSRMatrixType &icc) {
   static_assert(
       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
                       CSRMatrixType>::value == true);
@@ -463,7 +462,7 @@ void ICCLevelSymbolic3(const COLTYPE size, ROWTYPE const *ai,
                 "CSRMatrixType must have a resizable method");
   icc.rows = size;
   icc.cols = size;
-  ResizeCSRAI(icc, size + 1);
+  icc.ResizeAI(size + 1);
   const auto base = ai[0];
   const ROWTYPE nnz = ai[size] - base;
   const COLTYPE NONE = std::numeric_limits<COLTYPE>::max();
@@ -474,7 +473,7 @@ void ICCLevelSymbolic3(const COLTYPE size, ROWTYPE const *ai,
 
   ROWTYPE nnz_icc = nnz;
   std::vector<COLTYPE> av_lvls(nnz_icc);
-  ResizeCSRAJ(icc, nnz_icc);
+  icc.ResizeAJ(nnz_icc);
   std::vector<std::pair<COLTYPE, COLTYPE>> current_row1,
       current_row2; // <col, lvl>
   std::vector<ROWTYPE> span_prefix1, span_prefix2;
@@ -594,7 +593,7 @@ void ICCLevelSymbolic3(const COLTYPE size, ROWTYPE const *ai,
       else
         nnz_icc = nnz_icc * std::ceil(size * 1. / (j - base));
       av_lvls.resize(nnz_icc);
-      ResizeCSRAJ<CSRMatrixType, true>(icc, nnz_icc);
+      icc.ResizeAJ(nnz_icc);
     }
 
     //   update llist if necessary
@@ -614,13 +613,12 @@ void ICCLevelSymbolic3(const COLTYPE size, ROWTYPE const *ai,
     span_prefix1.clear();
     current_row1.clear();
   }
-  ResizeCSRAV(icc, icc.ai[size] - base);
+  icc.ResizeAV(icc.ai[size] - base);
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool ICCLevelNumeric(const COLTYPE size, ROWTYPE const *ai,
-                     COLTYPE const *aj, VALTYPE const *av,
-                     COLTYPE const *diag_pos, const int lvl,
+bool ICCLevelNumeric(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                     VALTYPE const *av, COLTYPE const *diag_pos, const int lvl,
                      const VALTYPE omega, ROWTYPE const *icc_ai,
                      COLTYPE const *icc_aj, VALTYPE *icc_av) {
   const auto base = ai[0];
@@ -696,6 +694,34 @@ bool ICCLevelNumeric(const COLTYPE size, ROWTYPE const *ai,
       icc_av[prec_i_idx_start - base] /= aii;
   }
   return true;
+}
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void ILULevel0Symbolic(const typename CSRMatrixType::COLTYPE size,
+                       typename CSRMatrixType::ROWTYPE const *ai,
+                       typename CSRMatrixType::COLTYPE const *aj,
+                       CSRMatrixType &icc) {
+  //   static_assert(
+  //       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
+  //                       CSRMatrixType>::value == true);
+  //   static_assert(CSRResizable<CSRMatrixType>::value,
+  //                 "CSRMatrixType must have a resizable method");
+  //   icc.rows = size;
+  //   icc.cols = size;
+  //   ResizeCSRAI(icc, size + 1);
+  //   const auto base = ai[0];
+  //   const ROWTYPE nnz = ai[size] - base;
+
+  //   ResizeCSRAJ(icc, nnz);
+  //   ResizeCSRAV(icc, nnz);
+  // #pragma omp parallel for
+  //   for (COLTYPE i = 0; i < size + 1; i++) {
+  //     icc.ai[i] = ai[i];
+  //   }
+  // #pragma omp parallel for
+  //   for (ROWTYPE i = 0; i < nnz; i++) {
+  //     icc.aj[i] = aj[i];
+  //   }
 }
 
 template <typename VT> class IdentityPrec {

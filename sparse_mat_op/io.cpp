@@ -7,7 +7,7 @@
 
 namespace matrix_utils {
 
-template <typename CSRMatrixType>
+template <ResizableCSRMatrixType CSRMatrixType>
 void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
                       const fast_matrix_market::read_options &options) {
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -22,9 +22,9 @@ void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
   csr_matrix.rows = mat.rows();
   csr_matrix.cols = mat.cols();
 
-  ResizeCSRAI(csr_matrix, mat.rows() + 1);
-  ResizeCSRAJ(csr_matrix, mat.nonZeros());
-  ResizeCSRAV(csr_matrix, mat.nonZeros());
+  csr_matrix.ResizeAI(mat.rows() + 1);
+  csr_matrix.ResizeAJ(mat.nonZeros());
+  csr_matrix.ResizeAV(mat.nonZeros());
 
   std::copy(mat.outerIndexPtr(), mat.outerIndexPtr() + mat.rows() + 1,
             csr_matrix.AI());

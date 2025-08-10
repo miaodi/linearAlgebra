@@ -4,6 +4,7 @@
 
 namespace matrix_utils {
 
+// NOTE: deprecated, use CSRMatrixType instead
 template <typename R, typename C, typename V> struct CSRMatrix;
 template <typename R, typename C, typename V> struct CSRMatrixVec;
 
@@ -15,6 +16,7 @@ struct CSRResizable<CSRMatrix<R, C, V>> : std::true_type {};
 template <typename R, typename C, typename V>
 struct CSRResizable<CSRMatrixVec<R, C, V>> : std::true_type {};
 
+// NOTE: deprecated, use CSRMatrixType instead
 template <typename R, typename C, typename V, typename CSRMatrixType>
 struct CSRMatrixFormat {
   static constexpr bool value =
@@ -22,6 +24,38 @@ struct CSRMatrixFormat {
       std::is_same_v<typename CSRMatrixType::COLTYPE, C> &&
       std::is_same_v<typename CSRMatrixType::VALTYPE, V>;
 };
+
+template <typename T>
+concept CSRMatrixType = requires(T obj) {
+  typename T::ROWTYPE;
+  typename T::COLTYPE;
+  typename T::VALTYPE;
+
+  // Check for member functions returning non-const pointers
+  { obj.AI() } -> std::same_as<typename T::ROWTYPE *>;
+  { obj.AJ() } -> std::same_as<typename T::COLTYPE *>;
+  { obj.AV() } -> std::same_as<typename T::VALTYPE *>;
+
+  // Check for member functions returning const pointers
+  {
+    static_cast<const T &>(obj).AI()
+    } -> std::same_as<typename T::ROWTYPE const *>;
+  {
+    static_cast<const T &>(obj).AJ()
+    } -> std::same_as<typename T::COLTYPE const *>;
+  {
+    static_cast<const T &>(obj).AV()
+    } -> std::same_as<typename T::VALTYPE const *>;
+};
+
+template <typename T>
+concept ResizableCSRMatrixType = CSRMatrixType<T> && requires(T obj) {
+  { obj.ResizeAI(std::declval<std::size_t>()) } -> std::same_as<void>;
+  { obj.ResizeAJ(std::declval<std::size_t>()) } -> std::same_as<void>;
+  { obj.ResizeAV(std::declval<std::size_t>()) } -> std::same_as<void>;
+};
+// template <typename T>
+// concept ResizableCSRMatrixType = true; // Temporarily remove constraints
 
 template <typename T> struct CSRMatrixRowType {
   using type = typename T::ROWTYPE;
