@@ -50,12 +50,35 @@ concept CSRMatrixType = requires(T obj) {
 
 template <typename T>
 concept ResizableCSRMatrixType = CSRMatrixType<T> && requires(T obj) {
-  { obj.ResizeAI(std::declval<std::size_t>()) } -> std::same_as<void>;
-  { obj.ResizeAJ(std::declval<std::size_t>()) } -> std::same_as<void>;
-  { obj.ResizeAV(std::declval<std::size_t>()) } -> std::same_as<void>;
+  {
+    obj.ResizeAI(std::declval<std::size_t>())
+    } -> std::same_as<typename T::ROWTYPE *>;
+  {
+    obj.ResizeAJ(std::declval<std::size_t>())
+    } -> std::same_as<typename T::COLTYPE *>;
+  {
+    obj.ResizeAV(std::declval<std::size_t>())
+    } -> std::same_as<typename T::VALTYPE *>;
 };
-// template <typename T>
-// concept ResizableCSRMatrixType = true; // Temporarily remove constraints
+
+template <typename T>
+concept Diagonaltype = requires(T obj) {
+  { obj.Diagonal() } -> std::same_as<typename T::ROWTYPE *>;
+  {
+    static_cast<const T &>(obj).Diagonal()
+    } -> std::same_as<typename T::ROWTYPE const *>;
+};
+
+template <typename T>
+concept ResizableDiagonalType = requires {
+  requires ResizableCSRMatrixType<T>;
+  requires Diagonaltype<T>;
+}
+&&requires(T obj) {
+  {
+    obj.ResizeDiagonal(std::declval<std::size_t>())
+    } -> std::same_as<typename T::ROWTYPE *>;
+};
 
 template <typename T> struct CSRMatrixRowType {
   using type = typename T::ROWTYPE;

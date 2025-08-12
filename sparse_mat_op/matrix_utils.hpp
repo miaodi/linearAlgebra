@@ -70,22 +70,28 @@ template <typename R, typename C, typename V> struct CSRMatrix {
   size_t ai_size{0};
   size_t aj_size{0};
   size_t av_size{0};
+  size_t diagonal_size{0};
   std::shared_ptr<ROWTYPE[]> ai;
   std::shared_ptr<COLTYPE[]> aj;
   std::shared_ptr<VALTYPE[]> av;
+  std::shared_ptr<ROWTYPE[]> diagonal;
 
   ROWTYPE Base() const { return ai[0]; }
   ROWTYPE NNZ() const { return ai[rows] - ai[0]; }
 
-  ROWTYPE const *AI() const { return ai.get(); }
-  COLTYPE const *AJ() const { return aj.get(); }
-  VALTYPE const *AV() const { return av.get(); }
+  ROWTYPE const *AI() const { return ai ? ai.get() : nullptr; }
+  COLTYPE const *AJ() const { return aj ? aj.get() : nullptr; }
+  VALTYPE const *AV() const { return av ? av.get() : nullptr; }
+  ROWTYPE const *Diagonal() const {
+    return diagonal ? diagonal.get() : nullptr;
+  }
 
-  ROWTYPE *AI() { return ai.get(); }
-  COLTYPE *AJ() { return aj.get(); }
-  VALTYPE *AV() { return av.get(); }
+  ROWTYPE *AI() { return ai ? ai.get() : nullptr; }
+  COLTYPE *AJ() { return aj ? aj.get() : nullptr; }
+  VALTYPE *AV() { return av ? av.get() : nullptr; }
+  ROWTYPE *Diagonal() { return diagonal ? diagonal.get() : nullptr; }
 
-  void ResizeAI(const size_t size) {
+  ROWTYPE *ResizeAI(const size_t size) {
     if (ai_size < size || ai == nullptr) {
       std::shared_ptr<ROWTYPE[]> tmp(new ROWTYPE[size]);
       if (ai != nullptr) {
@@ -94,9 +100,10 @@ template <typename R, typename C, typename V> struct CSRMatrix {
       std::swap(ai, tmp);
       ai_size = size;
     }
+    return ai.get();
   }
 
-  void ResizeAJ(const size_t size) {
+  COLTYPE *ResizeAJ(const size_t size) {
     if (aj_size < size || aj == nullptr) {
       std::shared_ptr<COLTYPE[]> tmp(new COLTYPE[size]);
       if (aj != nullptr) {
@@ -105,9 +112,10 @@ template <typename R, typename C, typename V> struct CSRMatrix {
       std::swap(aj, tmp);
       aj_size = size;
     }
+    return aj.get();
   }
 
-  void ResizeAV(const size_t size) {
+  VALTYPE *ResizeAV(const size_t size) {
     if (av_size < size || av == nullptr) {
       std::shared_ptr<VALTYPE[]> tmp(new VALTYPE[size]);
       if (av != nullptr) {
@@ -116,6 +124,19 @@ template <typename R, typename C, typename V> struct CSRMatrix {
       std::swap(av, tmp);
       av_size = size;
     }
+    return av.get();
+  }
+
+  ROWTYPE *ResizeDiagonal(const size_t size) {
+    if (diagonal_size < size || diagonal == nullptr) {
+      std::shared_ptr<ROWTYPE[]> tmp(new ROWTYPE[size]);
+      if (diagonal != nullptr) {
+        std::copy(diagonal.get(), diagonal.get() + diagonal_size, tmp.get());
+      }
+      std::swap(diagonal, tmp);
+      diagonal_size = size;
+    }
+    return diagonal.get();
   }
 
   CSRMatrix() = default;
@@ -146,22 +167,25 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
   COLTYPE *AJ() { return aj.data(); }
   VALTYPE *AV() { return av.data(); }
 
-  void ResizeAI(const size_t size) {
+  ROWTYPE *ResizeAI(const size_t size) {
     if (ai.size() < size) {
       ai.resize(size);
     }
+    return ai.data();
   }
 
-  void ResizeAJ(const size_t size) {
+  COLTYPE *ResizeAJ(const size_t size) {
     if (aj.size() < size) {
       aj.resize(size);
     }
+    return aj.data();
   }
 
-  void ResizeAV(const size_t size) {
+  VALTYPE *ResizeAV(const size_t size) {
     if (av.size() < size) {
       av.resize(size);
     }
+    return av.data();
   }
 
   template <class Archive> void serialize(Archive &ar) { ar(ai, aj, av); }

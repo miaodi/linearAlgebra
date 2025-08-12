@@ -696,32 +696,116 @@ bool ICCLevelNumeric(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
   return true;
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
-void ILULevel0Symbolic(const typename CSRMatrixType::COLTYPE size,
-                       typename CSRMatrixType::ROWTYPE const *ai,
-                       typename CSRMatrixType::COLTYPE const *aj,
-                       CSRMatrixType &icc) {
-  //   static_assert(
-  //       CSRMatrixFormat<ROWTYPE, COLTYPE, typename CSRMatrixType::VALTYPE,
-  //                       CSRMatrixType>::value == true);
-  //   static_assert(CSRResizable<CSRMatrixType>::value,
-  //                 "CSRMatrixType must have a resizable method");
-  //   icc.rows = size;
-  //   icc.cols = size;
-  //   ResizeCSRAI(icc, size + 1);
-  //   const auto base = ai[0];
-  //   const ROWTYPE nnz = ai[size] - base;
+template <ResizableDiagonalType CSRMatrixType> struct ILULevel0Symbolic {
+  bool operator()(const typename CSRMatrixType::COLTYPE size,
+                  typename CSRMatrixType::ROWTYPE const *ai,
+                  typename CSRMatrixType::COLTYPE const *aj,
+                  CSRMatrixType &ilu) {
+    ilu.rows = size;
+    ilu.cols = size;
+    ilu.ResizeAI(size + 1);
+    ilu.ResizeDiagonal(size);
+    const auto base = ai[0];
+    const typename CSRMatrixType::ROWTYPE nnz = ai[size] - base;
 
-  //   ResizeCSRAJ(icc, nnz);
-  //   ResizeCSRAV(icc, nnz);
-  // #pragma omp parallel for
-  //   for (COLTYPE i = 0; i < size + 1; i++) {
-  //     icc.ai[i] = ai[i];
-  //   }
-  // #pragma omp parallel for
-  //   for (ROWTYPE i = 0; i < nnz; i++) {
-  //     icc.aj[i] = aj[i];
-  //   }
+    ilu.ResizeAJ(nnz);
+    ilu.ResizeAV(nnz);
+
+#pragma omp parallel for
+    for (typename CSRMatrixType::COLTYPE i = 0; i < size + 1; i++) {
+      ilu.ai[i] = ai[i];
+    }
+#pragma omp parallel for
+    for (typename CSRMatrixType::ROWTYPE i = 0; i < nnz; i++) {
+      ilu.aj[i] = aj[i];
+    }
+
+    bool success = true;
+
+#pragma omp parallel for
+    for (typename CSRMatrixType::COLTYPE i = 0; i < size; i++) {
+      auto it = std::find(ilu.aj.get() + ilu.ai[i] - base,
+                          ilu.aj.get() + ilu.ai[i + 1] - base, i + base);
+      if (it == ilu.aj.get() + ilu.ai[i + 1] - base) {
+        success = false;
+        ilu.diagonal[i] =
+            std::numeric_limits<typename CSRMatrixType::ROWTYPE>::max();
+      } else {
+        ilu.diagonal[i] =
+            std::distance(ilu.aj.get() + ilu.ai[i] - base, it) + base;
+      }
+    }
+    return success;
+  }
+};
+
+template <ResizableDiagonalType CSRMatrixType> struct ILULevelSymbolic {
+  ILULevelSymbolic() = default;
+  bool operator()(const typename CSRMatrixType::COLTYPE size,
+                  typename CSRMatrixType::ROWTYPE const *ai,
+                  typename CSRMatrixType::COLTYPE const *aj, const int lvl,
+                  CSRMatrixType &ilu);
+
+  std::vector<int> _levels; // level for each element
+  std::vector<std::pair<typename CSRMatrixType::COLTYPE,
+                        int>>
+      _current_row; // <col, lvl> 0-based
+  std::vector<std::pair<typename CSRMatrixType::COLTYPE,
+                        int>>
+      _current_row2; // <col, lvl> 0-based used for merging
+};
+
+template <ResizableDiagonalType CSRMatrixType>
+bool ILULevelNumeric(const typename CSRMatrixType::COLTYPE size,
+                     typename CSRMatrixType::ROWTYPE const *ai,
+                     typename CSRMatrixType::COLTYPE const *aj,
+                     typename CSRMatrixType::VALTYPE const *av, const int lvl,
+                     CSRMatrixType &ilu) {
+  const auto base = ai[0];
+  typename CSRMatrixType::ROWTYPE i_idx, ilu_i_idx, k_idx, j_idx2, j_idx;
+  typename CSRMatrixType::COLTYPE j, k;
+
+  auto const *ilu_ai = ilu.AI();
+  auto const *ilu_aj = ilu.AJ();
+  auto *ilu_av = ilu.AV();
+  auto const *ilu_diag = ilu.Diagonal();
+  typename CSRMatrixType::VALTYPE akk, aik;
+
+  for (typename CSRMatrixType::COLTYPE i = 0; i < size; i++) {
+    // initialize the current row's nonzeros
+    i_idx = ai[i] - base;
+    for (ilu_i_idx = ilu_ai[i] - base; ilu_i_idx < ilu_ai[i + 1] - base;
+         ilu_i_idx++) {
+      if (i_idx == ai[i + 1] - base || aj[i_idx] != ilu_aj[ilu_i_idx]) {
+        ilu_av[ilu_i_idx] = 0; // initialize to zero
+      } else {
+        ilu_av[ilu_i_idx] = av[i_idx++]; // copy the value
+      }
+    }
+    k_idx = ilu_ai[i] - base;
+    while (true) {
+      k = ilu_aj[k_idx] - base;
+      if (k >= i) {
+        break;
+      }
+      akk = ilu_av[ilu_diag[k] - base];
+      ilu_av[k_idx] /= akk; // a_{ik} = a_{ik} / a_{kk}
+      aik = ilu_av[k_idx];
+
+      j_idx2 = k_idx; // j_idx2 is for ith row, j_idx is for kth row
+      for (j_idx = ilu_diag[k] - base + 1; j_idx < ilu_ai[k + 1] - base;) {
+        if (ilu_aj[j_idx] == ilu_aj[j_idx2]) {
+          ilu_av[j_idx++] -= aik * ilu_av[j_idx2++];
+        } else if (ilu_aj[j_idx] < ilu_aj[j_idx2]) {
+          j_idx++;
+        } else {
+          j_idx2++;
+        }
+      }
+      k_idx++;
+    }
+  }
+  return true;
 }
 
 template <typename VT> class IdentityPrec {

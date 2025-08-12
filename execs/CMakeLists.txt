@@ -28,4 +28,4 @@ add_executable(test_chol test_chol.cpp)
 target_link_libraries(test_chol PRIVATE ${libs})
 
 add_executable(test_gmres gmres.cpp)
-target_link_libraries(test_gmres PRIVATE ${libs})
+target_link_libraries(test_gmres PRIVATE ${libs} cxxopts)
