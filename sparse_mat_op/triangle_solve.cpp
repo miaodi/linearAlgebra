@@ -2,14 +2,12 @@
 
 namespace matrix_utils {
 template void ForwardSubstitution<int, int, double>(
-    const int size, const int base, int const *ai, int const *aj,
-    double const *av, double const *const b, double *const x);
+    const int size, const int base, int const *ai_start, int const *ai_end,
+    int const *aj, double const *av, double const *const b, double *const x);
 
-template void
-BackwardSubstitution<int, int, double>(const int size, const int base,
-                                       int const *ai, int const *aj,
-                                       double const *av, double const *diag,
-                                       double const *const b, double *const x);
+template void BackwardSubstitution<int, int, double>(
+    const int size, const int base, int const *ai_start, int const *ai_end,
+    int const *aj, double const *av, double const *const b, double *const x);
 
 template void ForwardSubstitutionT<int, int, double>(
     const int size, const int base, int const *ai, int const *aj,

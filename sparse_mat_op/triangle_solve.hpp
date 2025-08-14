@@ -24,18 +24,20 @@ namespace matrix_utils {
 /// @tparam VALTYPE
 /// @param size
 /// @param base
-/// @param ai
+/// @param ai_start
+/// @param ai_end
 /// @param aj
 /// @param av
 /// @param rhs
 /// @param x
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ForwardSubstitution(const COLTYPE size, const int base, ROWTYPE const *ai,
+void ForwardSubstitution(const COLTYPE size, const ROWTYPE base,
+                         ROWTYPE const *ai_start, ROWTYPE const *ai_end,
                          COLTYPE const *aj, VALTYPE const *av,
                          VALTYPE const *const b, VALTYPE *const x) {
   for (COLTYPE i = 0; i < size; i++) {
     VALTYPE val = 0;
-    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+    for (ROWTYPE j = ai_start[i] - base; j < ai_end[i] - base; j++) {
       val += av[j] * x[aj[j] - base];
     }
     x[i] = b[i] - val;
@@ -50,23 +52,26 @@ void ForwardSubstitution(const COLTYPE size, const int base, ROWTYPE const *ai,
 /// @tparam VALTYPE
 /// @param size
 /// @param base
-/// @param ai   csr of the strict upper triangular matrix
+/// @param ai_start diagonal of each row
+/// @param ai_end end of each row
 /// @param aj
 /// @param av
 /// @param diag diagonal vector
 /// @param b
 /// @param x
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void BackwardSubstitution(const COLTYPE size, const int base, ROWTYPE const *ai,
+void BackwardSubstitution(const COLTYPE size, const ROWTYPE base,
+                          ROWTYPE const *ai_start, ROWTYPE const *ai_end,
                           COLTYPE const *aj, VALTYPE const *av,
-                          VALTYPE const *diag, VALTYPE const *const b,
-                          VALTYPE *const x) {
+                          VALTYPE const *const b, VALTYPE *const x) {
   for (COLTYPE i = size - 1; i >= 0; i--) {
     VALTYPE val = 0;
-    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+
+    const COLTYPE diag_idx = ai_start[i] - base;
+    for (ROWTYPE j = ai_end[i] - base - 1; j > ai_start[i] - base; j--) {
       val += av[j] * x[aj[j] - base];
     }
-    x[i] = (b[i] - val) / diag[i];
+    x[i] = (b[i] - val) / av[diag_idx];
   }
 }
 

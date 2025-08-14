@@ -58,8 +58,8 @@ BENCHMARK_DEFINE_F(MyFixture, SerialForward)(benchmark::State &state) {
   for (auto _ : state) {
     for (int i = 0; i < state.range(0); i++) {
       matrix_utils::ForwardSubstitution(L.rows, L.Base(), L.ai.get(),
-                                        L.aj.get(), L.av.get(), b.data(),
-                                        x.data());
+                                        L.ai.get() + 1, L.aj.get(), L.av.get(),
+                                        b.data(), x.data());
     }
   }
 }
