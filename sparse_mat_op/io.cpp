@@ -2,13 +2,12 @@
 #include "matrix_utils.hpp"
 #include "sparse_mat_traits.hpp"
 #include <Eigen/Sparse>
-#include <algorithm>
 #include <fast_matrix_market/app/Eigen.hpp>
 #include <fast_matrix_market/app/triplet.hpp>
 
 namespace matrix_utils {
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableCSRMatrixType CSRMatrixType>
 void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
                       const fast_matrix_market::read_options &options) {
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -24,51 +23,14 @@ void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
   csr_matrix.cols = mat.cols();
 
   csr_matrix.ResizeAI(mat.rows() + 1);
-  csr_matrix.ResizeAJ(mat.nonZeros() +
-                      mat.rows()); // in case diagonal is not provided
-  csr_matrix.ResizeAV(mat.nonZeros() +
-                      mat.rows()); // in case diagonal is not provided
-  csr_matrix.ResizeDiagonal(mat.rows());
+  csr_matrix.ResizeAJ(mat.nonZeros());
+  csr_matrix.ResizeAV(mat.nonZeros());
 
-  const ROWTYPE base = mat.innerIndexPtr()[0];
-  assert(base == 0);
-
-  auto *ai = csr_matrix.AI();
-  auto *aj = csr_matrix.AJ();
-  auto *av = csr_matrix.AV();
-  auto *diagonal = csr_matrix.Diagonal();
-  ai[0] = 0;
-  ROWTYPE row_nnz;
-  for (COLTYPE i = 0; i < mat.rows(); ++i) {
-    bool has_diag = false;
-    row_nnz = ai[i];
-    assert(std::is_sorted(mat.innerIndexPtr() + mat.outerIndexPtr()[i],
-                          mat.innerIndexPtr() + mat.outerIndexPtr()[i + 1],
-                          std::less<COLTYPE>()));
-    for (COLTYPE j = mat.outerIndexPtr()[i]; j < mat.outerIndexPtr()[i + 1];
-         ++j) {
-      if (mat.innerIndexPtr()[j] == i) {
-        diagonal[i] = row_nnz;
-        has_diag = true;
-      } else if (!has_diag && mat.innerIndexPtr()[j] > i) {
-        // insert a zero diagonal entry
-        aj[row_nnz] = i;
-        av[row_nnz] = VALTYPE(0);
-        diagonal[i] = row_nnz++;
-        has_diag = true;
-      }
-      aj[row_nnz] = mat.innerIndexPtr()[j];
-      av[row_nnz] = mat.valuePtr()[j];
-      row_nnz++;
-    }
-    if (!has_diag) {
-      // insert a zero diagonal entry
-      aj[row_nnz] = i;
-      av[row_nnz] = VALTYPE(0);
-      diagonal[i] = row_nnz++;
-    }
-    ai[i + 1] = row_nnz;
-  }
+  std::copy(mat.outerIndexPtr(), mat.outerIndexPtr() + mat.rows() + 1,
+            csr_matrix.AI());
+  std::copy(mat.innerIndexPtr(), mat.innerIndexPtr() + mat.nonZeros(),
+            csr_matrix.AJ());
+  std::copy(mat.valuePtr(), mat.valuePtr() + mat.nonZeros(), csr_matrix.AV());
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>

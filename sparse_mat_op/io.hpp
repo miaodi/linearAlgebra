@@ -3,7 +3,7 @@
 #include <fast_matrix_market/fast_matrix_market.hpp>
 #include <istream>
 namespace matrix_utils {
-template <ResizableDiagonalType CSRMatrixType>
+template <typename CSRMatrixType>
 void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
                       const fast_matrix_market::read_options &options = {});
 
