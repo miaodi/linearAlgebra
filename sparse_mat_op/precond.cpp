@@ -11,7 +11,7 @@ bool ILULevelSymbolic<CSRMatrixType>::operator()(
   if (lvl < 0) {
     return false;
   } else if (lvl == 0) {
-    return ILULevel0Symbolic<CSRMatrixType>()(size, ai, aj, ilu);
+    return ILULevel0Symbolic(size, ai, aj, ilu);
   }
   ilu.rows = size;
   ilu.cols = size;
@@ -84,7 +84,8 @@ bool ILULevelSymbolic<CSRMatrixType>::operator()(
     }
     ilu_ai[i + 1] = ilu_ai[i] + _current_row.size() - 1;
     cur_nnz = ilu_ai[i + 1] - base;
-    assert(_current_row[k_idx].first == i);
+    if (_current_row[k_idx].first != i)
+      return false;
     ilu_diag[i] = ilu_ai[i] + k_idx;
 
     // copy to ilu aj and _levels
@@ -134,5 +135,66 @@ template bool ICCLevelNumeric<int, int, double>(
     int const *diag_pos, const int lvl, const double omega, int const *icc_ai,
     int const *icc_aj, double *icc_av);
 
+template <ResizableDiagonalType CSRMatrixType>
+bool ILULevelNumeric(const typename CSRMatrixType::COLTYPE size,
+                     typename CSRMatrixType::ROWTYPE const *ai,
+                     typename CSRMatrixType::COLTYPE const *aj,
+                     typename CSRMatrixType::VALTYPE const *av, const int lvl,
+                     CSRMatrixType &ilu) {
+  const auto base = ai[0];
+  typename CSRMatrixType::ROWTYPE i_idx, ilu_i_idx, k_idx, j_idx2, j_idx;
+  typename CSRMatrixType::COLTYPE j, k;
+
+  auto const *ilu_ai = ilu.AI();
+  auto const *ilu_aj = ilu.AJ();
+  auto *ilu_av = ilu.AV();
+  auto const *ilu_diag = ilu.Diagonal();
+  typename CSRMatrixType::VALTYPE akk, aik;
+
+  for (typename CSRMatrixType::COLTYPE i = 0; i < size; i++) {
+    // std::cout << "i: " << i << std::endl;
+    // initialize the current row's nonzeros
+    i_idx = ai[i] - base;
+    for (ilu_i_idx = ilu_ai[i] - base; ilu_i_idx < ilu_ai[i + 1] - base;
+         ilu_i_idx++) {
+      if (i_idx == ai[i + 1] - base || aj[i_idx] != ilu_aj[ilu_i_idx]) {
+        ilu_av[ilu_i_idx] = 0; // initialize to zero
+      } else {
+        ilu_av[ilu_i_idx] = av[i_idx++]; // copy the value
+      }
+    }
+    k_idx = ilu_ai[i] - base;
+    while (true) {
+      k = ilu_aj[k_idx] - base;
+      if (k >= i) {
+        break;
+      }
+      akk = ilu_av[ilu_diag[k] - base];
+      if (akk == 0) {
+        // akk = ilu_av[ilu_diag[k] - base] = 1e-16;
+        return false;
+      }
+      ilu_av[k_idx] /= akk; // a_{ik} = a_{ik} / a_{kk}
+      aik = ilu_av[k_idx];
+
+      j_idx2 = k_idx; // j_idx2 is for ith row, j_idx is for kth row
+      for (j_idx = ilu_diag[k] - base + 1; j_idx < ilu_ai[k + 1] - base;) {
+        if (ilu_aj[j_idx] == ilu_aj[j_idx2]) {
+          ilu_av[j_idx++] -= aik * ilu_av[j_idx2++];
+        } else if (ilu_aj[j_idx] < ilu_aj[j_idx2]) {
+          j_idx++;
+        } else {
+          j_idx2++;
+        }
+      }
+      k_idx++;
+    }
+  }
+  return true;
+}
+
 template struct ILULevelSymbolic<matrix_utils::CSRMatrix<int, int, double>>;
+template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>(
+    const int size, int const *ai, int const *aj, double const *av,
+    const int lvl, matrix_utils::CSRMatrix<int, int, double> &ilu);
 } // namespace matrix_utils

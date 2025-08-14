@@ -35,13 +35,27 @@ int main(int argc, char **argv) {
   matrix_utils::writeSVG(csr_matrix.rows, csr_matrix.cols, csr_matrix.AI(),
                          csr_matrix.AJ(), out0);
   out0.close();
+  bool success = false;
   {
+    std::cout << "Symbolic ILU factorization..." << std::endl;
     matrix_utils::ILULevelSymbolic<decltype(ilu_matrix)> ilu;
-    ilu(csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(), level, ilu_matrix);
-    matrix_utils::ILULevelNumeric(csr_matrix.rows, csr_matrix.AI(),
-                                  csr_matrix.AJ(), csr_matrix.AV(), level,
-                                  ilu_matrix);
-
+    success = ilu(csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(), level,
+                  ilu_matrix);
+    if (!success) {
+      std::cout << "Symbolic ILU factorization failed." << std::endl;
+      return -1;
+    }
+    std::cout << "Symbolic ILU factorization done. nnz: " << ilu_matrix.NNZ()
+              << std::endl; 
+    std::cout << "Numeric ILU factorization..." << std::endl;
+    success = matrix_utils::ILULevelNumeric(csr_matrix.rows, csr_matrix.AI(),
+                                            csr_matrix.AJ(), csr_matrix.AV(),
+                                            level, ilu_matrix);
+    if (!success) {
+      std::cout << "Numeric ILU factorization failed." << std::endl;
+      return -1;
+    }
+    std::cout << "ILU factorization done." << std::endl;
     std::ofstream out0("ilu_csr.svg");
     matrix_utils::writeSVG(ilu_matrix.rows, ilu_matrix.cols, ilu_matrix.AI(),
                            ilu_matrix.AJ(), out0);
@@ -61,7 +75,7 @@ int main(int argc, char **argv) {
   iterative_solver::GMRES<double> gmres_solver;
   gmres_solver.setMaxIter(10000000);
   gmres_solver.setRelTol(1e-8);
-  gmres_solver.setRestart(100000);
+  gmres_solver.setRestart(1000);
   gmres_solver(&spmv, &identity_prec, b.data(), x.data());
 
   // {
