@@ -80,7 +80,7 @@ BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
   std::vector<int> iperm(L.rows);
   std::vector<int> prefix;
   auto lvls = matrix_utils::TopologicalSort2<matrix_utils::TriangularMatrix::L>(
-      L.rows, L.Base(), L.ai.get(), L.aj.get(), iperm, prefix);
+      L.rows, L.ai.get(), L.aj.get(), iperm, prefix);
   for (auto _ : state) {
     for (int i = 0; i < state.range(0); i++) {
       matrix_utils::LevelScheduleForwardSubstitution(

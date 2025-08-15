@@ -584,18 +584,25 @@ using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
 
 enum TriangularMatrix { L = 0, U = 1 };
 
-template <TriangularMatrix TS = L, typename ROWTYPE, typename COLTYPE,
-          typename VEC>
-COLTYPE TopologicalSort(const COLTYPE nodes, const int base, ROWTYPE const *ai,
-                        COLTYPE const *aj, VEC &iperm, VEC &prefix) {
-  iperm.reserve(nodes);
-  iperm.clear();
+template <typename ROWTYPE, typename COLTYPE> struct TopologicalSort {
+  template <TriangularMatrix TS = L>
+  COLTYPE operator()(const COLTYPE nodes, ROWTYPE const *ai, COLTYPE const *aj,
+                     COLTYPE *iperm, COLTYPE *prefix);
+
+  std::vector<COLTYPE> _degrees;
+  std::vector<ROWTYPE> _t_ai;
+  std::vector<COLTYPE> _t_aj;
+  COLTYPE _start, _end, _inc;
+};
+
+template <TriangularMatrix TS = L, typename ROWTYPE, typename COLTYPE>
+COLTYPE TopologicalSort(const COLTYPE nodes, ROWTYPE const *ai,
+                        COLTYPE const *aj, COLTYPE *iperm, COLTYPE *prefix) {
   std::vector<int> degrees(nodes);
-  prefix.reserve(std::max(1, nodes / 100));
-  prefix.resize(1);
   prefix[0] = 0;
   prefix.push_back(prefix.back());
   COLTYPE start, end, inc;
+  const auto base = ai[0];
   if constexpr (TS == L) {
     start = 0;
     end = nodes;
@@ -640,8 +647,9 @@ COLTYPE TopologicalSort(const COLTYPE nodes, const int base, ROWTYPE const *ai,
 
 template <TriangularMatrix TS = L, typename ROWTYPE, typename COLTYPE,
           typename VEC>
-COLTYPE TopologicalSort2(const COLTYPE nodes, const int base, ROWTYPE const *ai,
+COLTYPE TopologicalSort2(const COLTYPE nodes, ROWTYPE const *ai,
                          COLTYPE const *aj, VEC &iperm, VEC &prefix) {
+  const auto base = ai[0];
   std::vector<int> degrees(nodes, 0);
   COLTYPE start, end, inc;
   if constexpr (TS == L) {

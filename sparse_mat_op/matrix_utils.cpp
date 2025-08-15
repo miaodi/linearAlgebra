@@ -43,21 +43,56 @@ template void symPermute<int, int, double>(const int rows, const int base,
                                            int *permed_ai, int *permed_aj,
                                            double *permed_av);
 
+template <typename ROWTYPE, typename COLTYPE>
+template <TriangularMatrix TS>
+COLTYPE TopologicalSort<ROWTYPE, COLTYPE>::operator()<TS>(const COLTYPE nodes,
+                                                          ROWTYPE const *ai,
+                                                          COLTYPE const *aj,
+                                                          COLTYPE *iperm,
+                                                          COLTYPE *prefix) {
+  _degrees.resize(nodes);
+  const auto base = ai[0];
+  const auto nnz = ai[nodes] - base;
+
+  _t_ai.resize(nodes + 1);
+  _t_aj.resize(nnz);
+
+  //   reverse graph
+  ParallelTranspose2(nodes, nodes, base, ai, aj, (double *)nullptr,
+                     _t_ai.data(), _t_aj.data(), (double *)nullptr);
+
+  if constexpr (TS == TriangularMatrix::L) {
+    _start = 0;
+    _end = nodes;
+    _inc = 1;
+  } else {
+    _start = nodes - 1;
+    _end = -1;
+    _inc = -1;
+  }
+
+  //   node degrees
+  for (COLTYPE i = _start; i != _end; i += _inc) {
+    _degrees[i] = ai[i + 1] - ai[i];
+    if(_degrees[i]==)
+  }
+}
+
 template int TopologicalSort<TriangularMatrix::L, int, int, std::vector<int>>(
-    const int nodes, const int base, int const *ai, int const *aj,
-    std::vector<int> &iperm, std::vector<int> &prefix);
+    const int nodes, int const *ai, int const *aj, std::vector<int> &iperm,
+    std::vector<int> &prefix);
 
 template int TopologicalSort<TriangularMatrix::U, int, int, std::vector<int>>(
-    const int nodes, const int base, int const *ai, int const *aj,
-    std::vector<int> &iperm, std::vector<int> &prefix);
+    const int nodes, int const *ai, int const *aj, std::vector<int> &iperm,
+    std::vector<int> &prefix);
 
 template int TopologicalSort2<TriangularMatrix::L, int, int, std::vector<int>>(
-    const int nodes, const int base, int const *ai, int const *aj,
-    std::vector<int> &iperm, std::vector<int> &prefix);
+    const int nodes, int const *ai, int const *aj, std::vector<int> &iperm,
+    std::vector<int> &prefix);
 
 template int TopologicalSort2<TriangularMatrix::U, int, int, std::vector<int>>(
-    const int nodes, const int base, int const *ai, int const *aj,
-    std::vector<int> &iperm, std::vector<int> &prefix);
+    const int nodes, int const *ai, int const *aj, std::vector<int> &iperm,
+    std::vector<int> &prefix);
 
 template bool Diagonal<int, int, double>(const int rows, const int base,
                                          int const *ai, int const *aj,
