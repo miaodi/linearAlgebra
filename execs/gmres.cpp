@@ -87,45 +87,75 @@ int main(int argc, char **argv) {
   out1.close();
 
   // spmv operator
-  std::cout<<"spmv operator..."<<std::endl;
+  std::cout << "spmv operator..." << std::endl;
   using CSRTYPE = typename matrix_utils::CSRMatrix<int, int, double>;
   matrix_utils::SPMV<CSRTYPE, matrix_utils::SerialSPMV> spmv;
   spmv.setMatrix(&csr_matrix);
   spmv.preprocess();
-  std::cout<<"spmv operator done."<<std::endl;
+  std::cout << "spmv operator done." << std::endl;
 
   // precond operator
-  std::cout<<"precond operator..."<<std::endl;
+  std::cout << "precond operator..." << std::endl;
   ILUPrec<decltype(ilu_matrix)> ilu_prec(csr_matrix.rows, ilu_matrix);
-  std::cout<<"precond operator done."<<std::endl;
+  std::cout << "precond operator done." << std::endl;
 
-  std::vector<double> b(csr_matrix.rows, 1.0);
-  std::vector<double> x(csr_matrix.rows, 0.0);
+  {
+    matrix_utils::SplitLU<decltype(ilu_matrix)> splitlu(8);
+    matrix_utils::CSRMatrix<int, int, double> L, U;
 
-  std::cout<<"GMRES..."<<std::endl;
-  iterative_solver::GMRES<double> gmres_solver;
-  gmres_solver.setMaxIter(10000000);
-  gmres_solver.setRelTol(1e-8);
-  gmres_solver.setRestart(100);
-  gmres_solver(&spmv, &ilu_prec, b.data(), x.data());
-  std::cout<<"GMRES done."<<std::endl;
+    std::cout << "SplitLU..." << std::endl;
+    splitlu(ilu_matrix.rows, ilu_matrix.AI(), ilu_matrix.Diagonal(),
+            ilu_matrix.AJ(), ilu_matrix.AV(), L, U);
+    std::cout << "SplitLU done." << std::endl;
 
-  // {
-  //   // Upper triangular matrix A (row-major)
-  //   double A[9] = {2, 3, 0, 0, 4, 0, 0, 0, 0}; // 2x2 matrix: [2 3; 0 4]
-  //   double b[2] = {5, 8};                      // Right-hand side
-  //   int n = 2;
-  //   int incx = 1;
+    std::ofstream outL("L_csr.svg");
+    matrix_utils::writeSVG(L.rows, L.cols, L.AI(), L.AJ(), outL);
+    outL.close();
+    std::ofstream outU("U_csr.svg");
+    matrix_utils::writeSVG(U.rows, U.cols, U.AI(), U.AJ(), outU);
+    outU.close();
 
-  //   // Solve A*x = b (A is upper triangular)
-  //   // The solution will overwrite b
-  //   cblas_dtrsv(CblasRowMajor, CblasUpper, CblasNoTrans, CblasNonUnit, n, A,
-  //   3,
-  //               b, incx);
-  //   std::cout << "Solution x:\n";
-  //   for (int i = 0; i < n; ++i) {
-  //     std::cout << b[i] << "\n";
-  //   }
-  // }
+    auto base = L.AI()[0];
+    std::cout << "base: " << base << std::endl;
+    matrix_utils::KahnParallel<int, int> kahn(8);
+    // matrix_utils::KahnSerial<int, int> kahn;
+    matrix_utils::TopologicalSort2<int, int> topSort;
+    std::vector<int> perm(L.rows);
+    std::vector<int> prefix(L.rows + 1);
+    int level = topSort(matrix_utils::TriangularMatrix::L, L.rows, L.AI(), L.AJ(),
+                     perm.data(), prefix.data());
+    std::cout << "Kahn done." << std::endl;
+    std::cout << "Level: " << level << std::endl;
+    for (int i = 0; i < level; i++) {
+      for (int j = prefix[i] - base; j < prefix[i + 1] - base; j++) {
+        std::cout << perm[j] - base << " ";
+      }
+      std::cout << std::endl;
+    }
+
+    // std::vector<int> permU(U.rows);
+    // std::vector<int> prefixU(U.rows + 1);
+    // int levelU = kahn(matrix_utils::TriangularMatrix::U, U.rows, U.AI(), U.AJ(),
+    //                   permU.data(), prefixU.data());
+    // std::cout << "Kahn done." << std::endl;
+    // std::cout << "Level: " << levelU << std::endl;
+    // for (int i = 0; i < levelU; i++) {
+    //   for (int j = prefixU[i] - base; j < prefixU[i + 1] - base; j++) {
+    //     std::cout << permU[j] - base << " ";
+    //   }
+    //   std::cout << std::endl;
+    // }
+  }
+
+  // std::vector<double> b(csr_matrix.rows, 1.0);
+  // std::vector<double> x(csr_matrix.rows, 0.0);
+
+  // std::cout<<"GMRES..."<<std::endl;
+  // iterative_solver::GMRES<double> gmres_solver;
+  // gmres_solver.setMaxIter(10000000);
+  // gmres_solver.setRelTol(1e-8);
+  // gmres_solver.setRestart(100);
+  // gmres_solver(&spmv, &ilu_prec, b.data(), x.data());
+  // std::cout<<"GMRES done."<<std::endl;
   return 0;
 }

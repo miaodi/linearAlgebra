@@ -232,7 +232,7 @@ public:
   knuth_s() : eng(rd()) {}
   template <typename T, typename Iter>
   void operator()(T M, T start, T end, Iter dest) const {
-    double select = M, remaining = end - start;
+    double select = std::min(M, end - start), remaining = end - start;
     for (T i = start; i < end; ++i) {
       if (dist(eng) < select / remaining) {
         *dest++ = i;

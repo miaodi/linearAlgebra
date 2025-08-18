@@ -12,6 +12,8 @@
 #include <type_traits>
 
 namespace matrix_utils {
+template <class Array>
+using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
 
 template <typename T> auto find_address_of(T &&p) { return p.get(); }
 
@@ -579,15 +581,14 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
   }
 }
 
-template <class Array>
-using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
-
 enum TriangularMatrix { L = 0, U = 1 };
 
-template <typename ROWTYPE, typename COLTYPE> struct TopologicalSort {
-  template <TriangularMatrix TS = L>
-  COLTYPE operator()(const COLTYPE nodes, ROWTYPE const *ai, COLTYPE const *aj,
-                     COLTYPE *iperm, COLTYPE *prefix);
+template <typename ROWTYPE, typename COLTYPE> struct KahnSerial {
+
+  // Kahn's algorithm
+  COLTYPE operator()(const TriangularMatrix TS, const COLTYPE nodes,
+                     ROWTYPE const *ai, COLTYPE const *aj, COLTYPE *perm,
+                     COLTYPE *prefix);
 
   std::vector<COLTYPE> _degrees;
   std::vector<ROWTYPE> _t_ai;
@@ -595,96 +596,37 @@ template <typename ROWTYPE, typename COLTYPE> struct TopologicalSort {
   COLTYPE _start, _end, _inc;
 };
 
-template <TriangularMatrix TS = L, typename ROWTYPE, typename COLTYPE>
-COLTYPE TopologicalSort(const COLTYPE nodes, ROWTYPE const *ai,
-                        COLTYPE const *aj, COLTYPE *iperm, COLTYPE *prefix) {
-  std::vector<int> degrees(nodes);
-  prefix[0] = 0;
-  prefix.push_back(prefix.back());
-  COLTYPE start, end, inc;
-  const auto base = ai[0];
-  if constexpr (TS == L) {
-    start = 0;
-    end = nodes;
-    inc = 1;
-  } else {
-    start = nodes - 1;
-    end = -1;
-    inc = -1;
-  }
+template <typename ROWTYPE, typename COLTYPE> struct KahnParallel {
+  KahnParallel(int nthreads)
+      : _nthreads(nthreads), _threads_nodes(nthreads),
+        _threads_prefix(nthreads + 1) {}
+  // Kahn's algorithm
+  COLTYPE operator()(const TriangularMatrix TS, const COLTYPE nodes,
+                     ROWTYPE const *ai, COLTYPE const *aj, COLTYPE *perm,
+                     COLTYPE *prefix);
 
-  for (COLTYPE i = start; i != end; i += inc) {
-    degrees[i] = ai[i + 1] - ai[i];
-    if (degrees[i] == 0) {
-      iperm.push_back(i + base);
-      prefix.back()++;
-    }
-  }
+  int _nthreads;
+  std::unique_ptr<std::atomic<COLTYPE>[]> _degrees { nullptr };
+  COLTYPE _degrees_size{0};
+  std::vector<ROWTYPE> _t_ai;
+  std::vector<COLTYPE> _t_aj;
+  std::vector<std::vector<COLTYPE>> _threads_nodes;
+  std::vector<COLTYPE> _threads_prefix;
+  COLTYPE _start, _end, _inc;
+};
 
-  const ROWTYPE nnz = ai[nodes] - base;
-  std::vector<ROWTYPE> t_ai(nodes + 1);
-  std::vector<COLTYPE> t_aj(nnz);
+template <typename ROWTYPE, typename COLTYPE> struct TopologicalSort2 {
 
-  ParallelTranspose2(nodes, nodes, base, ai, aj, (double *)nullptr, t_ai.data(),
-                     t_aj.data(), (double *)nullptr);
+  // max degree
+  COLTYPE operator()(const TriangularMatrix TS, const COLTYPE nodes,
+                     ROWTYPE const *ai, COLTYPE const *aj, COLTYPE *perm,
+                     COLTYPE *prefix);
 
-  COLTYPE level = 0;
-  while (iperm.size() != nodes) {
-    prefix.push_back(prefix.back());
-    for (size_t i = prefix[level]; i < prefix[level + 1]; i++) {
-      const auto idx = iperm[i] - base;
-      for (auto j = t_ai[idx] - base; j < t_ai[idx + 1] - base; j++) {
-        if (--degrees[t_aj[j] - base] == 0) {
-          iperm.push_back(t_aj[j]);
-          prefix.back()++;
-        }
-      }
-    }
-    level++;
-  }
-  return level;
-}
-
-template <TriangularMatrix TS = L, typename ROWTYPE, typename COLTYPE,
-          typename VEC>
-COLTYPE TopologicalSort2(const COLTYPE nodes, ROWTYPE const *ai,
-                         COLTYPE const *aj, VEC &iperm, VEC &prefix) {
-  const auto base = ai[0];
-  std::vector<int> degrees(nodes, 0);
-  COLTYPE start, end, inc;
-  if constexpr (TS == L) {
-    start = 0;
-    end = nodes;
-    inc = 1;
-  } else {
-    start = nodes - 1;
-    end = -1;
-    inc = -1;
-  }
-  COLTYPE level = 0;
-  for (COLTYPE i = start; i != end; i += inc) {
-    for (auto j = ai[i] - base; j < ai[i + 1] - base; j++) {
-      degrees[i] = std::max(degrees[i], degrees[aj[j] - base] + 1);
-    }
-    level = std::max(level, degrees[i] + 1);
-  }
-
-  prefix.resize(level + 1);
-  std::fill(prefix.begin(), prefix.end(), 0);
-
-  for (COLTYPE i = 0; i < nodes; i++) {
-    prefix[degrees[i] + 1]++;
-  }
-  std::inclusive_scan(prefix.begin(), prefix.end(), prefix.begin());
-
-  iperm.resize(nodes);
-  for (COLTYPE i = 0; i < nodes; i++) {
-    iperm[prefix[degrees[i]]++] = i + base;
-  }
-  std::rotate(prefix.rbegin(), prefix.rbegin() + 1, prefix.rend());
-  prefix[0] = 0;
-  return level;
-}
+  std::vector<COLTYPE> _degrees;
+  std::vector<ROWTYPE> _t_ai;
+  std::vector<COLTYPE> _t_aj;
+  COLTYPE _start, _end, _inc;
+};
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
@@ -811,6 +753,36 @@ void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
     }
   }
 }
+
+// Split a matrix into strictly lower triangular matrix L (assuming that the
+// diagonal are 1s) and upper triangular matrix U (including the diagonal)
+template <ResizableCSRMatrixType CSRMatrixType> struct SplitLU {
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using VALTYPE = typename CSRMatrixType::VALTYPE;
+  SplitLU(int num_threads = 1)
+      : num_threads(num_threads), prefixL(num_threads + 1, 0),
+        prefixU(num_threads + 1, 0) {}
+
+  /// @brief Split a matrix into strictly lower triangular matrix L (assuming
+  /// that the diagonal are 1s) and upper triangular matrix U (including the
+  /// diagonal)
+  /// @tparam CSRMatrixType
+  /// @param rows size of the square matrix
+  /// @param ai row index
+  /// @param diag diagonal index
+  /// @param aj column index
+  /// @param av value vector
+  /// @param L strictly lower triangular matrix
+  /// @param U upper triangular matrix
+  void operator()(const COLTYPE rows, ROWTYPE const *ai, ROWTYPE const *diag,
+                  COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &L,
+                  CSRMatrixType &U);
+
+  int num_threads;
+  std::vector<ROWTYPE> prefixL;
+  std::vector<ROWTYPE> prefixU;
+};
 
 template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
           typename VALTYPE, ResizableCSRMatrixType CSRMatrixType>
@@ -1124,6 +1096,31 @@ void Block(const COLTYPE rows, const int base, ROWTYPE const *ai,
         subMat.av[pos++] = av[_j];
       }
     }
+  }
+}
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void RandomL(const typename CSRMatrixType::COLTYPE rows,
+             const typename CSRMatrixType::COLTYPE base,
+             const typename CSRMatrixType::COLTYPE nnz_per_row,
+             CSRMatrixType &L) {
+  L.ResizeAI(rows + 1);
+  L.ResizeAJ(rows * nnz_per_row);
+  L.ResizeAV(rows * nnz_per_row);
+  L.rows = rows;
+  L.cols = rows;
+  auto ai = L.AI();
+  ai[0] = base;
+  auto aj = L.AJ();
+  auto av = L.AV();
+  utils::knuth_s random_generator;
+  for (auto i = 0; i < rows; i++) {
+    typename CSRMatrixType::COLTYPE row_size = std::min(nnz_per_row, i);
+    ai[i + 1] = ai[i] + row_size;
+  }
+#pragma omp parallel for
+  for (auto i = 0; i < rows; i++) {
+    random_generator(ai[i + 1] - ai[i], base, i + base, aj + ai[i] - base);
   }
 }
 } // namespace matrix_utils
