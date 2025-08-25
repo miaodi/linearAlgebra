@@ -418,7 +418,7 @@ void permutedAI(const COLTYPE rows, const int base, ROWTYPE const *ai,
     std::copy(std::execution::par, ai, ai + rows + 1, permed_ai);
   }
 
-  std::vector<MKL_INT> localNNZ(omp_get_max_threads() + 1, 0);
+  std::vector<ROWTYPE> localNNZ(omp_get_max_threads() + 1, 0);
   permed_ai[0] = 0;
 #pragma omp parallel
   {
@@ -430,7 +430,7 @@ void permutedAI(const COLTYPE rows, const int base, ROWTYPE const *ai,
     // iperm[i] = k -> pinv_{i,k} = 1 -> Aperm(i,*) = A(k, *)
     for (auto i = start; i < end; i++) {
       size_t k = iperm[i - permed_ai] - base;
-      MKL_INT nz = ai[k + 1] - ai[k];
+      ROWTYPE nz = ai[k + 1] - ai[k];
       *(i + 1) = (i == start ? 0 : *i) + nz;
       localNNZ[tid + 1] += nz;
     }
@@ -469,7 +469,7 @@ void permute(const COLTYPE rows, const int base, ROWTYPE const *ai,
       // permute column in each row perm[i] = k -> q_{i,k} = 1 -> new(*, k) =
       // old(*, i)
       std::transform(aj + ai[rowInd] - base, aj + ai[rowInd + 1] - base,
-                     permed_aj + *i - base, [perm, base](MKL_INT ind) {
+                     permed_aj + *i - base, [perm, base](COLTYPE ind) {
                        return perm ? perm[ind - base] : ind;
                      });
 
@@ -509,7 +509,7 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
   const COLTYPE n = rows;
   const auto nnz = ai[rows] - base;
   permed_ai[0] = base;
-  std::vector<MKL_INT> ai_prefix(n * (omp_get_max_threads() + 1), 0);
+  std::vector<COLTYPE> ai_prefix(n * (omp_get_max_threads() + 1), 0);
 #pragma omp parallel
   {
     const int tid = omp_get_thread_num();
@@ -517,7 +517,7 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
 
     auto [start, end] =
         utils::LoadPrefixBalancedPartition(ai, ai + n, tid, nthreads);
-    MKL_INT new_row, new_col, final_row, final_col, col;
+    COLTYPE new_row, new_col, final_row, final_col, col;
     for (auto i = start; i != end; i++) {
       new_row = iperm ? (iperm[i - ai] - base) : (i - ai);
       for (auto j = *i; j != *(i + 1); j++) {
@@ -534,7 +534,7 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
 #pragma omp barrier
 #pragma omp single
     {
-      for (MKL_INT i = 0; i < n; i++) {
+      for (COLTYPE i = 0; i < n; i++) {
         ai_prefix[i] = permed_ai[i] - base;
         for (int j = 0; j < nthreads; j++) {
           ai_prefix[(j + 1) * n + i] += ai_prefix[j * n + i];
@@ -569,7 +569,7 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
         while (pos != permed_aj + *i - base) {
           for (auto j = permed_aj + *i - base; j != pos; j++) {
             if (*j > *pos) {
-              MKL_INT tmp = *j;
+              COLTYPE tmp = *j;
               *j = *pos;
               *pos = tmp;
             }
@@ -606,7 +606,7 @@ template <typename ROWTYPE, typename COLTYPE> struct KahnParallel {
                      COLTYPE *prefix);
 
   int _nthreads;
-  std::unique_ptr<std::atomic<COLTYPE>[]> _degrees { nullptr };
+  std::unique_ptr<std::atomic<COLTYPE>[]> _degrees{nullptr};
   COLTYPE _degrees_size{0};
   std::vector<ROWTYPE> _t_ai;
   std::vector<COLTYPE> _t_aj;
@@ -629,10 +629,11 @@ template <typename ROWTYPE, typename COLTYPE> struct TopologicalSort2 {
 };
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool Diagonal(const COLTYPE rows, const int base, ROWTYPE const *ai,
-              COLTYPE const *aj, VALTYPE const *av, ROWTYPE *diagpos,
-              VALTYPE *diag, const bool invert = false) {
+bool Diagonal(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
+              VALTYPE const *av, ROWTYPE *diagpos, VALTYPE *diag,
+              const bool invert = false) {
   volatile bool missing_diag = false;
+  const auto base = ai[0];
 #pragma omp parallel for shared(missing_diag)
   for (COLTYPE i = 0; i < rows; i++) {
     auto mid =

@@ -1,0 +1,40 @@
+%%MatrixMarket matrix coordinate integer general
+% Extracted from second image; all nonzeros set to 1.
+% example in liu1990role
+10 10 36
+1 1 1
+1 3 1
+1 8 1
+2 2 1
+2 5 1
+2 10 1
+3 1 1
+3 3 1
+3 7 1
+4 4 1
+4 9 1
+4 10 1
+5 2 1
+5 5 1
+5 9 1
+5 10 1
+6 6 1
+6 7 1
+6 8 1
+7 3 1
+7 6 1
+7 7 1
+8 1 1
+8 6 1
+8 8 1
+8 9 1
+8 10 1
+9 4 1
+9 5 1
+9 8 1
+9 9 1
+10 2 1
+10 4 1
+10 5 1
+10 8 1
+10 10 1

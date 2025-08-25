@@ -295,9 +295,9 @@ bool incomplete_cholesky_k_2::symbolic_factorize(
   auto aj = A->get_aj();
   _diagPos.resize(_nrow);
 
-  bool success = matrix_utils::Diagonal(_nrow, (MKL_INT)_mkl_base, ai.get(),
-                                        aj.get(), _av.get(), _diagPos.data(),
-                                        static_cast<double *>(nullptr));
+  bool success =
+      matrix_utils::Diagonal(_nrow, ai.get(), aj.get(), _av.get(),
+                             _diagPos.data(), static_cast<double *>(nullptr));
   if (!success) {
     std::cerr << "Failed to get diagonal" << std::endl;
     return false;

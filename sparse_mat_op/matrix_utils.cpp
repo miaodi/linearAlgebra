@@ -251,10 +251,10 @@ COLTYPE TopologicalSort2<ROWTYPE, COLTYPE>::operator()(
   return level;
 }
 
-template bool Diagonal<int, int, double>(const int rows, const int base,
-                                         int const *ai, int const *aj,
-                                         double const *av, int *diagpos,
-                                         double *diag, const bool invert);
+template bool Diagonal<int, int, double>(const int rows, int const *ai,
+                                         int const *aj, double const *av,
+                                         int *diagpos, double *diag,
+                                         const bool invert);
 
 template void SplitLDU(const int rows, const int base, int const *ai,
                        int const *aj, double const *av,

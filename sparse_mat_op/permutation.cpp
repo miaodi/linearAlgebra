@@ -1,9 +1,7 @@
 #include "permutation.hpp"
 #include "utils.h"
 #include "variadic_sort.hpp"
-#include <algorithm>
 #include <cassert>
-#include <iostream>
 #include <numeric>
 #include <omp.h>
 #include <vector>
@@ -114,7 +112,7 @@ template <typename COLTYPE>
 void randPerm(const COLTYPE rows, const COLTYPE base, COLTYPE *const perm) {
   assert(perm != nullptr);
   std::iota(perm, perm + rows, base);
-  std::random_shuffle(perm, perm + rows);
+  std::shuffle(perm, perm + rows, std::mt19937(std::random_device{}()));
 }
 
 template <typename ROWTYPE, typename COLTYPE>
@@ -244,9 +242,12 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
 INSTANTIATE_PERM_FUNCS(int, double)
 INSTANTIATE_PERM_FUNCS(int, float)
 INSTANTIATE_PERM_FUNCS(int, int)
-INSTANTIATE_INVPERM_FUNC(int)
-INSTANTIATE_ISPERM_FUNC(int)
-INSTANTIATE_ISPERM_SERIAL_FUNC(int)
+INSTANTIATE_INVPERM_FUNC(std::int32_t)
+INSTANTIATE_INVPERM_FUNC(std::int64_t)
+INSTANTIATE_ISPERM_FUNC(std::int32_t)
+INSTANTIATE_ISPERM_SERIAL_FUNC(std::int32_t)
+INSTANTIATE_ISPERM_FUNC(std::int64_t)
+INSTANTIATE_ISPERM_SERIAL_FUNC(std::int64_t)
 INSTANTIATE_RANDPERM_FUNC(int)
 INSTANTIATE_PERM_ROW_PTR_FUNC(int)
 INSTANTIATE_PERMUTE_MAT_STRUCT_FUNC(int, int)

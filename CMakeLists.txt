@@ -67,20 +67,19 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(cxxopts)
 
-FetchContent_Declare(
-  cereal
-  GIT_REPOSITORY https://github.com/USCiLab/cereal.git
-  GIT_TAG master
-  GIT_SHALLOW TRUE
-)
-
-set(CMAKE_CXX_FLAGS_OLD "${CMAKE_CXX_FLAGS}")
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-dangling-reference")
-set(SKIP_PERFORMANCE_COMPARISON ON)
-FetchContent_MakeAvailable(cereal)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_OLD}")
-set(CMAKE_CXX_STANDARD 20)
+# FetchContent_Declare(
+#   cereal
+#   GIT_REPOSITORY https://github.com/USCiLab/cereal.git
+#   GIT_TAG master
+#   GIT_SHALLOW TRUE
+# )
+# set(CMAKE_CXX_FLAGS_OLD "${CMAKE_CXX_FLAGS}")
+# set(CMAKE_CXX_STANDARD 17)
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-dangling-reference")
+# set(SKIP_PERFORMANCE_COMPARISON ON)
+# FetchContent_MakeAvailable(cereal)
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_OLD}")
+# set(CMAKE_CXX_STANDARD 20)
 
 FetchContent_Declare(
   AMGCL
@@ -105,6 +104,20 @@ find_package(TBB REQUIRED)
 find_package(OpenMP REQUIRED)
 
 find_package(LAPACK REQUIRED)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# Check if ssgetpy is available
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} -c "import ssgetpy"
+    RESULT_VARIABLE SSGETPY_RESULT
+    ERROR_QUIET OUTPUT_QUIET
+)
+
+if(NOT SSGETPY_RESULT EQUAL 0)
+    message(FATAL_ERROR "Python package 'ssgetpy' not found. 
+Please install it with: pip install ssgetpy")
+endif()
 
 if(USE_AMGCL_LIB)
   FetchContent_MakeAvailable(AMGCL)
@@ -138,23 +151,25 @@ configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/config.h.in"
   "${CMAKE_BINARY_DIR}/config.h")
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
+include_directories(${CMAKE_BINARY_DIR})  
 
 add_subdirectory(utils)
 add_subdirectory(sparse_mat_op)
 add_subdirectory(mkl_wrapper)
 add_subdirectory(reordering)
 add_subdirectory(factorization)
+add_subdirectory(data)
 
 add_subdirectory(execs)
 enable_testing()
 add_subdirectory(tests)
 
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/data)
-file(GLOB MATRIX_FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/*)
-foreach(MATRIX_FILE ${MATRIX_FILES})
-   get_filename_component(FILENAME ${MATRIX_FILE} NAME)
-   file(CREATE_LINK ${MATRIX_FILE} ${CMAKE_CURRENT_BINARY_DIR}/data/${FILENAME} SYMBOLIC)
-endforeach()
+# file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/data)
+# file(GLOB MATRIX_FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/*)
+# foreach(MATRIX_FILE ${MATRIX_FILES})
+#    get_filename_component(FILENAME ${MATRIX_FILE} NAME)
+#    file(CREATE_LINK ${MATRIX_FILE} ${CMAKE_CURRENT_BINARY_DIR}/data/${FILENAME} SYMBOLIC)
+# endforeach()
 
 if(BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)

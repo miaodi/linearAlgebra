@@ -1,10 +1,10 @@
 #pragma once
+#include "config.h"
 #include <atomic>
 #include <fast_matrix_market/fast_matrix_market.hpp>
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <mkl.h>
 #include <queue>
 #include <random>
 #include <string>
@@ -248,10 +248,12 @@ protected:
   mutable std::uniform_real_distribution<> dist; // [0,1)
 };
 
-std::vector<MKL_INT> randomPermute(const MKL_INT n, const MKL_INT base = 0);
+template <typename COLTYPE>
+std::vector<COLTYPE> randomPermute(const COLTYPE n, const COLTYPE base = 0);
 
-void inversePermute(std::vector<MKL_INT> &iperm,
-                    const std::vector<MKL_INT> &perm, const MKL_INT base = 0);
+template <typename COLTYPE>
+void inversePermute(std::vector<COLTYPE> &iperm,
+                    const std::vector<COLTYPE> &perm, const COLTYPE base = 0);
 
 template <typename T, typename C> class MaxHeap {
 public:
@@ -331,6 +333,13 @@ protected:
   C _comp;
 };
 
+#ifdef USE_BOOST_LIB
+template <typename COLTYPE>
+void printEliminationTree(const COLTYPE size, const COLTYPE base,
+                          COLTYPE *const parent, const std::string &filename);
+#endif
+
+// TODO: remove
 template <typename T>
 class CacheFriendlyVectors : public std::vector<std::vector<T>> {
 public:
@@ -364,4 +373,5 @@ protected:
   size_t _modifiedInd{0};
   size_t _at{0};
 };
+
 } // namespace utils

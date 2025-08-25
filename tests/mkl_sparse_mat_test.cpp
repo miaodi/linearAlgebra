@@ -314,7 +314,7 @@ TEST_F(sparse_matrix_Test, permute) {
   A1.to_one_based();
   for (int it = 0; it < 100; it++) {
     // test zero based
-    std::vector<MKL_INT> perm0 = utils::randomPermute(3, A.mkl_base()),
+    std::vector<MKL_INT> perm0 = utils::randomPermute(3, (int)A.mkl_base()),
                          inv_perm;
 
     auto [aiB, ajB, avB] = matrix_utils::AllocateCSRData(A.rows(), A.nnz());
@@ -324,7 +324,7 @@ TEST_F(sparse_matrix_Test, permute) {
 
     mkl_wrapper::mkl_sparse_mat B(3, 3, aiB, ajB, avB);
 
-    utils::inversePermute(inv_perm, perm0, A.mkl_base());
+    utils::inversePermute(inv_perm, perm0, (int)A.mkl_base());
     auto [aiC, ajC, avC] = matrix_utils::AllocateCSRData(B.rows(), B.nnz());
     matrix_utils::permute(B.rows(), (int)B.mkl_base(), B.get_ai().get(),
                           B.get_aj().get(), B.get_av().get(), inv_perm.data(),
@@ -350,7 +350,7 @@ TEST_F(sparse_matrix_Test, permute) {
                             perm1.data(), aiB.get(), ajB.get(), avB.get());
       mkl_wrapper::mkl_sparse_mat B(3, 3, aiB, ajB, avB, SPARSE_INDEX_BASE_ONE);
 
-      utils::inversePermute(inv_perm, perm1, A1.mkl_base());
+      utils::inversePermute(inv_perm, perm1, (int)A1.mkl_base());
 
       auto [aiC, ajC, avC] = matrix_utils::AllocateCSRData(A.rows(), A.nnz());
       matrix_utils::permute(B.rows(), (int)B.mkl_base(), B.get_ai().get(),
@@ -378,7 +378,7 @@ TEST_F(sparse_matrix_Test, permute2) {
   A1.to_one_based();
   for (int it = 0; it < 10; it++) {
     // test zero based
-    std::vector<MKL_INT> perm0 = utils::randomPermute(10000, A.mkl_base()),
+    std::vector<MKL_INT> perm0 = utils::randomPermute(10000, (int)A.mkl_base()),
                          inv_perm;
     auto [aiB, ajB, avB] = matrix_utils::AllocateCSRData(A1.rows(), A1.nnz());
     matrix_utils::permute(A.rows(), (int)A.mkl_base(), A.get_ai().get(),
@@ -386,7 +386,7 @@ TEST_F(sparse_matrix_Test, permute2) {
                           perm0.data(), aiB.get(), ajB.get(), avB.get());
     mkl_wrapper::mkl_sparse_mat B(10000, 10000, aiB, ajB, avB);
 
-    utils::inversePermute(inv_perm, perm0, A.mkl_base());
+    utils::inversePermute(inv_perm, perm0, (int)A.mkl_base());
     auto [aiC, ajC, avC] = matrix_utils::AllocateCSRData(B.rows(), B.nnz());
     matrix_utils::permute(B.rows(), (int)B.mkl_base(), B.get_ai().get(),
                           B.get_aj().get(), B.get_av().get(), inv_perm.data(),
@@ -413,7 +413,7 @@ TEST_F(sparse_matrix_Test, permute2) {
       mkl_wrapper::mkl_sparse_mat B(10000, 10000, aiB, ajB, avB,
                                     SPARSE_INDEX_BASE_ONE);
 
-      utils::inversePermute(inv_perm, perm1, A1.mkl_base());
+      utils::inversePermute(inv_perm, perm1, (int)A1.mkl_base());
 
       auto [aiC, ajC, avC] = matrix_utils::AllocateCSRData(A.rows(), A.nnz());
       matrix_utils::permute(B.rows(), (int)B.mkl_base(), B.get_ai().get(),

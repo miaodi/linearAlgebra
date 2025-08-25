@@ -1,6 +1,12 @@
 #include "utils.h"
 #include <Eigen/Sparse>
 #include <omp.h>
+
+#ifdef USE_BOOST_LIB
+#include <boost/graph/adjacency_list.hpp>
+#include <boost/graph/graphviz.hpp>
+#endif
+
 #define PBSTR "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
 #define PBWIDTH 60
 
@@ -88,8 +94,9 @@ void ReadFromBinaryVec(const std::string &filename, std::vector<double> &vec) {
 // return res;
 // }
 
-std::vector<MKL_INT> randomPermute(const MKL_INT n, const MKL_INT base) {
-  std::vector<MKL_INT> perm(n);
+template <typename COLTYPE>
+std::vector<COLTYPE> randomPermute(const COLTYPE n, const COLTYPE base) {
+  std::vector<COLTYPE> perm(n);
   std::iota(perm.begin(), perm.end(), base);
 
   std::random_device rd;
@@ -98,12 +105,69 @@ std::vector<MKL_INT> randomPermute(const MKL_INT n, const MKL_INT base) {
   return perm;
 }
 
-void inversePermute(std::vector<MKL_INT> &iperm,
-                    const std::vector<MKL_INT> &perm, const MKL_INT base) {
+template <typename COLTYPE>
+void inversePermute(std::vector<COLTYPE> &iperm,
+                    const std::vector<COLTYPE> &perm, const COLTYPE base) {
   iperm.resize(perm.size());
 #pragma omp parallel for
   for (size_t i = 0; i < perm.size(); i++) {
     iperm[perm[i] - base] = i + base;
   }
 }
+
+#ifdef USE_BOOST_LIB
+template <typename COLTYPE>
+void printEliminationTree(const COLTYPE size, const COLTYPE base,
+                          COLTYPE *const parent, const std::string &filename) {
+  // Define the graph type with a string name property
+  using graph_type =
+      boost::adjacency_list<boost::vecS, boost::vecS, boost::directedS,
+                            boost::property<boost::vertex_name_t, std::string>>;
+
+  // Get the vertex property map type
+  using VertexNameMap =
+      boost::property_map<graph_type, boost::vertex_name_t>::type;
+
+  graph_type graph;
+  VertexNameMap name_map = boost::get(boost::vertex_name, graph);
+
+  // Add vertices and set their names
+  for (COLTYPE i = 0; i < size; i++) {
+    auto v = boost::add_vertex(graph);
+    name_map[v] = std::to_string(i + base);
+  }
+
+  // Add edges based on parent array
+  for (COLTYPE i = 0; i < size; i++) {
+    if (parent[i] != i + base) { // If not root
+      boost::add_edge(boost::vertex(i, graph),
+                      boost::vertex(parent[i] - base, graph), graph);
+    }
+  }
+
+  // Write to dot file
+  std::ofstream dot(filename);
+  boost::write_graphviz(
+      dot, graph,
+      boost::make_label_writer(boost::get(boost::vertex_name, graph)));
+}
+
+template void printEliminationTree(const std::int32_t size,
+                                   const std::int32_t base,
+                                   std::int32_t *const parent,
+                                   const std::string &filename);
+template void printEliminationTree(const std::int64_t size,
+                                   const std::int64_t base,
+                                   std::int64_t *const parent,
+                                   const std::string &filename);
+#endif
+
+#define INSTANTIATE(T)                                                         \
+  template std::vector<T> randomPermute(const T n, const T base);              \
+  template void inversePermute(std::vector<T> &iperm,                          \
+                               const std::vector<T> &perm, const T base);
+
+INSTANTIATE(std::int32_t)
+INSTANTIATE(std::int64_t)
+
 } // namespace utils

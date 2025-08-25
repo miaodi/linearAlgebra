@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(tests)
 
-set(libs Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper reordering sparse_mat_op factorization)
+set(libs Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper reordering sparse_mat_op factorization cxxopts)
 
 # add_executable(linearSolve linearSolve.cpp)
 # target_link_libraries(linearSolve PRIVATE ${libs} TBB::tbb)
@@ -24,8 +24,8 @@ set(libs Utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper 
 # add_executable(temp_test temp_test.cpp)
 # target_link_libraries(temp_test PRIVATE ${libs})
 
-# add_executable(test_chol test_chol.cpp)
-# target_link_libraries(test_chol PRIVATE ${libs})
+add_executable(test_chol test_chol.cpp)
+target_link_libraries(test_chol PRIVATE ${libs})
 
 add_executable(test_gmres gmres.cpp)
-target_link_libraries(test_gmres PRIVATE ${libs} cxxopts)
+target_link_libraries(test_gmres PRIVATE ${libs})
