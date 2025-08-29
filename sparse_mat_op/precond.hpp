@@ -1,11 +1,14 @@
 #pragma once
 
+#include "circularbuffer.hpp"
 #include "matrix_utils.hpp"
 #include "sparse_mat_traits.hpp"
+#include <deque>
 #include <forward_list>
+#include <map>
 #include <omp.h>
 #include <ranges>
-#include <span>
+#include <unordered_map>
 #include <vector>
 
 // for all preconditioner operators, assuming the diagonal entries are filled.
@@ -696,6 +699,56 @@ bool ICCLevelNumeric(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
   return true;
 }
 
+template <ResizableDiagonalType CSRMatrixType> class ICCLevelSymbolicSerial {
+public:
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+
+  ICCLevelSymbolicSerial() {}
+
+  bool operator()(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                  const int lvl, CSRMatrixType &L);
+
+private:
+  utils::CircularBuffer<std::pair<COLTYPE, COLTYPE>> _Q;
+  std::map<COLTYPE, COLTYPE> _level;
+  // std::deque<std::pair<COLTYPE, COLTYPE>> _Q;
+  std::map<COLTYPE, COLTYPE> _S;
+};
+
+template <ResizableDiagonalType CSRMatrixType> class ICCLevelSymbolicSerial2 {
+public:
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+
+  ICCLevelSymbolicSerial2() {}
+
+  bool operator()(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                  const int lvl, CSRMatrixType &L);
+
+private:
+  std::unordered_map<COLTYPE, COLTYPE> _Q;
+  std::unordered_map<COLTYPE, COLTYPE> _Q_temp;
+  std::map<COLTYPE, COLTYPE> _S;
+};
+
+template <ResizableDiagonalType CSRMatrixType> class ICCLevelSymbolicSerial3 {
+public:
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+
+  ICCLevelSymbolicSerial3() {}
+
+  bool operator()(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                  const int lvl, CSRMatrixType &L);
+
+private:
+  std::vector<COLTYPE> _S_val;
+  std::vector<COLTYPE> _S_path_max;
+  std::vector<COLTYPE> _visited_nodes;
+  std::vector<COLTYPE> _q;
+};
+
 template <ResizableDiagonalType CSRMatrixType>
 bool ILULevel0Symbolic(const typename CSRMatrixType::COLTYPE size,
                        typename CSRMatrixType::ROWTYPE const *ai,
@@ -737,13 +790,15 @@ bool ILULevel0Symbolic(const typename CSRMatrixType::COLTYPE size,
   return success;
 }
 
-template <ResizableDiagonalType CSRMatrixType> struct ILULevelSymbolic {
+template <ResizableDiagonalType CSRMatrixType> class ILULevelSymbolic {
+public:
   ILULevelSymbolic() = default;
   bool operator()(const typename CSRMatrixType::COLTYPE size,
                   typename CSRMatrixType::ROWTYPE const *ai,
                   typename CSRMatrixType::COLTYPE const *aj, const int lvl,
                   CSRMatrixType &ilu);
 
+private:
   std::vector<int> _levels; // level for each element
   std::vector<std::pair<typename CSRMatrixType::COLTYPE,
                         int>>
@@ -759,7 +814,7 @@ bool ILULevelNumeric(const typename CSRMatrixType::COLTYPE size,
                      typename CSRMatrixType::COLTYPE const *aj,
                      typename CSRMatrixType::VALTYPE const *av, const int lvl,
                      CSRMatrixType &ilu);
-                     
+
 template <typename VT> class IdentityPrec {
 public:
   using VALTYPE = VT;

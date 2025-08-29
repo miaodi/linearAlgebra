@@ -1,4 +1,5 @@
 #pragma once
+#include "sparse_mat_traits.hpp"
 #include <vector>
 
 namespace factorization {
@@ -40,7 +41,8 @@ private:
 };
 
 /// @brief Compute the subtree size of each node in the elimination tree
-/// @brief Note that the elimination tree must be postordered
+/// (including the node itself)
+/// @brief Note that the elimination tree must be postordered!!
 /// @tparam COLTYPE column index type
 /// @param nnodes number of nodes
 /// @param base base index of the matrix (usually 0 or 1)
@@ -64,4 +66,46 @@ template <typename ROWTYPE, typename COLTYPE>
 void NNZCount(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
               const COLTYPE *parent, ROWTYPE *row_count, ROWTYPE *col_count,
               COLTYPE *mark);
+
+template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+class SkeletonGraph {
+public:
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+
+  SkeletonGraph(const int nthreads)
+      : _nthreads(nthreads), _XLEAFs(nthreads), _LEAFs(nthreads),
+        _XLEAF_prefix(nthreads + 1) {}
+
+  void operator()(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
+                  const COLTYPE *parent, CSRMatrixType &leaf);
+
+private:
+  int _nthreads;
+  std::vector<std::vector<COLTYPE>> _XLEAFs;
+  std::vector<std::vector<COLTYPE>> _LEAFs;
+  std::vector<COLTYPE> _XLEAF_prefix;
+  std::vector<COLTYPE> _subtree_size;
+};
+
+template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+class SymbolicCholesky {
+public:
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+
+  SymbolicCholesky(const int nthreads)
+      : _nthreads(nthreads), _ais_prefix(nthreads + 1), _ais(nthreads),
+        _ajs(nthreads) {}
+
+  void operator()(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
+                  const COLTYPE *parent, const COLTYPE *XLEAF,
+                  const COLTYPE *LEAF, CSRMatrixType &L);
+
+private:
+  int _nthreads;
+  std::vector<ROWTYPE> _ais_prefix;
+  std::vector<std::vector<ROWTYPE>> _ais;
+  std::vector<std::vector<COLTYPE>> _ajs;
+};
 } // namespace factorization

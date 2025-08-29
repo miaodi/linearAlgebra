@@ -4,21 +4,24 @@
 #include "config.h"
 #include "io.hpp"
 #include "matrix_utils.hpp"
+#include "permutation.hpp"
 #include "precond.hpp"
 #include "utils.h"
 #include <cxxopts.hpp>
 #include <fstream>
 #include <numeric>
 #include <string>
-#include <vector>
 
 int main(int argc, char **argv) {
   cxxopts::Options options("Cholesky Example", "Example of using Cholesky");
-  options.add_options()("f,filename", "Matrix Market file to read",
-                        cxxopts::value<std::string>()->default_value(
-                            "../data/matrix_fig_4_2.mtx"));
+  options.add_options()(
+      "f,filename", "Matrix Market file to read",
+      cxxopts::value<std::string>()->default_value("../data/symm_example.mtx"));
+  options.add_options()("l,level", "Level of ILU",
+                        cxxopts::value<int>()->default_value("0"));
   auto result = options.parse(argc, argv);
   std::string filename = result["filename"].as<std::string>();
+  int level = result["level"].as<int>();
 
   std::ifstream f(filename);
   f.clear();
@@ -60,7 +63,22 @@ int main(int argc, char **argv) {
   for (size_t i = 0; i < csr_matrix.rows; i++) {
     std::cout << perm[i] << " ";
   }
+  matrix_utils::CSRMatrix<int, int, double> csr_matrix_perm;
+  csr_matrix_perm.ResizeAI(csr_matrix.rows + 1);
+  csr_matrix_perm.ResizeAJ(csr_matrix.NNZ());
+  csr_matrix_perm.ResizeAV(csr_matrix.NNZ());
+  csr_matrix_perm.ResizeDiagonal(csr_matrix.rows);
+  csr_matrix_perm.rows = csr_matrix.rows;
+  csr_matrix_perm.cols = csr_matrix.cols;
+  matrix_utils::permuteMat(csr_matrix.rows, csr_matrix.cols, perm.data(),
+                           iperm.data(), csr_matrix.AI(), csr_matrix.AJ(),
+                           csr_matrix_perm.AI(), csr_matrix_perm.AJ(),
+                           csr_matrix.AV(), csr_matrix_perm.AV());
 
+  std::ofstream out1("mat_csr_perm.svg");
+  matrix_utils::writeSVG(csr_matrix_perm.rows, csr_matrix_perm.cols,
+                         csr_matrix_perm.AI(), csr_matrix_perm.AJ(), out1);
+  out1.close();
 #ifdef USE_BOOST_LIB
   utils::printEliminationTree(csr_matrix.rows, csr_matrix.AI()[0],
                               permed_parent.data(), "post_order_tree.dot");
@@ -86,34 +104,83 @@ int main(int argc, char **argv) {
     }
   }
 
-  std::vector<int> row_count(csr_matrix.rows + 1);
-  std::vector<int> col_count(csr_matrix.rows + 1);
-  row_count[0] = col_count[0] = csr_matrix.Base();
-  std::vector<int> mark(csr_matrix.rows);
-  factorization::NNZCount(csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
-                          parent.data(), row_count.data() + 1,
-                          col_count.data() + 1, mark.data());
-  std::inclusive_scan(col_count.begin(), col_count.end(), col_count.begin());
+  matrix_utils::CSRMatrix<int, int, double> skeleton_graph, L;
+  factorization::SkeletonGraph<decltype(skeleton_graph)> sk_generator(4);
+  sk_generator(csr_matrix.rows, csr_matrix_perm.AI(), csr_matrix_perm.AJ(),
+               permed_parent.data(), skeleton_graph);
+  factorization::SymbolicCholesky<decltype(L)> cholesky_symbol(4);
+  cholesky_symbol(csr_matrix.rows, csr_matrix_perm.AI(), csr_matrix_perm.AJ(),
+                  permed_parent.data(), skeleton_graph.AI(),
+                  skeleton_graph.AJ(), L);
+  // std::cout << "L: " << std::endl;
+  // for (int i = 0; i < L.rows + 1; i++) {
+  //   std::cout << L.AI()[i] << " ";
+  // }
+  // std::cout << std::endl;
+  // for (int i = 0; i < L.NNZ(); i++) {
+  //   std::cout << L.AJ()[i] << " ";
+  // }
+  std::cout << std::endl;
+  std::ofstream out2("L.svg");
+  matrix_utils::writeSVG(L.rows, L.cols, L.AI(), L.AJ(), out2);
+  out2.close();
+
+  // std::vector<int> row_count(csr_matrix.rows + 1);
+  // std::vector<int> col_count(csr_matrix.rows + 1);
+  // row_count[0] = col_count[0] = csr_matrix_perm.Base();
+  // std::vector<int> mark(csr_matrix.rows);
+  // factorization::NNZCount(csr_matrix.rows, csr_matrix_perm.AI(),
+  //                         csr_matrix_perm.AJ(), permed_parent.data(),
+  //                         row_count.data() + 1, col_count.data() + 1,
+  //                         mark.data());
+  // std::inclusive_scan(col_count.begin(), col_count.end(), col_count.begin());
 
   {
-    csr_matrix.ResizeDiagonal(csr_matrix.rows);
-    std::cout << matrix_utils::Diagonal(csr_matrix.rows, csr_matrix.AI(),
-                                        csr_matrix.AJ(), csr_matrix.AV(),
-                                        csr_matrix.Diagonal(),
-                                        static_cast<double *>(nullptr))
+    csr_matrix_perm.ResizeDiagonal(csr_matrix.rows);
+    std::cout << matrix_utils::Diagonal(
+                     csr_matrix.rows, csr_matrix_perm.AI(),
+                     csr_matrix_perm.AJ(), csr_matrix_perm.AV(),
+                     csr_matrix_perm.Diagonal(), static_cast<double *>(nullptr))
               << std::endl;
 
-    matrix_utils::CSRMatrix<int, int, double> icc;
-    matrix_utils::ICCLevelSymbolic2(csr_matrix.rows, csr_matrix.AI(),
-                                    csr_matrix.AJ(), csr_matrix.Diagonal(),
-                                    10000, icc);
-    std::cout << std::noboolalpha;
-    for (size_t i = 0; i < icc.rows + 1; i++) {
-      if (icc.AI()[i] != col_count[i]) {
-        std::cout << i << " " << icc.AI()[i] << " " << col_count[i]
-                  << std::endl;
+    matrix_utils::CSRMatrix<int, int, double> icc, icc_transpose;
+    matrix_utils::ICCLevelSymbolic2(csr_matrix_perm.rows, csr_matrix_perm.AI(),
+                                    csr_matrix_perm.AJ(),
+                                    csr_matrix_perm.Diagonal(), 100, icc);
+    icc_transpose.ResizeAI(icc.rows + 1);
+    icc_transpose.ResizeAJ(icc.NNZ());
+    icc_transpose.ResizeAV(icc.NNZ());
+    icc_transpose.ResizeDiagonal(icc.rows);
+    matrix_utils::ParallelTranspose2(icc.rows, icc.cols, 0, icc.AI(), icc.AJ(),
+                                     icc.AV(), icc_transpose.AI(),
+                                     icc_transpose.AJ(), icc_transpose.AV());
+    for (int i = 0; i < icc.rows + 1; i++) {
+      if (L.AI()[i] != icc_transpose.AI()[i]) {
+        std::cout << "AI[" << i << "] is not equal" << std::endl;
       }
     }
+    for (int i = 0; i < icc.NNZ(); i++) {
+      if (L.AJ()[i] != icc_transpose.AJ()[i]) {
+        std::cout << "AJ[" << i << "] is not equal" << std::endl;
+      }
+    }
+    // std::cout << std::endl;
+    // for (int i = 0; i < icc.NNZ(); i++) {
+    //   std::cout << icc_transpose.AJ()[i] << " ";
+    // }
+    // std::cout << std::endl;
+  }
+  {
+    matrix_utils::CSRMatrix<int, int, double> L;
+    matrix_utils::ICCLevelSymbolicSerial3<
+        matrix_utils::CSRMatrix<int, int, double>>
+        icc_symbolic;
+    icc_symbolic(csr_matrix_perm.rows, csr_matrix_perm.AI(),
+                 csr_matrix_perm.AJ(), level, L);
+
+    std::ofstream out1("iccL.svg");
+    matrix_utils::writeSVG(L.rows, L.cols, L.AI(), L.AJ(), out1);
+    out1.close();
   }
   return 0;
 }

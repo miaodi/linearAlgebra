@@ -39,26 +39,30 @@ concept CSRMatrixType = requires(T obj) {
   // Check for member functions returning const pointers
   {
     static_cast<const T &>(obj).AI()
-    } -> std::same_as<typename T::ROWTYPE const *>;
+  } -> std::same_as<typename T::ROWTYPE const *>;
   {
     static_cast<const T &>(obj).AJ()
-    } -> std::same_as<typename T::COLTYPE const *>;
+  } -> std::same_as<typename T::COLTYPE const *>;
   {
     static_cast<const T &>(obj).AV()
-    } -> std::same_as<typename T::VALTYPE const *>;
+  } -> std::same_as<typename T::VALTYPE const *>;
+
+  // Check for rows and cols member variables
+  { obj.rows } -> std::convertible_to<typename T::COLTYPE>;
+  { obj.cols } -> std::convertible_to<typename T::COLTYPE>;
 };
 
 template <typename T>
 concept ResizableCSRMatrixType = CSRMatrixType<T> && requires(T obj) {
   {
     obj.ResizeAI(std::declval<std::size_t>())
-    } -> std::same_as<typename T::ROWTYPE *>;
+  } -> std::same_as<typename T::ROWTYPE *>;
   {
     obj.ResizeAJ(std::declval<std::size_t>())
-    } -> std::same_as<typename T::COLTYPE *>;
+  } -> std::same_as<typename T::COLTYPE *>;
   {
     obj.ResizeAV(std::declval<std::size_t>())
-    } -> std::same_as<typename T::VALTYPE *>;
+  } -> std::same_as<typename T::VALTYPE *>;
 };
 
 template <typename T>
@@ -66,18 +70,17 @@ concept Diagonaltype = requires(T obj) {
   { obj.Diagonal() } -> std::same_as<typename T::ROWTYPE *>;
   {
     static_cast<const T &>(obj).Diagonal()
-    } -> std::same_as<typename T::ROWTYPE const *>;
+  } -> std::same_as<typename T::ROWTYPE const *>;
 };
 
 template <typename T>
 concept ResizableDiagonalType = requires {
   requires ResizableCSRMatrixType<T>;
   requires Diagonaltype<T>;
-}
-&&requires(T obj) {
+} && requires(T obj) {
   {
     obj.ResizeDiagonal(std::declval<std::size_t>())
-    } -> std::same_as<typename T::ROWTYPE *>;
+  } -> std::same_as<typename T::ROWTYPE *>;
 };
 
 template <typename T> struct CSRMatrixRowType {
@@ -97,10 +100,9 @@ concept SpmvOpType = requires(const T op, typename T::VALTYPE const *const b,
                               typename T::VALTYPE *const x,
                               const T::VALTYPE alpha, const T::VALTYPE beta) {
   { op.size() } -> std::convertible_to<std::size_t>;
-  {op(b, x, alpha, beta)};
+  { op(b, x, alpha, beta) };
   typename T::VALTYPE;
-}
-&&std::floating_point<typename T::VALTYPE>;
+} && std::floating_point<typename T::VALTYPE>;
 
 template <typename T>
 concept PrecOpType = requires(const T prec, typename T::VALTYPE const *const b,

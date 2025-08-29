@@ -1,9 +1,11 @@
 #include "Cholesky.hpp"
+#include "matrix_utils.hpp"
 #include "permutation.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
-#include <numeric>
+#include <iostream>
+#include <omp.h>
 
 namespace factorization {
 
@@ -139,6 +141,118 @@ void NNZCount(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
   }
 }
 
+template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+void SkeletonGraph<CSRMatrixType>::operator()(const COLTYPE nnodes,
+                                              const ROWTYPE *ai,
+                                              const COLTYPE *aj,
+                                              const COLTYPE *parent,
+                                              CSRMatrixType &leaf) {
+  const ROWTYPE base = ai[0];
+  _subtree_size.resize(nnodes);
+  SubtreeSize(nnodes, base, parent, _subtree_size.data());
+#pragma omp parallel num_threads(_nthreads)
+  {
+    const int tid = omp_get_thread_num();
+    const int nthreads = omp_get_num_threads();
+    auto [start, end] =
+        utils::LoadPrefixBalancedPartitionPos(ai, ai + nnodes, tid, nthreads);
+    _XLEAFs[tid].clear();
+    _XLEAFs[tid].push_back(0);
+    _LEAFs[tid].clear();
+    for (auto i = start; i < end; i++) {
+      COLTYPE count = 0;
+      auto j = ai[i] - base;
+      if (j < ai[i + 1] - base && aj[j] - base < i) {
+        _LEAFs[tid].push_back(aj[j++]);
+        count++;
+      }
+
+      for (; j < ai[i + 1] - base && aj[j] - base < i; j++) {
+        if (aj[j - 1] + _subtree_size[aj[j] - base] - 1 < aj[j]) {
+          _LEAFs[tid].push_back(aj[j]);
+          count++;
+        }
+      }
+      _XLEAFs[tid].push_back(_XLEAFs[tid].back() + count);
+    }
+
+#pragma omp barrier
+#pragma omp single
+    {
+      _XLEAF_prefix[0] = 0;
+      for (int i = 0; i < _nthreads; i++) {
+        _XLEAF_prefix[i + 1] = _XLEAF_prefix[i] + _LEAFs[i].size();
+      }
+      leaf.ResizeAI(nnodes + 1);
+      leaf.ResizeAJ(_XLEAF_prefix.back());
+    }
+    for (auto i = start; i <= end; i++) {
+      leaf.AI()[i] = _XLEAFs[tid][i - start] + _XLEAF_prefix[tid] + base;
+    }
+    COLTYPE pos = _XLEAF_prefix[tid];
+    for (auto i : _LEAFs[tid]) {
+      leaf.AJ()[pos++] = i;
+    }
+  }
+}
+
+template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+void SymbolicCholesky<CSRMatrixType>::operator()(
+    const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
+    const COLTYPE *parent, const COLTYPE *XLEAF, const COLTYPE *LEAF,
+    CSRMatrixType &L) {
+  const auto base = ai[0];
+#pragma omp parallel num_threads(_nthreads)
+  {
+    const int tid = omp_get_thread_num();
+    auto [start, end] =
+        utils::LoadPrefixBalancedPartitionPos(ai, ai + nnodes, tid, _nthreads);
+    _ais[tid].clear();
+    _ais[tid].push_back(0);
+    _ajs[tid].clear();
+    for (auto i = start; i < end; i++) {
+      ROWTYPE count = 0;
+      for (auto j = XLEAF[i] - base; j < XLEAF[i + 1] - base; j++) {
+        COLTYPE node = LEAF[j] - base;
+        COLTYPE nextleaf;
+        if (j + 1 == XLEAF[i + 1] - base) {
+          nextleaf = i;
+        } else {
+          nextleaf = LEAF[j + 1] - base;
+        }
+        while (node < nextleaf) {
+          _ajs[tid].push_back(node + base);
+          count++;
+          node = parent[node] - base;
+        }
+      }
+      _ajs[tid].push_back(i + base);
+      _ais[tid].push_back(_ais[tid].back() + count + 1);
+    }
+
+#pragma omp barrier
+#pragma omp single
+    {
+      _ais_prefix[0] = 0;
+      for (int i = 0; i < _nthreads; i++) {
+        _ais_prefix[i + 1] = _ais_prefix[i] + _ajs[i].size();
+      }
+      L.ResizeAI(nnodes + 1);
+      L.ResizeAJ(_ais_prefix.back());
+      L.rows = nnodes;
+      L.cols = nnodes;
+    }
+    for (auto i = start; i <= end; i++) {
+      L.AI()[i] = _ais[tid][i - start] + _ais_prefix[tid] + base;
+    }
+    COLTYPE pos = _ais_prefix[tid];
+    for (auto i : _ajs[tid]) {
+      L.AJ()[pos++] = i;
+    }
+  }
+  L.ResizeAV(_ais_prefix.back());
+}
+
 // instantiate for common types
 #define INSTANTIATE_CHOLESKY(ROWTYPE, COLTYPE)                                 \
   template void EliminationTree<ROWTYPE, COLTYPE>(                             \
@@ -156,4 +270,12 @@ void NNZCount(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
 INSTANTIATE_CHOLESKY(std::int32_t, std::int32_t)
 INSTANTIATE_CHOLESKY(std::int64_t, std::int64_t)
 
+template class SkeletonGraph<
+    ::matrix_utils::CSRMatrix<std::int32_t, std::int32_t, double>>;
+template class SkeletonGraph<
+    ::matrix_utils::CSRMatrix<std::int64_t, std::int64_t, double>>;
+template class SymbolicCholesky<
+    ::matrix_utils::CSRMatrix<std::int32_t, std::int32_t, double>>;
+template class SymbolicCholesky<
+    ::matrix_utils::CSRMatrix<std::int64_t, std::int64_t, double>>;
 } // namespace factorization

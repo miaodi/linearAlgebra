@@ -5,12 +5,13 @@ include(../cmake/ssget.cmake)
 
 
 download_sparse_matrix("msc00726" ${CMAKE_CURRENT_BINARY_DIR})
-
 download_sparse_matrix("nasa2910" ${CMAKE_CURRENT_BINARY_DIR})
-
 download_sparse_matrix("plat1919" ${CMAKE_CURRENT_BINARY_DIR})
-
 download_sparse_matrix("bcsstk05" ${CMAKE_CURRENT_BINARY_DIR})
+download_sparse_matrix("bcsstk01" ${CMAKE_CURRENT_BINARY_DIR})
+download_sparse_matrix("ex5" ${CMAKE_CURRENT_BINARY_DIR})
+download_sparse_matrix("mesh1em1" ${CMAKE_CURRENT_BINARY_DIR})
+download_sparse_matrix("mesh1em6" ${CMAKE_CURRENT_BINARY_DIR})
 
 
 message("CMAKE_CURRENT_BINARY_DIR: ${CMAKE_CURRENT_BINARY_DIR}")

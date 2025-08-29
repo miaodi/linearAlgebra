@@ -57,7 +57,7 @@ void invPerm(const COLTYPE rows, const COLTYPE base, COLTYPE const *const perm,
 template <typename COLTYPE>
 bool isPermutation(const COLTYPE rows, const COLTYPE base,
                    COLTYPE const *const perm);
-                   
+
 template <typename COLTYPE>
 bool isPermutationSerial(const COLTYPE rows, const COLTYPE base,
                          COLTYPE const *const perm);
@@ -84,7 +84,8 @@ void randPerm(const COLTYPE rows, const COLTYPE base, COLTYPE *const perm);
  *  @param rows Number of rows in the matrix
  *  @param ai Row pointer of the matrix
  *  @param perm Permutation vector, where perm[i] = j means P(i, j) = 1
- *  @param permed_ai Output row pointer after permutation
+ *  @param permed_ai Output row pointer after permutation, where size of
+ * permed_ai[i] = size of ai[perm[i]]
  *  @tparam ROWTYPE Type of the row indices (e.g., int, long)
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
