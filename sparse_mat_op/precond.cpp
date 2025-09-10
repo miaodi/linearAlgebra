@@ -331,10 +331,9 @@ bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()(const COLTYPE size,
                                                         COLTYPE const *aj,
                                                         const int lvl,
                                                         CSRMatrixType &L) {
-  _S_val.resize(size);
-  std::fill(_S_val.begin(), _S_val.end(), 0);
-  _S_path_max.resize(size);
-  _visited_nodes.resize(size);
+  _visited.resize(size);
+  std::fill(_visited.begin(), _visited.end(), 0);
+  _Li_path_max.resize(size);
   const auto base = ai[0];
   L.ResizeAI(size + 1);
   ROWTYPE nnz = ai[size] - base;
@@ -343,52 +342,60 @@ bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()(const COLTYPE size,
   L.cols = size;
   L.AI()[0] = base;
   COLTYPE visited_token = 0;
-  _Q_next.clear();
-
   for (COLTYPE i = 0; i < size; i++) {
     _Q.clear();
-    _Q.push_back(i);
+    _Q_next.clear();
+    for (auto j_idx = ai[i] - base; j_idx < ai[i + 1] - base; j_idx++) {
+      const auto j = aj[j_idx] - base;
+      if (j > i) {
+        break;
+      }
+      _Q[j] = j;
+    }
+
     visited_token++;
-    _S_val[i] = visited_token;
-    _S_path_max[i] = 0;
-    _visited_nodes.clear();
-    _visited_nodes.push_back(i);
+    _Li.clear();
 
     int level = 0;
     while (level <= lvl) {
-      for (const auto k : _Q) {
-        auto path_max = _S_path_max[k];
+      for (const auto &[k, path_max] : _Q) {
+        // skip if the the destination has been visited with a smaller path_max
+        if (_visited[k] == visited_token && _Li_path_max[k] <= path_max) {
+          continue;
+        }
+        if (_visited[k] != visited_token) {
+          _visited[k] = visited_token;
+        }
+        if (path_max == k)
+          _Li.push_back(k);
+
+        _Li_path_max[k] = path_max;
+        if (level == lvl) {
+          continue;
+        }
+        // iterative k->j paths
         for (auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++) {
           auto j = aj[j_idx] - base;
           if (j >= i) {
             break;
           }
-          COLTYPE j_path_max = std::max(j, path_max);
-          if (_S_val[j] != visited_token) {
-            _visited_nodes.push_back(j);
-            if (level < lvl) {
-              _S_val[j] = visited_token;
-              _S_path_max[j] = j_path_max;
-              _Q_next.push_back(j);
-            }
-          } else if (_S_path_max[j] > j_path_max && level < lvl) {
-            _S_path_max[j] = j_path_max;
-            _Q_next.push_back(j);
+          const COLTYPE kj_path_max = std::max(j, path_max);
+          auto it = _Q_next.find(j);
+          if (it != _Q_next.end()) {
+            it->second = std::min(it->second, kj_path_max);
+          } else {
+            _Q_next[j] = kj_path_max;
           }
         }
       }
-      if (level < lvl) {
-        std::sort(_Q_next.begin(), _Q_next.end());
-        auto unique_end = std::unique(_Q_next.begin(), _Q_next.end());
-        _Q_next.erase(unique_end, _Q_next.end());
-        _Q.swap(_Q_next);
-        _Q_next.clear();
-      }
+
+      _Q.swap(_Q_next);
+      _Q_next.clear();
       level++;
     }
 
     ROWTYPE pos = L.AI()[i] - base;
-    if (nnz < pos + _visited_nodes.size()) {
+    if (nnz < pos + _Li.size()) {
       if (2 * i >= size)
         nnz *= 2;
       else
@@ -396,12 +403,9 @@ bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()(const COLTYPE size,
       L.ResizeAJ(nnz);
     }
 
-    std::sort(_visited_nodes.begin(), _visited_nodes.end());
-
-    for (const auto &s : _visited_nodes) {
-      if (_S_path_max[s] <= s) {
-        L.AJ()[pos++] = s + base;
-      }
+    std::sort(_Li.begin(), _Li.end());
+    for (const auto &s : _Li) {
+      L.AJ()[pos++] = s + base;
     }
     L.AI()[i + 1] = pos + base;
   }

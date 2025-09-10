@@ -743,11 +743,11 @@ public:
                   const int lvl, CSRMatrixType &L);
 
 private:
-  std::vector<COLTYPE> _S_val;
-  std::vector<COLTYPE> _S_path_max;
-  std::vector<COLTYPE> _visited_nodes;
-  std::vector<COLTYPE> _Q;
-  std::vector<COLTYPE> _Q_next;
+  std::vector<COLTYPE> _Li_path_max;// 
+  std::vector<COLTYPE> _visited;
+  std::vector<COLTYPE> _Li;
+  std::unordered_map<COLTYPE, COLTYPE> _Q;
+  std::unordered_map<COLTYPE, COLTYPE> _Q_next;
 };
 
 template <ResizableDiagonalType CSRMatrixType>
