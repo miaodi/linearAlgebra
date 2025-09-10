@@ -332,6 +332,7 @@ bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()(const COLTYPE size,
                                                         const int lvl,
                                                         CSRMatrixType &L) {
   _S_val.resize(size);
+  std::fill(_S_val.begin(), _S_val.end(), 0);
   _S_path_max.resize(size);
   _visited_nodes.resize(size);
   const auto base = ai[0];
@@ -342,10 +343,11 @@ bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()(const COLTYPE size,
   L.cols = size;
   L.AI()[0] = base;
   COLTYPE visited_token = 0;
+  _Q_next.clear();
 
   for (COLTYPE i = 0; i < size; i++) {
-    _q.clear();
-    _q.push_back(i);
+    _Q.clear();
+    _Q.push_back(i);
     visited_token++;
     _S_val[i] = visited_token;
     _S_path_max[i] = 0;
@@ -353,11 +355,8 @@ bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()(const COLTYPE size,
     _visited_nodes.push_back(i);
 
     int level = 0;
-    ROWTYPE q_head = 0;
-    while (level < lvl && q_head < _q.size()) {
-      ROWTYPE q_tail = _q.size();
-      for (; q_head < q_tail; q_head++) {
-        auto k = _q[q_head];
+    while (level <= lvl) {
+      for (const auto k : _Q) {
         auto path_max = _S_path_max[k];
         for (auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++) {
           auto j = aj[j_idx] - base;
@@ -366,15 +365,24 @@ bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()(const COLTYPE size,
           }
           COLTYPE j_path_max = std::max(j, path_max);
           if (_S_val[j] != visited_token) {
-            _S_val[j] = visited_token;
-            _S_path_max[j] = j_path_max;
-            _q.push_back(j);
             _visited_nodes.push_back(j);
-          } else if (_S_path_max[j] > j_path_max) {
+            if (level < lvl) {
+              _S_val[j] = visited_token;
+              _S_path_max[j] = j_path_max;
+              _Q_next.push_back(j);
+            }
+          } else if (_S_path_max[j] > j_path_max && level < lvl) {
             _S_path_max[j] = j_path_max;
-            _q.push_back(j);
+            _Q_next.push_back(j);
           }
         }
+      }
+      if (level < lvl) {
+        std::sort(_Q_next.begin(), _Q_next.end());
+        auto unique_end = std::unique(_Q_next.begin(), _Q_next.end());
+        _Q_next.erase(unique_end, _Q_next.end());
+        _Q.swap(_Q_next);
+        _Q_next.clear();
       }
       level++;
     }
