@@ -106,6 +106,7 @@ find_package(OpenMP REQUIRED)
 find_package(LAPACK REQUIRED)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+message(STATUS "Using Python interpreter: ${Python3_EXECUTABLE}")
 
 # Check if ssgetpy is available
 execute_process(

@@ -29,3 +29,6 @@ target_link_libraries(test_chol PRIVATE ${libs})
 
 add_executable(test_gmres gmres.cpp)
 target_link_libraries(test_gmres PRIVATE ${libs})
+
+add_executable(test_unsymm unsymm.cpp)
+target_link_libraries(test_unsymm PRIVATE ${libs})

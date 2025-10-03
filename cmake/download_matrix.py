@@ -29,6 +29,11 @@ if os.path.isdir(path):
     # If it's a directory, look for .mtx files inside it
     for f in os.listdir(path):
         if f.endswith(".mtx"):
+            with open(os.path.join(path, f), "r") as fin:
+                headline = fin.readline()
+                if "matrix array" in headline:
+                    print(f"Skipping {f} because it contains 'matrix array' in the headline.")
+                    continue
             # If found, move the .mtx file to the desired output location
             os.rename(os.path.join(path, f), outfile)
             print(f"Saved as {outfile}")
