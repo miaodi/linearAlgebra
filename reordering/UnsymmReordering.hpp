@@ -26,8 +26,8 @@ void MaximumMatching(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
   auto augment_path = [&](COLTYPE v, COLTYPE curr) {
     while (curr != INVALID) {
       COLTYPE next_v = matching_row[curr];
-      matching_row[curr] = v;
-      matching_col[v] = curr;
+      matching_row[curr] = v + base;
+      matching_col[v] = curr + base;
       v = next_v;
       if (v != INVALID)
         curr = parent[curr];
@@ -48,13 +48,13 @@ void MaximumMatching(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
         COLTYPE v = aj[i] - base;
         if (matching_col[v] == INVALID) {
           // Found an unmatched vertex, augment the path
-          found_augmenting_path = true;
           augment_path(v, curr);
           return true;
         } else if (!visited[v]) {
           visited[v] = true;
           // Continue searching
-          auto curr_1 = matching_col[v];
+          auto curr_1 = matching_col[v] - base;
+          found_augmenting_path = true;
           parent[curr_1] = curr;
           curr = curr_1;
           break;

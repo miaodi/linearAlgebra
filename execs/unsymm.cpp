@@ -1,6 +1,7 @@
 #include "UnsymmReordering.hpp"
 #include "io.hpp"
 #include "matrix_utils.hpp"
+#include "permutation.hpp"
 #include <cxxopts.hpp>
 #include <fstream>
 #include <mkl.h>
@@ -174,21 +175,8 @@ int main(int argc, char **argv) {
 
   std::vector<int> matching_row(csr_matrix.rows);
   std::vector<int> matching_col(csr_matrix.rows);
-  // reordering::MaximumMatching(csr_matrix.rows, csr_matrix.AI(),
-  // csr_matrix.AJ(),
-  //                             matching_row.data(), matching_col.data());
-  // for (int i = 0; i < csr_matrix.rows; i++) {
-  //   std::cout << matching_row[i] << " ";
-  // }
-  // std::cout << std::endl;
-  // for (int i = 0; i < csr_matrix.rows; i++) {
-  //   std::cout << matching_col[i] << " ";
-  // }
-  // std::cout << std::endl;
-
-  maximum_cardinality_matching_csr(csr_matrix.rows, csr_matrix.AI(),
-                                   csr_matrix.AJ(), matching_row.data(),
-                                   matching_col.data());
+  reordering::MaximumMatching(csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
+                              matching_row.data(), matching_col.data());
   for (int i = 0; i < csr_matrix.rows; i++) {
     std::cout << matching_row[i] << " ";
   }
@@ -197,5 +185,35 @@ int main(int argc, char **argv) {
     std::cout << matching_col[i] << " ";
   }
   std::cout << std::endl;
+
+  // Row permute the matrix according to matching_row
+  matrix_utils::CSRMatrix<int, int, double> permuted_matrix;
+
+  permuted_matrix.rows = csr_matrix.rows;
+  permuted_matrix.cols = csr_matrix.cols;
+  permuted_matrix.ResizeAI(csr_matrix.rows + 1);
+  permuted_matrix.ResizeAJ(csr_matrix.NNZ());
+  permuted_matrix.ResizeAV(csr_matrix.NNZ());
+  matrix_utils::permuteMat(csr_matrix.rows, csr_matrix.cols, (int *)nullptr,
+                           matching_col.data(), csr_matrix.AI(),
+                           csr_matrix.AJ(), permuted_matrix.AI(),
+                           permuted_matrix.AJ());
+
+  std::ofstream out1("mat_csr_rowperm.svg");
+  matrix_utils::writeSVG(permuted_matrix.rows, permuted_matrix.cols,
+                         permuted_matrix.AI(), permuted_matrix.AJ(), out1);
+  out1.close();
+
+  // maximum_cardinality_matching_csr(csr_matrix.rows, csr_matrix.AI(),
+  //                                  csr_matrix.AJ(), matching_row.data(),
+  //                                  matching_col.data());
+  // for (int i = 0; i < csr_matrix.rows; i++) {
+  //   std::cout << matching_row[i] << " ";
+  // }
+  // std::cout << std::endl;
+  // for (int i = 0; i < csr_matrix.rows; i++) {
+  //   std::cout << matching_col[i] << " ";
+  // }
+  // std::cout << std::endl;
   return 0;
 }
