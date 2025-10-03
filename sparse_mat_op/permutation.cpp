@@ -184,6 +184,8 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
           utils::variadic_assign(j_idx, perm_j_idx, args...);
         }
       }
+
+      // Sort the column indices (and associated values) within each row
       if (ipermQ == nullptr)
         continue;
 
