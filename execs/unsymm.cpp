@@ -215,5 +215,24 @@ int main(int argc, char **argv) {
   //   std::cout << matching_col[i] << " ";
   // }
   // std::cout << std::endl;
+  {
+    reordering::HungarianAlgorithm<int, int, double> hungarian;
+    std::vector<int> matching_row(csr_matrix.rows);
+    std::vector<int> matching_col(csr_matrix.rows);
+    std::vector<double> potential_row(csr_matrix.rows);
+    std::vector<double> potential_col(csr_matrix.rows);
+    hungarian(csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
+              csr_matrix.AV(), matching_row.data(), matching_col.data(),
+              potential_row.data(), potential_col.data());
+
+    for (int i = 0; i < csr_matrix.rows; i++) {
+      std::cout << matching_row[i] << " ";
+    }
+    std::cout << std::endl;
+    for (int i = 0; i < csr_matrix.rows; i++) {
+      std::cout << potential_row[i] << " ";
+    }
+    std::cout << std::endl;
+  }
   return 0;
 }

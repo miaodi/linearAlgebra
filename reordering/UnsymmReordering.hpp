@@ -1,4 +1,5 @@
 #pragma once
+#include <deque>
 #include <functional>
 #include <limits>
 #include <vector>
@@ -15,61 +16,42 @@ namespace reordering {
 /// matching[j] = std::numeric_limits<COLTYPE>::max()
 template <typename ROWTYPE, typename COLTYPE>
 void MaximumMatching(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
-                     COLTYPE *matching_row, COLTYPE *matching_col) {
-  const COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
-  const ROWTYPE base = ai[0];
-  std::vector<bool> visited(rows, false);
-  std::vector<COLTYPE> parent(rows, INVALID);
-  std::fill_n(matching_row, rows, INVALID);
-  std::fill_n(matching_col, rows, INVALID);
+                     COLTYPE *matching_row, COLTYPE *matching_col);
 
-  auto augment_path = [&](COLTYPE v, COLTYPE curr) {
-    while (curr != INVALID) {
-      COLTYPE next_v = matching_row[curr];
-      matching_row[curr] = v + base;
-      matching_col[v] = curr + base;
-      v = next_v;
-      if (v != INVALID)
-        curr = parent[curr];
-      else
-        curr = INVALID;
-    }
-  };
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+class HungarianAlgorithm {
+public:
+  HungarianAlgorithm() = default;
+  void operator()(const COLTYPE n, ROWTYPE const *ai, COLTYPE const *aj,
+                  VALTYPE const *av, COLTYPE *matching_row,
+                  COLTYPE *matching_col, VALTYPE *potential_row,
+                  VALTYPE *potential_col);
 
-  std::function<bool(COLTYPE)> bpm = [&](COLTYPE u) {
-    std::fill(visited.begin(), visited.end(), false);
-    std::fill(parent.begin(), parent.end(), INVALID);
+private:
+  void initialize();
+  void initialize_row();
+  void augment(const COLTYPE t, const COLTYPE s);
+  void update_potentials();
+  void visit_matched_col(const COLTYPE col);
+  void match_row(const COLTYPE row);
 
-    COLTYPE curr = u;
-    while (curr != INVALID) {
-      bool found_augmenting_path = false;
-      for (ROWTYPE i = ai[curr - base] - base; i < ai[curr - base + 1] - base;
-           i++) {
-        COLTYPE v = aj[i] - base;
-        if (matching_col[v] == INVALID) {
-          // Found an unmatched vertex, augment the path
-          augment_path(v, curr);
-          return true;
-        } else if (!visited[v]) {
-          visited[v] = true;
-          // Continue searching
-          auto curr_1 = matching_col[v] - base;
-          found_augmenting_path = true;
-          parent[curr_1] = curr;
-          curr = curr_1;
-          break;
-        }
-      }
-      if (!found_augmenting_path) {
-        curr = parent[curr];
-      }
-    }
-    return false;
-  };
+private:
+  std::vector<COLTYPE> parent;
+  std::vector<bool> S;
+  std::vector<bool> T;
+  std::vector<VALTYPE> min_slack;
+  std::deque<COLTYPE> Q;
+  static constexpr COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
 
-  for (COLTYPE u = 0; u < rows; u++) {
-    if (matching_row[u] == INVALID)
-      bpm(u);
-  }
-}
+  // Data that does not owned by this class
+  VALTYPE *potential_row;
+  VALTYPE *potential_col;
+  COLTYPE *matching_row;
+  COLTYPE *matching_col;
+
+  COLTYPE n;
+  ROWTYPE const *ai;
+  COLTYPE const *aj;
+  VALTYPE const *av;
+};
 } // namespace reordering
