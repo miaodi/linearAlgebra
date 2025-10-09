@@ -11,9 +11,12 @@ namespace reordering {
 /// @param rows Number of rows (and columns) in the square matrix
 /// @param ai Row pointer array (size rows + 1)
 /// @param aj Column indices array (size nnz)
-/// @param matching Output array to store the matching (size rows). matching[j]
-/// = i means column j is matched to row i. Unmatched columns will have
-/// matching[j] = std::numeric_limits<COLTYPE>::max()
+/// @param matching_row Output array for matching from rows to columns (size
+/// rows). For example, if row i is matched to column j, matching_row[i] = j
+/// @param matching_col Output array for matching from columns to rows (size
+/// rows). For example, if column j is matched to row i, matching_col[j] = i
+/// Unmatched columns will have matching_col[j] =
+/// std::numeric_limits<COLTYPE>::max()
 template <typename ROWTYPE, typename COLTYPE>
 void MaximumMatching(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
                      COLTYPE *matching_row, COLTYPE *matching_col);

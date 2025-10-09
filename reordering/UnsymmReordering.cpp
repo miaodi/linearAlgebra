@@ -1,8 +1,7 @@
 #include "UnsymmReordering.hpp"
-
+#include <iostream>
+#include <queue>
 namespace reordering {
-
-// MaximumMatching function definition
 template <typename ROWTYPE, typename COLTYPE>
 void MaximumMatching(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
                      COLTYPE *matching_row, COLTYPE *matching_col) {
@@ -13,16 +12,15 @@ void MaximumMatching(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
   std::fill_n(matching_row, rows, INVALID);
   std::fill_n(matching_col, rows, INVALID);
 
-  auto augment_path = [&](COLTYPE v, COLTYPE curr) {
-    while (curr != INVALID) {
-      COLTYPE next_v = matching_row[curr];
-      matching_row[curr] = v;
-      matching_col[v] = curr;
-      v = next_v;
-      if (v != INVALID)
-        curr = parent[curr];
-      else
-        curr = INVALID;
+  auto augment_path = [&](COLTYPE t) {
+    while (true) {
+      COLTYPE s = parent[t];
+      COLTYPE next_t = matching_row[s];
+      matching_row[s] = t + base;
+      matching_col[t] = s + base;
+      if (next_t == INVALID)
+        break;
+      t = next_t - base;
     }
   };
 
@@ -30,29 +28,34 @@ void MaximumMatching(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
     std::fill(visited.begin(), visited.end(), false);
     std::fill(parent.begin(), parent.end(), INVALID);
 
-    COLTYPE curr = u;
-    while (curr != INVALID) {
-      bool found_augmenting_path = false;
-      for (ROWTYPE i = ai[curr - base] - base; i < ai[curr - base + 1] - base;
-           i++) {
-        COLTYPE v = aj[i] - base;
-        if (matching_col[v] == INVALID) {
-          // Found an unmatched vertex, augment the path
-          found_augmenting_path = true;
-          augment_path(v, curr);
-          return true;
-        } else if (!visited[v]) {
-          visited[v] = true;
-          // Continue searching
-          auto curr_1 = matching_col[v];
-          parent[curr_1] = curr;
-          curr = curr_1;
-          break;
+    std::queue<COLTYPE> q;
+    q.push(u);
+    visited[u] = true;
+
+    COLTYPE end_t = INVALID;
+    while (!q.empty()) {
+      COLTYPE s = q.front();
+      q.pop();
+      for (ROWTYPE i = ai[s] - base; i < ai[s + 1] - base; i++) {
+        COLTYPE t = aj[i] - base;
+        if (!visited[t]) {
+          visited[t] = true;
+          parent[t] = s;
+          if (matching_col[t] == INVALID) {
+            // Found an augmenting path
+            end_t = t;
+            break;
+          } else {
+            q.push(matching_col[t] - base);
+          }
         }
       }
-      if (!found_augmenting_path) {
-        curr = parent[curr];
-      }
+      if (end_t != INVALID)
+        break;
+    }
+    if (end_t != INVALID) {
+      augment_path(end_t);
+      return true;
     }
     return false;
   };
