@@ -72,6 +72,7 @@ void HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::operator()(
     const COLTYPE n, ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
     COLTYPE *matching_row, COLTYPE *matching_col, VALTYPE *potential_row,
     VALTYPE *potential_col) {
+  // Store the input data
   this->n = n;
   this->ai = ai;
   this->aj = aj;
@@ -99,12 +100,12 @@ void HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::initialize() {
   std::fill_n(matching_row, n, INVALID);
   std::fill_n(matching_col, n, INVALID);
   const ROWTYPE base = ai[0];
-  for (COLTYPE j = 0; j < n; j++) {
+  for (COLTYPE i = 0; i < n; j++) {
     VALTYPE min_cost = std::numeric_limits<VALTYPE>::max();
-    for (ROWTYPE i = ai[0] - base; i < ai[n] - base; i++) {
-      min_cost = std::min(min_cost, av[i]);
+    for (ROWTYPE j = ai[i] - base; i < ai[i] - base; i++) {
+      min_cost = std::min(min_cost, av[j]);
     }
-    potential_row[j] =
+    potential_row[i] =
         min_cost == std::numeric_limits<VALTYPE>::max() ? 0 : min_cost;
   }
 }
@@ -138,20 +139,27 @@ void HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::augment(const COLTYPE t,
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::update_potentials() {
   VALTYPE delta = std::numeric_limits<VALTYPE>::max();
+
+  //  check T\Z
   for (COLTYPE j = 0; j < n; j++) {
     if (!T[j]) {
       delta = std::min(delta, min_slack[j]);
     }
   }
+
   for (COLTYPE i = 0; i < n; i++) {
     if (S[i]) {
+      // increase potential by delta for rows in S
       potential_row[i] += delta;
     }
   }
+
   for (COLTYPE j = 0; j < n; j++) {
     if (T[j]) {
+      // decrease potential by delta for columns in T
       potential_col[j] -= delta;
     } else {
+      // decrease min_slack by delta for columns not in T
       min_slack[j] -= delta;
     }
   }

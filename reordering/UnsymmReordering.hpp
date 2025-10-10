@@ -40,8 +40,8 @@ private:
 
 private:
   std::vector<COLTYPE> parent;
-  std::vector<bool> S;
-  std::vector<bool> T;
+  std::vector<bool> S; // rows in the alternating tree Z
+  std::vector<bool> T; // columns in the alternating tree Z
   std::vector<VALTYPE> min_slack;
   std::deque<COLTYPE> Q;
   static constexpr COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
