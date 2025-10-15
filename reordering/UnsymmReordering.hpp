@@ -32,17 +32,18 @@ public:
 
 private:
   void initialize();
-  void initialize_row();
-  void augment(const COLTYPE t, const COLTYPE s);
-  void update_potentials();
-  void visit_matched_col(const COLTYPE col);
-  void match_row(const COLTYPE row);
+  void initialize_row(const COLTYPE row);
+  void augment(const COLTYPE t);
+  bool update_potentials();
+  void prep_row(const COLTYPE row);
+  bool match_row(const COLTYPE row);
 
 private:
   std::vector<COLTYPE> parent;
-  std::vector<bool> S; // rows in the alternating tree Z
-  std::vector<bool> T; // columns in the alternating tree Z
+  std::vector<int> S; // rows in the alternating tree Z
+  std::vector<int> T; // columns in the alternating tree Z
   std::vector<VALTYPE> min_slack;
+  // std::vector<VALTYPE> min_slack_cpy;
   std::deque<COLTYPE> Q;
   static constexpr COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
 
@@ -56,5 +57,6 @@ private:
   ROWTYPE const *ai;
   COLTYPE const *aj;
   VALTYPE const *av;
+  ROWTYPE base;
 };
 } // namespace reordering

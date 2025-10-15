@@ -48,23 +48,23 @@ int main(int argc, char **argv) {
   // }
   // std::cout << std::endl;
 
-  // // Row permute the matrix according to matching_row
-  // matrix_utils::CSRMatrix<int, int, double> permuted_matrix;
+  // Row permute the matrix according to matching_row
+  matrix_utils::CSRMatrix<int, int, double> permuted_matrix;
 
-  // permuted_matrix.rows = csr_matrix.rows;
-  // permuted_matrix.cols = csr_matrix.cols;
-  // permuted_matrix.ResizeAI(csr_matrix.rows + 1);
-  // permuted_matrix.ResizeAJ(csr_matrix.NNZ());
-  // permuted_matrix.ResizeAV(csr_matrix.NNZ());
-  // matrix_utils::permuteMat(csr_matrix.rows, csr_matrix.cols, matching_col.data(),
-  //                          (int*)nullptr, csr_matrix.AI(),
-  //                          csr_matrix.AJ(), permuted_matrix.AI(),
-  //                          permuted_matrix.AJ());
+  permuted_matrix.rows = csr_matrix.rows;
+  permuted_matrix.cols = csr_matrix.cols;
+  permuted_matrix.ResizeAI(csr_matrix.rows + 1);
+  permuted_matrix.ResizeAJ(csr_matrix.NNZ());
+  permuted_matrix.ResizeAV(csr_matrix.NNZ());
+  matrix_utils::permuteMat(csr_matrix.rows, csr_matrix.cols,
+                           matching_col.data(), (int *)nullptr, csr_matrix.AI(),
+                           csr_matrix.AJ(), permuted_matrix.AI(),
+                           permuted_matrix.AJ());
 
-  // std::ofstream out1("mat_csr_rowperm.svg");
-  // matrix_utils::writeSVG(permuted_matrix.rows, permuted_matrix.cols,
-  //                        permuted_matrix.AI(), permuted_matrix.AJ(), out1);
-  // out1.close();
+  std::ofstream out1("mat_csr_rowperm_1.svg");
+  matrix_utils::writeSVG(permuted_matrix.rows, permuted_matrix.cols,
+                         permuted_matrix.AI(), permuted_matrix.AJ(), out1);
+  out1.close();
 
   {
     reordering::HungarianAlgorithm<int, int, double> hungarian;
@@ -84,6 +84,23 @@ int main(int argc, char **argv) {
       std::cout << potential_row[i] << " ";
     }
     std::cout << std::endl;
+
+    matrix_utils::CSRMatrix<int, int, double> permuted_matrix;
+
+    permuted_matrix.rows = csr_matrix.rows;
+    permuted_matrix.cols = csr_matrix.cols;
+    permuted_matrix.ResizeAI(csr_matrix.rows + 1);
+    permuted_matrix.ResizeAJ(csr_matrix.NNZ());
+    permuted_matrix.ResizeAV(csr_matrix.NNZ());
+    matrix_utils::permuteMat(csr_matrix.rows, csr_matrix.cols,
+                             matching_col.data(), (int *)nullptr,
+                             csr_matrix.AI(), csr_matrix.AJ(),
+                             permuted_matrix.AI(), permuted_matrix.AJ());
+
+    std::ofstream out1("mat_csr_rowperm.svg");
+    matrix_utils::writeSVG(permuted_matrix.rows, permuted_matrix.cols,
+                           permuted_matrix.AI(), permuted_matrix.AJ(), out1);
+    out1.close();
   }
   return 0;
 }
