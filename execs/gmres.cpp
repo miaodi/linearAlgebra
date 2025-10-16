@@ -5,9 +5,12 @@
 #include "sparse_mat_traits.hpp"
 #include "spmv.hpp"
 #include "triangle_solve.hpp"
+#include <cmath>
 #include <cxxopts.hpp>
 #include <fstream>
+#include <iomanip>
 #include <mkl.h>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -42,8 +45,13 @@ int main(int argc, char **argv) {
   options.add_options()(
       "f,filename", "Matrix Market file to read",
       cxxopts::value<std::string>()->default_value("../tests/data/ex5.mtx"))(
-      "l,level", "ILU level",
-      cxxopts::value<int>()->default_value("0"))("h,help", "Print usage");
+      "l,level", "ILU level", cxxopts::value<int>()->default_value("0"))(
+      "p,precond",
+      "Preconditioner type: none (no preconditioning), left (M^-1 A x = M^-1 "
+      "b), right (A M^-1 y = b)",
+      cxxopts::value<std::string>()->default_value("left"))(
+      "r,restart", "GMRES restart parameter",
+      cxxopts::value<int>()->default_value("100"))("h,help", "Print usage");
   auto result = options.parse(argc, argv);
   if (result.count("help")) {
     std::cout << options.help() << std::endl;
@@ -51,6 +59,33 @@ int main(int argc, char **argv) {
   }
   std::string filename = result["filename"].as<std::string>();
   int level = result["level"].as<int>();
+  std::string precond_type_str = result["precond"].as<std::string>();
+  int restart = result["restart"].as<int>();
+
+  // Validate restart parameter
+  if (restart <= 0) {
+    std::cerr << "Invalid restart parameter: " << restart
+              << ". Must be a positive integer." << std::endl;
+    return -1;
+  }
+
+  // Parse preconditioner type
+  iterative_solver::PreconditionerType precond_type;
+  if (precond_type_str == "none") {
+    precond_type = iterative_solver::PreconditionerType::NONE;
+  } else if (precond_type_str == "left") {
+    precond_type = iterative_solver::PreconditionerType::LEFT;
+  } else if (precond_type_str == "right") {
+    precond_type = iterative_solver::PreconditionerType::RIGHT;
+  } else {
+    std::cerr << "Invalid preconditioner type: " << precond_type_str
+              << ". Valid options are: none, left, right" << std::endl;
+    return -1;
+  }
+
+  std::cout << "Using preconditioner type: " << precond_type_str << std::endl;
+  std::cout << "Using restart parameter: " << restart << std::endl;
+
   std::ifstream f(filename);
   f.clear();
   f.seekg(0, std::ios::beg);
@@ -122,8 +157,8 @@ int main(int argc, char **argv) {
     matrix_utils::TopologicalSort2<int, int> topSort;
     std::vector<int> perm(L.rows);
     std::vector<int> prefix(L.rows + 1);
-    int level = topSort(matrix_utils::TriangularMatrix::L, L.rows, L.AI(), L.AJ(),
-                     perm.data(), prefix.data());
+    int level = topSort(matrix_utils::TriangularMatrix::L, L.rows, L.AI(),
+                        L.AJ(), perm.data(), prefix.data());
     std::cout << "Kahn done." << std::endl;
     std::cout << "Level: " << level << std::endl;
     for (int i = 0; i < level; i++) {
@@ -135,7 +170,8 @@ int main(int argc, char **argv) {
 
     // std::vector<int> permU(U.rows);
     // std::vector<int> prefixU(U.rows + 1);
-    // int levelU = kahn(matrix_utils::TriangularMatrix::U, U.rows, U.AI(), U.AJ(),
+    // int levelU = kahn(matrix_utils::TriangularMatrix::U, U.rows, U.AI(),
+    // U.AJ(),
     //                   permU.data(), prefixU.data());
     // std::cout << "Kahn done." << std::endl;
     // std::cout << "Level: " << levelU << std::endl;
@@ -147,15 +183,64 @@ int main(int argc, char **argv) {
     // }
   }
 
-  // std::vector<double> b(csr_matrix.rows, 1.0);
-  // std::vector<double> x(csr_matrix.rows, 0.0);
+  // Randomly generate b and x vectors
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<double> dis(-1.0, 1.0);
 
-  // std::cout<<"GMRES..."<<std::endl;
-  // iterative_solver::GMRES<double> gmres_solver;
-  // gmres_solver.setMaxIter(10000000);
-  // gmres_solver.setRelTol(1e-8);
-  // gmres_solver.setRestart(100);
-  // gmres_solver(&spmv, &ilu_prec, b.data(), x.data());
-  // std::cout<<"GMRES done."<<std::endl;
-  return 0;
+  std::vector<double> b(csr_matrix.rows);
+  std::vector<double> x(csr_matrix.rows);
+
+  // Generate random b vector
+  for (size_t i = 0; i < b.size(); ++i) {
+    b[i] = dis(gen);
+  }
+
+  // Generate random initial guess for x
+  for (size_t i = 0; i < x.size(); ++i) {
+    x[i] = dis(gen);
+  }
+
+  std::cout << "Generated random b and x vectors (uniform distribution [-1, 1])"
+            << std::endl;
+  std::cout << "GMRES..." << std::endl;
+  iterative_solver::GMRES<double> gmres_solver;
+  gmres_solver.setMaxIter(10000000);
+  gmres_solver.setRelTol(1e-8);
+  gmres_solver.setRestart(restart);
+  // gmres_solver.setPreconditionerType(precond_type);
+  auto state = gmres_solver(&spmv, &ilu_prec, b.data(), x.data());
+
+  std::cout << "GMRES done. Final state: ";
+  switch (state) {
+  case iterative_solver::State::CONVERGED:
+    std::cout << "CONVERGED" << std::endl;
+    break;
+  case iterative_solver::State::MAX_ITER_REACHED:
+    std::cout << "MAX_ITER_REACHED" << std::endl;
+    break;
+  case iterative_solver::State::FAILED:
+    std::cout << "FAILED" << std::endl;
+    break;
+  default:
+    std::cout << "UNKNOWN" << std::endl;
+    break;
+  }
+
+  // Compute final residual: r = Ax - b
+  std::vector<double> residual(csr_matrix.rows);
+  std::copy(b.begin(), b.end(), residual.begin()); // residual = b
+  spmv(x.data(), residual.data(), 1.0, -1.0);      // residual = Ax - b
+
+  // Compute L2 norm of residual
+  double residual_norm = 0.0;
+  for (size_t i = 0; i < residual.size(); ++i) {
+    residual_norm += residual[i] * residual[i];
+  }
+  residual_norm = std::sqrt(residual_norm);
+
+  std::cout << "Final residual L2 norm: " << std::scientific
+            << std::setprecision(6) << residual_norm << std::endl;
+
+  return (state == iterative_solver::State::CONVERGED) ? 0 : -1;
 }

@@ -9,6 +9,29 @@
 
 namespace iterative_solver {
 
+/**
+ * @brief Enumeration of preconditioner types.
+ * left: M^{-1} * A * x = M^{-1} * b
+ * right: A * M^{-1} * y = b, x = M^{-1} * y
+ * none: A * x = b
+ */
+enum class PreconditionerType { NONE = 0, LEFT = 1, RIGHT = 2 };
+
+// Apply Givens rotation to R and g, and compute new Givens rotation
+/**
+ * @brief Applies a Givens rotation to the Hessenberg matrix column and the
+ * residual vector.
+ *
+ * @tparam VALTYPE Scalar type (e.g., float, double).
+ * @param R Pointer to the Hessenberg matrix data (column-major).
+ * @param g Pointer to the residual vector.
+ * @param c Pointer to the cosine values for Givens rotations.
+ * @param s Pointer to the sine values for Givens rotations.
+ * @param beta Scalar value representing the norm of the new vector.
+ * @param resid Reference to the current residual value (will be updated).
+ * @param lda Leading dimension (number of rows) of the Hessenberg matrix.
+ * @param j Current iteration index (column being processed).
+ */
 template <typename VALTYPE>
 void givens_rotation(VALTYPE *const R, VALTYPE *const g, VALTYPE *const c,
                      VALTYPE *const s, const VALTYPE beta, VALTYPE &resid,
@@ -50,6 +73,9 @@ public:
   void setAbsTol(VALTYPE abs_tol) { _abs_tol = abs_tol; }
   void setRelTol(VALTYPE rel_tol) { _rel_tol = rel_tol; }
   void setRestart(size_t restart) { _restart = restart; }
+  void setPreconditionerType(PreconditionerType prec_type) {
+    _prec_type = prec_type;
+  }
 
   template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
   State operator()(Op const *const op, PrecOp const *const prec,
@@ -60,87 +86,181 @@ public:
     static_assert(std::is_same_v<typename PrecOp::VALTYPE, VALTYPE>,
                   "PrecOp::VALTYPE must be the same as VALTYPE");
 
-    const auto size = op->size();
-    _restart = std::min(static_cast<size_t>(size), _restart);
-    const auto restart1 = _restart + 1;
-    _H.resize(_restart, _restart);
-    _H.setZero();
-    _Q.resize(size, restart1);
-    _Q.setZero();
+    const size_t size = op->size();
+    initialize_workspace(size);
 
-    _tmp.resize(size);
-    _g.resize(_restart);
-    _c.resize(_restart);
-    _s.resize(_restart);
     Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>> x_vec(x, size);
+    VALTYPE init_resid = compute_initial_residual(op, prec, b, x, size);
 
-    VALTYPE resid, init_resid, beta;
-    State state_code = State::RUNNING;
-
-    vec_ops::copy_vec(size, b, _tmp.data());
-
-    // b-= Ax_0
-    (*op)(x, _tmp.data(), (VALTYPE)(-1), (VALTYPE)(1));
-    // resid_0 = M^{-1}(b - Ax_0)
-    (*prec)(_tmp.data(), _Q.col(0).data());
-
-    init_resid = resid = _Q.col(0).norm();
     if (init_resid < _abs_tol) {
       return State::CONVERGED;
     }
 
-    size_t j, iter;
-    for (iter = 0; iter < _max_iter;) {
-      _Q.col(0) = _Q.col(0) / resid;
+    VALTYPE resid = init_resid;
+    for (size_t iter = 0; iter < _max_iter;) {
+      size_t cycle_iterations;
+      State restart_state = perform_restart_cycle(op, prec, iter, resid,
+                                                  init_resid, cycle_iterations);
 
-      for (j = 0; j < _restart; j++, iter++) {
-        if (iter >= _max_iter) {
-          state_code = State::MAX_ITER_REACHED;
-          break;
-        }
-        // v_j_ptr = A * v_j_ptr
-        (*op)(_Q.col(j).data(), _tmp.data(), (VALTYPE)(1), (VALTYPE)(0));
-        // Apply preconditioner
-        (*prec)(_tmp.data(), _Q.col(j + 1).data());
-
-        for (size_t i = 0; i <= j; i++) {
-          // H[i][j] = v_i^T * v_j
-          _H(i, j) = _Q.col(i).dot(_Q.col(j + 1));
-          // w -= H[i][j] * v_i
-          _Q.col(j + 1) -= _H(i, j) * _Q.col(i);
-        }
-
-        // H[j+1][j] = ||v_j_ptr||
-        beta = _Q.col(j + 1).norm();
-        _Q.col(j + 1) = _Q.col(j + 1) / beta;
-        givens_rotation(_H.data(), _g.data(), _c.data(), _s.data(), beta, resid,
-                        _restart, j);
-        std::cout << "iter: " << iter << " "
-                  << "resid: " << std::abs(resid) << " "
-                  << "relative resid: " << std::abs(resid) / init_resid
-                  << std::endl;
-        if (std::abs(resid) < _abs_tol ||
-            std::abs(resid) < _rel_tol * init_resid) {
-          state_code = State::CONVERGED;
-          break;
-        }
+      if (restart_state == State::CONVERGED) {
+        return State::CONVERGED;
       }
+
+      if (restart_state == State::MAX_ITER_REACHED) {
+        return State::MAX_ITER_REACHED;
+      }
+
+      update_solution(prec, x_vec, cycle_iterations);
+
+      if (restart_state != State::RUNNING) {
+        break;
+      }
+
+      resid = compute_restart_residual(op, prec, b, x, size);
+    }
+
+    return State::MAX_ITER_REACHED;
+  }
+
+private:
+  void initialize_workspace(size_t size) {
+    _restart = std::min(static_cast<size_t>(size), _restart);
+    _H.resize(_restart, _restart);
+    _H.setZero();
+    _Q.resize(size, _restart + 1);
+    _Q.setZero();
+    _tmp.resize(size);
+    _g.resize(_restart);
+    _c.resize(_restart);
+    _s.resize(_restart);
+  }
+
+  template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
+  VALTYPE compute_initial_residual(Op const *op, PrecOp const *prec,
+                                   VALTYPE const *b, VALTYPE const *x,
+                                   size_t size) {
+    vec_ops::copy_vec(size, b, _tmp.data());
+    (*op)(x, _tmp.data(), (VALTYPE)(-1), (VALTYPE)(1));
+
+    apply_preconditioner_to_residual(prec, _tmp.data(), _Q.col(0).data(), size);
+    return _Q.col(0).norm();
+  }
+
+  template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
+  VALTYPE compute_restart_residual(Op const *op, PrecOp const *prec,
+                                   VALTYPE const *b, VALTYPE const *x,
+                                   size_t size) {
+    vec_ops::copy_vec(size, b, _tmp.data());
+    (*op)(x, _tmp.data(), (VALTYPE)(-1), (VALTYPE)(1));
+
+    apply_preconditioner_to_residual(prec, _tmp.data(), _Q.col(0).data(), size);
+    return _Q.col(0).norm();
+  }
+
+  template <matrix_utils::PrecOpType PrecOp>
+  void apply_preconditioner_to_residual(PrecOp const *prec,
+                                        VALTYPE const *input, VALTYPE *output,
+                                        size_t size) {
+    if (_prec_type == PreconditionerType::LEFT) {
+      (*prec)(input, output);
+    } else {
+      vec_ops::copy_vec(size, input, output);
+    }
+  }
+
+  template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
+  void apply_operator_with_preconditioning(Op const *op, PrecOp const *prec,
+                                           VALTYPE const *input,
+                                           VALTYPE *output) {
+    switch (_prec_type) {
+    case PreconditionerType::RIGHT:
+      (*prec)(input, _tmp.data());
+      (*op)(_tmp.data(), output, (VALTYPE)(1), (VALTYPE)(0));
+      break;
+    case PreconditionerType::LEFT:
+      (*op)(input, _tmp.data(), (VALTYPE)(1), (VALTYPE)(0));
+      (*prec)(_tmp.data(), output);
+      break;
+    case PreconditionerType::NONE:
+      (*op)(input, output, (VALTYPE)(1), (VALTYPE)(0));
+      break;
+    }
+  }
+
+  template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
+  State perform_restart_cycle(Op const *op, PrecOp const *prec, size_t &iter,
+                              VALTYPE &resid, VALTYPE init_resid,
+                              size_t &cycle_iterations) {
+    _Q.col(0) /= resid;
+
+    size_t j;
+    for (j = 0; j < _restart && iter < _max_iter; ++j, ++iter) {
+      apply_operator_with_preconditioning(op, prec, _Q.col(j).data(),
+                                          _Q.col(j + 1).data());
+
+      // Modified Gram-Schmidt orthogonalization
+      for (size_t i = 0; i <= j; ++i) {
+        _H(i, j) = _Q.col(i).dot(_Q.col(j + 1));
+        _Q.col(j + 1) -= _H(i, j) * _Q.col(i);
+      }
+
+      VALTYPE beta = _Q.col(j + 1).norm();
+      _Q.col(j + 1) /= beta;
+
+      givens_rotation(_H.data(), _g.data(), _c.data(), _s.data(), beta, resid,
+                      _restart, j);
+
+      print_iteration_info(iter, resid, init_resid);
+
+      if (check_convergence(resid, init_resid)) {
+        cycle_iterations = j + 1;
+        solve_least_squares(j + 1);
+        return State::CONVERGED;
+      }
+    }
+
+    cycle_iterations = j;
+    solve_least_squares(j);
+    return (iter >= _max_iter) ? State::MAX_ITER_REACHED : State::RUNNING;
+  }
+
+  void solve_least_squares(size_t j) {
+    if (j > 0) {
       _H.block(0, 0, j, j)
           .template triangularView<Eigen::Upper>()
           .solveInPlace(_g.head(j));
-      x_vec += _Q.leftCols(j) * _g.head(j);
-      if (state_code != State::RUNNING) {
-        break;
-      }
-      vec_ops::copy_vec(size, b, _tmp.data());
-      // b-= Ax_i
-      (*op)(x, _tmp.data(), (VALTYPE)(-1), (VALTYPE)(1));
-      // resid_i = b - Ax_i
-      (*prec)(_tmp.data(), _Q.col(0).data());
-      resid = _Q.col(0).norm();
     }
+  }
 
-    return state_code;
+  template <matrix_utils::PrecOpType PrecOp>
+  void
+  update_solution(PrecOp const *prec,
+                  Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>> &x_vec,
+                  size_t j) {
+    if (j == 0)
+      return;
+
+    if (_prec_type == PreconditionerType::RIGHT) {
+      Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> y = _Q.leftCols(j) * _g.head(j);
+      (*prec)(y.data(), _tmp.data());
+      x_vec += Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>>(
+          _tmp.data(), x_vec.size());
+    } else {
+      x_vec += _Q.leftCols(j) * _g.head(j);
+    }
+  }
+
+  void print_iteration_info(size_t iter, VALTYPE resid,
+                            VALTYPE init_resid) const {
+    std::cout << "iter: " << iter << " "
+              << "resid: " << std::abs(resid) << " "
+              << "relative resid: " << std::abs(resid) / init_resid
+              << std::endl;
+  }
+
+  bool check_convergence(VALTYPE resid, VALTYPE init_resid) const {
+    return std::abs(resid) < _abs_tol ||
+           std::abs(resid) < _rel_tol * init_resid;
   }
 
 private:
@@ -148,6 +268,7 @@ private:
   VALTYPE _abs_tol{0.0};
   VALTYPE _rel_tol{1e-8};
   size_t _restart{20};
+  PreconditionerType _prec_type{PreconditionerType::LEFT};
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _H;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _Q;
   Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _g;
