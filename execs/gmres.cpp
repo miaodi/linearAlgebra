@@ -183,23 +183,22 @@ int main(int argc, char **argv) {
     // }
   }
 
-  // Randomly generate b and x vectors
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<double> dis(-1.0, 1.0);
+  std::vector<double> b(csr_matrix.rows, 1.0);
+  std::vector<double> x(csr_matrix.rows, 0.0);
 
-  std::vector<double> b(csr_matrix.rows);
-  std::vector<double> x(csr_matrix.rows);
+  // // Randomly generate b and x vectors
+  // std::random_device rd;
+  // std::mt19937 gen(rd());
+  // std::uniform_real_distribution<double> dis(-1.0, 1.0);
+  // // Generate random b vector
+  // for (size_t i = 0; i < b.size(); ++i) {
+  //   b[i] = dis(gen);
+  // }
 
-  // Generate random b vector
-  for (size_t i = 0; i < b.size(); ++i) {
-    b[i] = dis(gen);
-  }
-
-  // Generate random initial guess for x
-  for (size_t i = 0; i < x.size(); ++i) {
-    x[i] = dis(gen);
-  }
+  // // Generate random initial guess for x
+  // for (size_t i = 0; i < x.size(); ++i) {
+  //   x[i] = dis(gen);
+  // }
 
   std::cout << "Generated random b and x vectors (uniform distribution [-1, 1])"
             << std::endl;
@@ -232,15 +231,30 @@ int main(int argc, char **argv) {
   std::copy(b.begin(), b.end(), residual.begin()); // residual = b
   spmv(x.data(), residual.data(), 1.0, -1.0);      // residual = Ax - b
 
-  // Compute L2 norm of residual
+  // Compute L2 norm of residual (absolute)
   double residual_norm = 0.0;
   for (size_t i = 0; i < residual.size(); ++i) {
     residual_norm += residual[i] * residual[i];
   }
   residual_norm = std::sqrt(residual_norm);
 
-  std::cout << "Final residual L2 norm: " << std::scientific
+  // Compute L2 norm of RHS vector b
+  double b_norm = 0.0;
+  for (size_t i = 0; i < b.size(); ++i) {
+    b_norm += b[i] * b[i];
+  }
+  b_norm = std::sqrt(b_norm);
+
+  // Compute relative residual norm
+  double relative_residual_norm = (b_norm > 0.0) ? residual_norm / b_norm : residual_norm;
+
+  std::cout << "Final residual norms:" << std::endl;
+  std::cout << "  Absolute L2 norm: " << std::scientific
             << std::setprecision(6) << residual_norm << std::endl;
+  std::cout << "  Relative L2 norm: " << std::scientific
+            << std::setprecision(6) << relative_residual_norm << std::endl;
+  std::cout << "  RHS L2 norm:      " << std::scientific
+            << std::setprecision(6) << b_norm << std::endl;
 
   return (state == iterative_solver::State::CONVERGED) ? 0 : -1;
 }
