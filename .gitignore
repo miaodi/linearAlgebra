@@ -4,6 +4,8 @@
 /data/eigenvalue
 /release
 /release_cuda
+/release*
+/debug*
 /debug
 /opt
 /RelWithInfo

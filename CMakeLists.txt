@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 
+# Set compilers before project() to ensure proper detection
+set(CMAKE_CXX_COMPILER "g++")
+set(CMAKE_C_COMPILER "gcc")
+
 project(Linear_Algebra CXX Fortran)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -143,6 +147,8 @@ if(USE_BOOST_LIB)
 endif(USE_BOOST_LIB)
 
 if(USE_CUDA)
+  # Set CUDA compiler explicitly
+  set(CMAKE_CUDA_COMPILER "nvcc")
   enable_language(CUDA)
   
   # Set CUDA standard to match C++ standard
@@ -172,6 +178,8 @@ if(USE_CUDA)
   endif(USE_CUDSS)
   
   message(STATUS "CUDA enabled with architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+  message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER}")
+  message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
 endif(USE_CUDA)
 
 configure_file(

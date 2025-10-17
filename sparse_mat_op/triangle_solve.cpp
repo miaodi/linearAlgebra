@@ -41,4 +41,20 @@ template class OptimizedTriangularSolve<FBSubstitutionType::NoBarrierSuperNode,
 template class OptimizedTriangularSolve<FBSubstitutionType::NoBarrierSuperNode,
                                         TriangularMatrix::U, int, int, double>;
 
+// template class TriangularSolve<int, int, double>;
+template void TriangularSolve<TriangularMatrix::L, int, int, double>(const int,
+                                                                     int const *,
+                                                                     int const *,
+                                                                     double const *,
+                                                                     double const *,
+                                                                     double const *,
+                                                                     double *);
+
+template void TriangularSolve<TriangularMatrix::U, int, int, double>(const int,
+                                                                     int const *,
+                                                                     int const *,
+                                                                     double const *,
+                                                                     double const *,
+                                                                     double const *,
+                                                                     double *);
 } // namespace matrix_utils
