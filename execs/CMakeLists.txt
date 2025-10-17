@@ -32,3 +32,26 @@ target_link_libraries(test_gmres PRIVATE ${libs})
 
 add_executable(test_unsymm unsymm.cpp)
 target_link_libraries(test_unsymm PRIVATE ${libs})
+
+# CUDA executables (only build if CUDA is enabled)
+if(USE_CUDA)
+  add_executable(cuda_spsv_test cuda_spsv_test.cu)
+  
+  # Link CUDA libraries, project libraries, and cxxopts
+  target_link_libraries(cuda_spsv_test PRIVATE 
+    CUDA::cusparse 
+    CUDA::cublas 
+    CUDA::cudart
+    sparse_mat_op
+    cxxopts
+  )
+  
+  # Set CUDA properties
+  set_target_properties(cuda_spsv_test PROPERTIES
+    CUDA_STANDARD ${CMAKE_CUDA_STANDARD}
+    CUDA_STANDARD_REQUIRED ON
+    CUDA_EXTENSIONS OFF
+  )
+  
+  message(STATUS "Added CUDA executable: cuda_spsv_test")
+endif()

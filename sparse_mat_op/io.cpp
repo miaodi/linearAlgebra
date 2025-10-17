@@ -113,6 +113,14 @@ INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeFloat);
 using CSRMatrixTypeInt = matrix_utils::CSRMatrix<int, int, int>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeInt);
 
+// Add instantiations for CSRMatrixVec types
+using CSRMatrixVecTypeDouble = matrix_utils::CSRMatrixVec<int, int, double>;
+INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeDouble);
+using CSRMatrixVecTypeFloat = matrix_utils::CSRMatrixVec<int, int, float>;
+INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeFloat);
+using CSRMatrixVecTypeInt = matrix_utils::CSRMatrixVec<int, int, int>;
+INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeInt);
+
 INSTANTIATE_WRITEMATRIXMARKET(int, int, double);
 INSTANTIATE_WRITEMATRIXMARKET(int, int, float);
 INSTANTIATE_WRITEMATRIXMARKET(int, int, int);

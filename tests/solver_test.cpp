@@ -1,6 +1,6 @@
 #include "../config.h"
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) && defined(USE_CUDSS)
 
 #include "cudss_wrapper.h"
 #include "matrix_utils.hpp"

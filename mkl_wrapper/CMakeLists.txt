@@ -23,11 +23,11 @@ if (USE_BOOST_LIB)
  set(DEPENDENCIES ${DEPENDENCIES} Boost::boost)
 endif(USE_BOOST_LIB)
 
-if (USE_CUDA)
+if (USE_CUDA AND USE_CUDSS)
  set(MKL_WRAPPER_SRC ${MKL_WRAPPER_SRC} cudss_wrapper.cpp)
  set_source_files_properties(cudss_wrapper.cpp PROPERTIES LANGUAGE CUDA)
  set(DEPENDENCIES ${DEPENDENCIES} cudss)
-endif(USE_CUDA)
+endif(USE_CUDA AND USE_CUDSS)
 
 
 add_library(${PROJECT_NAME} STATIC ${MKL_WRAPPER_SRC})

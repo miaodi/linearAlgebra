@@ -3,6 +3,7 @@
 /data/linear_system
 /data/eigenvalue
 /release
+/release_cuda
 /debug
 /opt
 /RelWithInfo

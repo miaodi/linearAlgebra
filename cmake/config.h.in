@@ -11,3 +11,5 @@
 #cmakedefine USE_BOOST_LIB
 
 #cmakedefine USE_CUDA
+
+#cmakedefine USE_CUDSS

@@ -30,7 +30,9 @@ option(USE_METIS_LIB "Use metis for matrix reordering" OFF)
 
 option(USE_BOOST_LIB "Use boost library" OFF)
 
-option(USE_CUDA "Use cuda (cudss)" OFF)
+option(USE_CUDA "Use cuda" OFF)
+
+option(USE_CUDSS "Use cudss library for direct solver. Note that USE_CUDA must be ON" OFF)
 
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 
@@ -142,10 +144,34 @@ endif(USE_BOOST_LIB)
 
 if(USE_CUDA)
   enable_language(CUDA)
+  
+  # Set CUDA standard to match C++ standard
   set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
   set(CMAKE_CUDA_STANDARD_REQUIRED ON)
   set(CMAKE_CUDA_EXTENSIONS OFF)
-  find_package(cudss REQUIRED)
+  
+  # Find CUDA toolkit (optional but recommended for better error messages)
+  find_package(CUDAToolkit REQUIRED)
+  
+  # Set CUDA architectures if not already set
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES "60;70;75;80;86")  # Common architectures
+  endif()
+  
+  # Set CUDA compiler flags for different build types
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G")  # Debug info for device code
+  elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
+  endif()
+  
+  # CUDSS support
+  if(USE_CUDSS)
+    add_definitions(-DUSE_CUDSS)
+    find_package(cudss REQUIRED)
+  endif(USE_CUDSS)
+  
+  message(STATUS "CUDA enabled with architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 endif(USE_CUDA)
 
 configure_file(

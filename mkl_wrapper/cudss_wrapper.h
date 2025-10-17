@@ -2,7 +2,7 @@
 
 #include "../config.h"
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) && defined(USE_CUDSS)
 #include "cudss.h"
 #include "mkl_solver.h"
 #include "mkl_sparse_mat.h"
