@@ -1,420 +1,513 @@
 #include "precond.hpp"
 #include "matrix_utils.hpp"
 
-namespace matrix_utils {
+namespace matrix_utils
+{
 template <ResizableDiagonalType CSRMatrixType>
-bool ILULevelSymbolic<CSRMatrixType>::operator()(
-    const typename CSRMatrixType::COLTYPE size,
-    typename CSRMatrixType::ROWTYPE const *ai,
-    typename CSRMatrixType::COLTYPE const *aj, const int lvl,
-    CSRMatrixType &ilu) {
-  if (lvl < 0) {
-    return false;
-  } else if (lvl == 0) {
-    return ILULevel0Symbolic(size, ai, aj, ilu);
-  }
-  ilu.rows = size;
-  ilu.cols = size;
-  ilu.ResizeAI(size + 1);
-  ilu.ResizeDiagonal(size);
-  const auto base = ai[0];
-  typename CSRMatrixType::ROWTYPE nnz = ai[size] - base, cur_nnz;
-  const auto NONE = std::numeric_limits<typename CSRMatrixType::COLTYPE>::max();
-
-  ilu.ResizeAJ(nnz);
-  ilu.ResizeAV(nnz);
-  _levels.resize(nnz);
-  typename CSRMatrixType::ROWTYPE i_idx, i_idx_end, k_idx, k_idx2, j_idx,
-      j_idx_end, k_idx_end;
-  typename CSRMatrixType::COLTYPE j, k;
-
-  int lvl_ik, level;
-
-  auto *ilu_ai = ilu.AI();
-  auto *ilu_aj = ilu.AJ();
-  auto *ilu_av = ilu.AV();
-  auto *ilu_diag = ilu.Diagonal();
-  ilu_ai[0] = base;
-  for (typename CSRMatrixType::COLTYPE i = 0; i < size; i++) {
-    _current_row.clear();
-    i_idx = ai[i] - base;
-    i_idx_end = ai[i + 1] - base;
-
-    // initialize the current row's nonzeros
-    for (; i_idx < i_idx_end; i_idx++) {
-      _current_row.emplace_back(aj[i_idx] - base, 0);
+bool ILULevelSymbolic<CSRMatrixType>::operator()( const typename CSRMatrixType::COLTYPE size,
+                                                  typename CSRMatrixType::ROWTYPE const* ai,
+                                                  typename CSRMatrixType::COLTYPE const* aj,
+                                                  const int lvl,
+                                                  CSRMatrixType& ilu )
+{
+    if ( lvl < 0 )
+    {
+        return false;
     }
-    _current_row.emplace_back(NONE, 0); // max as the end
+    else if ( lvl == 0 )
+    {
+        return ILULevel0Symbolic( size, ai, aj, ilu );
+    }
+    ilu.rows = size;
+    ilu.cols = size;
+    ilu.ResizeAI( size + 1 );
+    ilu.ResizeDiagonal( size );
+    const auto base = ai[0];
+    typename CSRMatrixType::ROWTYPE nnz = ai[size] - base, cur_nnz;
+    const auto NONE = std::numeric_limits<typename CSRMatrixType::COLTYPE>::max();
 
-    for (k_idx = 0; k_idx < _current_row.size(); k_idx++) {
-      k = _current_row[k_idx].first;
-      if (k >= i) {
-        break;
-      }
-      lvl_ik = _current_row[k_idx].second;
+    ilu.ResizeAJ( nnz );
+    ilu.ResizeAV( nnz );
+    _levels.resize( nnz );
+    typename CSRMatrixType::ROWTYPE i_idx, i_idx_end, k_idx, k_idx2, j_idx,
+        j_idx_end, k_idx_end;
+    typename CSRMatrixType::COLTYPE j, k;
 
-      j_idx = ilu_diag[k] - base + 1;
-      j_idx_end = ilu_ai[k + 1] - base;
-      k_idx_end = _current_row.size();
-      k_idx2 = k_idx;
-      for (; j_idx < j_idx_end; j_idx++) {
-        level = lvl_ik + _levels[j_idx] + 1;
-        if (level > lvl) {
-          continue; // skip this element
+    int lvl_ik, level;
+
+    auto* ilu_ai = ilu.AI();
+    auto* ilu_aj = ilu.AJ();
+    auto* ilu_av = ilu.AV();
+    auto* ilu_diag = ilu.Diagonal();
+    ilu_ai[0] = base;
+    for ( typename CSRMatrixType::COLTYPE i = 0; i < size; i++ )
+    {
+        _current_row.clear();
+        i_idx = ai[i] - base;
+        i_idx_end = ai[i + 1] - base;
+
+        // initialize the current row's nonzeros
+        for ( ; i_idx < i_idx_end; i_idx++ )
+        {
+            _current_row.emplace_back( aj[i_idx] - base, 0 );
         }
-        while (_current_row[k_idx2].first < ilu_aj[j_idx] - base) {
-          k_idx2++;
-        }
-        if (_current_row[k_idx2].first > ilu_aj[j_idx] - base) {
-          // insert new element
-          _current_row.emplace_back(ilu_aj[j_idx] - base, level);
-        } else {
-          // update the level
-          _current_row[k_idx2].second =
-              std::min(_current_row[k_idx2].second, level);
-        }
-      }
-      std::merge(
-          _current_row.begin(), _current_row.begin() + k_idx_end,
-          _current_row.begin() + k_idx_end, _current_row.end(),
-          std::back_inserter(_current_row2),
-          [](const auto &a, const auto &b) { return a.first < b.first; });
-      std::swap(_current_row, _current_row2);
-      _current_row2.clear();
-    }
-    ilu_ai[i + 1] = ilu_ai[i] + _current_row.size() - 1;
-    cur_nnz = ilu_ai[i + 1] - base;
-    if (_current_row[k_idx].first != i)
-      return false;
-    ilu_diag[i] = ilu_ai[i] + k_idx;
+        _current_row.emplace_back( NONE, 0 ); // max as the end
 
-    // copy to ilu aj and _levels
-    if (cur_nnz > nnz) {
-      // estimate the new size
-      if (2 * (i - base) >= size)
-        nnz *= 2;
-      else
-        nnz = nnz * std::ceil(size * 1. / (i - base));
-      nnz = std::max(nnz, cur_nnz);
-      ilu_aj = ilu.ResizeAJ(nnz);
-      _levels.resize(nnz);
-    }
+        for ( k_idx = 0; k_idx < _current_row.size(); k_idx++ )
+        {
+            k = _current_row[k_idx].first;
+            if ( k >= i )
+            {
+                break;
+            }
+            lvl_ik = _current_row[k_idx].second;
 
-    for (i_idx = ilu_ai[i] - base, k_idx2 = 0; i_idx < ilu_ai[i + 1] - base;
-         i_idx++, k_idx2++) {
-      ilu_aj[i_idx] = _current_row[k_idx2].first;
-      _levels[i_idx] = _current_row[k_idx2].second;
+            j_idx = ilu_diag[k] - base + 1;
+            j_idx_end = ilu_ai[k + 1] - base;
+            k_idx_end = _current_row.size();
+            k_idx2 = k_idx;
+            for ( ; j_idx < j_idx_end; j_idx++ )
+            {
+                level = lvl_ik + _levels[j_idx] + 1;
+                if ( level > lvl )
+                {
+                    continue; // skip this element
+                }
+                while ( _current_row[k_idx2].first < ilu_aj[j_idx] - base )
+                {
+                    k_idx2++;
+                }
+                if ( _current_row[k_idx2].first > ilu_aj[j_idx] - base )
+                {
+                    // insert new element
+                    _current_row.emplace_back( ilu_aj[j_idx] - base, level );
+                }
+                else
+                {
+                    // update the level
+                    _current_row[k_idx2].second =
+                        std::min( _current_row[k_idx2].second, level );
+                }
+            }
+            std::merge( _current_row.begin(), _current_row.begin() + k_idx_end,
+                        _current_row.begin() + k_idx_end, _current_row.end(),
+                        std::back_inserter( _current_row2 ),
+                        []( const auto& a, const auto& b )
+                        { return a.first < b.first; } );
+            std::swap( _current_row, _current_row2 );
+            _current_row2.clear();
+        }
+        ilu_ai[i + 1] = ilu_ai[i] + _current_row.size() - 1;
+        cur_nnz = ilu_ai[i + 1] - base;
+        if ( _current_row[k_idx].first != i )
+            return false;
+        ilu_diag[i] = ilu_ai[i] + k_idx;
+
+        // copy to ilu aj and _levels
+        if ( cur_nnz > nnz )
+        {
+            // estimate the new size
+            if ( 2 * ( i - base ) >= size )
+                nnz *= 2;
+            else
+                nnz = nnz * std::ceil( size * 1. / ( i - base ) );
+            nnz = std::max( nnz, cur_nnz );
+            ilu_aj = ilu.ResizeAJ( nnz );
+            _levels.resize( nnz );
+        }
+
+        for ( i_idx = ilu_ai[i] - base, k_idx2 = 0;
+              i_idx < ilu_ai[i + 1] - base; i_idx++, k_idx2++ )
+        {
+            ilu_aj[i_idx] = _current_row[k_idx2].first;
+            _levels[i_idx] = _current_row[k_idx2].second;
+        }
     }
-  }
-  ilu.ResizeAV(ilu_ai[size] - base);
-  return true;
+    ilu.ResizeAV( ilu_ai[size] - base );
+    return true;
 }
 
 template void ICCLevel0SymSymbolic<int, int, CSRMatrix<int, int, double>>(
-    const int rows, int const *ai, int const *aj,
-    CSRMatrix<int, int, double> &icc);
+    const int rows, int const* ai, int const* aj, CSRMatrix<int, int, double>& icc );
 
 template void ICCLevelSymbolic0<int, int, CSRMatrix<int, int, double>>(
-    const int rows, int const *ai, int const *aj, int const *diag_pos,
-    const int lvl, CSRMatrix<int, int, double> &icc);
+    const int rows,
+    int const* ai,
+    int const* aj,
+    int const* diag_pos,
+    const int lvl,
+    CSRMatrix<int, int, double>& icc );
 
 template void ICCLevelSymbolic1<int, int, CSRMatrix<int, int, double>>(
-    const int rows, int const *ai, int const *aj, int const *diag_pos,
-    const int lvl, CSRMatrix<int, int, double> &icc);
+    const int rows,
+    int const* ai,
+    int const* aj,
+    int const* diag_pos,
+    const int lvl,
+    CSRMatrix<int, int, double>& icc );
 
 template void ICCLevelSymbolic2<int, int, CSRMatrix<int, int, double>>(
-    const int rows, int const *ai, int const *aj, int const *diag_pos,
-    const int lvl, CSRMatrix<int, int, double> &icc);
+    const int rows,
+    int const* ai,
+    int const* aj,
+    int const* diag_pos,
+    const int lvl,
+    CSRMatrix<int, int, double>& icc );
 
 template void ICCLevelSymbolic3<int, int, CSRMatrix<int, int, double>>(
-    const int rows, int const *ai, int const *aj, int const *diag_pos,
-    const int lvl, CSRMatrix<int, int, double> &icc);
+    const int rows,
+    int const* ai,
+    int const* aj,
+    int const* diag_pos,
+    const int lvl,
+    CSRMatrix<int, int, double>& icc );
 
-template bool ICCLevelNumeric<int, int, double>(
-    const int rows, int const *ai, int const *aj, double const *av,
-    int const *diag_pos, const int lvl, const double omega, int const *icc_ai,
-    int const *icc_aj, double *icc_av);
-
-template <ResizableDiagonalType CSRMatrixType>
-bool ICCLevelSymbolicSerial<CSRMatrixType>::operator()(const COLTYPE size,
-                                                       ROWTYPE const *ai,
-                                                       COLTYPE const *aj,
-                                                       const int lvl,
-                                                       CSRMatrixType &L) {
-  _Q.resize(64);
-  const auto base = ai[0];
-  L.ResizeAI(size + 1);
-  ROWTYPE nnz = ai[size] - base;
-  std::cout << "nnz: " << nnz << std::endl;
-  L.ResizeAJ(nnz);
-  L.rows = size;
-  L.cols = size;
-  L.AI()[0] = base;
-  for (COLTYPE i = 0; i < size; i++) {
-    _S.clear();
-    _Q.push(std::make_pair(i, 0));
-    _S[i] = 0;
-    int level = 0;
-    // _level.clear();
-    // _level[i] = 0;
-    while (level <= lvl) {
-      for (auto lvl_size = _Q.size(); lvl_size > 0; lvl_size--) {
-        auto [k, path_max] = _Q.shift();
-        // if (level > _level[k] && path_max != _S[k]) {
-        //   continue;
-        // }
-        for (auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++) {
-          auto j = aj[j_idx] - base;
-          if (j >= i) {
-            break;
-          }
-          COLTYPE j_path_max = std::max(j, path_max);
-          if (!_S.contains(j) || _S[j] > j_path_max) {
-            _S[j] = j_path_max;
-            if (level < lvl) {
-              if (_Q.isFull()) {
-                std::cout << "resize _Q" << std::endl;
-                _Q.resizePreserve(_Q.size() * 2);
-              }
-              _Q.push(std::make_pair(j, j_path_max));
-              // _level[j] = level;
-            }
-          }
-        }
-      }
-      level++;
-    }
-    ROWTYPE pos = L.AI()[i] - base;
-    if (nnz < pos + _S.size()) {
-      if (2 * (i - base) >= size)
-        nnz *= 2;
-      else
-        nnz = nnz * std::ceil(size * 1. / (i - base));
-      L.ResizeAJ(nnz);
-    }
-    for (const auto &s : _S) {
-      if (s.second <= s.first) {
-        L.AJ()[pos++] = s.first + base;
-      }
-    }
-    L.AI()[i + 1] = pos + base;
-  }
-  L.ResizeAV(L.AI()[size] - base);
-  return true;
-}
+template bool ICCLevelNumeric<int, int, double>( const int rows,
+                                                 int const* ai,
+                                                 int const* aj,
+                                                 double const* av,
+                                                 int const* diag_pos,
+                                                 const int lvl,
+                                                 const double omega,
+                                                 int const* icc_ai,
+                                                 int const* icc_aj,
+                                                 double* icc_av );
 
 template <ResizableDiagonalType CSRMatrixType>
-bool ICCLevelSymbolicSerial2<CSRMatrixType>::operator()(const COLTYPE size,
-                                                        ROWTYPE const *ai,
-                                                        COLTYPE const *aj,
+bool ICCLevelSymbolicSerial<CSRMatrixType>::operator()( const COLTYPE size,
+                                                        ROWTYPE const* ai,
+                                                        COLTYPE const* aj,
                                                         const int lvl,
-                                                        CSRMatrixType &L) {
-  const auto base = ai[0];
-  L.ResizeAI(size + 1);
-  ROWTYPE nnz = ai[size] - base;
-  _Q_temp.clear();
-  L.ResizeAJ(nnz);
-  L.rows = size;
-  L.cols = size;
-  L.AI()[0] = base;
-  for (COLTYPE i = 0; i < size; i++) {
-    _Q.clear();
-    _Q[i] = 0;
-    _S.clear();
-    _S[i] = 0;
-    int level = 0;
-    while (level <= lvl) {
-      for (const auto &[k, path_max] : _Q) {
-        for (auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++) {
-          auto j = aj[j_idx] - base;
-          if (j >= i) {
-            break;
-          }
-          COLTYPE j_path_max = std::max(j, path_max);
-          if (!_S.contains(j) || _S[j] > j_path_max) {
-            _S[j] = j_path_max;
-            if (level < lvl) {
-              _Q_temp[j] = j_path_max;
+                                                        CSRMatrixType& L )
+{
+    _Q.resize( 64 );
+    const auto base = ai[0];
+    L.ResizeAI( size + 1 );
+    ROWTYPE nnz = ai[size] - base;
+    std::cout << "nnz: " << nnz << std::endl;
+    L.ResizeAJ( nnz );
+    L.rows = size;
+    L.cols = size;
+    L.AI()[0] = base;
+    for ( COLTYPE i = 0; i < size; i++ )
+    {
+        _S.clear();
+        _Q.push( std::make_pair( i, 0 ) );
+        _S[i] = 0;
+        int level = 0;
+        // _level.clear();
+        // _level[i] = 0;
+        while ( level <= lvl )
+        {
+            for ( auto lvl_size = _Q.size(); lvl_size > 0; lvl_size-- )
+            {
+                auto [k, path_max] = _Q.shift();
+                // if (level > _level[k] && path_max != _S[k]) {
+                //   continue;
+                // }
+                for ( auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++ )
+                {
+                    auto j = aj[j_idx] - base;
+                    if ( j >= i )
+                    {
+                        break;
+                    }
+                    COLTYPE j_path_max = std::max( j, path_max );
+                    if ( !_S.contains( j ) || _S[j] > j_path_max )
+                    {
+                        _S[j] = j_path_max;
+                        if ( level < lvl )
+                        {
+                            if ( _Q.isFull() )
+                            {
+                                std::cout << "resize _Q" << std::endl;
+                                _Q.resizePreserve( _Q.size() * 2 );
+                            }
+                            _Q.push( std::make_pair( j, j_path_max ) );
+                            // _level[j] = level;
+                        }
+                    }
+                }
             }
-          }
+            level++;
         }
-      }
-      _Q.clear();
-      _Q.swap(_Q_temp);
-      level++;
+        ROWTYPE pos = L.AI()[i] - base;
+        if ( nnz < pos + _S.size() )
+        {
+            if ( 2 * ( i - base ) >= size )
+                nnz *= 2;
+            else
+                nnz = nnz * std::ceil( size * 1. / ( i - base ) );
+            L.ResizeAJ( nnz );
+        }
+        for ( const auto& s : _S )
+        {
+            if ( s.second <= s.first )
+            {
+                L.AJ()[pos++] = s.first + base;
+            }
+        }
+        L.AI()[i + 1] = pos + base;
     }
-    ROWTYPE pos = L.AI()[i] - base;
-    if (nnz < pos + _S.size()) {
-      if (2 * (i - base) >= size)
-        nnz *= 2;
-      else
-        nnz = nnz * std::ceil(size * 1. / (i - base));
-      L.ResizeAJ(nnz);
-    }
-    for (const auto &s : _S) {
-      if (s.second <= s.first) {
-        L.AJ()[pos++] = s.first + base;
-      }
-    }
-    L.AI()[i + 1] = pos + base;
-  }
-  L.ResizeAV(L.AI()[size] - base);
-  return true;
+    L.ResizeAV( L.AI()[size] - base );
+    return true;
 }
 
 template <ResizableDiagonalType CSRMatrixType>
-bool ILULevelNumeric(const typename CSRMatrixType::COLTYPE size,
-                     typename CSRMatrixType::ROWTYPE const *ai,
-                     typename CSRMatrixType::COLTYPE const *aj,
-                     typename CSRMatrixType::VALTYPE const *av, const int lvl,
-                     CSRMatrixType &ilu) {
-  const auto base = ai[0];
-  typename CSRMatrixType::ROWTYPE i_idx, ilu_i_idx, k_idx, j_idx2, j_idx;
-  typename CSRMatrixType::COLTYPE j, k;
-
-  auto const *ilu_ai = ilu.AI();
-  auto const *ilu_aj = ilu.AJ();
-  auto *ilu_av = ilu.AV();
-  auto const *ilu_diag = ilu.Diagonal();
-  typename CSRMatrixType::VALTYPE akk, aik;
-
-  for (typename CSRMatrixType::COLTYPE i = 0; i < size; i++) {
-    // initialize the current row's nonzeros
-    i_idx = ai[i] - base;
-    for (ilu_i_idx = ilu_ai[i] - base; ilu_i_idx < ilu_ai[i + 1] - base;
-         ilu_i_idx++) {
-      if (i_idx == ai[i + 1] - base || aj[i_idx] != ilu_aj[ilu_i_idx]) {
-        ilu_av[ilu_i_idx] = 0; // initialize to zero
-      } else {
-        ilu_av[ilu_i_idx] = av[i_idx++]; // copy the value
-      }
-    }
-    k_idx = ilu_ai[i] - base;
-    while (true) {
-      k = ilu_aj[k_idx] - base;
-      if (k >= i) {
-        break;
-      }
-      akk = ilu_av[ilu_diag[k] - base];
-      if (akk == 0) {
-        // akk = ilu_av[ilu_diag[k] - base] = 1e-16;
-        return false;
-      }
-      ilu_av[k_idx] /= akk; // a_{ik} = a_{ik} / a_{kk}
-      aik = ilu_av[k_idx];
-
-      j_idx2 = ++k_idx; // j_idx2 is for ith row, start after current k element
-      for (j_idx = ilu_diag[k] - base + 1; j_idx < ilu_ai[k + 1] - base;) {
-        if (ilu_aj[j_idx] == ilu_aj[j_idx2]) {
-          ilu_av[j_idx2++] -= aik * ilu_av[j_idx++];
-        } else if (ilu_aj[j_idx] < ilu_aj[j_idx2]) {
-          j_idx++;
-        } else {
-          j_idx2++;
+bool ICCLevelSymbolicSerial2<CSRMatrixType>::operator()( const COLTYPE size,
+                                                         ROWTYPE const* ai,
+                                                         COLTYPE const* aj,
+                                                         const int lvl,
+                                                         CSRMatrixType& L )
+{
+    const auto base = ai[0];
+    L.ResizeAI( size + 1 );
+    ROWTYPE nnz = ai[size] - base;
+    _Q_temp.clear();
+    L.ResizeAJ( nnz );
+    L.rows = size;
+    L.cols = size;
+    L.AI()[0] = base;
+    for ( COLTYPE i = 0; i < size; i++ )
+    {
+        _Q.clear();
+        _Q[i] = 0;
+        _S.clear();
+        _S[i] = 0;
+        int level = 0;
+        while ( level <= lvl )
+        {
+            for ( const auto& [k, path_max] : _Q )
+            {
+                for ( auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++ )
+                {
+                    auto j = aj[j_idx] - base;
+                    if ( j >= i )
+                    {
+                        break;
+                    }
+                    COLTYPE j_path_max = std::max( j, path_max );
+                    if ( !_S.contains( j ) || _S[j] > j_path_max )
+                    {
+                        _S[j] = j_path_max;
+                        if ( level < lvl )
+                        {
+                            _Q_temp[j] = j_path_max;
+                        }
+                    }
+                }
+            }
+            _Q.clear();
+            _Q.swap( _Q_temp );
+            level++;
         }
-      }
+        ROWTYPE pos = L.AI()[i] - base;
+        if ( nnz < pos + _S.size() )
+        {
+            if ( 2 * ( i - base ) >= size )
+                nnz *= 2;
+            else
+                nnz = nnz * std::ceil( size * 1. / ( i - base ) );
+            L.ResizeAJ( nnz );
+        }
+        for ( const auto& s : _S )
+        {
+            if ( s.second <= s.first )
+            {
+                L.AJ()[pos++] = s.first + base;
+            }
+        }
+        L.AI()[i + 1] = pos + base;
     }
-  }
-  return true;
+    L.ResizeAV( L.AI()[size] - base );
+    return true;
 }
-
-template class ICCLevelSymbolicSerial<
-    matrix_utils::CSRMatrix<int, int, double>>;
-template class ICCLevelSymbolicSerial2<
-    matrix_utils::CSRMatrix<int, int, double>>;
 
 template <ResizableDiagonalType CSRMatrixType>
-bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()(const COLTYPE size,
-                                                        ROWTYPE const *ai,
-                                                        COLTYPE const *aj,
-                                                        const int lvl,
-                                                        CSRMatrixType &L) {
-  _visited.resize(size);
-  std::fill(_visited.begin(), _visited.end(), 0);
-  _Li_path_max.resize(size);
-  const auto base = ai[0];
-  L.ResizeAI(size + 1);
-  ROWTYPE nnz = ai[size] - base;
-  L.ResizeAJ(nnz);
-  L.rows = size;
-  L.cols = size;
-  L.AI()[0] = base;
-  COLTYPE visited_token = 0;
-  for (COLTYPE i = 0; i < size; i++) {
-    _Q.clear();
-    _Q_next.clear();
-    for (auto j_idx = ai[i] - base; j_idx < ai[i + 1] - base; j_idx++) {
-      const auto j = aj[j_idx] - base;
-      if (j > i) {
-        break;
-      }
-      _Q[j] = j;
-    }
+bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
+                      typename CSRMatrixType::ROWTYPE const* ai,
+                      typename CSRMatrixType::COLTYPE const* aj,
+                      typename CSRMatrixType::VALTYPE const* av,
+                      const int lvl,
+                      CSRMatrixType& ilu )
+{
+    const auto base = ai[0];
+    typename CSRMatrixType::ROWTYPE i_idx, ilu_i_idx, k_idx, j_idx2, j_idx;
+    typename CSRMatrixType::COLTYPE j, k;
 
-    visited_token++;
-    _Li.clear();
+    auto const* ilu_ai = ilu.AI();
+    auto const* ilu_aj = ilu.AJ();
+    auto* ilu_av = ilu.AV();
+    auto const* ilu_diag = ilu.Diagonal();
+    typename CSRMatrixType::VALTYPE akk, aik;
 
-    int level = 0;
-    while (level <= lvl) {
-      for (const auto &[k, path_max] : _Q) {
-        // skip if the the destination has been visited with a smaller path_max
-        if (_visited[k] == visited_token && _Li_path_max[k] <= path_max) {
-          continue;
+    for ( typename CSRMatrixType::COLTYPE i = 0; i < size; i++ )
+    {
+        // initialize the current row's nonzeros
+        i_idx = ai[i] - base;
+        for ( ilu_i_idx = ilu_ai[i] - base; ilu_i_idx < ilu_ai[i + 1] - base; ilu_i_idx++ )
+        {
+            if ( i_idx == ai[i + 1] - base || aj[i_idx] != ilu_aj[ilu_i_idx] )
+            {
+                ilu_av[ilu_i_idx] = 0; // initialize to zero
+            }
+            else
+            {
+                ilu_av[ilu_i_idx] = av[i_idx++]; // copy the value
+            }
         }
-        if (_visited[k] != visited_token) {
-          _visited[k] = visited_token;
+        k_idx = ilu_ai[i] - base;
+        while ( true )
+        {
+            k = ilu_aj[k_idx] - base;
+            if ( k >= i )
+            {
+                break;
+            }
+            akk = ilu_av[ilu_diag[k] - base];
+            if ( akk == 0 )
+            {
+                // akk = ilu_av[ilu_diag[k] - base] = 1e-16;
+                return false;
+            }
+            ilu_av[k_idx] /= akk; // a_{ik} = a_{ik} / a_{kk}
+            aik = ilu_av[k_idx];
+
+            j_idx2 = ++k_idx; // j_idx2 is for ith row, start after current k element
+            for ( j_idx = ilu_diag[k] - base + 1; j_idx < ilu_ai[k + 1] - base; )
+            {
+                if ( ilu_aj[j_idx] == ilu_aj[j_idx2] )
+                {
+                    ilu_av[j_idx2++] -= aik * ilu_av[j_idx++];
+                }
+                else if ( ilu_aj[j_idx] < ilu_aj[j_idx2] )
+                {
+                    j_idx++;
+                }
+                else
+                {
+                    j_idx2++;
+                }
+            }
         }
-        if (path_max == k)
-          _Li.push_back(k);
-
-        _Li_path_max[k] = path_max;
-        if (level == lvl) {
-          continue;
-        }
-        // iterative k->j paths
-        for (auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++) {
-          auto j = aj[j_idx] - base;
-          if (j >= i) {
-            break;
-          }
-          const COLTYPE kj_path_max = std::max(j, path_max);
-          auto it = _Q_next.find(j);
-          if (it != _Q_next.end()) {
-            it->second = std::min(it->second, kj_path_max);
-          } else {
-            _Q_next[j] = kj_path_max;
-          }
-        }
-      }
-
-      _Q.swap(_Q_next);
-      _Q_next.clear();
-      level++;
     }
-
-    ROWTYPE pos = L.AI()[i] - base;
-    if (nnz < pos + _Li.size()) {
-      if (2 * i >= size)
-        nnz *= 2;
-      else
-        nnz = nnz * std::ceil(size * 1. / i);
-      L.ResizeAJ(nnz);
-    }
-
-    std::sort(_Li.begin(), _Li.end());
-    for (const auto &s : _Li) {
-      L.AJ()[pos++] = s + base;
-    }
-    L.AI()[i + 1] = pos + base;
-  }
-  L.ResizeAV(L.AI()[size] - base);
-  return true;
+    return true;
 }
 
-template class ICCLevelSymbolicSerial3<
-    matrix_utils::CSRMatrix<int, int, double>>;
+template class ICCLevelSymbolicSerial<matrix_utils::CSRMatrix<int, int, double>>;
+template class ICCLevelSymbolicSerial2<matrix_utils::CSRMatrix<int, int, double>>;
+
+template <ResizableDiagonalType CSRMatrixType>
+bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()( const COLTYPE size,
+                                                         ROWTYPE const* ai,
+                                                         COLTYPE const* aj,
+                                                         const int lvl,
+                                                         CSRMatrixType& L )
+{
+    _visited.resize( size );
+    std::fill( _visited.begin(), _visited.end(), 0 );
+    _Li_path_max.resize( size );
+    const auto base = ai[0];
+    L.ResizeAI( size + 1 );
+    ROWTYPE nnz = ai[size] - base;
+    L.ResizeAJ( nnz );
+    L.rows = size;
+    L.cols = size;
+    L.AI()[0] = base;
+    COLTYPE visited_token = 0;
+    for ( COLTYPE i = 0; i < size; i++ )
+    {
+        _Q.clear();
+        _Q_next.clear();
+        for ( auto j_idx = ai[i] - base; j_idx < ai[i + 1] - base; j_idx++ )
+        {
+            const auto j = aj[j_idx] - base;
+            if ( j > i )
+            {
+                break;
+            }
+            _Q[j] = j;
+        }
+
+        visited_token++;
+        _Li.clear();
+
+        int level = 0;
+        while ( level <= lvl )
+        {
+            for ( const auto& [k, path_max] : _Q )
+            {
+                // skip if the the destination has been visited with a smaller path_max
+                if ( _visited[k] == visited_token && _Li_path_max[k] <= path_max )
+                {
+                    continue;
+                }
+                if ( _visited[k] != visited_token )
+                {
+                    _visited[k] = visited_token;
+                }
+                if ( path_max == k )
+                    _Li.push_back( k );
+
+                _Li_path_max[k] = path_max;
+                if ( level == lvl )
+                {
+                    continue;
+                }
+                // iterative k->j paths
+                for ( auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++ )
+                {
+                    auto j = aj[j_idx] - base;
+                    if ( j >= i )
+                    {
+                        break;
+                    }
+                    const COLTYPE kj_path_max = std::max( j, path_max );
+                    auto it = _Q_next.find( j );
+                    if ( it != _Q_next.end() )
+                    {
+                        it->second = std::min( it->second, kj_path_max );
+                    }
+                    else
+                    {
+                        _Q_next[j] = kj_path_max;
+                    }
+                }
+            }
+
+            _Q.swap( _Q_next );
+            _Q_next.clear();
+            level++;
+        }
+
+        ROWTYPE pos = L.AI()[i] - base;
+        if ( nnz < pos + _Li.size() )
+        {
+            if ( 2 * i >= size )
+                nnz *= 2;
+            else
+                nnz = nnz * std::ceil( size * 1. / i );
+            L.ResizeAJ( nnz );
+        }
+
+        std::sort( _Li.begin(), _Li.end() );
+        for ( const auto& s : _Li )
+        {
+            L.AJ()[pos++] = s + base;
+        }
+        L.AI()[i + 1] = pos + base;
+    }
+    L.ResizeAV( L.AI()[size] - base );
+    return true;
+}
+
+template class ICCLevelSymbolicSerial3<matrix_utils::CSRMatrix<int, int, double>>;
 template class ILULevelSymbolic<matrix_utils::CSRMatrix<int, int, double>>;
 template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>(
-    const int size, int const *ai, int const *aj, double const *av,
-    const int lvl, matrix_utils::CSRMatrix<int, int, double> &ilu);
+    const int size,
+    int const* ai,
+    int const* aj,
+    double const* av,
+    const int lvl,
+    matrix_utils::CSRMatrix<int, int, double>& ilu );
 } // namespace matrix_utils
