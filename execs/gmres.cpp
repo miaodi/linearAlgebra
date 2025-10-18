@@ -72,7 +72,7 @@ int main( int argc, char** argv )
         "p,precond",
         "Preconditioner type: none (no preconditioning), left (M^-1 A x = M^-1 "
         "b), right (A M^-1 y = b)",
-        cxxopts::value<std::string>()->default_value( "left" ) )(
+        cxxopts::value<std::string>()->default_value( "none" ) )(
         "r,restart", "GMRES restart parameter",
         cxxopts::value<int>()->default_value( "20" ) )(
         "m,maxiter", "Maximum number of GMRES iterations",
@@ -189,82 +189,82 @@ int main( int argc, char** argv )
     ILUPrec<decltype( ilu_matrix )> ilu_prec( csr_matrix.rows, ilu_matrix );
     std::cout << "precond operator done." << std::endl;
 
-    // std::vector<double> b( csr_matrix.rows, 1.0 );
-    // std::vector<double> x( csr_matrix.rows, 0.0 );
+    std::vector<double> b( csr_matrix.rows, 1.0 );
+    std::vector<double> x( csr_matrix.rows, 0.0 );
 
-    // // // Randomly generate b and x vectors
-    // // std::random_device rd;
-    // // std::mt19937 gen(rd());
-    // // std::uniform_real_distribution<double> dis(-1.0, 1.0);
-    // // // Generate random b vector
-    // // for (size_t i = 0; i < b.size(); ++i) {
-    // //   b[i] = dis(gen);
-    // // }
-
-    // // // Generate random initial guess for x
-    // // for (size_t i = 0; i < x.size(); ++i) {
-    // //   x[i] = dis(gen);
-    // // }
-
-    // std::cout
-    //     << "Generated random b and x vectors (uniform distribution [-1, 1])"
-    //     << std::endl;
-    // std::cout << "GMRES..." << std::endl;
-    // iterative_solver::GMRES<double> gmres_solver;
-    // gmres_solver.setMaxIter( maxiter );
-    // gmres_solver.setRelTol( 1e-8 );
-    // gmres_solver.setRestart( restart );
-    // // gmres_solver.setPreconditionerType(precond_type);
-    // auto state = gmres_solver( &spmv, &ilu_prec, b.data(), x.data() );
-
-    // std::cout << "GMRES done. Final state: ";
-    // switch ( state )
-    // {
-    // case iterative_solver::State::CONVERGED:
-    //     std::cout << "CONVERGED" << std::endl;
-    //     break;
-    // case iterative_solver::State::MAX_ITER_REACHED:
-    //     std::cout << "MAX_ITER_REACHED" << std::endl;
-    //     break;
-    // case iterative_solver::State::FAILED:
-    //     std::cout << "FAILED" << std::endl;
-    //     break;
-    // default:
-    //     std::cout << "UNKNOWN" << std::endl;
-    //     break;
+    // // Randomly generate b and x vectors
+    // std::random_device rd;
+    // std::mt19937 gen(rd());
+    // std::uniform_real_distribution<double> dis(-1.0, 1.0);
+    // // Generate random b vector
+    // for (size_t i = 0; i < b.size(); ++i) {
+    //   b[i] = dis(gen);
     // }
 
-    // // Compute final residual: r = Ax - b
-    // std::vector<double> residual( csr_matrix.rows );
-    // std::copy( b.begin(), b.end(), residual.begin() ); // residual = b
-    // spmv( x.data(), residual.data(), 1.0, -1.0 );      // residual = Ax - b
-
-    // // Compute L2 norm of residual (absolute)
-    // double residual_norm = 0.0;
-    // for ( size_t i = 0; i < residual.size(); ++i )
-    // {
-    //     residual_norm += residual[i] * residual[i];
+    // // Generate random initial guess for x
+    // for (size_t i = 0; i < x.size(); ++i) {
+    //   x[i] = dis(gen);
     // }
-    // residual_norm = std::sqrt( residual_norm );
 
-    // // Compute L2 norm of RHS vector b
-    // double b_norm = 0.0;
-    // for ( size_t i = 0; i < b.size(); ++i )
-    // {
-    //     b_norm += b[i] * b[i];
-    // }
-    // b_norm = std::sqrt( b_norm );
+    std::cout
+        << "Generated random b and x vectors (uniform distribution [-1, 1])"
+        << std::endl;
+    std::cout << "GMRES..." << std::endl;
+    iterative_solver::GMRES<double> gmres_solver;
+    gmres_solver.setMaxIter( maxiter );
+    gmres_solver.setRelTol( 1e-10 );
+    gmres_solver.setRestart( restart );
+    // gmres_solver.setPreconditionerType(precond_type);
+    auto state = gmres_solver( &spmv, &ilu_prec, b.data(), x.data() );
 
-    // // Compute relative residual norm
-    // double relative_residual_norm = ( b_norm > 0.0 ) ? residual_norm / b_norm : residual_norm;
+    std::cout << "GMRES done. Final state: ";
+    switch ( state )
+    {
+    case iterative_solver::State::CONVERGED:
+        std::cout << "CONVERGED" << std::endl;
+        break;
+    case iterative_solver::State::MAX_ITER_REACHED:
+        std::cout << "MAX_ITER_REACHED" << std::endl;
+        break;
+    case iterative_solver::State::FAILED:
+        std::cout << "FAILED" << std::endl;
+        break;
+    default:
+        std::cout << "UNKNOWN" << std::endl;
+        break;
+    }
 
-    // std::cout << "Final residual norms:" << std::endl;
-    // std::cout << "  Absolute L2 norm: " << std::scientific
-    //           << std::setprecision( 6 ) << residual_norm << std::endl;
-    // std::cout << "  Relative L2 norm: " << std::scientific
-    //           << std::setprecision( 6 ) << relative_residual_norm << std::endl;
-    // std::cout << "  RHS L2 norm:      " << std::scientific
-    //           << std::setprecision( 6 ) << b_norm << std::endl;
+    // Compute final residual: r = Ax - b
+    std::vector<double> residual( csr_matrix.rows );
+    std::copy( b.begin(), b.end(), residual.begin() ); // residual = b
+    spmv( x.data(), residual.data(), 1.0, -1.0 );      // residual = Ax - b
 
-    // return ( state == iterative_solver::State::CONVERGED ) ? 0 : -1;
+    // Compute L2 norm of residual (absolute)
+    double residual_norm = 0.0;
+    for ( size_t i = 0; i < residual.size(); ++i )
+    {
+        residual_norm += residual[i] * residual[i];
+    }
+    residual_norm = std::sqrt( residual_norm );
+
+    // Compute L2 norm of RHS vector b
+    double b_norm = 0.0;
+    for ( size_t i = 0; i < b.size(); ++i )
+    {
+        b_norm += b[i] * b[i];
+    }
+    b_norm = std::sqrt( b_norm );
+
+    // Compute relative residual norm
+    double relative_residual_norm = ( b_norm > 0.0 ) ? residual_norm / b_norm : residual_norm;
+
+    std::cout << "Final residual norms:" << std::endl;
+    std::cout << "  Absolute L2 norm: " << std::scientific
+              << std::setprecision( 6 ) << residual_norm << std::endl;
+    std::cout << "  Relative L2 norm: " << std::scientific
+              << std::setprecision( 6 ) << relative_residual_norm << std::endl;
+    std::cout << "  RHS L2 norm:      " << std::scientific
+              << std::setprecision( 6 ) << b_norm << std::endl;
+
+    return ( state == iterative_solver::State::CONVERGED ) ? 0 : -1;
 }
