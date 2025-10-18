@@ -279,7 +279,6 @@ bool ILULevelNumeric(const typename CSRMatrixType::COLTYPE size,
   typename CSRMatrixType::VALTYPE akk, aik;
 
   for (typename CSRMatrixType::COLTYPE i = 0; i < size; i++) {
-    // std::cout << "i: " << i << std::endl;
     // initialize the current row's nonzeros
     i_idx = ai[i] - base;
     for (ilu_i_idx = ilu_ai[i] - base; ilu_i_idx < ilu_ai[i + 1] - base;
@@ -304,17 +303,16 @@ bool ILULevelNumeric(const typename CSRMatrixType::COLTYPE size,
       ilu_av[k_idx] /= akk; // a_{ik} = a_{ik} / a_{kk}
       aik = ilu_av[k_idx];
 
-      j_idx2 = k_idx; // j_idx2 is for ith row, j_idx is for kth row
+      j_idx2 = ++k_idx; // j_idx2 is for ith row, start after current k element
       for (j_idx = ilu_diag[k] - base + 1; j_idx < ilu_ai[k + 1] - base;) {
         if (ilu_aj[j_idx] == ilu_aj[j_idx2]) {
-          ilu_av[j_idx++] -= aik * ilu_av[j_idx2++];
+          ilu_av[j_idx2++] -= aik * ilu_av[j_idx++];
         } else if (ilu_aj[j_idx] < ilu_aj[j_idx2]) {
           j_idx++;
         } else {
           j_idx2++;
         }
       }
-      k_idx++;
     }
   }
   return true;
