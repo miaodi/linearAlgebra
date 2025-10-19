@@ -26,16 +26,6 @@ public:
     {
         matrix_utils::SplitLDU( _size, _ilu.AI()[0], _ilu.AI(), _ilu.AJ(),
                                 _ilu.AV(), L, D, U );
-        std::cout << "U matrix (CSR format):" << std::endl;
-        for ( COLTYPE i = 0; i < U.rows; ++i )
-        {
-            std::cout << "Row " << i << ": ";
-            for ( auto idx = U.AI()[i]; idx < U.AI()[i + 1]; ++idx )
-            {
-                std::cout << "(col " << U.AJ()[idx] << ", val " << U.AV()[idx] << ") ";
-            }
-            std::cout << std::endl;
-        }
     }
 
     COLTYPE size() const
@@ -76,8 +66,10 @@ int main( int argc, char** argv )
         "r,restart", "GMRES restart parameter",
         cxxopts::value<int>()->default_value( "20" ) )(
         "m,maxiter", "Maximum number of GMRES iterations",
-        cxxopts::value<int>()->default_value( "10" ) )( "h,help",
-                                                        "Print usage" );
+        cxxopts::value<int>()->default_value( "10" ) )(
+        "t,reltol", "Relative tolerance for GMRES convergence",
+        cxxopts::value<double>()->default_value( "1e-10" ) )( "h,help",
+                                                              "Print usage" );
     auto result = options.parse( argc, argv );
     if ( result.count( "help" ) )
     {
@@ -89,6 +81,7 @@ int main( int argc, char** argv )
     std::string precond_type_str = result["precond"].as<std::string>();
     int restart = result["restart"].as<int>();
     int maxiter = result["maxiter"].as<int>();
+    double reltol = result["reltol"].as<double>();
 
     std::cout << "Options:" << std::endl;
     std::cout << "  filename: " << filename << std::endl;
@@ -96,6 +89,7 @@ int main( int argc, char** argv )
     std::cout << "  precond: " << precond_type_str << std::endl;
     std::cout << "  restart: " << restart << std::endl;
     std::cout << "  maxiter: " << maxiter << std::endl;
+    std::cout << "  reltol: " << reltol << std::endl;
 
     // Validate restart parameter
     if ( restart <= 0 )
@@ -134,11 +128,11 @@ int main( int argc, char** argv )
     f.seekg( 0, std::ios::beg );
     matrix_utils::CSRMatrix<int, int, double> csr_matrix, ilu_matrix;
     matrix_utils::readMatrixMarket( f, csr_matrix );
-    std::cout << "size: " << csr_matrix.rows << std::endl;
-    std::ofstream out0( "mat_csr.svg" );
-    matrix_utils::writeSVG( csr_matrix.rows, csr_matrix.cols, csr_matrix.AI(),
-                            csr_matrix.AJ(), out0 );
-    out0.close();
+    std::cout << "size: " << csr_matrix.rows << " nnz: " << csr_matrix.NNZ() << std::endl;
+    // std::ofstream out0( "mat_csr.svg" );
+    // matrix_utils::writeSVG( csr_matrix.rows, csr_matrix.cols, csr_matrix.AI(),
+    //                         csr_matrix.AJ(), out0 );
+    // out0.close();
     bool success = false;
     std::cout << "Symbolic ILU factorization..." << std::endl;
     matrix_utils::ILULevelSymbolic<decltype( ilu_matrix )> ilu;
@@ -159,22 +153,10 @@ int main( int argc, char** argv )
         return -1;
     }
     std::cout << "ILU factorization done." << std::endl;
-    std::ofstream out1( "ilu_csr.svg" );
-    matrix_utils::writeSVG( ilu_matrix.rows, ilu_matrix.cols, ilu_matrix.AI(),
-                            ilu_matrix.AJ(), out1 );
-    out1.close();
-
-    std::cout << "Printing ILU matrix (CSR format):" << std::endl;
-    for ( int i = 0; i < ilu_matrix.rows; ++i )
-    {
-        std::cout << "Row " << i << ": ";
-        for ( auto idx = ilu_matrix.AI()[i]; idx < ilu_matrix.AI()[i + 1]; ++idx )
-        {
-            std::cout << "(col " << ilu_matrix.AJ()[idx] << ", val "
-                      << ilu_matrix.AV()[idx] << ") ";
-        }
-        std::cout << std::endl;
-    }
+    // std::ofstream out1( "ilu_csr.svg" );
+    // matrix_utils::writeSVG( ilu_matrix.rows, ilu_matrix.cols, ilu_matrix.AI(),
+    //                         ilu_matrix.AJ(), out1 );
+    // out1.close();
 
     // spmv operator
     std::cout << "spmv operator..." << std::endl;
@@ -212,9 +194,9 @@ int main( int argc, char** argv )
     std::cout << "GMRES..." << std::endl;
     iterative_solver::GMRES<double> gmres_solver;
     gmres_solver.setMaxIter( maxiter );
-    gmres_solver.setRelTol( 1e-10 );
+    gmres_solver.setRelTol( reltol );
     gmres_solver.setRestart( restart );
-    // gmres_solver.setPreconditionerType(precond_type);
+    gmres_solver.setPreconditionerType( precond_type );
     auto state = gmres_solver( &spmv, &ilu_prec, b.data(), x.data() );
 
     std::cout << "GMRES done. Final state: ";

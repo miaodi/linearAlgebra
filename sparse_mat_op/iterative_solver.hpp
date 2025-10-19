@@ -29,24 +29,24 @@ enum class PreconditionerType
  * residual vector.
  *
  * @tparam VALTYPE Scalar type (e.g., float, double).
+ * @param beta Scalar value representing the norm of the new vector.
+ * @param lda Leading dimension (number of rows) of the Hessenberg matrix.
+ * @param j Current iteration index (column being processed).
  * @param R Pointer to the Hessenberg matrix data (column-major).
  * @param g Pointer to the residual vector.
  * @param c Pointer to the cosine values for Givens rotations.
  * @param s Pointer to the sine values for Givens rotations.
- * @param beta Scalar value representing the norm of the new vector.
  * @param resid Reference to the current residual value (will be updated).
- * @param lda Leading dimension (number of rows) of the Hessenberg matrix.
- * @param j Current iteration index (column being processed).
  */
 template <typename VALTYPE>
-void givens_rotation( VALTYPE* const R,
+void givens_rotation( const VALTYPE beta,
+                      const size_t lda,
+                      const size_t j,
+                      VALTYPE* const R,
                       VALTYPE* const g,
                       VALTYPE* const c,
                       VALTYPE* const s,
-                      const VALTYPE beta,
-                      VALTYPE& resid,
-                      const size_t lda,
-                      const size_t j )
+                      VALTYPE& resid )
 {
     auto R_col_j = R + j * lda;
     // apply Givens rotation to R_col_j
@@ -120,8 +120,7 @@ public:
         const size_t size = op->size();
         initialize_workspace( size );
         Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>> x_vec( x, size );
-        VALTYPE init_resid = compute_initial_residual( op, prec, b, x, size );
-        std::cout << "Initial residual: " << init_resid << std::endl;
+        VALTYPE init_resid = compute_residual( op, prec, b, x, size );
         if ( init_resid < _abs_tol )
         {
             return State::CONVERGED;
@@ -132,8 +131,9 @@ public:
         {
             size_t cycle_iterations;
             State restart_state = perform_restart_cycle(
-                op, prec, iter, resid, init_resid, cycle_iterations );
+                op, prec, init_resid, x_vec, iter, resid, cycle_iterations );
 
+            // std::cout << _H << std::endl;
             if ( restart_state == State::CONVERGED )
             {
                 return State::CONVERGED;
@@ -144,14 +144,15 @@ public:
                 return State::MAX_ITER_REACHED;
             }
 
-            update_solution( prec, x_vec, cycle_iterations );
+            // std::cout<<"after update: " << std::endl;
+            // std::cout << x_vec << std::endl;
 
             if ( restart_state != State::RUNNING )
             {
                 break;
             }
 
-            resid = compute_restart_residual( op, prec, b, x, size );
+            resid = compute_residual( op, prec, b, x, size );
         }
 
         return State::MAX_ITER_REACHED;
@@ -172,43 +173,21 @@ private:
     }
 
     template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
-    VALTYPE compute_initial_residual(
-        Op const* op, PrecOp const* prec, VALTYPE const* b, VALTYPE const* x, size_t size )
+    VALTYPE compute_residual( Op const* op, PrecOp const* prec, VALTYPE const* b, VALTYPE const* x, size_t size )
     {
         vec_ops::copy_vec( size, b, _tmp.data() );
+        // Compute residual r = b - Ax
         ( *op )( x, _tmp.data(), (VALTYPE)( -1 ), (VALTYPE)( 1 ) );
-        apply_preconditioner_to_residual( prec, _tmp.data(), _Q.col( 0 ).data(), size );
-        std::cout << "hello" << std::endl;
-        std::cout << _Q.col( 0 ) << std::endl;
-        return _Q.col( 0 ).norm();
-    }
-
-    template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
-    VALTYPE compute_restart_residual(
-        Op const* op, PrecOp const* prec, VALTYPE const* b, VALTYPE const* x, size_t size )
-    {
-        vec_ops::copy_vec( size, b, _tmp.data() );
-        ( *op )( x, _tmp.data(), (VALTYPE)( -1 ), (VALTYPE)( 1 ) );
-
-        apply_preconditioner_to_residual( prec, _tmp.data(), _Q.col( 0 ).data(), size );
+        apply_preconditioner( prec, _tmp.data(), size, _Q.col( 0 ).data() );
         return _Q.col( 0 ).norm();
     }
 
     template <matrix_utils::PrecOpType PrecOp>
-    void apply_preconditioner_to_residual( PrecOp const* prec,
-                                           VALTYPE const* input,
-                                           VALTYPE* output,
-                                           size_t size )
+    void apply_preconditioner( PrecOp const* prec, VALTYPE const* input, size_t size, VALTYPE* output )
     {
         if ( _prec_type == PreconditionerType::LEFT )
         {
             ( *prec )( input, output );
-            std::cout << "after prec" << std::endl;
-            for ( size_t i = 0; i < size; ++i )
-            {
-                std::cout << output[i] << " ";
-            }
-            std::cout << std::endl;
         }
         else
         {
@@ -241,9 +220,10 @@ private:
     template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
     State perform_restart_cycle( Op const* op,
                                  PrecOp const* prec,
+                                 VALTYPE init_resid,
+                                 Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>>& x_vec,
                                  size_t& iter,
                                  VALTYPE& resid,
-                                 VALTYPE init_resid,
                                  size_t& cycle_iterations )
     {
         _Q.col( 0 ) /= resid;
@@ -264,8 +244,8 @@ private:
             VALTYPE beta = _Q.col( j + 1 ).norm();
             _Q.col( j + 1 ) /= beta;
 
-            givens_rotation( _H.data(), _g.data(), _c.data(), _s.data(), beta,
-                             resid, _restart, j );
+            givens_rotation( beta, _restart, j, _H.data(), _g.data(), _c.data(),
+                             _s.data(), resid );
 
             print_iteration_info( iter, resid, init_resid );
 
@@ -273,12 +253,14 @@ private:
             {
                 cycle_iterations = j + 1;
                 solve_least_squares( j + 1 );
+                update_solution( prec, cycle_iterations, x_vec );
                 return State::CONVERGED;
             }
         }
 
         cycle_iterations = j;
         solve_least_squares( j );
+        update_solution( prec, cycle_iterations, x_vec );
         return ( iter >= _max_iter ) ? State::MAX_ITER_REACHED : State::RUNNING;
     }
 
@@ -292,8 +274,8 @@ private:
 
     template <matrix_utils::PrecOpType PrecOp>
     void update_solution( PrecOp const* prec,
-                          Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>>& x_vec,
-                          size_t j )
+                          size_t j,
+                          Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>>& x_vec )
     {
         if ( j == 0 )
             return;
