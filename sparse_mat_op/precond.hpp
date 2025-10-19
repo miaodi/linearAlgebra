@@ -814,11 +814,12 @@ private:
 };
 
 template <ResizableDiagonalType CSRMatrixType>
-bool ILULevelNumeric(const typename CSRMatrixType::COLTYPE size,
-                     typename CSRMatrixType::ROWTYPE const *ai,
-                     typename CSRMatrixType::COLTYPE const *aj,
-                     typename CSRMatrixType::VALTYPE const *av, const int lvl,
-                     CSRMatrixType &ilu);
+bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
+                      typename CSRMatrixType::ROWTYPE const* ai,
+                      typename CSRMatrixType::COLTYPE const* aj,
+                      typename CSRMatrixType::VALTYPE const* av,
+                      const int lvl,
+                      CSRMatrixType& ilu );
 
 template <typename VT> class IdentityPrec {
 public:

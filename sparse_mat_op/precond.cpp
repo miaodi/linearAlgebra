@@ -356,63 +356,72 @@ bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
                       CSRMatrixType& ilu )
 {
     const auto base = ai[0];
-    typename CSRMatrixType::ROWTYPE i_idx, ilu_i_idx, k_idx, j_idx2, j_idx;
-    typename CSRMatrixType::COLTYPE j, k;
-
     auto const* ilu_ai = ilu.AI();
     auto const* ilu_aj = ilu.AJ();
     auto* ilu_av = ilu.AV();
     auto const* ilu_diag = ilu.Diagonal();
-    typename CSRMatrixType::VALTYPE akk, aik;
 
-    for ( typename CSRMatrixType::COLTYPE i = 0; i < size; i++ )
+    using ROWT = typename CSRMatrixType::ROWTYPE;
+    using COLT = typename CSRMatrixType::COLTYPE;
+    using VALT = typename CSRMatrixType::VALTYPE;
+    const ROWT MARKER_ABSENT = std::numeric_limits<ROWT>::max();
+    // Reusable marker: position of column j in current row i (or ABSENT)
+    std::vector<ROWT> marker( size, MARKER_ABSENT );
+
+    for ( COLT i = 0; i < size; i++ )
     {
-        // initialize the current row's nonzeros
-        i_idx = ai[i] - base;
-        for ( ilu_i_idx = ilu_ai[i] - base; ilu_i_idx < ilu_ai[i + 1] - base; ilu_i_idx++ )
+        // ---- Initialize row i entries ----
+        const ROWT row_start = ilu_ai[i] - base;
+        const ROWT row_end = ilu_ai[i + 1] - base;
+        ROWT a_pos = ai[i] - base;
+        const ROWT a_row_end = ai[i + 1] - base;
+        // build marker for current row
+        for ( ROWT pos = row_start; pos < row_end; ++pos )
         {
-            if ( i_idx == ai[i + 1] - base || aj[i_idx] != ilu_aj[ilu_i_idx] )
+            COLT col = ilu_aj[pos] - base;
+            marker[col] = pos; // record position
+            if ( a_pos == a_row_end || aj[a_pos] != ilu_aj[pos] )
             {
-                ilu_av[ilu_i_idx] = 0; // initialize to zero
+                ilu_av[pos] = VALT( 0 );
             }
             else
             {
-                ilu_av[ilu_i_idx] = av[i_idx++]; // copy the value
+                ilu_av[pos] = av[a_pos++ - base];
             }
         }
-        k_idx = ilu_ai[i] - base;
-        while ( true )
-        {
-            k = ilu_aj[k_idx] - base;
-            if ( k >= i )
-            {
-                break;
-            }
-            akk = ilu_av[ilu_diag[k] - base];
-            if ( akk == 0 )
-            {
-                // akk = ilu_av[ilu_diag[k] - base] = 1e-16;
-                return false;
-            }
-            ilu_av[k_idx] /= akk; // a_{ik} = a_{ik} / a_{kk}
-            aik = ilu_av[k_idx];
 
-            j_idx2 = ++k_idx; // j_idx2 is for ith row, start after current k element
-            for ( j_idx = ilu_diag[k] - base + 1; j_idx < ilu_ai[k + 1] - base; )
+        // ---- Elimination: process L part entries (pivot columns k < i) ----
+        for ( ROWT k_pos = row_start; k_pos < row_end; ++k_pos )
+        {
+            COLT k = ilu_aj[k_pos] - base;
+            if ( k >= i )
+                break; // reached diagonal / upper part
+            if ( ilu_av[k_pos] == VALT( 0 ) )
+                continue; // nothing to eliminate
+            const VALT akk = ilu_av[ilu_diag[k] - base];
+            if ( akk == VALT( 0 ) )
+                return false; // singular pivot
+            const VALT aik = ( ilu_av[k_pos] /= akk );
+
+            // Iterate over U portion of row k: columns > k
+            const ROWT k_u_begin = ( ilu_diag[k] - base ) + 1;
+            const ROWT k_u_end = ilu_ai[k + 1] - base;
+            for ( ROWT j_pos = k_u_begin; j_pos < k_u_end; ++j_pos )
             {
-                if ( ilu_aj[j_idx] == ilu_aj[j_idx2] )
-                {
-                    ilu_av[j_idx2++] -= aik * ilu_av[j_idx++];
-                }
-                else if ( ilu_aj[j_idx] < ilu_aj[j_idx2] )
-                {
-                    j_idx++;
-                }
-                else
-                {
-                    j_idx2++;
-                }
+                COLT j = ilu_aj[j_pos] - base;
+                ROWT pos_i = marker[j];
+                if ( pos_i == MARKER_ABSENT )
+                    continue; // fill not in numeric pattern (due to level dropping)
+                // a_ij -= a_ik * a_kj (FMA form)
+                ilu_av[pos_i] = std::fma( -aik, ilu_av[j_pos], ilu_av[pos_i] );
             }
+        }
+
+        // Clear marker entries touched in row i (make them ABSENT for next row)
+        for ( ROWT pos = row_start; pos < row_end; ++pos )
+        {
+            COLT col = ilu_aj[pos] - base;
+            marker[col] = MARKER_ABSENT;
         }
     }
     return true;
