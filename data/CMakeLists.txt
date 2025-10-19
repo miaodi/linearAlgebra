@@ -15,6 +15,8 @@ download_sparse_matrix("bcsstk01" ${CMAKE_CURRENT_BINARY_DIR})
 download_sparse_matrix("ex5" ${CMAKE_CURRENT_BINARY_DIR})
 download_sparse_matrix("mesh1em1" ${CMAKE_CURRENT_BINARY_DIR})
 download_sparse_matrix("mesh1em6" ${CMAKE_CURRENT_BINARY_DIR})
+download_sparse_matrix("barrier2-2" ${CMAKE_CURRENT_BINARY_DIR})
+download_sparse_matrix("barrier2-3" ${CMAKE_CURRENT_BINARY_DIR})
 
 
 message("CMAKE_CURRENT_BINARY_DIR: ${CMAKE_CURRENT_BINARY_DIR}")
