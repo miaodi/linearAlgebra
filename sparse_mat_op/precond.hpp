@@ -800,13 +800,17 @@ public:
                   CSRMatrixType &ilu);
 
 private:
+  // Local (col, level) pair used during symbolic pattern construction of a row
+  struct ColLevel {
+    typename CSRMatrixType::COLTYPE col;
+    int level;
+  };
   std::vector<int> _levels; // level for each element
-  std::vector<std::pair<typename CSRMatrixType::COLTYPE,
-                        int>>
-      _current_row; // <col, lvl> 0-based
-  std::vector<std::pair<typename CSRMatrixType::COLTYPE,
-                        int>>
-      _current_row2; // <col, lvl> 0-based used for merging
+  // marker array for O(1) membership / position lookup in current row (MAX sentinel if absent)
+  std::vector<typename CSRMatrixType::ROWTYPE> _marker;
+  // Reusable storage to avoid per-row allocations
+  std::vector<ColLevel> _cl;
+  std::deque<typename CSRMatrixType::COLTYPE> _q; // queue of pivot candidates < i
 };
 
 template <ResizableDiagonalType CSRMatrixType>

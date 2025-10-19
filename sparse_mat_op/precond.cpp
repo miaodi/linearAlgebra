@@ -1,5 +1,9 @@
 #include "precond.hpp"
 #include "matrix_utils.hpp"
+#include <algorithm>
+#include <deque>
+#include <numeric>
+#include <ranges>
 
 namespace matrix_utils
 {
@@ -11,117 +15,137 @@ bool ILULevelSymbolic<CSRMatrixType>::operator()( const typename CSRMatrixType::
                                                   CSRMatrixType& ilu )
 {
     if ( lvl < 0 )
-    {
         return false;
-    }
-    else if ( lvl == 0 )
-    {
+    if ( lvl == 0 )
         return ILULevel0Symbolic( size, ai, aj, ilu );
-    }
+
     ilu.rows = size;
     ilu.cols = size;
     ilu.ResizeAI( size + 1 );
     ilu.ResizeDiagonal( size );
     const auto base = ai[0];
-    typename CSRMatrixType::ROWTYPE nnz = ai[size] - base, cur_nnz;
-    const auto NONE = std::numeric_limits<typename CSRMatrixType::COLTYPE>::max();
-
-    ilu.ResizeAJ( nnz );
-    ilu.ResizeAV( nnz );
-    _levels.resize( nnz );
-    typename CSRMatrixType::ROWTYPE i_idx, i_idx_end, k_idx, k_idx2, j_idx,
-        j_idx_end, k_idx_end;
-    typename CSRMatrixType::COLTYPE j, k;
-
-    int lvl_ik, level;
-
+    typename CSRMatrixType::ROWTYPE nnz_cap = 3 * ( ai[size] - base ); // initial guess
+    ilu.ResizeAJ( nnz_cap );
+    ilu.ResizeAV( nnz_cap );
+    _levels.assign( nnz_cap, 0 );
+    using ROWT = typename CSRMatrixType::ROWTYPE;
+    const ROWT MARKER_ABSENT = std::numeric_limits<ROWT>::max();
+    _marker.assign( size, MARKER_ABSENT );
     auto* ilu_ai = ilu.AI();
     auto* ilu_aj = ilu.AJ();
-    auto* ilu_av = ilu.AV();
     auto* ilu_diag = ilu.Diagonal();
     ilu_ai[0] = base;
+
+    // Algorithm overview (BFS style ILU(k) symbolic factorization):
+    // 1. Start from original sparsity pattern of row i (A_i,:); push columns < i into queue.
+    // 2. Pop k from queue (k < i). If level(i,k) < lvl expand row k (its already-built ILU row)
+    //    considering only entries j with k < j <= i (lower part + diagonal) because fill in U
+    //    influences current row. For each candidate j compute new level = level(i,k)+level(k,j)+1.
+    // 3. Insert/update (i,j) using a marker array to get O(1) membership test; if level improved
+    //    and j < i we re-enqueue j to allow deeper / cheaper paths.
+    // 4. After expansion ensure diagonal exists, then sort columns and append to global arrays.
+    // Complexity: each discovered fill is processed proportional to the number of times its level
+    // improves (bounded by lvl); membership operations are O(1). Avoids repeated full-row merges.
+    // Data structures:
+    //   cols/levels : local unsorted storage of pattern and their levels.
+    //   _marker     : maps col -> position in cols (or MARKER_ABSENT if absent).
+    //   q           : deque for BFS/level relaxation.
+    // Potential further micro-optimizations: replace std::deque with custom ring buffer, use
+    // integer vector as queue with two indices, and bucket queue by current fill level.
+
+    // reuse member containers to avoid reallocations
+    _cl.clear();
+    if ( _cl.capacity() < 64 )
+        _cl.reserve( 64 );
+    _q.clear();
+
     for ( typename CSRMatrixType::COLTYPE i = 0; i < size; i++ )
     {
-        _current_row.clear();
-        i_idx = ai[i] - base;
-        i_idx_end = ai[i + 1] - base;
-
-        // initialize the current row's nonzeros
-        for ( ; i_idx < i_idx_end; i_idx++ )
+        _cl.clear();
+        _q.clear();
+        // load original sparsity row i
+        for ( auto p = ai[i] - base; p < ai[i + 1] - base; ++p )
         {
-            _current_row.emplace_back( aj[i_idx] - base, 0 );
+            auto c = aj[p] - base;
+            _marker[c] = static_cast<ROWT>( _cl.size() );
+            _cl.push_back( { c, 0 } );
+            if ( c < i )
+                _q.push_back( c ); // candidate pivot in elimination
         }
-        _current_row.emplace_back( NONE, 0 ); // max as the end
-
-        for ( k_idx = 0; k_idx < _current_row.size(); k_idx++ )
+        // BFS style expansion limited by level
+        while ( !_q.empty() )
         {
-            k = _current_row[k_idx].first;
+            auto k = _q.front();
+            _q.pop_front();
             if ( k >= i )
-            {
-                break;
-            }
-            lvl_ik = _current_row[k_idx].second;
+                continue; // only consider columns < i
+            auto k_pos = _marker[k];
+            int lvl_ik = _cl[k_pos].level;
+            if ( lvl_ik >= lvl )
+                continue; // no need to expand further
 
-            j_idx = ilu_diag[k] - base + 1;
-            j_idx_end = ilu_ai[k + 1] - base;
-            k_idx_end = _current_row.size();
-            k_idx2 = k_idx;
-            for ( ; j_idx < j_idx_end; j_idx++ )
+            // iterate over (k, j) with j > k (upper part of row k) starting at diagonal+1
+            auto row_start = ( ilu_diag[k] - base ) + 1;
+            auto row_end = ilu_ai[k + 1] - base;
+            for ( auto rp = row_start; rp < row_end; ++rp )
             {
-                level = lvl_ik + _levels[j_idx] + 1;
-                if ( level > lvl )
+                auto j = ilu_aj[rp] - base;
+                // j is guaranteed > k since we started after diagonal
+                int new_level = lvl_ik + _levels[rp] + 1; // candidate level(i,j)
+                if ( new_level > lvl )
+                    continue;
+                auto pos = _marker[j];
+                if ( pos == MARKER_ABSENT )
                 {
-                    continue; // skip this element
-                }
-                while ( _current_row[k_idx2].first < ilu_aj[j_idx] - base )
-                {
-                    k_idx2++;
-                }
-                if ( _current_row[k_idx2].first > ilu_aj[j_idx] - base )
-                {
-                    // insert new element
-                    _current_row.emplace_back( ilu_aj[j_idx] - base, level );
+                    // add new fill
+                    pos = static_cast<ROWT>( _cl.size() );
+                    _cl.push_back( { j, new_level } );
+                    _marker[j] = pos;
+                    // only columns < i can produce further fill into row i (lower part)
+                    if ( j < i )
+                        _q.push_back( j );
                 }
                 else
                 {
-                    // update the level
-                    _current_row[k_idx2].second =
-                        std::min( _current_row[k_idx2].second, level );
+                    if ( new_level < _cl[pos].level )
+                    {
+                        _cl[pos].level = new_level;
+                        if ( j < i )
+                            _q.push_back( j ); // improved path -> re-expand
+                    }
                 }
             }
-            std::merge( _current_row.begin(), _current_row.begin() + k_idx_end,
-                        _current_row.begin() + k_idx_end, _current_row.end(),
-                        std::back_inserter( _current_row2 ),
-                        []( const auto& a, const auto& b )
-                        { return a.first < b.first; } );
-            std::swap( _current_row, _current_row2 );
-            _current_row2.clear();
         }
-        ilu_ai[i + 1] = ilu_ai[i] + _current_row.size() - 1;
-        cur_nnz = ilu_ai[i + 1] - base;
-        if ( _current_row[k_idx].first != i )
-            return false;
-        ilu_diag[i] = ilu_ai[i] + k_idx;
-
-        // copy to ilu aj and _levels
-        if ( cur_nnz > nnz )
+        // ensure diagonal exists
+        if ( _marker[i] == MARKER_ABSENT )
         {
-            // estimate the new size
-            if ( 2 * ( i - base ) >= size )
-                nnz *= 2;
-            else
-                nnz = nnz * std::ceil( size * 1. / ( i - base ) );
-            nnz = std::max( nnz, cur_nnz );
-            ilu_aj = ilu.ResizeAJ( nnz );
-            _levels.resize( nnz );
+            _marker[i] = static_cast<ROWT>( _cl.size() );
+            _cl.push_back( { i, 0 } );
         }
-
-        for ( i_idx = ilu_ai[i] - base, k_idx2 = 0;
-              i_idx < ilu_ai[i + 1] - base; i_idx++, k_idx2++ )
+        // sort by column index using ranges
+        std::ranges::sort( _cl, {}, &ColLevel::col );
+        auto row_nnz = static_cast<typename CSRMatrixType::ROWTYPE>( _cl.size() );
+        auto needed = ( ilu_ai[i] - base ) + row_nnz;
+        if ( needed > nnz_cap )
         {
-            ilu_aj[i_idx] = _current_row[k_idx2].first;
-            _levels[i_idx] = _current_row[k_idx2].second;
+            nnz_cap = std::max<decltype( nnz_cap )>( nnz_cap * 2, needed );
+            ilu_aj = ilu.ResizeAJ( nnz_cap );
+            ilu.ResizeAV( nnz_cap );
+            _levels.resize( nnz_cap );
         }
+        auto write_pos = ilu_ai[i] - base;
+        for ( const auto& e : _cl )
+        {
+            ilu_aj[write_pos] = e.col + base;
+            _levels[write_pos] = e.level;
+            if ( e.col == i )
+                ilu_diag[i] = write_pos + base; // store diag position
+            ++write_pos;
+        }
+        ilu_ai[i + 1] = write_pos + base;
+        // clear marker entries for this row
+        for ( const auto& e : _cl )
+            _marker[e.col] = MARKER_ABSENT;
     }
     ilu.ResizeAV( ilu_ai[size] - base );
     return true;
