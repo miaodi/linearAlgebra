@@ -307,6 +307,15 @@ constexpr bool spmv_has_preprocess = requires(const COLTYPE size,
   t.preprocess(size, base, ai, aj, av);
 };
 
+/** 
+ * Sparse Matrix-Vector Multiplication (SPMV) operator
+ * After preprocess(), the operator() can be called to perform SPMV
+ * Usage:
+ *  matrix_utils::SPMV<CSRMatrixType, SPMVType> spmv;
+ *  spmv.setMatrix(&csr_matrix);
+ *  spmv.preprocess();
+ *  spmv(b, x, alpha, beta); // x = alpha * A * b + beta * x
+ */
 template <typename CSRMatrixType, typename SPMVType> struct SPMV {
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;
   using COLTYPE = typename CSRMatrixType::COLTYPE;

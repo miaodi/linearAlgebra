@@ -213,37 +213,41 @@ void TriangularSolve( const COLTYPE size,
     // Extract base from ai[0]
     const ROWTYPE base = ai[0];
 
-    // Determine loop parameters based on matrix type
-    constexpr bool is_forward = ( TM == TriangularMatrix::L );
-    const COLTYPE start_i = is_forward ? 0 : size - 1;
-    const COLTYPE end_i = is_forward ? size : -1;
-    const int step = is_forward ? 1 : -1;
-
-    for ( COLTYPE i = start_i; i != end_i; i += step )
+    // Lambda to process a single row - eliminates code duplication
+    auto process_row = [&]( COLTYPE row_idx )
     {
-        VALTYPE val = 0;
+        VALTYPE val = VALTYPE( 0 );
 
-        for ( ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++ )
+        for ( ROWTYPE j = ai[row_idx] - base; j < ai[row_idx + 1] - base; j++ )
         {
             COLTYPE col_idx = aj[j] - base;
-
-            // Check triangular constraint based on matrix type
-            bool include_element = is_forward ? ( col_idx < i ) : ( col_idx > i );
-
-            if ( include_element )
-            {
-                val += av[j] * x[col_idx];
-            }
+            val += av[j] * x[col_idx];
         }
 
         // Apply diagonal
         if ( diag )
         {
-            x[i] = ( b[i] - val ) / diag[i];
+            x[row_idx] = ( b[row_idx] - val ) / diag[row_idx];
         }
         else
         {
-            x[i] = b[i] - val; // Unit diagonal
+            x[row_idx] = b[row_idx] - val; // Unit diagonal
+        }
+    };
+
+    // Use different loop strategies for forward vs backward to handle unsigned types
+    if constexpr ( TM == TriangularMatrix::L ) // Forward substitution
+    {
+        for ( COLTYPE i = 0; i < size; i++ )
+        {
+            process_row( i );
+        }
+    }
+    else // Backward substitution (TM == TriangularMatrix::U)
+    {
+        for ( COLTYPE i = size; i > 0; i-- )
+        {
+            process_row( i - 1 );
         }
     }
 }
