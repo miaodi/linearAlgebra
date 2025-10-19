@@ -67,9 +67,9 @@ int main( int argc, char** argv )
         cxxopts::value<int>()->default_value( "20" ) )(
         "m,maxiter", "Maximum number of GMRES iterations",
         cxxopts::value<int>()->default_value( "10" ) )(
-        "t,reltol", "Relative tolerance for GMRES convergence",
-        cxxopts::value<double>()->default_value( "1e-10" ) )( "h,help",
-                                                              "Print usage" );
+    "t,reltol", "Relative tolerance for GMRES convergence",
+    cxxopts::value<double>()->default_value( "1e-10" ) )( "h,help",
+                                  "Print usage" );
     auto result = options.parse( argc, argv );
     if ( result.count( "help" ) )
     {
@@ -136,7 +136,12 @@ int main( int argc, char** argv )
     bool success = false;
     std::cout << "Symbolic ILU factorization..." << std::endl;
     matrix_utils::ILULevelSymbolic<decltype( ilu_matrix )> ilu;
+    auto t1 = std::chrono::high_resolution_clock::now();
     success = ilu( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(), level, ilu_matrix );
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = t2 - t1;
+    std::cout << "Symbolic ILU factorization time: " << elapsed.count() << " s"
+              << std::endl;
     if ( !success )
     {
         std::cout << "Symbolic ILU factorization failed." << std::endl;
@@ -144,9 +149,16 @@ int main( int argc, char** argv )
     }
     std::cout << "Symbolic ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
     std::cout << "Numeric ILU factorization..." << std::endl;
+    auto t3 = std::chrono::high_resolution_clock::now();
+    // Add option to select original/optimized ILULevelNumeric
+    std::cout << "Using ILULevelNumeric." << std::endl;
     success = matrix_utils::ILULevelNumeric( csr_matrix.rows, csr_matrix.AI(),
                                              csr_matrix.AJ(), csr_matrix.AV(),
                                              level, ilu_matrix );
+    auto t4 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed_numeric = t4 - t3;
+    std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count()
+              << " s" << std::endl;
     if ( !success )
     {
         std::cout << "Numeric ILU factorization failed." << std::endl;

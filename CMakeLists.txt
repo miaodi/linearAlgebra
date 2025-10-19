@@ -12,7 +12,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mtune=native -fno-strict-aliasing -Wno-unused-variable")
+# set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mtune=native -fno-strict-aliasing -Wno-unused-variable")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # set(CMAKE_CXX_FLAGS "-g -O0 -Wall -Wextra -Wno-unused-variable -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -DDEBUG")
@@ -20,7 +20,7 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   set(CMAKE_CXX_FLAGS "-Wno-unused-variable")
   add_definitions(-DNDEBUG)
 elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-  set(CMAKE_CXX_FLAGS "-Wno-unused-variable")
+  set(CMAKE_CXX_FLAGS "-Wno-unused-variable -O2 -g -fno-omit-frame-pointer")
 endif()
 # set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
