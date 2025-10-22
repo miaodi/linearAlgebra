@@ -178,21 +178,19 @@ private:
         vec_ops::copy_vec( size, b, _tmp.data() );
         // Compute residual r = b - Ax
         ( *op )( x, _tmp.data(), (VALTYPE)( -1 ), (VALTYPE)( 1 ) );
-        apply_preconditioner( prec, _tmp.data(), size, _Q.col( 0 ).data() );
-        return _Q.col( 0 ).norm();
-    }
 
-    template <matrix_utils::PrecOpType PrecOp>
-    void apply_preconditioner( PrecOp const* prec, VALTYPE const* input, size_t size, VALTYPE* output )
-    {
+        // Apply preconditioner to residual for left preconditioning only
+        // For right preconditioning, the preconditioner is applied to the solution update,
+        // not to the residual computation, so we just copy the residual as-is
         if ( _prec_type == PreconditionerType::LEFT )
         {
-            ( *prec )( input, output );
+            ( *prec )( _tmp.data(), _Q.col( 0 ).data() );
         }
         else
         {
-            vec_ops::copy_vec( size, input, output );
+            vec_ops::copy_vec( size, _tmp.data(), _Q.col( 0 ).data() );
         }
+        return _Q.col( 0 ).norm();
     }
 
     template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
@@ -242,6 +240,18 @@ private:
             }
 
             VALTYPE beta = _Q.col( j + 1 ).norm();
+
+            // // Check for happy breakdown: if beta is very small, the Krylov subspace
+            // // is complete and we have found the exact solution within the subspace
+            // if ( beta < _breakdown_tol )
+            // {
+            //     // Happy breakdown occurred - solve with current subspace and return
+            //     cycle_iterations = j + 1;
+            //     solve_least_squares( j + 1 );
+            //     update_solution( prec, cycle_iterations, x_vec );
+            //     return State::CONVERGED;
+            // }
+
             _Q.col( j + 1 ) /= beta;
 
             givens_rotation( beta, _restart, j, _H.data(), _g.data(), _c.data(),
@@ -309,6 +319,7 @@ private:
     size_t _max_iter{ 100 };
     VALTYPE _abs_tol{ 0.0 };
     VALTYPE _rel_tol{ 1e-8 };
+    // VALTYPE _breakdown_tol{ 1e-14 };  // Tolerance for detecting happy breakdown
     size_t _restart{ 20 };
     PreconditionerType _prec_type{ PreconditionerType::LEFT };
     Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _H;
