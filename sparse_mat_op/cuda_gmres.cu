@@ -28,11 +28,11 @@ CudaGMRES::CudaGMRES()
     , _d_Q(nullptr)
     , _d_tmp(nullptr)
     , _d_w(nullptr)
-    , _h_g(nullptr)
     , _h_c(nullptr)
     , _h_s(nullptr)
     , _h_col_norms(nullptr)
     , _um_H(nullptr)
+    , _um_g(nullptr)
     , _n(0)
     , _current_restart(0)
     , _spv_buffer_size_L(0)
@@ -70,11 +70,11 @@ void CudaGMRES::cleanup_cuda()
     if (_d_Q) { cudaFree(_d_Q); _d_Q = nullptr; }
     if (_d_tmp) { cudaFree(_d_tmp); _d_tmp = nullptr; }
     if (_d_w) { cudaFree(_d_w); _d_w = nullptr; }
-    if (_h_g) { cudaFree(_h_g); _h_g = nullptr; }  // Changed from cudaFreeHost to cudaFree for unified memory
     if (_h_c) { cudaFreeHost(_h_c); _h_c = nullptr; }
     if (_h_s) { cudaFreeHost(_h_s); _h_s = nullptr; }
     if (_h_col_norms) { cudaFreeHost(_h_col_norms); _h_col_norms = nullptr; }
     if (_um_H) { cudaFree(_um_H); _um_H = nullptr; }
+    if (_um_g) { cudaFree(_um_g); _um_g = nullptr; }
     if (_d_spv_buffer_L) { cudaFree(_d_spv_buffer_L); _d_spv_buffer_L = nullptr; }
     if (_d_spv_buffer_U) { cudaFree(_d_spv_buffer_U); _d_spv_buffer_U = nullptr; }
     if (_d_spmv_buffer) { cudaFree(_d_spmv_buffer); _d_spmv_buffer = nullptr; }
@@ -107,11 +107,11 @@ void CudaGMRES::initialize_workspace(size_t n)
     if (_d_Q) cudaFree(_d_Q);
     if (_d_tmp) cudaFree(_d_tmp);
     if (_d_w) cudaFree(_d_w);
-    if (_h_g) cudaFree(_h_g);  // Changed from cudaFreeHost to cudaFree for unified memory
     if (_h_c) cudaFreeHost(_h_c);
     if (_h_s) cudaFreeHost(_h_s);
     if (_h_col_norms) cudaFreeHost(_h_col_norms);
     if (_um_H) cudaFree(_um_H);
+    if (_um_g) cudaFree(_um_g);
     
     _n = n;
     _current_restart = std::min(_restart, n);
@@ -125,8 +125,6 @@ void CudaGMRES::initialize_workspace(size_t n)
                      "Failed to allocate work vector memory");
     
     // Allocate host memory
-    check_cuda_error(cudaMallocManaged(&_h_g, _current_restart * sizeof(double)), 
-                     "Failed to allocate residual vector unified memory");
     check_cuda_error(cudaMallocHost(&_h_c, _current_restart * sizeof(double)), 
                      "Failed to allocate cosine values memory");
     check_cuda_error(cudaMallocHost(&_h_s, _current_restart * sizeof(double)), 
@@ -134,12 +132,15 @@ void CudaGMRES::initialize_workspace(size_t n)
     check_cuda_error(cudaMallocHost(&_h_col_norms, _current_restart * sizeof(double)), 
                      "Failed to allocate column norms memory");
     
-    // Allocate unified memory for Hessenberg matrix
+    // Allocate unified memory for matrices/vectors accessible from both host and device
     check_cuda_error(cudaMallocManaged(&_um_H, _current_restart * _current_restart * sizeof(double)), 
                      "Failed to allocate Hessenberg matrix unified memory");
+    check_cuda_error(cudaMallocManaged(&_um_g, _current_restart * sizeof(double)), 
+                     "Failed to allocate residual vector unified memory");
     
-    // Initialize Hessenberg matrix to zero
+    // Initialize unified memory to zero
     cudaMemset(_um_H, 0, _current_restart * _current_restart * sizeof(double));
+    cudaMemset(_um_g, 0, _current_restart * sizeof(double));
 }
 
 void CudaGMRES::setup_matrix_descriptors(size_t n, size_t nnz,
@@ -522,9 +523,9 @@ void CudaGMRES::givens_rotation(double beta, size_t j, double& resid)
     
     // Apply Givens rotation to residual vector
     if (j == 0) {
-        _h_g[0] = resid;  // Initialize residual vector
+        _um_g[0] = resid;  // Initialize residual vector
     }
-    _h_g[j] = _h_c[j] * resid;
+    _um_g[j] = _h_c[j] * resid;
     resid *= _h_s[j];
 }
 
@@ -542,11 +543,14 @@ void CudaGMRES::solve_least_squares(size_t j)
     // - N: size of the system (j)
     // - A: Hessenberg matrix (_um_H)
     // - lda: leading dimension (_current_restart)
-    // - X: right-hand side and solution vector (_h_g)
+    // - X: right-hand side and solution vector (_um_g)
     // - incX: increment for X (1)
     
+    // Synchronize to ensure unified memory is up-to-date on host
+    check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before CPU triangular solve");
+    
     cblas_dtrsv(CblasColMajor, CblasUpper, CblasNoTrans, CblasNonUnit,
-                static_cast<int>(j), _um_H, static_cast<int>(_current_restart), _h_g, 1);
+                static_cast<int>(j), _um_H, static_cast<int>(_current_restart), _um_g, 1);
 }
 
 void CudaGMRES::update_solution(double* d_x, size_t j)
@@ -566,7 +570,7 @@ void CudaGMRES::update_solution(double* d_x, size_t j)
         cublasDgemv(_cublas_handle, CUBLAS_OP_N,
                    _n, j,
                    &one, _d_Q, _n,
-                   _h_g, 1,
+                   _um_g, 1,
                    &zero, _d_tmp, 1),
         "Failed to compute solution update");
     
