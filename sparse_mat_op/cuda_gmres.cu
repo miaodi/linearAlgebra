@@ -2,6 +2,7 @@
 #include <cstring>
 #include <algorithm>
 #include <iomanip>
+#include <stdexcept>
 #include <mkl_cblas.h>  // Include MKL CBLAS for CPU BLAS routines
 
 namespace cuda_iterative_solver
@@ -15,6 +16,8 @@ CudaGMRES::CudaGMRES()
     , _vec_x(nullptr)
     , _vec_y(nullptr)
     , _vec_tmp(nullptr)
+    , _vec_prec_x(nullptr)
+    , _vec_prec_y(nullptr)
     , _spv_descr_L(nullptr)
     , _spv_descr_U(nullptr)
     , _mat_prec_L(nullptr)
@@ -24,7 +27,12 @@ CudaGMRES::CudaGMRES()
     , _rel_tol(1e-8)
     , _restart(20)
     , _prec_type(PreconditionerType::LEFT)
-    , _is_setup(false)
+    , _is_operator_setup(false)
+    , _is_ilu_setup(false)
+    , _matrix_n(0)
+    , _matrix_nnz(0)
+    , _ilu_nnz_L(0)
+    , _ilu_nnz_U(0)
     , _d_Q(nullptr)
     , _d_tmp(nullptr)
     , _d_w(nullptr)
@@ -86,6 +94,8 @@ void CudaGMRES::cleanup_cuda()
     if (_vec_x) cusparseDestroyDnVec(_vec_x);
     if (_vec_y) cusparseDestroyDnVec(_vec_y);
     if (_vec_tmp) cusparseDestroyDnVec(_vec_tmp);
+    if (_vec_prec_x) cusparseDestroyDnVec(_vec_prec_x);
+    if (_vec_prec_y) cusparseDestroyDnVec(_vec_prec_y);
     if (_spv_descr_L) cusparseSpSV_destroyDescr(_spv_descr_L);
     if (_spv_descr_U) cusparseSpSV_destroyDescr(_spv_descr_U);
     if (_mat_prec_L) cusparseDestroySpMat(_mat_prec_L);
@@ -143,109 +153,93 @@ void CudaGMRES::initialize_workspace(size_t n)
     cudaMemset(_um_g, 0, _current_restart * sizeof(double));
 }
 
-void CudaGMRES::setup_matrix_descriptors(size_t n, size_t nnz,
-                                         const int* d_ia_A, const int* d_ja_A, const double* d_va_A,
-                                         size_t nnz_L, const int* d_ia_L, const int* d_ja_L, const double* d_va_L,
-                                         size_t nnz_U, const int* d_ia_U, const int* d_ja_U, const double* d_va_U)
+void CudaGMRES::setupOperator(size_t n, size_t nnz,
+                              const int* h_ia_A, const int* h_ja_A, const double* h_va_A)
+{
+    // Store matrix properties
+    _matrix_n = n;
+    _matrix_nnz = nnz;
+    
+    // Copy matrix data from host to device
+    _d_ia_A.copyFromHost(h_ia_A, n + 1);
+    _d_ja_A.copyFromHost(h_ja_A, nnz);
+    _d_va_A.copyFromHost(h_va_A, nnz);
+    
+    // Initialize workspace for this problem size
+    initialize_workspace(n);
+    
+    // Setup matrix descriptor
+    setup_matrix_descriptor();
+    
+    _is_operator_setup = true;
+}
+
+void CudaGMRES::setupILU(size_t n,
+                         size_t nnz_L, const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
+                         size_t nnz_U, const int* h_ia_U, const int* h_ja_U, const double* h_va_U)
+{
+    if (!_is_operator_setup || _matrix_n != n) {
+        throw std::runtime_error("setupOperator must be called first with the same matrix size");
+    }
+    
+    // Store ILU properties
+    _ilu_nnz_L = nnz_L;
+    _ilu_nnz_U = nnz_U;
+    
+    // Copy ILU data from host to device
+    if (nnz_L > 0) {
+        _d_ia_L.copyFromHost(h_ia_L, n + 1);
+        _d_ja_L.copyFromHost(h_ja_L, nnz_L);
+        _d_va_L.copyFromHost(h_va_L, nnz_L);
+    }
+    
+    if (nnz_U > 0) {
+        _d_ia_U.copyFromHost(h_ia_U, n + 1);
+        _d_ja_U.copyFromHost(h_ja_U, nnz_U);
+        _d_va_U.copyFromHost(h_va_U, nnz_U);
+    }
+    
+    // Setup ILU descriptors
+    setup_ilu_descriptors();
+    
+    _is_ilu_setup = true;
+}
+
+void CudaGMRES::setup_matrix_descriptor()
 {
     // Destroy existing descriptors
     if (_mat_A) cusparseDestroySpMat(_mat_A);
     if (_vec_x) cusparseDestroyDnVec(_vec_x);
     if (_vec_y) cusparseDestroyDnVec(_vec_y);
     if (_vec_tmp) cusparseDestroyDnVec(_vec_tmp);
+    if (_vec_prec_x) cusparseDestroyDnVec(_vec_prec_x);
+    if (_vec_prec_y) cusparseDestroyDnVec(_vec_prec_y);
+    
     const double one = 1.0;
 
     // Create matrix A descriptor
     check_cusparse_error(
-        cusparseCreateCsr(&_mat_A, n, n, nnz,
-                         const_cast<int*>(d_ia_A), const_cast<int*>(d_ja_A), const_cast<double*>(d_va_A),
+        cusparseCreateCsr(&_mat_A, _matrix_n, _matrix_n, _matrix_nnz,
+                         _d_ia_A.data(), _d_ja_A.data(), _d_va_A.data(),
                          CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F),
         "Failed to create matrix A descriptor");
     
     // Create vector descriptors (will be updated with actual pointers during solve)
     check_cusparse_error(
-        cusparseCreateDnVec(&_vec_x, n, nullptr, CUDA_R_64F),
+        cusparseCreateDnVec(&_vec_x, _matrix_n, nullptr, CUDA_R_64F),
         "Failed to create vector x descriptor");
     check_cusparse_error(
-        cusparseCreateDnVec(&_vec_y, n, nullptr, CUDA_R_64F),
+        cusparseCreateDnVec(&_vec_y, _matrix_n, nullptr, CUDA_R_64F),
         "Failed to create vector y descriptor");
     check_cusparse_error(
-        cusparseCreateDnVec(&_vec_tmp, n, nullptr, CUDA_R_64F),
+        cusparseCreateDnVec(&_vec_tmp, _matrix_n, nullptr, CUDA_R_64F),
         "Failed to create temporary vector descriptor");
-    
-    // Setup ILU preconditioner if provided
-    if (_prec_type != PreconditionerType::NONE && nnz_L > 0 && nnz_U > 0) {
-        // Destroy existing preconditioner descriptors
-        if (_mat_prec_L) cusparseDestroySpMat(_mat_prec_L);
-        if (_mat_prec_U) cusparseDestroySpMat(_mat_prec_U);
-        if (_spv_descr_L) cusparseSpSV_destroyDescr(_spv_descr_L);
-        if (_spv_descr_U) cusparseSpSV_destroyDescr(_spv_descr_U);
-        
-        // Create L factor (lower triangular with unit diagonal)
-        check_cusparse_error(
-            cusparseCreateCsr(&_mat_prec_L, n, n, nnz_L,
-                             const_cast<int*>(d_ia_L), const_cast<int*>(d_ja_L), const_cast<double*>(d_va_L),
-                             CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F),
-            "Failed to create preconditioner L matrix descriptor");
-        
-        // Set matrix properties for lower triangular
-        cusparseFillMode_t lower_fill = CUSPARSE_FILL_MODE_LOWER;
-        cusparseDiagType_t unit_diag = CUSPARSE_DIAG_TYPE_UNIT;
-        cusparseSpMatSetAttribute(_mat_prec_L, CUSPARSE_SPMAT_FILL_MODE, &lower_fill, sizeof(cusparseFillMode_t));
-        cusparseSpMatSetAttribute(_mat_prec_L, CUSPARSE_SPMAT_DIAG_TYPE, &unit_diag, sizeof(cusparseDiagType_t));
-        
-        // Create U factor (upper triangular with non-unit diagonal)
-        check_cusparse_error(
-            cusparseCreateCsr(&_mat_prec_U, n, n, nnz_U,
-                             const_cast<int*>(d_ia_U), const_cast<int*>(d_ja_U), const_cast<double*>(d_va_U),
-                             CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F),
-            "Failed to create preconditioner U matrix descriptor");
-        
-        // Set matrix properties for upper triangular
-        cusparseFillMode_t upper_fill = CUSPARSE_FILL_MODE_UPPER;
-        cusparseDiagType_t nonunit_diag = CUSPARSE_DIAG_TYPE_NON_UNIT;
-        cusparseSpMatSetAttribute(_mat_prec_U, CUSPARSE_SPMAT_FILL_MODE, &upper_fill, sizeof(cusparseFillMode_t));
-        cusparseSpMatSetAttribute(_mat_prec_U, CUSPARSE_SPMAT_DIAG_TYPE, &nonunit_diag, sizeof(cusparseDiagType_t));
-        
-        // Create SpSV descriptors for triangular solves
-        check_cusparse_error(cusparseSpSV_createDescr(&_spv_descr_L), "Failed to create SpSV L descriptor");
-        check_cusparse_error(cusparseSpSV_createDescr(&_spv_descr_U), "Failed to create SpSV U descriptor");
-        
-        check_cusparse_error(
-            cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                   &one, _mat_prec_L, _vec_x, _vec_y, CUDA_R_64F,
-                                   CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, &_spv_buffer_size_L),
-            "Failed to get SpSV L buffer size");
-        
-        check_cusparse_error(
-            cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                   &one, _mat_prec_U, _vec_x, _vec_y, CUDA_R_64F,
-                                   CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, &_spv_buffer_size_U),
-            "Failed to get SpSV U buffer size");
-        
-        // Allocate SpSV buffers
-        if (_spv_buffer_size_L > 0) {
-            check_cuda_error(cudaMalloc(&_d_spv_buffer_L, _spv_buffer_size_L), 
-                           "Failed to allocate SpSV L buffer");
-        }
-        if (_spv_buffer_size_U > 0) {
-            check_cuda_error(cudaMalloc(&_d_spv_buffer_U, _spv_buffer_size_U), 
-                           "Failed to allocate SpSV U buffer");
-        }
-        
-        // Analyze the sparsity patterns for optimal performance
-        check_cusparse_error(
-            cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                 &one, _mat_prec_L, _vec_x, _vec_y, CUDA_R_64F,
-                                 CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_spv_buffer_L),
-            "Failed to analyze SpSV L pattern");
-        
-        check_cusparse_error(
-            cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                 &one, _mat_prec_U, _vec_x, _vec_y, CUDA_R_64F,
-                                 CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_spv_buffer_U),
-            "Failed to analyze SpSV U pattern");
-    }
+    check_cusparse_error(
+        cusparseCreateDnVec(&_vec_prec_x, _matrix_n, nullptr, CUDA_R_64F),
+        "Failed to create preconditioner x vector descriptor");
+    check_cusparse_error(
+        cusparseCreateDnVec(&_vec_prec_y, _matrix_n, nullptr, CUDA_R_64F),
+        "Failed to create preconditioner y vector descriptor");
     
     // Setup SpMV buffer
     check_cusparse_error(
@@ -261,27 +255,123 @@ void CudaGMRES::setup_matrix_descriptors(size_t n, size_t nnz,
     }
 }
 
-void CudaGMRES::setup(size_t n, size_t nnz,
-                      const int* d_ia_A, const int* d_ja_A, const double* d_va_A,
-                      size_t nnz_L, const int* d_ia_L, const int* d_ja_L, const double* d_va_L,
-                      size_t nnz_U, const int* d_ia_U, const int* d_ja_U, const double* d_va_U)
+void CudaGMRES::setup_ilu_descriptors()
 {
-    // Initialize workspace for this problem size
-    initialize_workspace(n);
+    if (_prec_type == PreconditionerType::NONE || _ilu_nnz_L == 0 || _ilu_nnz_U == 0) {
+        return; // No preconditioner setup needed
+    }
     
-    // Setup matrix and preconditioner descriptors
-    setup_matrix_descriptors(n, nnz, d_ia_A, d_ja_A, d_va_A, nnz_L, d_ia_L, d_ja_L, d_va_L, nnz_U, d_ia_U, d_ja_U, d_va_U);
+    // Destroy existing preconditioner descriptors
+    if (_mat_prec_L) cusparseDestroySpMat(_mat_prec_L);
+    if (_mat_prec_U) cusparseDestroySpMat(_mat_prec_U);
+    if (_spv_descr_L) cusparseSpSV_destroyDescr(_spv_descr_L);
+    if (_spv_descr_U) cusparseSpSV_destroyDescr(_spv_descr_U);
     
-    // Mark as setup complete
-    _is_setup = true;
+    const double one = 1.0;
+    
+    // Create L factor (lower triangular with unit diagonal)
+    check_cusparse_error(
+        cusparseCreateCsr(&_mat_prec_L, _matrix_n, _matrix_n, _ilu_nnz_L,
+                         _d_ia_L.data(), _d_ja_L.data(), _d_va_L.data(),
+                         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F),
+        "Failed to create preconditioner L matrix descriptor");
+    
+    // Set matrix properties for lower triangular
+    cusparseFillMode_t lower_fill = CUSPARSE_FILL_MODE_LOWER;
+    cusparseDiagType_t unit_diag = CUSPARSE_DIAG_TYPE_UNIT;
+    cusparseSpMatSetAttribute(_mat_prec_L, CUSPARSE_SPMAT_FILL_MODE, &lower_fill, sizeof(cusparseFillMode_t));
+    cusparseSpMatSetAttribute(_mat_prec_L, CUSPARSE_SPMAT_DIAG_TYPE, &unit_diag, sizeof(cusparseDiagType_t));
+    
+    // Create U factor (upper triangular with non-unit diagonal)
+    check_cusparse_error(
+        cusparseCreateCsr(&_mat_prec_U, _matrix_n, _matrix_n, _ilu_nnz_U,
+                         _d_ia_U.data(), _d_ja_U.data(), _d_va_U.data(),
+                         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F),
+        "Failed to create preconditioner U matrix descriptor");
+    
+    // Set matrix properties for upper triangular
+    cusparseFillMode_t upper_fill = CUSPARSE_FILL_MODE_UPPER;
+    cusparseDiagType_t nonunit_diag = CUSPARSE_DIAG_TYPE_NON_UNIT;
+    cusparseSpMatSetAttribute(_mat_prec_U, CUSPARSE_SPMAT_FILL_MODE, &upper_fill, sizeof(cusparseFillMode_t));
+    cusparseSpMatSetAttribute(_mat_prec_U, CUSPARSE_SPMAT_DIAG_TYPE, &nonunit_diag, sizeof(cusparseDiagType_t));
+    
+    // Create SpSV descriptors for triangular solves
+    check_cusparse_error(cusparseSpSV_createDescr(&_spv_descr_L), "Failed to create SpSV L descriptor");
+    check_cusparse_error(cusparseSpSV_createDescr(&_spv_descr_U), "Failed to create SpSV U descriptor");
+    
+    check_cusparse_error(
+        cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                               &one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                               CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, &_spv_buffer_size_L),
+        "Failed to get SpSV L buffer size");
+    
+    check_cusparse_error(
+        cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                               &one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                               CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, &_spv_buffer_size_U),
+        "Failed to get SpSV U buffer size");
+    
+    // Allocate SpSV buffers
+    if (_spv_buffer_size_L > 0) {
+        check_cuda_error(cudaMalloc(&_d_spv_buffer_L, _spv_buffer_size_L), 
+                       "Failed to allocate SpSV L buffer");
+    }
+    if (_spv_buffer_size_U > 0) {
+        check_cuda_error(cudaMalloc(&_d_spv_buffer_U, _spv_buffer_size_U), 
+                       "Failed to allocate SpSV U buffer");
+    }
+    
+    // Analyze the sparsity patterns for optimal performance
+    check_cusparse_error(
+        cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                             &one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                             CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_spv_buffer_L),
+        "Failed to analyze SpSV L pattern");
+    
+    check_cusparse_error(
+        cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                             &one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                             CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_spv_buffer_U),
+        "Failed to analyze SpSV U pattern");
 }
 
-State CudaGMRES::solve(const double* d_b, double* d_x)
+
+
+State CudaGMRES::solve(const double* h_b, double* h_x)
 {
     // Check if setup has been called
-    if (!_is_setup) {
-        std::cerr << "Error: setup() must be called before solve()" << std::endl;
-        throw std::runtime_error("GMRES solver not properly initialized. Call setup() first.");
+    if (!_is_operator_setup) {
+        throw std::runtime_error("setupOperator must be called before solve");
+    }
+    
+    // Check if ILU is required but not setup
+    if (_prec_type != PreconditionerType::NONE && !_is_ilu_setup) {
+        throw std::runtime_error("setupILU must be called before solve when using preconditioner");
+    }
+    
+    // Copy host data to device
+    _d_b.copyFromHost(h_b, _matrix_n);
+    _d_x.copyFromHost(h_x, _matrix_n);
+    
+    // Solve on device
+    State result = deviceSolve(_d_b.data(), _d_x.data());
+    
+    // Copy solution back to host
+    cudaMemcpy(h_x, _d_x.data(), _matrix_n * sizeof(double), cudaMemcpyDeviceToHost);
+    
+    return result;
+}
+
+State CudaGMRES::deviceSolve(const double* d_b, double* d_x)
+{
+    // Check if setup has been called
+    if (!_is_operator_setup) {
+        throw std::runtime_error("setupOperator must be called before solve");
+    }
+    
+    // Check if ILU is required but not setup
+    if (_prec_type != PreconditionerType::NONE && !_is_ilu_setup) {
+        throw std::runtime_error("setupILU must be called before solve when using preconditioner");
     }
     
     // Compute initial residual
@@ -332,7 +422,7 @@ double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
                     &neg_one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
                     CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
         "Failed to compute SpMV for residual");
-    
+
     // Apply left preconditioning if needed
     if (_prec_type == PreconditionerType::LEFT) {
         apply_preconditioner(_d_Q, _d_tmp);
@@ -344,7 +434,6 @@ double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
     double norm;
     check_cublas_error(cublasDnrm2(_cublas_handle, _n, _d_Q, 1, &norm), 
                        "Failed to compute residual norm");
-    
     return norm;
 }
 
@@ -404,22 +493,22 @@ void CudaGMRES::apply_preconditioner(const double* d_input, double* d_output)
     
     // Apply ILU preconditioning: M^{-1} = U^{-1} * L^{-1}
     // First solve: L * y = input (forward substitution)
-    check_cusparse_error(cusparseDnVecSetValues(_vec_x, const_cast<double*>(d_input)), "Failed to set input vector");
-    check_cusparse_error(cusparseDnVecSetValues(_vec_y, _d_tmp), "Failed to set intermediate vector");
+    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_x, const_cast<double*>(d_input)), "Failed to set preconditioner input vector");
+    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_y, _d_tmp), "Failed to set preconditioner intermediate vector");
     
     check_cusparse_error(
         cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &one, _mat_prec_L, _vec_x, _vec_y, CUDA_R_64F,
+                          &one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
                           CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L),
         "Failed to solve forward substitution (L * y = input)");
     
     // Second solve: U * output = y (backward substitution)
-    check_cusparse_error(cusparseDnVecSetValues(_vec_x, _d_tmp), "Failed to set intermediate as input");
-    check_cusparse_error(cusparseDnVecSetValues(_vec_y, d_output), "Failed to set output vector");
+    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_x, _d_tmp), "Failed to set preconditioner intermediate as input");
+    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_y, d_output), "Failed to set preconditioner output vector");
     
     check_cusparse_error(
         cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &one, _mat_prec_U, _vec_x, _vec_y, CUDA_R_64F,
+                          &one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
                           CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U),
         "Failed to solve backward substitution (U * output = y)");
 }
@@ -437,7 +526,7 @@ State CudaGMRES::perform_restart_cycle(const double* d_b, double* d_x,
     for (j = 0; j < _current_restart && iter < _max_iter; ++j, ++iter) {
         // Arnoldi iteration: generate next Krylov vector
         double beta = arnoldi_iteration(j);
-        
+
         // Apply Givens rotation on host
         givens_rotation(beta, j, resid);
         
@@ -460,35 +549,35 @@ State CudaGMRES::perform_restart_cycle(const double* d_b, double* d_x,
 
 double CudaGMRES::arnoldi_iteration(size_t j)
 {
-    double* q_j = _d_Q + j * _n;           // Current Krylov vector
-    double* q_j_plus_1 = _d_Q + (j + 1) * _n;  // Next Krylov vector
+    double* d_q_j = _d_Q + j * _n;           // Current Krylov vector
+    double* d_q_j_plus_1 = _d_Q + (j + 1) * _n;  // Next Krylov vector
     
     // Apply operator: q_{j+1} = A * q_j (with preconditioning)
-    apply_operator_with_preconditioning(q_j, q_j_plus_1);
+    apply_operator_with_preconditioning(d_q_j, d_q_j_plus_1);
     
     // Modified Gram-Schmidt orthogonalization
     for (size_t i = 0; i <= j; ++i) {
-        double* q_i = _d_Q + i * _n;
+        double* d_q_i = _d_Q + i * _n;
         
         // Compute h_{i,j} = <q_i, q_{j+1}> and store directly in Hessenberg matrix
-        check_cublas_error(cublasDdot(_cublas_handle, _n, q_i, 1, q_j_plus_1, 1, &_um_H[i + j * _current_restart]),
+        check_cublas_error(cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1, &_um_H[i + j * _current_restart]),
                            "Failed to compute dot product in Gram-Schmidt");
         
         // q_{j+1} = q_{j+1} - h_{i,j} * q_i
         double neg_h_ij = -_um_H[i + j * _current_restart];
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_h_ij, q_i, 1, q_j_plus_1, 1),
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_h_ij, d_q_i, 1, d_q_j_plus_1, 1),
                            "Failed to update vector in Gram-Schmidt");
     }
     
     // Compute norm of q_{j+1}
     double beta;
-    check_cublas_error(cublasDnrm2(_cublas_handle, _n, q_j_plus_1, 1, &beta),
+    check_cublas_error(cublasDnrm2(_cublas_handle, _n, d_q_j_plus_1, 1, &beta),
                        "Failed to compute norm in Arnoldi iteration");
     
     // Normalize q_{j+1}
     if (beta > 1e-14) {  // Avoid division by zero
         const double inv_beta = 1.0 / beta;
-        check_cublas_error(cublasDscal(_cublas_handle, _n, &inv_beta, q_j_plus_1, 1),
+        check_cublas_error(cublasDscal(_cublas_handle, _n, &inv_beta, d_q_j_plus_1, 1),
                            "Failed to normalize Krylov vector");
     }
     

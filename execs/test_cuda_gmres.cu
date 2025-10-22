@@ -109,7 +109,6 @@ int main(int argc, char** argv)
         // Perform ILU factorization if preconditioner is requested
         matrix_utils::CSRMatrix<int, int, double> ilu_matrix;
         matrix_utils::CSRMatrix<int, int, double> L_matrix, U_matrix;
-        std::vector<double> D_vector;
         bool has_preconditioner = (precond_type != PreconditionerType::NONE);
         
         if (has_preconditioner) {
@@ -129,7 +128,6 @@ int main(int argc, char** argv)
                 return 1;
             }
             std::cout << "Symbolic ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
-            
             // Numeric ILU factorization
             std::cout << "Numeric ILU factorization..." << std::endl;
             auto t3 = std::chrono::high_resolution_clock::now();
@@ -145,14 +143,38 @@ int main(int argc, char** argv)
                 return 1;
             }
             std::cout << "ILU factorization completed successfully." << std::endl;
-            
-            // Split ILU matrix into L, D, U components
-            std::cout << "Splitting ILU matrix into L, D, U factors..." << std::endl;
-            matrix_utils::SplitLDU<int, int, double>(n, ilu_matrix.AI()[0], ilu_matrix.AI(), ilu_matrix.AJ(),
-                                                     ilu_matrix.AV(), L_matrix, D_vector, U_matrix);
+
+            // Split ILU matrix into L (unit diagonal) and U (with diagonal) components
+            std::cout << "Splitting ILU matrix into L, U factors..." << std::endl;
+            matrix_utils::SplitLU<matrix_utils::CSRMatrix<int, int, double>> splitLU;
+            splitLU(n, ilu_matrix.AI(), ilu_matrix.Diagonal(), ilu_matrix.AJ(), ilu_matrix.AV(), 
+                   L_matrix, U_matrix);
             
             std::cout << "L factor nnz: " << L_matrix.NNZ() << std::endl;
             std::cout << "U factor nnz: " << U_matrix.NNZ() << std::endl;
+            
+            // Write L and U factors to SVG files for visualization
+            std::cout << "Writing L and U factors to SVG files..." << std::endl;
+            {
+                std::ofstream L_svg("L_factor.svg");
+                if (L_svg.is_open()) {
+                    matrix_utils::writeSVG(L_matrix.rows, L_matrix.cols, L_matrix.AI(), L_matrix.AJ(), L_svg);
+                    L_svg.close();
+                    std::cout << "L factor written to L_factor.svg" << std::endl;
+                } else {
+                    std::cerr << "Warning: Could not create L_factor.svg" << std::endl;
+                }
+            }
+            {
+                std::ofstream U_svg("U_factor.svg");
+                if (U_svg.is_open()) {
+                    matrix_utils::writeSVG(U_matrix.rows, U_matrix.cols, U_matrix.AI(), U_matrix.AJ(), U_svg);
+                    U_svg.close();
+                    std::cout << "U factor written to U_factor.svg" << std::endl;
+                } else {
+                    std::cerr << "Warning: Could not create U_factor.svg" << std::endl;
+                }
+            }
         }
         
         // Generate right-hand side vector (all ones)
@@ -169,57 +191,6 @@ int main(int argc, char** argv)
         
         std::cout << "Generated RHS vector (all ones) and random initial guess" << std::endl;
         
-        
-        // Allocate device memory for matrix and vectors
-        int *d_ia, *d_ja;
-        double *d_va, *d_b, *d_x;
-        
-        // Allocate device memory for preconditioner factors (if needed)
-        int *d_ia_L = nullptr, *d_ja_L = nullptr, *d_ia_U = nullptr, *d_ja_U = nullptr;
-        double *d_va_L = nullptr, *d_va_U = nullptr;
-        size_t nnz_L = 0, nnz_U = 0;
-        
-        cudaMalloc(&d_ia, (n + 1) * sizeof(int));
-        cudaMalloc(&d_ja, nnz * sizeof(int));
-        cudaMalloc(&d_va, nnz * sizeof(double));
-        cudaMalloc(&d_b, n * sizeof(double));
-        cudaMalloc(&d_x, n * sizeof(double));
-        
-        if (has_preconditioner) {
-            nnz_L = L_matrix.NNZ();
-            nnz_U = U_matrix.NNZ();
-            
-            cudaMalloc(&d_ia_L, (n + 1) * sizeof(int));
-            cudaMalloc(&d_ja_L, nnz_L * sizeof(int));
-            cudaMalloc(&d_va_L, nnz_L * sizeof(double));
-            
-            cudaMalloc(&d_ia_U, (n + 1) * sizeof(int));
-            cudaMalloc(&d_ja_U, nnz_U * sizeof(int));
-            cudaMalloc(&d_va_U, nnz_U * sizeof(double));
-        }
-        cudaMalloc(&d_x, n * sizeof(double));
-        
-        // Copy data to device
-        cudaMemcpy(d_ia, csr_matrix.AI(), (n + 1) * sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_ja, csr_matrix.AJ(), nnz * sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_va, csr_matrix.AV(), nnz * sizeof(double), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_b, b_host.data(), n * sizeof(double), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_x, x_host.data(), n * sizeof(double), cudaMemcpyHostToDevice);
-        
-        if (has_preconditioner) {
-            // Copy preconditioner L and U factors to device
-            cudaMemcpy(d_ia_L, L_matrix.AI(), (n + 1) * sizeof(int), cudaMemcpyHostToDevice);
-            cudaMemcpy(d_ja_L, L_matrix.AJ(), nnz_L * sizeof(int), cudaMemcpyHostToDevice);
-            cudaMemcpy(d_va_L, L_matrix.AV(), nnz_L * sizeof(double), cudaMemcpyHostToDevice);
-            
-            cudaMemcpy(d_ia_U, U_matrix.AI(), (n + 1) * sizeof(int), cudaMemcpyHostToDevice);
-            cudaMemcpy(d_ja_U, U_matrix.AJ(), nnz_U * sizeof(int), cudaMemcpyHostToDevice);
-            cudaMemcpy(d_va_U, U_matrix.AV(), nnz_U * sizeof(double), cudaMemcpyHostToDevice);
-        }
-        
-        std::cout << "Data transferred to GPU successfully" << std::endl;
-        
-        
         // Create and configure GMRES solver
         CudaGMRES solver;
         solver.setMaxIter(maxiter);
@@ -233,21 +204,23 @@ int main(int argc, char** argv)
         State result;
         auto start_time = std::chrono::high_resolution_clock::now();
         
-        // Setup matrix and preconditioner
-        std::cout << "Setting up matrix and preconditioner..." << std::endl;
+        // Setup matrix operator
+        std::cout << "Setting up matrix operator..." << std::endl;
+        solver.setupOperator(n, nnz, csr_matrix.AI(), csr_matrix.AJ(), csr_matrix.AV());
+        
+        // Setup ILU preconditioner if needed
         if (has_preconditioner) {
-            solver.setup(n, nnz, d_ia, d_ja, d_va,
-                        nnz_L, d_ia_L, d_ja_L, d_va_L,    // L factor
-                        nnz_U, d_ia_U, d_ja_U, d_va_U);   // U factor
-        } else {
-            solver.setup(n, nnz, d_ia, d_ja, d_va,
-                        0, nullptr, nullptr, nullptr,    // No L factor
-                        0, nullptr, nullptr, nullptr);   // No U factor
+            std::cout << "Setting up ILU preconditioner..." << std::endl;
+            size_t nnz_L = L_matrix.NNZ();
+            size_t nnz_U = U_matrix.NNZ();
+            solver.setupILU(n,
+                           nnz_L, L_matrix.AI(), L_matrix.AJ(), L_matrix.AV(),    // L factor
+                           nnz_U, U_matrix.AI(), U_matrix.AJ(), U_matrix.AV());  // U factor
         }
         
         // Solve the system
         std::cout << "Solving linear system..." << std::endl;
-        result = solver.solve(d_b, d_x);
+        result = solver.solve(b_host.data(), x_host.data());
         
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -255,8 +228,7 @@ int main(int argc, char** argv)
         std::cout << "Solver completed in " << duration.count() << " ms" << std::endl;
         
         
-        // Copy solution back to host
-        cudaMemcpy(x_host.data(), d_x, n * sizeof(double), cudaMemcpyDeviceToHost);
+        // Solution is already in host memory (x_host)
         
         // Print results
         std::cout << "\nSolver finished with state: ";
@@ -328,22 +300,6 @@ int main(int argc, char** argv)
                 if (i < n - 1) std::cout << ", ";
             }
             std::cout << "]" << std::endl;
-        }
-        
-        // Cleanup
-        cudaFree(d_ia);
-        cudaFree(d_ja);
-        cudaFree(d_va);
-        cudaFree(d_b);
-        cudaFree(d_x);
-        
-        if (has_preconditioner) {
-            cudaFree(d_ia_L);
-            cudaFree(d_ja_L);
-            cudaFree(d_va_L);
-            cudaFree(d_ia_U);
-            cudaFree(d_ja_U);
-            cudaFree(d_va_U);
         }
         
         return (result == State::CONVERGED) ? 0 : 1;
