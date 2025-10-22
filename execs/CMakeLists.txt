@@ -45,5 +45,20 @@ if(USE_CUDA)
     CUDA_EXTENSIONS OFF
   )
   
-  message(STATUS "Added CUDA executable: cuda_spsv_test")
+  # Add CUDA GMRES test
+  add_executable(test_cuda_gmres test_cuda_gmres.cu)
+  
+  target_link_libraries(test_cuda_gmres PRIVATE 
+    CUDA::cusparse 
+    CUDA::cublas 
+    CUDA::cudart
+    sparse_mat_op
+    cxxopts
+  )
+  
+  set_target_properties(test_cuda_gmres PROPERTIES
+    CUDA_STANDARD ${CMAKE_CUDA_STANDARD}
+    CUDA_STANDARD_REQUIRED ON
+    CUDA_EXTENSIONS OFF
+  )
 endif()
