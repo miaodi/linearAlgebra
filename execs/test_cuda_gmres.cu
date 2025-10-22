@@ -98,13 +98,12 @@ int main(int argc, char** argv)
         file.close();
         
         const size_t n = csr_matrix.rows;
-        const size_t nnz = csr_matrix.NNZ();
         
         std::cout << "Matrix loaded successfully:" << std::endl;
         std::cout << "  Size: " << n << " x " << csr_matrix.cols << std::endl;
-        std::cout << "  Non-zeros: " << nnz << std::endl;
+        std::cout << "  Non-zeros: " << csr_matrix.NNZ() << std::endl;
         std::cout << "  Density: " << std::fixed << std::setprecision(4) 
-                  << (100.0 * nnz) / (n * n) << "%" << std::endl;
+                  << (100.0 * csr_matrix.NNZ()) / (n * n) << "%" << std::endl;
         
         // Perform ILU factorization if preconditioner is requested
         matrix_utils::CSRMatrix<int, int, double> ilu_matrix;
@@ -206,16 +205,14 @@ int main(int argc, char** argv)
         
         // Setup matrix operator
         std::cout << "Setting up matrix operator..." << std::endl;
-        solver.setupOperator(n, nnz, csr_matrix.AI(), csr_matrix.AJ(), csr_matrix.AV());
+        solver.setupOperator(n, csr_matrix.AI(), csr_matrix.AJ(), csr_matrix.AV());
         
         // Setup ILU preconditioner if needed
         if (has_preconditioner) {
             std::cout << "Setting up ILU preconditioner..." << std::endl;
-            size_t nnz_L = L_matrix.NNZ();
-            size_t nnz_U = U_matrix.NNZ();
             solver.setupILU(n,
-                           nnz_L, L_matrix.AI(), L_matrix.AJ(), L_matrix.AV(),    // L factor
-                           nnz_U, U_matrix.AI(), U_matrix.AJ(), U_matrix.AV());  // U factor
+                           L_matrix.AI(), L_matrix.AJ(), L_matrix.AV(),    // L factor
+                           U_matrix.AI(), U_matrix.AJ(), U_matrix.AV());  // U factor
         }
         
         // Solve the system

@@ -33,6 +33,9 @@ CudaGMRES::CudaGMRES()
     , _matrix_nnz(0)
     , _ilu_nnz_L(0)
     , _ilu_nnz_U(0)
+    , _index_base(0)
+    , _index_base_L(0)
+    , _index_base_U(0)
     , _d_Q(nullptr)
     , _d_tmp(nullptr)
     , _d_w(nullptr)
@@ -153,9 +156,15 @@ void CudaGMRES::initialize_workspace(size_t n)
     cudaMemset(_um_g, 0, _current_restart * sizeof(double));
 }
 
-void CudaGMRES::setupOperator(size_t n, size_t nnz,
+void CudaGMRES::setupOperator(size_t n,
                               const int* h_ia_A, const int* h_ja_A, const double* h_va_A)
 {
+    // Deduce indexing base from first row pointer
+    _index_base = h_ia_A[0];
+    
+    // Calculate number of non-zeros
+    size_t nnz = h_ia_A[n] - h_ia_A[0];
+    
     // Store matrix properties
     _matrix_n = n;
     _matrix_nnz = nnz;
@@ -175,11 +184,25 @@ void CudaGMRES::setupOperator(size_t n, size_t nnz,
 }
 
 void CudaGMRES::setupILU(size_t n,
-                         size_t nnz_L, const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
-                         size_t nnz_U, const int* h_ia_U, const int* h_ja_U, const double* h_va_U)
+                         const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
+                         const int* h_ia_U, const int* h_ja_U, const double* h_va_U)
 {
     if (!_is_operator_setup || _matrix_n != n) {
         throw std::runtime_error("setupOperator must be called first with the same matrix size");
+    }
+    
+    // Calculate number of non-zeros for L and U factors and deduce index bases
+    size_t nnz_L = 0;
+    size_t nnz_U = 0;
+    
+    if (h_ia_L != nullptr) {
+        _index_base_L = h_ia_L[0];
+        nnz_L = h_ia_L[n] - h_ia_L[0];
+    }
+    
+    if (h_ia_U != nullptr) {
+        _index_base_U = h_ia_U[0];
+        nnz_U = h_ia_U[n] - h_ia_U[0];
     }
     
     // Store ILU properties
@@ -218,10 +241,11 @@ void CudaGMRES::setup_matrix_descriptor()
     const double one = 1.0;
 
     // Create matrix A descriptor
+    cusparseIndexBase_t index_base = (_index_base == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE;
     check_cusparse_error(
         cusparseCreateCsr(&_mat_A, _matrix_n, _matrix_n, _matrix_nnz,
                          _d_ia_A.data(), _d_ja_A.data(), _d_va_A.data(),
-                         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F),
+                         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, index_base, CUDA_R_64F),
         "Failed to create matrix A descriptor");
     
     // Create vector descriptors (will be updated with actual pointers during solve)
@@ -270,10 +294,11 @@ void CudaGMRES::setup_ilu_descriptors()
     const double one = 1.0;
     
     // Create L factor (lower triangular with unit diagonal)
+    cusparseIndexBase_t index_base_L = (_index_base_L == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE;
     check_cusparse_error(
         cusparseCreateCsr(&_mat_prec_L, _matrix_n, _matrix_n, _ilu_nnz_L,
                          _d_ia_L.data(), _d_ja_L.data(), _d_va_L.data(),
-                         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F),
+                         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, index_base_L, CUDA_R_64F),
         "Failed to create preconditioner L matrix descriptor");
     
     // Set matrix properties for lower triangular
@@ -283,10 +308,11 @@ void CudaGMRES::setup_ilu_descriptors()
     cusparseSpMatSetAttribute(_mat_prec_L, CUSPARSE_SPMAT_DIAG_TYPE, &unit_diag, sizeof(cusparseDiagType_t));
     
     // Create U factor (upper triangular with non-unit diagonal)
+    cusparseIndexBase_t index_base_U = (_index_base_U == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE;
     check_cusparse_error(
         cusparseCreateCsr(&_mat_prec_U, _matrix_n, _matrix_n, _ilu_nnz_U,
                          _d_ia_U.data(), _d_ja_U.data(), _d_va_U.data(),
-                         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F),
+                         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, index_base_U, CUDA_R_64F),
         "Failed to create preconditioner U matrix descriptor");
     
     // Set matrix properties for upper triangular
@@ -575,12 +601,13 @@ double CudaGMRES::arnoldi_iteration(size_t j)
                        "Failed to compute norm in Arnoldi iteration");
     
     // Normalize q_{j+1}
-    if (beta > 1e-14) {  // Avoid division by zero
+    if ( beta != 0.0 )
+    { // Avoid division by zero
         const double inv_beta = 1.0 / beta;
         check_cublas_error(cublasDscal(_cublas_handle, _n, &inv_beta, d_q_j_plus_1, 1),
                            "Failed to normalize Krylov vector");
     }
-    
+
     return beta;
 }
 
