@@ -11,6 +11,54 @@ namespace cuda_iterative_solver
 {
 
 /**
+ * @brief Helper class for managing device arrays with capacity tracking
+ */
+template<typename T>
+class DeviceArray
+{
+public:
+    DeviceArray() : _data(nullptr), _size(0), _capacity(0) {}
+    
+    ~DeviceArray() {
+        if (_data) {
+            cudaFree(_data);
+        }
+    }
+    
+    void resize(size_t new_size) {
+        if (new_size > _capacity) {
+            if (_data) {
+                cudaFree(_data);
+            }
+            cudaMalloc(&_data, new_size * sizeof(T));
+            _capacity = new_size;
+        }
+        _size = new_size;
+    }
+    
+    void copyFromHost(const T* host_data, size_t count) {
+        resize(count);
+        if (count > 0) {
+            cudaMemcpy(_data, host_data, count * sizeof(T), cudaMemcpyHostToDevice);
+        }
+    }
+    
+    T* data() { return _data; }
+    const T* data() const { return _data; }
+    size_t size() const { return _size; }
+    size_t capacity() const { return _capacity; }
+    
+private:
+    T* _data;
+    size_t _size;
+    size_t _capacity;
+    
+    // Disable copy and assignment
+    DeviceArray(const DeviceArray&) = delete;
+    DeviceArray& operator=(const DeviceArray&) = delete;
+};
+
+/**
  * @brief Enumeration of preconditioner types.
  * left: M^{-1} * A * x = M^{-1} * b
  * right: A * M^{-1} * y = b, x = M^{-1} * y
@@ -66,41 +114,54 @@ public:
     void setPreconditionerType(PreconditionerType prec_type) { _prec_type = prec_type; }
 
     /**
-     * @brief Setup matrix and preconditioner for subsequent solve operations
+     * @brief Setup matrix operator for subsequent solve operations
      * 
-     * This method should be called once to setup the matrix and preconditioner.
-     * After setup, multiple solve() calls can reuse the same operators.
+     * This method should be called to setup the matrix operator.
+     * Data is copied from host to device.
      * 
      * @param n Matrix size
      * @param nnz Number of non-zeros in matrix A
-     * @param d_ia_A Row pointers for matrix A (size n+1)
-     * @param d_ja_A Column indices for matrix A (size nnz)
-     * @param d_va_A Values for matrix A (size nnz)
-     * @param nnz_L Number of non-zeros in L factor (0 if no preconditioner)
-     * @param d_ia_L Row pointers for L factor (nullptr if no preconditioner)
-     * @param d_ja_L Column indices for L factor (nullptr if no preconditioner)  
-     * @param d_va_L Values for L factor (nullptr if no preconditioner)
-     * @param nnz_U Number of non-zeros in U factor (0 if no preconditioner)
-     * @param d_ia_U Row pointers for U factor (nullptr if no preconditioner)
-     * @param d_ja_U Column indices for U factor (nullptr if no preconditioner)
-     * @param d_va_U Values for U factor (nullptr if no preconditioner)
+     * @param h_ia_A Row pointers for matrix A (size n+1, host data)
+     * @param h_ja_A Column indices for matrix A (size nnz, host data)
+     * @param h_va_A Values for matrix A (size nnz, host data)
      */
-    void setup(size_t n, size_t nnz,
-               const int* d_ia_A, const int* d_ja_A, const double* d_va_A,
-               size_t nnz_L, const int* d_ia_L, const int* d_ja_L, const double* d_va_L,
-               size_t nnz_U, const int* d_ia_U, const int* d_ja_U, const double* d_va_U);
+    void setupOperator(size_t n, size_t nnz,
+                      const int* h_ia_A, const int* h_ja_A, const double* h_va_A);
+    
+    /**
+     * @brief Setup ILU preconditioner for subsequent solve operations
+     * 
+     * This method should be called to setup the ILU preconditioner.
+     * Data is copied from host to device.
+     * 
+     * @param n Matrix size  
+     * @param nnz_L Number of non-zeros in L factor
+     * @param h_ia_L Row pointers for L factor (size n+1, host data)
+     * @param h_ja_L Column indices for L factor (size nnz_L, host data)
+     * @param h_va_L Values for L factor (size nnz_L, host data)
+     * @param nnz_U Number of non-zeros in U factor
+     * @param h_ia_U Row pointers for U factor (size n+1, host data)
+     * @param h_ja_U Column indices for U factor (size nnz_U, host data)
+     * @param h_va_U Values for U factor (size nnz_U, host data)
+     */
+    void setupILU(size_t n,
+                  size_t nnz_L, const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
+                  size_t nnz_U, const int* h_ia_U, const int* h_ja_U, const double* h_va_U);
 
     /**
-     * @brief Solve the linear system Ax = b using GMRES
+     * @brief Solve the linear system Ax = b using GMRES (host interface)
      * 
-     * Note: setup() must be called before the first solve() call.
+     * This method provides a host-based interface for users without CUDA experience.
+     * Data is automatically copied to/from device as needed.
+     * 
+     * Note: setupOperator() must be called before the first solve() call.
      * Multiple solve() calls can reuse the same matrix/preconditioner setup.
      * 
-     * @param d_b Right-hand side vector (device pointer)
-     * @param d_x Solution vector (device pointer, input: initial guess, output: solution)
+     * @param h_b Right-hand side vector (host pointer, size n)
+     * @param h_x Solution vector (host pointer, size n, input: initial guess, output: solution)
      * @return Convergence state
      */
-    State solve(const double* d_b, double* d_x);
+    State solve(const double* h_b, double* h_x);
 
 private:
     // CUDA handles
@@ -115,6 +176,7 @@ private:
     
     // Preconditioner descriptors
     cusparseSpMatDescr_t _mat_prec_L, _mat_prec_U;
+    cusparseDnVecDescr_t _vec_prec_x, _vec_prec_y;  // Dedicated vectors for preconditioner
     
     // Algorithm parameters
     size_t _max_iter;
@@ -124,7 +186,24 @@ private:
     PreconditionerType _prec_type;
     
     // Setup state tracking
-    bool _is_setup;              // Whether setup() has been called
+    bool _is_operator_setup;     // Whether setupOperator() has been called
+    bool _is_ilu_setup;          // Whether setupILU() has been called
+    
+    // Device storage for matrix data
+    DeviceArray<int> _d_ia_A, _d_ja_A;     // Matrix A structure
+    DeviceArray<double> _d_va_A;           // Matrix A values
+    DeviceArray<int> _d_ia_L, _d_ja_L;     // L factor structure
+    DeviceArray<double> _d_va_L;           // L factor values
+    DeviceArray<int> _d_ia_U, _d_ja_U;     // U factor structure
+    DeviceArray<double> _d_va_U;           // U factor values
+    
+    // Device storage for RHS and solution vectors
+    DeviceArray<double> _d_b;              // Right-hand side vector
+    DeviceArray<double> _d_x;              // Solution vector
+    
+    // Matrix properties
+    size_t _matrix_n, _matrix_nnz;
+    size_t _ilu_nnz_L, _ilu_nnz_U;
 
     // Workspace arrays (device memory)
     double* _d_Q;           // Krylov basis vectors: size n * (_restart + 1)
@@ -169,13 +248,26 @@ private:
     void initialize_workspace(size_t n);
 
     /**
-     * @brief Setup matrix and preconditioner descriptors
+     * @brief Setup matrix A descriptor
      */
-    void setup_matrix_descriptors(size_t n, size_t nnz,
-                                  const int* d_ia_A, const int* d_ja_A, const double* d_va_A,
-                                  size_t nnz_L, const int* d_ia_L, const int* d_ja_L, const double* d_va_L,
-                                  size_t nnz_U, const int* d_ia_U, const int* d_ja_U, const double* d_va_U);
+    void setup_matrix_descriptor();
+    
+    /**
+     * @brief Setup ILU preconditioner descriptors
+     */
+    void setup_ilu_descriptors();
 
+    /**
+     * @brief Solve the linear system Ax = b using GMRES (device interface)
+     * 
+     * Internal method that operates on device pointers.
+     * 
+     * @param d_b Right-hand side vector (device pointer)
+     * @param d_x Solution vector (device pointer, input: initial guess, output: solution)
+     * @return Convergence state
+     */
+    State deviceSolve(const double* d_b, double* d_x);
+    
     /**
      * @brief Compute initial residual and setup first Krylov vector
      */
