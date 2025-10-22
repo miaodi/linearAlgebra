@@ -305,9 +305,11 @@ private:
 
     void print_iteration_info( size_t iter, VALTYPE resid, VALTYPE init_resid ) const
     {
-        std::cout << "iter: " << iter << " "
-                  << "resid: " << std::abs( resid ) << " "
-                  << "relative resid: " << std::abs( resid ) / init_resid << std::endl;
+        std::cout << "iter: " << std::setw( 6 ) << iter << " "
+                  << "resid: " << std::scientific << std::setprecision( 14 )
+                  << std::abs( resid ) << " "
+                  << "relative resid: " << std::scientific << std::setprecision( 14 )
+                  << std::abs( resid ) / init_resid << std::endl;
     }
 
     bool check_convergence( VALTYPE resid, VALTYPE init_resid ) const
