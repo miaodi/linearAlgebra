@@ -118,14 +118,15 @@ public:
      * 
      * This method should be called to setup the matrix operator.
      * Data is copied from host to device.
+     * The number of non-zeros is calculated as ia_A[n] - ia_A[0].
+     * The indexing base (0 or 1) is deduced from ia_A[0].
      * 
      * @param n Matrix size
-     * @param nnz Number of non-zeros in matrix A
      * @param h_ia_A Row pointers for matrix A (size n+1, host data)
-     * @param h_ja_A Column indices for matrix A (size nnz, host data)
-     * @param h_va_A Values for matrix A (size nnz, host data)
+     * @param h_ja_A Column indices for matrix A (host data)
+     * @param h_va_A Values for matrix A (host data)
      */
-    void setupOperator(size_t n, size_t nnz,
+    void setupOperator(size_t n,
                       const int* h_ia_A, const int* h_ja_A, const double* h_va_A);
     
     /**
@@ -133,20 +134,19 @@ public:
      * 
      * This method should be called to setup the ILU preconditioner.
      * Data is copied from host to device.
+     * The number of non-zeros is calculated as ia[n] - ia[0] for each factor.
      * 
      * @param n Matrix size  
-     * @param nnz_L Number of non-zeros in L factor
      * @param h_ia_L Row pointers for L factor (size n+1, host data)
-     * @param h_ja_L Column indices for L factor (size nnz_L, host data)
-     * @param h_va_L Values for L factor (size nnz_L, host data)
-     * @param nnz_U Number of non-zeros in U factor
+     * @param h_ja_L Column indices for L factor (host data)
+     * @param h_va_L Values for L factor (host data)
      * @param h_ia_U Row pointers for U factor (size n+1, host data)
-     * @param h_ja_U Column indices for U factor (size nnz_U, host data)
-     * @param h_va_U Values for U factor (size nnz_U, host data)
+     * @param h_ja_U Column indices for U factor (host data)
+     * @param h_va_U Values for U factor (host data)
      */
     void setupILU(size_t n,
-                  size_t nnz_L, const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
-                  size_t nnz_U, const int* h_ia_U, const int* h_ja_U, const double* h_va_U);
+                  const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
+                  const int* h_ia_U, const int* h_ja_U, const double* h_va_U);
 
     /**
      * @brief Solve the linear system Ax = b using GMRES (host interface)
@@ -204,6 +204,8 @@ private:
     // Matrix properties
     size_t _matrix_n, _matrix_nnz;
     size_t _ilu_nnz_L, _ilu_nnz_U;
+    int _index_base;  // 0-based or 1-based indexing (deduced from ia_A[0])
+    int _index_base_L, _index_base_U;  // Index bases for L and U factors
 
     // Workspace arrays (device memory)
     double* _d_Q;           // Krylov basis vectors: size n * (_restart + 1)
