@@ -132,13 +132,13 @@ private:
     double* _d_w;           // Work vector for SpMV: size n
     
     // Host workspace arrays
-    double* _h_g;           // Residual vector for least squares: size _restart
     double* _h_c;           // Cosine values for Givens rotations: size _restart
     double* _h_s;           // Sine values for Givens rotations: size _restart
     double* _h_col_norms;   // Column norms buffer: size _restart
     
-    // Unified memory for Hessenberg matrix (accessed by both host and device)
+    // Unified memory arrays (accessible from both host and device)
     double* _um_H;          // Hessenberg matrix: size _restart * _restart
+    double* _um_g;          // Residual vector for least squares: size _restart
     
     // Current problem size
     size_t _n;
