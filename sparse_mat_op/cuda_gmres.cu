@@ -1,5 +1,4 @@
 #include "cuda_gmres.h"
-#include <cstring>
 #include <algorithm>
 #include <iomanip>
 #include <stdexcept>
@@ -41,9 +40,9 @@ CudaGMRES::CudaGMRES()
     , _d_w(nullptr)
     , _h_c(nullptr)
     , _h_s(nullptr)
-    , _h_col_norms(nullptr)
     , _um_H(nullptr)
     , _um_g(nullptr)
+    , _um_norm(nullptr)
     , _n(0)
     , _current_restart(0)
     , _spv_buffer_size_L(0)
@@ -52,6 +51,10 @@ CudaGMRES::CudaGMRES()
     , _d_spv_buffer_U(nullptr)
     , _spmv_buffer_size(0)
     , _d_spmv_buffer(nullptr)
+    , _d_scalar_buffer(nullptr)
+    , _d_neg_one(nullptr)
+    , _d_one(nullptr)
+    , _d_zero(nullptr)
 {
     initialize_cuda();
 }
@@ -83,14 +86,16 @@ void CudaGMRES::cleanup_cuda()
     if (_d_w) { cudaFree(_d_w); _d_w = nullptr; }
     if (_h_c) { cudaFreeHost(_h_c); _h_c = nullptr; }
     if (_h_s) { cudaFreeHost(_h_s); _h_s = nullptr; }
-    if (_h_col_norms) { cudaFreeHost(_h_col_norms); _h_col_norms = nullptr; }
     if (_um_H) { cudaFree(_um_H); _um_H = nullptr; }
     if (_um_g) { cudaFree(_um_g); _um_g = nullptr; }
+    if (_um_norm) { cudaFree(_um_norm); _um_norm = nullptr; }
     if (_d_spv_buffer_L) { cudaFree(_d_spv_buffer_L); _d_spv_buffer_L = nullptr; }
     if (_d_spv_buffer_U) { cudaFree(_d_spv_buffer_U); _d_spv_buffer_U = nullptr; }
     if (_d_spmv_buffer) { cudaFree(_d_spmv_buffer); _d_spmv_buffer = nullptr; }
-    
-    // Free device constants
+    if (_d_scalar_buffer) { cudaFree(_d_scalar_buffer); _d_scalar_buffer = nullptr; }
+    if (_d_neg_one) { cudaFree(_d_neg_one); _d_neg_one = nullptr; }
+    if (_d_one) { cudaFree(_d_one); _d_one = nullptr; }
+    if (_d_zero) { cudaFree(_d_zero); _d_zero = nullptr; }
     
     // Destroy descriptors
     if (_mat_A) cusparseDestroySpMat(_mat_A);
@@ -122,9 +127,9 @@ void CudaGMRES::initialize_workspace(size_t n)
     if (_d_w) cudaFree(_d_w);
     if (_h_c) cudaFreeHost(_h_c);
     if (_h_s) cudaFreeHost(_h_s);
-    if (_h_col_norms) cudaFreeHost(_h_col_norms);
     if (_um_H) cudaFree(_um_H);
     if (_um_g) cudaFree(_um_g);
+    if (_um_norm) cudaFree(_um_norm);
     
     _n = n;
     _current_restart = std::min(_restart, n);
@@ -142,14 +147,45 @@ void CudaGMRES::initialize_workspace(size_t n)
                      "Failed to allocate cosine values memory");
     check_cuda_error(cudaMallocHost(&_h_s, _current_restart * sizeof(double)), 
                      "Failed to allocate sine values memory");
-    check_cuda_error(cudaMallocHost(&_h_col_norms, _current_restart * sizeof(double)), 
-                     "Failed to allocate column norms memory");
     
     // Allocate unified memory for matrices/vectors accessible from both host and device
     check_cuda_error(cudaMallocManaged(&_um_H, _current_restart * _current_restart * sizeof(double)), 
                      "Failed to allocate Hessenberg matrix unified memory");
     check_cuda_error(cudaMallocManaged(&_um_g, _current_restart * sizeof(double)), 
                      "Failed to allocate residual vector unified memory");
+    check_cuda_error(cudaMallocManaged(&_um_norm, sizeof(double)), 
+                     "Failed to allocate norm unified memory");
+    
+    // Allocate device scalar buffer for device-only operations
+    if (!_d_scalar_buffer) {
+        check_cuda_error(cudaMalloc(&_d_scalar_buffer, sizeof(double)), 
+                         "Failed to allocate device scalar buffer");
+    }
+    
+    // Allocate and initialize device constants
+    if (!_d_neg_one) {
+        check_cuda_error(cudaMalloc(&_d_neg_one, sizeof(double)), 
+                         "Failed to allocate device negative one constant");
+        const double neg_one_host = -1.0;
+        check_cuda_error(cudaMemcpy(_d_neg_one, &neg_one_host, sizeof(double), cudaMemcpyHostToDevice),
+                         "Failed to initialize device negative one constant");
+    }
+    
+    if (!_d_one) {
+        check_cuda_error(cudaMalloc(&_d_one, sizeof(double)), 
+                         "Failed to allocate device one constant");
+        const double one_host = 1.0;
+        check_cuda_error(cudaMemcpy(_d_one, &one_host, sizeof(double), cudaMemcpyHostToDevice),
+                         "Failed to initialize device one constant");
+    }
+    
+    if (!_d_zero) {
+        check_cuda_error(cudaMalloc(&_d_zero, sizeof(double)), 
+                         "Failed to allocate device zero constant");
+        const double zero_host = 0.0;
+        check_cuda_error(cudaMemcpy(_d_zero, &zero_host, sizeof(double), cudaMemcpyHostToDevice),
+                         "Failed to initialize device zero constant");
+    }
     
     // Initialize unified memory to zero
     cudaMemset(_um_H, 0, _current_restart * _current_restart * sizeof(double));
@@ -265,7 +301,7 @@ void CudaGMRES::setup_matrix_descriptor()
         cusparseCreateDnVec(&_vec_prec_y, _matrix_n, nullptr, CUDA_R_64F),
         "Failed to create preconditioner y vector descriptor");
     
-    // Setup SpMV buffer
+    // Setup SpMV buffer (use host constants for setup phase)
     check_cusparse_error(
         cusparseSpMV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                                &one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
@@ -277,6 +313,13 @@ void CudaGMRES::setup_matrix_descriptor()
         check_cuda_error(cudaMalloc(&_d_spmv_buffer, _spmv_buffer_size), 
                        "Failed to allocate SpMV buffer");
     }
+    
+    // Preprocess SpMV for optimal performance (use host constants for setup phase)
+    check_cusparse_error(
+        cusparseSpMV_preprocess(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                               &one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
+                               CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
+        "Failed to preprocess SpMV");
 }
 
 void CudaGMRES::setup_ilu_descriptors()
@@ -432,7 +475,8 @@ State CudaGMRES::deviceSolve(const double* d_b, double* d_x)
 
 double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
 {
-    const double one = 1.0, neg_one = -1.0;
+    // Set cuBLAS to device pointer mode for device-only operations
+    cublasSetPointerMode(_cublas_handle, CUBLAS_POINTER_MODE_DEVICE);
     
     // Copy b to first Krylov vector: Q[:, 0] = b
     check_cuda_error(cudaMemcpy(_d_Q, d_b, _n * sizeof(double), cudaMemcpyDeviceToDevice),
@@ -442,30 +486,43 @@ double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
     check_cusparse_error(cusparseDnVecSetValues(_vec_x, const_cast<double*>(d_x)), "Failed to set vec_x");
     check_cusparse_error(cusparseDnVecSetValues(_vec_y, _d_Q), "Failed to set vec_y");
     
+    // Set cuSPARSE to device pointer mode for SpMV operations
+    cusparseSetPointerMode(_cusparse_handle, CUSPARSE_POINTER_MODE_DEVICE);
+    
     // Compute r = b - Ax: Q[:, 0] = Q[:, 0] - A * x = b - A * x
     check_cusparse_error(
         cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                    &neg_one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
+                    _d_neg_one, _mat_A, _vec_x, _d_one, _vec_y, CUDA_R_64F,
                     CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
         "Failed to compute SpMV for residual");
 
+    // Reset cuSPARSE to host pointer mode
+    cusparseSetPointerMode(_cusparse_handle, CUSPARSE_POINTER_MODE_HOST);
+
     // Apply left preconditioning if needed
     if (_prec_type == PreconditionerType::LEFT) {
-        apply_preconditioner(_d_Q, _d_tmp);
+        apply_preconditioner( _d_Q, _d_tmp, true );
         check_cuda_error(cudaMemcpy(_d_Q, _d_tmp, _n * sizeof(double), cudaMemcpyDeviceToDevice),
                          "Failed to copy preconditioned residual");
     }
     
-    // Compute norm of residual
-    double norm;
-    check_cublas_error(cublasDnrm2(_cublas_handle, _n, _d_Q, 1, &norm), 
+    // Compute norm of residual using device pointer mode
+    check_cublas_error(cublasDnrm2(_cublas_handle, _n, _d_Q, 1, _um_norm), 
                        "Failed to compute residual norm");
-    return norm;
+    
+    // Synchronize only the stream to access norm from host
+    check_cuda_error(cudaStreamSynchronize(_stream), "Failed to synchronize stream before accessing norm");
+    
+    // Reset cuBLAS to host pointer mode
+    cublasSetPointerMode(_cublas_handle, CUBLAS_POINTER_MODE_HOST);
+    
+    return *_um_norm;
 }
 
 void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, double* d_output)
 {
-    const double one = 1.0, zero = 0.0;
+    // Set cuSPARSE to device pointer mode for fully device-resident operations
+    cusparseSetPointerMode(_cusparse_handle, CUSPARSE_POINTER_MODE_DEVICE);
     
     // Update vector descriptors
     check_cusparse_error(cusparseDnVecSetValues(_vec_x, const_cast<double*>(d_input)), "Failed to set input vector");
@@ -474,11 +531,11 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
     switch (_prec_type) {
     case PreconditionerType::RIGHT:
         // Right preconditioning: A * M^{-1} * input
-        apply_preconditioner(d_input, _d_tmp);
+        apply_preconditioner(d_input, _d_tmp, false);
         check_cusparse_error(cusparseDnVecSetValues(_vec_x, _d_tmp), "Failed to set preconditioned input");
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                        &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
+                        _d_one, _mat_A, _vec_x, _d_zero, _vec_y, CUDA_R_64F,
                         CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
             "Failed to compute SpMV with right preconditioning");
         break;
@@ -487,10 +544,10 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
         // Left preconditioning: M^{-1} * A * input
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                        &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
+                        _d_one, _mat_A, _vec_x, _d_zero, _vec_y, CUDA_R_64F,
                         CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
             "Failed to compute SpMV");
-        apply_preconditioner(d_output, _d_tmp);
+        apply_preconditioner(d_output, _d_tmp, false);
         check_cuda_error(cudaMemcpy(d_output, _d_tmp, _n * sizeof(double), cudaMemcpyDeviceToDevice),
                          "Failed to copy preconditioned result");
         break;
@@ -499,32 +556,41 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
         // No preconditioning: A * input
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                        &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
+                        _d_one, _mat_A, _vec_x, _d_zero, _vec_y, CUDA_R_64F,
                         CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
             "Failed to compute SpMV without preconditioning");
         break;
     }
+    
+    // Reset cuSPARSE to host pointer mode for other operations
+    cusparseSetPointerMode(_cusparse_handle, CUSPARSE_POINTER_MODE_HOST);
 }
 
-void CudaGMRES::apply_preconditioner(const double* d_input, double* d_output)
+void CudaGMRES::apply_preconditioner(const double* d_input, double* d_output, bool manage_pointer_mode)
 {
+    // Set cuSPARSE to device pointer mode if requested
+    if (manage_pointer_mode) {
+        cusparseSetPointerMode(_cusparse_handle, CUSPARSE_POINTER_MODE_DEVICE);
+    }
+    
     if (_prec_type == PreconditionerType::NONE || !_spv_descr_L || !_spv_descr_U) {
         // No preconditioner, just copy
         check_cuda_error(cudaMemcpy(d_output, d_input, _n * sizeof(double), cudaMemcpyDeviceToDevice),
                          "Failed to copy input to output");
+        if (manage_pointer_mode) {
+            cusparseSetPointerMode(_cusparse_handle, CUSPARSE_POINTER_MODE_HOST);
+        }
         return;
     }
-    
-    const double one = 1.0;
-    
+
     // Apply ILU preconditioning: M^{-1} = U^{-1} * L^{-1}
     // First solve: L * y = input (forward substitution)
     check_cusparse_error(cusparseDnVecSetValues(_vec_prec_x, const_cast<double*>(d_input)), "Failed to set preconditioner input vector");
     check_cusparse_error(cusparseDnVecSetValues(_vec_prec_y, _d_tmp), "Failed to set preconditioner intermediate vector");
-    
+
     check_cusparse_error(
         cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                          _d_one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
                           CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L),
         "Failed to solve forward substitution (L * y = input)");
     
@@ -534,9 +600,14 @@ void CudaGMRES::apply_preconditioner(const double* d_input, double* d_output)
     
     check_cusparse_error(
         cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                          _d_one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
                           CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U),
         "Failed to solve backward substitution (U * output = y)");
+    
+    // Reset cuSPARSE to host pointer mode if requested
+    if (manage_pointer_mode) {
+        cusparseSetPointerMode(_cusparse_handle, CUSPARSE_POINTER_MODE_HOST);
+    }
 }
 
 State CudaGMRES::perform_restart_cycle(const double* d_b, double* d_x,
@@ -575,38 +646,56 @@ State CudaGMRES::perform_restart_cycle(const double* d_b, double* d_x,
 
 double CudaGMRES::arnoldi_iteration(size_t j)
 {
+
     double* d_q_j = _d_Q + j * _n;           // Current Krylov vector
     double* d_q_j_plus_1 = _d_Q + (j + 1) * _n;  // Next Krylov vector
     
     // Apply operator: q_{j+1} = A * q_j (with preconditioning)
     apply_operator_with_preconditioning(d_q_j, d_q_j_plus_1);
     
-    // Modified Gram-Schmidt orthogonalization
+    // Set cuBLAS to device pointer mode for device-only Gram-Schmidt
+    cublasSetPointerMode(_cublas_handle, CUBLAS_POINTER_MODE_DEVICE);
+    
+    // Modified Gram-Schmidt orthogonalization - device-only version
     for (size_t i = 0; i <= j; ++i) {
         double* d_q_i = _d_Q + i * _n;
         
-        // Compute h_{i,j} = <q_i, q_{j+1}> and store directly in Hessenberg matrix
-        check_cublas_error(cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1, &_um_H[i + j * _current_restart]),
+        // Compute h_{i,j} = <q_i, q_{j+1}> and store on device
+        double* d_h_ij = &_um_H[i + j * _current_restart];
+        check_cublas_error(cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1, d_h_ij),
                            "Failed to compute dot product in Gram-Schmidt");
         
-        // q_{j+1} = q_{j+1} - h_{i,j} * q_i
-        double neg_h_ij = -_um_H[i + j * _current_restart];
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_h_ij, d_q_i, 1, d_q_j_plus_1, 1),
+        // q_{j+1} = q_{j+1} - h_{i,j} * q_i using device-only operations
+        // Copy h_{i,j} to device scalar buffer and negate it
+        check_cuda_error(cudaMemcpy(_d_scalar_buffer, d_h_ij, sizeof(double), cudaMemcpyDeviceToDevice),
+                         "Failed to copy coefficient to scalar buffer");
+        
+        // Negate the coefficient using cuBLAS scal with device -1 constant
+        check_cublas_error(cublasDscal(_cublas_handle, 1, _d_neg_one, _d_scalar_buffer, 1),
+                           "Failed to negate coefficient");
+        
+        // Subtract projection: q_{j+1} = q_{j+1} + (-h_{i,j}) * q_i
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, _d_scalar_buffer, d_q_i, 1, d_q_j_plus_1, 1),
                            "Failed to update vector in Gram-Schmidt");
     }
     
-    // Compute norm of q_{j+1}
-    double beta;
-    check_cublas_error(cublasDnrm2(_cublas_handle, _n, d_q_j_plus_1, 1, &beta),
+    // Compute norm of q_{j+1} and store in unified memory for host access
+    check_cublas_error(cublasDnrm2(_cublas_handle, _n, d_q_j_plus_1, 1, _um_norm),
                        "Failed to compute norm in Arnoldi iteration");
     
-    // Normalize q_{j+1}
-    if ( beta != 0.0 )
-    { // Avoid division by zero
-        const double inv_beta = 1.0 / beta;
-        check_cublas_error(cublasDscal(_cublas_handle, _n, &inv_beta, d_q_j_plus_1, 1),
-                           "Failed to normalize Krylov vector");
-    }
+    // Synchronize to access beta from host
+    check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before accessing beta");
+    const double beta = *_um_norm;
+
+    // Compute 1/beta and store in unified memory for device access
+    *_um_norm = 1.0 / beta;
+
+    // Normalize using device pointer to unified memory
+    check_cublas_error( cublasDscal( _cublas_handle, _n, _um_norm, d_q_j_plus_1, 1 ),
+                        "Failed to normalize Krylov vector" );
+
+    // Reset cuBLAS to host pointer mode for subsequent operations
+    cublasSetPointerMode(_cublas_handle, CUBLAS_POINTER_MODE_HOST);
 
     return beta;
 }
@@ -649,57 +738,62 @@ void CudaGMRES::solve_least_squares(size_t j)
 {
     if (j == 0) return;
     
-    // Solve upper triangular system H * y = g using CPU BLAS DTRSV
-    // H is stored in column-major format in unified memory (accessible from host)
-    // DTRSV parameters:
-    // - CBLAS_ORDER: CblasColMajor (column-major storage)
-    // - CBLAS_UPLO: CblasUpper (upper triangular)
-    // - CBLAS_TRANSPOSE: CblasNoTrans (no transpose)
-    // - CBLAS_DIAG: CblasNonUnit (non-unit diagonal)
-    // - N: size of the system (j)
+    // Solve upper triangular system H * y = g using device cuBLAS DTRSV
+    // H is stored in column-major format in unified memory (accessible from device)
+    // cuBLAS DTRSV parameters:
+    // - handle: cuBLAS handle
+    // - uplo: CUBLAS_FILL_MODE_UPPER (upper triangular)
+    // - trans: CUBLAS_OP_N (no transpose)
+    // - diag: CUBLAS_DIAG_NON_UNIT (non-unit diagonal)
+    // - n: size of the system (j)
     // - A: Hessenberg matrix (_um_H)
     // - lda: leading dimension (_current_restart)
-    // - X: right-hand side and solution vector (_um_g)
-    // - incX: increment for X (1)
+    // - x: right-hand side and solution vector (_um_g)
+    // - incx: increment for x (1)
     
-    // Synchronize to ensure unified memory is up-to-date on host
-    check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before CPU triangular solve");
+    // Set cuBLAS to host pointer mode for scalar parameters
+    cublasSetPointerMode(_cublas_handle, CUBLAS_POINTER_MODE_HOST);
     
-    cblas_dtrsv(CblasColMajor, CblasUpper, CblasNoTrans, CblasNonUnit,
-                static_cast<int>(j), _um_H, static_cast<int>(_current_restart), _um_g, 1);
+    check_cublas_error(
+        cublasDtrsv(_cublas_handle, CUBLAS_FILL_MODE_UPPER, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT,
+                   static_cast<int>(j), _um_H, static_cast<int>(_current_restart), _um_g, 1),
+        "Failed to solve upper triangular system with cuBLAS");
 }
 
 void CudaGMRES::update_solution(double* d_x, size_t j)
 {
     if (j == 0) return;
     
-    const double one = 1.0, zero = 0.0;
+    // Set cuBLAS to device pointer mode for device-only operations
+    cublasSetPointerMode(_cublas_handle, CUBLAS_POINTER_MODE_DEVICE);
     
     // Compute solution update: delta_x = Q[:, 0:j] * g[0:j]
     // Use GEMV: y = alpha * A * x + beta * y
     // Here: _d_tmp = 1.0 * Q[:, 0:j] * g[0:j] + 0.0 * _d_tmp
     
-    // Ensure unified memory is synchronized before use
-    check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before GEMV");
+    // No synchronization needed - unified memory accessible from device
     
     check_cublas_error(
         cublasDgemv(_cublas_handle, CUBLAS_OP_N,
                    _n, j,
-                   &one, _d_Q, _n,
+                   _d_one, _d_Q, _n,
                    _um_g, 1,
-                   &zero, _d_tmp, 1),
+                   _d_zero, _d_tmp, 1),
         "Failed to compute solution update");
     
     if (_prec_type == PreconditionerType::RIGHT) {
         // For right preconditioning: x = x + M^{-1} * delta_x
-        apply_preconditioner(_d_tmp, _d_w);
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_w, 1, d_x, 1),
+        apply_preconditioner(_d_tmp, _d_w, true);
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, _d_one, _d_w, 1, d_x, 1),
                            "Failed to update solution with right preconditioning");
     } else {
         // For left or no preconditioning: x = x + delta_x
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_tmp, 1, d_x, 1),
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, _d_one, _d_tmp, 1, d_x, 1),
                            "Failed to update solution");
     }
+    
+    // Reset cuBLAS to host pointer mode for subsequent operations
+    cublasSetPointerMode(_cublas_handle, CUBLAS_POINTER_MODE_HOST);
 }
 
 bool CudaGMRES::check_convergence(double resid, double init_resid) const

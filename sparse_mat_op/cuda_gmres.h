@@ -4,7 +4,6 @@
 #include <cusparse.h>
 #include <cuda_runtime.h>
 #include <iostream>
-#include <vector>
 #include <cmath>
 
 namespace cuda_iterative_solver
@@ -215,11 +214,11 @@ private:
     // Host workspace arrays
     double* _h_c;           // Cosine values for Givens rotations: size _restart
     double* _h_s;           // Sine values for Givens rotations: size _restart
-    double* _h_col_norms;   // Column norms buffer: size _restart
     
     // Unified memory arrays (accessible from both host and device)
     double* _um_H;          // Hessenberg matrix: size _restart * _restart
     double* _um_g;          // Residual vector for least squares: size _restart
+    double* _um_norm;       // Norm value for computation: size 1
     
     // Current problem size
     size_t _n;
@@ -233,6 +232,14 @@ private:
     // Buffer for SpMV operations
     size_t _spmv_buffer_size;
     void* _d_spmv_buffer;
+    
+    // Device scalar buffer for fully device-resident operations
+    double* _d_scalar_buffer;
+    
+    // Device constants for BLAS operations
+    double* _d_neg_one;
+    double* _d_one;
+    double* _d_zero;
     
     /**
      * @brief Initialize CUDA handles and resources
@@ -283,7 +290,7 @@ private:
     /**
      * @brief Apply preconditioner (triangular solve using SpSV)
      */
-    void apply_preconditioner(const double* d_input, double* d_output);
+    void apply_preconditioner(const double* d_input, double* d_output, bool manage_pointer_mode = true);
 
     /**
      * @brief Perform one GMRES restart cycle
