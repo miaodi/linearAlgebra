@@ -26,6 +26,7 @@ CudaGMRES::CudaGMRES()
     , _rel_tol(1e-8)
     , _restart(20)
     , _prec_type(PreconditionerType::LEFT)
+    , _use_batch_orthogonalization(true)
     , _is_operator_setup(false)
     , _is_ilu_setup(false)
     , _matrix_n(0)
@@ -66,6 +67,7 @@ void CudaGMRES::cleanup_cuda()
     _d_Q.release();
     _d_tmp.release();
     _d_w.release();
+    _d_h_batch.release();
     _h_g.release();
     _d_g.release();
     _d_spv_buffer_L.release();
@@ -114,6 +116,9 @@ void CudaGMRES::initialize_workspace(size_t n)
     
     // Allocate device memory for GMRES algorithm
     _d_g.resize(_current_restart);
+    if (_use_batch_orthogonalization) {
+        _d_h_batch.resize(_current_restart);
+    }
     
     // Initialize arrays to zero
     std::fill(_h_g.data(), _h_g.data() + _h_g.size(), 0.0);
@@ -543,17 +548,60 @@ double CudaGMRES::arnoldi_iteration(size_t j)
     apply_operator_with_preconditioning(d_q_j, d_q_j_plus_1);
     
     // Modified Gram-Schmidt orthogonalization
-    for (size_t i = 0; i <= j; ++i) {
-        double* d_q_i = _d_Q.data() + i * _n;
-        
-        // Compute h_{i,j} = <q_i, q_{j+1}> and store directly in Hessenberg matrix
-        check_cublas_error(cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1, &_h_H.data()[i + j * _current_restart]),
-                           "Failed to compute dot product in Gram-Schmidt");
-        
-        // q_{j+1} = q_{j+1} - h_{i,j} * q_i
-        double neg_h_ij = -_h_H.data()[i + j * _current_restart];
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_h_ij, d_q_i, 1, d_q_j_plus_1, 1),
-                           "Failed to update vector in Gram-Schmidt");
+    if (_use_batch_orthogonalization) {
+        if (_d_h_batch.size() < _current_restart) {
+            _d_h_batch.resize(_current_restart);
+        }
+
+        int m = static_cast<int>(_n);
+        int k = static_cast<int>(j + 1);
+        double alpha = 1.0;
+        double zero = 0.0;
+        check_cublas_error(
+            cublasDgemv(_cublas_handle, CUBLAS_OP_T,
+                        m, k,
+                        &alpha, _d_Q.data(), m,
+                        d_q_j_plus_1, 1,
+                        &zero, _d_h_batch.data(), 1),
+            "Failed to compute batched dot products in Gram-Schmidt");
+
+        check_cuda_error(
+            cudaMemcpy(_h_H.data() + j * _current_restart,
+                       _d_h_batch.data(), k * sizeof(double),
+                       cudaMemcpyDeviceToHost),
+            "Failed to copy Hessenberg column to host");
+
+        if (k < static_cast<int>(_current_restart)) {
+            double* start = _h_H.data() + j * _current_restart + k;
+            double* end = _h_H.data() + (j + 1) * _current_restart;
+            std::fill(start, end, 0.0);
+        }
+
+        double neg_one = -1.0;
+        double one = 1.0;
+        check_cublas_error(
+            cublasDgemv(_cublas_handle, CUBLAS_OP_N,
+                        m, k,
+                        &neg_one, _d_Q.data(), m,
+                        _d_h_batch.data(), 1,
+                        &one, d_q_j_plus_1, 1),
+            "Failed to update vector in batched Gram-Schmidt");
+    } else {
+        for (size_t i = 0; i <= j; ++i) {
+            double* d_q_i = _d_Q.data() + i * _n;
+
+            // Compute h_{i,j} = <q_i, q_{j+1}> and store directly in Hessenberg matrix
+            check_cublas_error(
+                cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1,
+                           &_h_H.data()[i + j * _current_restart]),
+                "Failed to compute dot product in Gram-Schmidt");
+
+            // q_{j+1} = q_{j+1} - h_{i,j} * q_i
+            double neg_h_ij = -_h_H.data()[i + j * _current_restart];
+            check_cublas_error(
+                cublasDaxpy(_cublas_handle, _n, &neg_h_ij, d_q_i, 1, d_q_j_plus_1, 1),
+                "Failed to update vector in Gram-Schmidt");
+        }
     }
     
     // Compute norm of q_{j+1}

@@ -26,6 +26,7 @@ public:
     void setRelTol(double rel_tol) { _rel_tol = rel_tol; }
     void setRestart(size_t restart) { _restart = restart; }
     void setPreconditionerType(PreconditionerType prec_type) { _prec_type = prec_type; }
+    void setUseBatchOrthogonalization(bool enable) { _use_batch_orthogonalization = enable; }
 
     void setupOperator(size_t n,
                        const int* h_ia_A, const int* h_ja_A, const double* h_va_A);
@@ -56,6 +57,7 @@ private:
     double _rel_tol;
     size_t _restart;
     PreconditionerType _prec_type;
+    bool _use_batch_orthogonalization;
 
     // Setup state
     bool _is_operator_setup;
