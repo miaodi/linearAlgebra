@@ -19,11 +19,7 @@ class DeviceArray
 public:
     DeviceArray() : _data(nullptr), _size(0), _capacity(0) {}
     
-    ~DeviceArray() {
-        if (_data) {
-            cudaFree(_data);
-        }
-    }
+    ~DeviceArray() { release(); }
     
     void resize(size_t new_size) {
         if (new_size > _capacity) {
@@ -41,6 +37,15 @@ public:
         if (count > 0) {
             cudaMemcpy(_data, host_data, count * sizeof(T), cudaMemcpyHostToDevice);
         }
+    }
+    
+    void release() {
+        if (_data) {
+            cudaFree(_data);
+            _data = nullptr;
+        }
+        _size = 0;
+        _capacity = 0;
     }
     
     T* data() { return _data; }
@@ -226,12 +231,11 @@ private:
     
     // Buffer sizes for SpSV operations
     size_t _spv_buffer_size_L, _spv_buffer_size_U;
-    void* _d_spv_buffer_L;
-    void* _d_spv_buffer_U;
+    DeviceArray<char> _d_spv_buffer_L;
+    DeviceArray<char> _d_spv_buffer_U;
     
     // Buffer for SpMV operations
-    size_t _spmv_buffer_size;
-    void* _d_spmv_buffer;
+    DeviceArray<char> _d_spmv_buffer;
     
     /**
      * @brief Initialize CUDA handles and resources

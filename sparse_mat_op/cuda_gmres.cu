@@ -45,12 +45,6 @@ CudaGMRES::CudaGMRES()
     , _um_g(nullptr)
     , _n(0)
     , _current_restart(0)
-    , _spv_buffer_size_L(0)
-    , _spv_buffer_size_U(0)
-    , _d_spv_buffer_L(nullptr)
-    , _d_spv_buffer_U(nullptr)
-    , _spmv_buffer_size(0)
-    , _d_spmv_buffer(nullptr)
 {
     initialize_cuda();
 }
@@ -85,10 +79,9 @@ void CudaGMRES::cleanup_cuda()
     if (_h_col_norms) { cudaFreeHost(_h_col_norms); _h_col_norms = nullptr; }
     if (_um_H) { cudaFree(_um_H); _um_H = nullptr; }
     if (_um_g) { cudaFree(_um_g); _um_g = nullptr; }
-    if (_d_spv_buffer_L) { cudaFree(_d_spv_buffer_L); _d_spv_buffer_L = nullptr; }
-    if (_d_spv_buffer_U) { cudaFree(_d_spv_buffer_U); _d_spv_buffer_U = nullptr; }
-    if (_d_spmv_buffer) { cudaFree(_d_spmv_buffer); _d_spmv_buffer = nullptr; }
-    
+    _d_spv_buffer_L.release();
+    _d_spv_buffer_U.release();
+    _d_spmv_buffer.release();
     // Free device constants
     
     // Destroy descriptors
@@ -262,19 +255,23 @@ void CudaGMRES::setup_matrix_descriptor()
     check_cusparse_error(
         cusparseCreateDnVec(&_vec_prec_y, _matrix_n, nullptr, CUDA_R_64F),
         "Failed to create preconditioner y vector descriptor");
-    
+    size_t spmv_buffer_size = 0;
     // Setup SpMV buffer
     check_cusparse_error(
         cusparseSpMV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                                &one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
-                               CUSPARSE_SPMV_ALG_DEFAULT, &_spmv_buffer_size),
+                               CUSPARSE_SPMV_ALG_DEFAULT, &spmv_buffer_size),
         "Failed to get SpMV buffer size");
-    
-    if (_d_spmv_buffer) cudaFree(_d_spmv_buffer);
-    if (_spmv_buffer_size > 0) {
-        check_cuda_error(cudaMalloc(&_d_spmv_buffer, _spmv_buffer_size), 
-                       "Failed to allocate SpMV buffer");
-    }
+
+    // Ensure buffer can accommodate the requested size; grow only as needed
+    _d_spmv_buffer.resize(spmv_buffer_size);
+
+    // Preprocess SpMV once so repeated calls can reuse internal optimizations
+    check_cusparse_error(
+        cusparseSpMV_preprocess( _cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 &one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
+                                 CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer.data() ),
+        "Failed to preprocess SpMV" );
 }
 
 void CudaGMRES::setup_ilu_descriptors()
@@ -322,40 +319,34 @@ void CudaGMRES::setup_ilu_descriptors()
     // Create SpSV descriptors for triangular solves
     check_cusparse_error(cusparseSpSV_createDescr(&_spv_descr_L), "Failed to create SpSV L descriptor");
     check_cusparse_error(cusparseSpSV_createDescr(&_spv_descr_U), "Failed to create SpSV U descriptor");
-    
+    size_t buffer_size;
     check_cusparse_error(
         cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                                &one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
-                               CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, &_spv_buffer_size_L),
+                               CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, &buffer_size),
         "Failed to get SpSV L buffer size");
+    _d_spv_buffer_L.resize(buffer_size);
     
     check_cusparse_error(
         cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                                &one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
-                               CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, &_spv_buffer_size_U),
+                               CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, &buffer_size),
         "Failed to get SpSV U buffer size");
     
-    // Allocate SpSV buffers
-    if (_spv_buffer_size_L > 0) {
-        check_cuda_error(cudaMalloc(&_d_spv_buffer_L, _spv_buffer_size_L), 
-                       "Failed to allocate SpSV L buffer");
-    }
-    if (_spv_buffer_size_U > 0) {
-        check_cuda_error(cudaMalloc(&_d_spv_buffer_U, _spv_buffer_size_U), 
-                       "Failed to allocate SpSV U buffer");
-    }
+    // Ensure buffers can accommodate required sizes; grow only when needed
+    _d_spv_buffer_U.resize(buffer_size);
     
     // Analyze the sparsity patterns for optimal performance
     check_cusparse_error(
         cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                              &one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
-                             CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_spv_buffer_L),
+                             CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_spv_buffer_L.data()),
         "Failed to analyze SpSV L pattern");
     
     check_cusparse_error(
         cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                              &one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
-                             CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_spv_buffer_U),
+                             CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_spv_buffer_U.data()),
         "Failed to analyze SpSV U pattern");
 }
 
@@ -431,7 +422,6 @@ State CudaGMRES::deviceSolve(const double* d_b, double* d_x)
 double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
 {
     const double one = 1.0, neg_one = -1.0;
-    
     // Copy b to first Krylov vector: Q[:, 0] = b
     check_cuda_error(cudaMemcpy(_d_Q, d_b, _n * sizeof(double), cudaMemcpyDeviceToDevice),
                      "Failed to copy b to Q");
@@ -444,7 +434,7 @@ double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
     check_cusparse_error(
         cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                     &neg_one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
-                    CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
+                    CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer.data()),
         "Failed to compute SpMV for residual");
 
     // Apply left preconditioning if needed
@@ -464,6 +454,7 @@ double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
 void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, double* d_output)
 {
     const double one = 1.0, zero = 0.0;
+    void* spmv_buffer = _d_spmv_buffer.data();
     
     // Update vector descriptors
     check_cusparse_error(cusparseDnVecSetValues(_vec_x, const_cast<double*>(d_input)), "Failed to set input vector");
@@ -477,7 +468,7 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                         &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
-                        CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
+                        CUSPARSE_SPMV_ALG_DEFAULT, spmv_buffer),
             "Failed to compute SpMV with right preconditioning");
         break;
         
@@ -486,7 +477,7 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                         &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
-                        CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
+                        CUSPARSE_SPMV_ALG_DEFAULT, spmv_buffer),
             "Failed to compute SpMV");
         apply_preconditioner(d_output, _d_tmp);
         check_cuda_error(cudaMemcpy(d_output, _d_tmp, _n * sizeof(double), cudaMemcpyDeviceToDevice),
@@ -498,7 +489,7 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                         &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
-                        CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer),
+                        CUSPARSE_SPMV_ALG_DEFAULT, spmv_buffer),
             "Failed to compute SpMV without preconditioning");
         break;
     }
@@ -660,8 +651,8 @@ void CudaGMRES::solve_least_squares(size_t j)
     // - X: right-hand side and solution vector (_um_g)
     // - incX: increment for X (1)
     
-    // Synchronize to ensure unified memory is up-to-date on host
-    check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before CPU triangular solve");
+    // // Synchronize to ensure unified memory is up-to-date on host
+    // check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before CPU triangular solve");
     
     cblas_dtrsv(CblasColMajor, CblasUpper, CblasNoTrans, CblasNonUnit,
                 static_cast<int>(j), _um_H, static_cast<int>(_current_restart), _um_g, 1);
@@ -678,7 +669,7 @@ void CudaGMRES::update_solution(double* d_x, size_t j)
     // Here: _d_tmp = 1.0 * Q[:, 0:j] * g[0:j] + 0.0 * _d_tmp
     
     // Ensure unified memory is synchronized before use
-    check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before GEMV");
+    // check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before GEMV");
     
     check_cublas_error(
         cublasDgemv(_cublas_handle, CUBLAS_OP_N,
