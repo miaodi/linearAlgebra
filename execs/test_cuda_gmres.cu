@@ -53,7 +53,9 @@ int main( int argc, char** argv )
         cxxopts::value<std::string>()->default_value( "" ) )(
         "U-file",
         "Matrix Market file containing U factor for ILU preconditioner",
-        cxxopts::value<std::string>()->default_value( "" ) )( "h,help",
+        cxxopts::value<std::string>()->default_value( "" ) )(
+        "b,batch-ortho", "Enable batch orthogonalization in GMRES",
+        cxxopts::value<bool>()->default_value( "false" ) )( "h,help",
                                                               "Print usage" );
 
     auto result = options.parse( argc, argv );
@@ -75,6 +77,7 @@ int main( int argc, char** argv )
     std::string rhs_file = result["rhs-file"].as<std::string>();
     std::string l_file = result["L-file"].as<std::string>();
     std::string u_file = result["U-file"].as<std::string>();
+    bool batch_ortho = result["batch-ortho"].as<bool>();
 
     // Validate file options for L and U matrices
     bool has_lu_files = !l_file.empty() && !u_file.empty();
@@ -119,6 +122,7 @@ int main( int argc, char** argv )
     std::cout << "  Absolute tolerance: " << std::scientific << abstol << std::endl;
     std::cout << "  Preconditioner: " << precond_str << std::endl;
     std::cout << "  Print LU factors: " << ( print_lu ? "yes" : "no" ) << std::endl;
+    std::cout << "  Batch orthogonalization: " << ( batch_ortho ? "enabled" : "disabled" ) << std::endl;
     std::cout << "  RHS file: " << ( rhs_file.empty() ? "(none - using all ones)" : rhs_file )
               << std::endl;
     if ( has_lu_files )
@@ -367,6 +371,7 @@ int main( int argc, char** argv )
         solver.setAbsTol( abstol );
         solver.setRestart( restart );
         solver.setPreconditionerType( precond_type );
+        solver.setUseBatchOrthogonalization( batch_ortho );
 
         std::cout << "\nStarting CUDA GMRES solver..." << std::endl;
 
