@@ -96,6 +96,7 @@ DeviceCudaGMRES::DeviceCudaGMRES()
     , _rel_tol(1e-8)
     , _restart(20)
     , _prec_type(PreconditionerType::LEFT)
+    , _use_batch_orthogonalization(true)
     , _is_operator_setup(false)
     , _is_ilu_setup(false)
     , _matrix_n(0)
@@ -617,19 +618,53 @@ const double* DeviceCudaGMRES::run_modified_gram_schmidt(size_t j)
     double* d_neg_alpha = _d_scalar_workspace.data() + kScalarTmp0;
     double* d_beta = _d_scalar_workspace.data() + kScalarTmp1;
     double* d_inv_beta = _d_scalar_workspace.data() + kScalarTmp2;
+    double* d_h_col = _d_H.data() + j * _current_restart;
+    double* d_one = _d_scalar_workspace.data() + kScalarOne;
+    double* d_zero = _d_scalar_workspace.data() + kScalarZero;
+    double* d_neg_one = _d_scalar_workspace.data() + kScalarNegOne;
 
-    for (size_t i = 0; i <= j; ++i) {
-        double* d_q_i = _d_Q.data() + i * _n;
-        double* h_ij = _d_H.data() + j * _current_restart + i;
+    if (_use_batch_orthogonalization) {
+        int m = static_cast<int>(_n);
+        int k = static_cast<int>(j + 1);
 
-        check_cublas_error(cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1, h_ij),
-                           "Failed to compute dot product in Gram-Schmidt");
+        check_cublas_error(
+            cublasDgemv(_cublas_handle, CUBLAS_OP_T,
+                        m, k,
+                        d_one, _d_Q.data(), m,
+                        d_q_j_plus_1, 1,
+                        d_zero, d_h_col, 1),
+            "Failed to compute batched dot products in Gram-Schmidt");
 
-        negate_value_kernel<<<1, 1>>>(h_ij, d_neg_alpha);
-        check_cuda_error(cudaGetLastError(), "Failed to launch negate kernel");
+        check_cublas_error(
+            cublasDgemv(_cublas_handle, CUBLAS_OP_N,
+                        m, k,
+                        d_neg_one, _d_Q.data(), m,
+                        d_h_col, 1,
+                        d_one, d_q_j_plus_1, 1),
+            "Failed to update vector in batched Gram-Schmidt");
 
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, d_neg_alpha, d_q_i, 1, d_q_j_plus_1, 1),
-                           "Failed to update vector in Gram-Schmidt");
+        if (k < static_cast<int>(_current_restart)) {
+            size_t remaining = _current_restart - static_cast<size_t>(k);
+            check_cuda_error(
+                cudaMemset(d_h_col + k, 0, remaining * sizeof(double)),
+                "Failed to zero unused Hessenberg entries");
+        }
+    } else {
+        for (size_t i = 0; i <= j; ++i) {
+            double* d_q_i = _d_Q.data() + i * _n;
+            double* h_ij = d_h_col + i;
+
+            check_cublas_error(
+                cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1, h_ij),
+                "Failed to compute dot product in Gram-Schmidt");
+
+            negate_value_kernel<<<1, 1>>>(h_ij, d_neg_alpha);
+            check_cuda_error(cudaGetLastError(), "Failed to launch negate kernel");
+
+            check_cublas_error(
+                cublasDaxpy(_cublas_handle, _n, d_neg_alpha, d_q_i, 1, d_q_j_plus_1, 1),
+                "Failed to update vector in Gram-Schmidt");
+        }
     }
 
     check_cublas_error(cublasDnrm2(_cublas_handle, _n, d_q_j_plus_1, 1, d_beta),

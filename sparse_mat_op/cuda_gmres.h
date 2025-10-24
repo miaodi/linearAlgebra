@@ -153,6 +153,7 @@ public:
     void setRelTol(double rel_tol) { _rel_tol = rel_tol; }
     void setRestart(size_t restart) { _restart = restart; }
     void setPreconditionerType(PreconditionerType prec_type) { _prec_type = prec_type; }
+    void setUseBatchOrthogonalization(bool enable) { _use_batch_orthogonalization = enable; }
 
     /**
      * @brief Setup matrix operator for subsequent solve operations
@@ -224,6 +225,7 @@ private:
     double _rel_tol;
     size_t _restart;
     PreconditionerType _prec_type;
+    bool _use_batch_orthogonalization;
     
     // Setup state tracking
     bool _is_operator_setup;     // Whether setupOperator() has been called
@@ -251,6 +253,7 @@ private:
     DeviceArray<double> _d_Q;           // Krylov basis vectors: size n * (_restart + 1)
     DeviceArray<double> _d_tmp;         // Temporary vector: size n
     DeviceArray<double> _d_w;           // Work vector for SpMV: size n
+    DeviceArray<double> _d_h_batch;     // Workspace for batched Gram-Schmidt coefficients
     
     // Host workspace arrays
     std::vector<double> _h_c;           // Cosine values for Givens rotations: size _restart
