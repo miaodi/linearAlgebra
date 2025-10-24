@@ -167,7 +167,6 @@ private:
     // CUDA handles
     cublasHandle_t _cublas_handle;
     cusparseHandle_t _cusparse_handle;
-    cudaStream_t _stream;
 
     // Matrix descriptors
     cusparseSpMatDescr_t _mat_A;
