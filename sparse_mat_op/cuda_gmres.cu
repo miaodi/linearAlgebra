@@ -35,14 +35,6 @@ CudaGMRES::CudaGMRES()
     , _index_base(0)
     , _index_base_L(0)
     , _index_base_U(0)
-    , _d_Q(nullptr)
-    , _d_tmp(nullptr)
-    , _d_w(nullptr)
-    , _h_c(nullptr)
-    , _h_s(nullptr)
-    , _h_col_norms(nullptr)
-    , _um_H(nullptr)
-    , _um_g(nullptr)
     , _n(0)
     , _current_restart(0)
 {
@@ -71,14 +63,11 @@ void CudaGMRES::initialize_cuda()
 void CudaGMRES::cleanup_cuda()
 {
     // Free workspace memory
-    if (_d_Q) { cudaFree(_d_Q); _d_Q = nullptr; }
-    if (_d_tmp) { cudaFree(_d_tmp); _d_tmp = nullptr; }
-    if (_d_w) { cudaFree(_d_w); _d_w = nullptr; }
-    if (_h_c) { cudaFreeHost(_h_c); _h_c = nullptr; }
-    if (_h_s) { cudaFreeHost(_h_s); _h_s = nullptr; }
-    if (_h_col_norms) { cudaFreeHost(_h_col_norms); _h_col_norms = nullptr; }
-    if (_um_H) { cudaFree(_um_H); _um_H = nullptr; }
-    if (_um_g) { cudaFree(_um_g); _um_g = nullptr; }
+    _d_Q.release();
+    _d_tmp.release();
+    _d_w.release();
+    _h_g.release();
+    _d_g.release();
     _d_spv_buffer_L.release();
     _d_spv_buffer_U.release();
     _d_spmv_buffer.release();
@@ -107,44 +96,27 @@ void CudaGMRES::initialize_workspace(size_t n)
         return; // Already initialized for this size
     }
     
-    // Free existing memory
-    if (_d_Q) cudaFree(_d_Q);
-    if (_d_tmp) cudaFree(_d_tmp);
-    if (_d_w) cudaFree(_d_w);
-    if (_h_c) cudaFreeHost(_h_c);
-    if (_h_s) cudaFreeHost(_h_s);
-    if (_h_col_norms) cudaFreeHost(_h_col_norms);
-    if (_um_H) cudaFree(_um_H);
-    if (_um_g) cudaFree(_um_g);
-    
     _n = n;
     _current_restart = std::min(_restart, n);
     
-    // Allocate device memory
-    check_cuda_error(cudaMalloc(&_d_Q, n * (_current_restart + 1) * sizeof(double)), 
-                     "Failed to allocate Krylov basis memory");
-    check_cuda_error(cudaMalloc(&_d_tmp, n * sizeof(double)), 
-                     "Failed to allocate temporary vector memory");
-    check_cuda_error(cudaMalloc(&_d_w, n * sizeof(double)), 
-                     "Failed to allocate work vector memory");
+    // Allocate device memory using DeviceArray
+    _d_Q.resize(n * (_current_restart + 1));
+    _d_tmp.resize(n);
+    _d_w.resize(n);
     
-    // Allocate host memory
-    check_cuda_error(cudaMallocHost(&_h_c, _current_restart * sizeof(double)), 
-                     "Failed to allocate cosine values memory");
-    check_cuda_error(cudaMallocHost(&_h_s, _current_restart * sizeof(double)), 
-                     "Failed to allocate sine values memory");
-    check_cuda_error(cudaMallocHost(&_h_col_norms, _current_restart * sizeof(double)), 
-                     "Failed to allocate column norms memory");
+    // Allocate host memory using std::vector
+    _h_c.resize(_current_restart);
+    _h_s.resize(_current_restart);
     
-    // Allocate unified memory for matrices/vectors accessible from both host and device
-    check_cuda_error(cudaMallocManaged(&_um_H, _current_restart * _current_restart * sizeof(double)), 
-                     "Failed to allocate Hessenberg matrix unified memory");
-    check_cuda_error(cudaMallocManaged(&_um_g, _current_restart * sizeof(double)), 
-                     "Failed to allocate residual vector unified memory");
+    // Allocate pinned memory using PinnedArray
+    _h_H.resize(_current_restart * _current_restart, 0.0);  // Initialize to zero
+    _h_g.resize(_current_restart);
     
-    // Initialize unified memory to zero
-    cudaMemset(_um_H, 0, _current_restart * _current_restart * sizeof(double));
-    cudaMemset(_um_g, 0, _current_restart * sizeof(double));
+    // Allocate device memory for GMRES algorithm
+    _d_g.resize(_current_restart);
+    
+    // Initialize arrays to zero
+    std::fill(_h_g.data(), _h_g.data() + _h_g.size(), 0.0);
 }
 
 void CudaGMRES::setupOperator(size_t n,
@@ -423,12 +395,12 @@ double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
 {
     const double one = 1.0, neg_one = -1.0;
     // Copy b to first Krylov vector: Q[:, 0] = b
-    check_cuda_error(cudaMemcpy(_d_Q, d_b, _n * sizeof(double), cudaMemcpyDeviceToDevice),
+    check_cuda_error(cudaMemcpy(_d_Q.data(), d_b, _n * sizeof(double), cudaMemcpyDeviceToDevice),
                      "Failed to copy b to Q");
     
     // Update vector descriptors
     check_cusparse_error(cusparseDnVecSetValues(_vec_x, const_cast<double*>(d_x)), "Failed to set vec_x");
-    check_cusparse_error(cusparseDnVecSetValues(_vec_y, _d_Q), "Failed to set vec_y");
+    check_cusparse_error(cusparseDnVecSetValues(_vec_y, _d_Q.data()), "Failed to set vec_y");
     
     // Compute r = b - Ax: Q[:, 0] = Q[:, 0] - A * x = b - A * x
     check_cusparse_error(
@@ -439,14 +411,14 @@ double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
 
     // Apply left preconditioning if needed
     if (_prec_type == PreconditionerType::LEFT) {
-        apply_preconditioner(_d_Q, _d_tmp);
-        check_cuda_error(cudaMemcpy(_d_Q, _d_tmp, _n * sizeof(double), cudaMemcpyDeviceToDevice),
+        apply_preconditioner(_d_Q.data(), _d_tmp.data());
+        check_cuda_error(cudaMemcpy(_d_Q.data(), _d_tmp.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
                          "Failed to copy preconditioned residual");
     }
     
     // Compute norm of residual
     double norm;
-    check_cublas_error(cublasDnrm2(_cublas_handle, _n, _d_Q, 1, &norm), 
+    check_cublas_error(cublasDnrm2(_cublas_handle, _n, _d_Q.data(), 1, &norm), 
                        "Failed to compute residual norm");
     return norm;
 }
@@ -463,8 +435,8 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
     switch (_prec_type) {
     case PreconditionerType::RIGHT:
         // Right preconditioning: A * M^{-1} * input
-        apply_preconditioner(d_input, _d_tmp);
-        check_cusparse_error(cusparseDnVecSetValues(_vec_x, _d_tmp), "Failed to set preconditioned input");
+        apply_preconditioner(d_input, _d_tmp.data());
+        check_cusparse_error(cusparseDnVecSetValues(_vec_x, _d_tmp.data()), "Failed to set preconditioned input");
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                         &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
@@ -479,8 +451,8 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
                         &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
                         CUSPARSE_SPMV_ALG_DEFAULT, spmv_buffer),
             "Failed to compute SpMV");
-        apply_preconditioner(d_output, _d_tmp);
-        check_cuda_error(cudaMemcpy(d_output, _d_tmp, _n * sizeof(double), cudaMemcpyDeviceToDevice),
+        apply_preconditioner(d_output, _d_tmp.data());
+        check_cuda_error(cudaMemcpy(d_output, _d_tmp.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
                          "Failed to copy preconditioned result");
         break;
         
@@ -509,7 +481,7 @@ void CudaGMRES::apply_preconditioner(const double* d_input, double* d_output)
     // Apply ILU preconditioning: M^{-1} = U^{-1} * L^{-1}
     // First solve: L * y = input (forward substitution)
     check_cusparse_error(cusparseDnVecSetValues(_vec_prec_x, const_cast<double*>(d_input)), "Failed to set preconditioner input vector");
-    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_y, _d_tmp), "Failed to set preconditioner intermediate vector");
+    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_y, _d_tmp.data()), "Failed to set preconditioner intermediate vector");
     
     check_cusparse_error(
         cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -518,7 +490,7 @@ void CudaGMRES::apply_preconditioner(const double* d_input, double* d_output)
         "Failed to solve forward substitution (L * y = input)");
     
     // Second solve: U * output = y (backward substitution)
-    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_x, _d_tmp), "Failed to set preconditioner intermediate as input");
+    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_x, _d_tmp.data()), "Failed to set preconditioner intermediate as input");
     check_cusparse_error(cusparseDnVecSetValues(_vec_prec_y, d_output), "Failed to set preconditioner output vector");
     
     check_cusparse_error(
@@ -534,7 +506,7 @@ State CudaGMRES::perform_restart_cycle(const double* d_b, double* d_x,
 {
     // Normalize first Krylov vector
     const double inv_resid = 1.0 / resid;
-    check_cublas_error(cublasDscal(_cublas_handle, _n, &inv_resid, _d_Q, 1),
+    check_cublas_error(cublasDscal(_cublas_handle, _n, &inv_resid, _d_Q.data(), 1),
                        "Failed to normalize first Krylov vector");
     
     size_t j;
@@ -564,22 +536,22 @@ State CudaGMRES::perform_restart_cycle(const double* d_b, double* d_x,
 
 double CudaGMRES::arnoldi_iteration(size_t j)
 {
-    double* d_q_j = _d_Q + j * _n;           // Current Krylov vector
-    double* d_q_j_plus_1 = _d_Q + (j + 1) * _n;  // Next Krylov vector
+    double* d_q_j = _d_Q.data() + j * _n;           // Current Krylov vector
+    double* d_q_j_plus_1 = _d_Q.data() + (j + 1) * _n;  // Next Krylov vector
     
     // Apply operator: q_{j+1} = A * q_j (with preconditioning)
     apply_operator_with_preconditioning(d_q_j, d_q_j_plus_1);
     
     // Modified Gram-Schmidt orthogonalization
     for (size_t i = 0; i <= j; ++i) {
-        double* d_q_i = _d_Q + i * _n;
+        double* d_q_i = _d_Q.data() + i * _n;
         
         // Compute h_{i,j} = <q_i, q_{j+1}> and store directly in Hessenberg matrix
-        check_cublas_error(cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1, &_um_H[i + j * _current_restart]),
+        check_cublas_error(cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1, &_h_H.data()[i + j * _current_restart]),
                            "Failed to compute dot product in Gram-Schmidt");
         
         // q_{j+1} = q_{j+1} - h_{i,j} * q_i
-        double neg_h_ij = -_um_H[i + j * _current_restart];
+        double neg_h_ij = -_h_H.data()[i + j * _current_restart];
         check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_h_ij, d_q_i, 1, d_q_j_plus_1, 1),
                            "Failed to update vector in Gram-Schmidt");
     }
@@ -602,8 +574,8 @@ double CudaGMRES::arnoldi_iteration(size_t j)
 
 void CudaGMRES::givens_rotation(double beta, size_t j, double& resid)
 {
-    // Access Hessenberg matrix column j (unified memory)
-    double* H_col_j = _um_H + j * _current_restart;
+    // Access Hessenberg matrix column j (host memory)
+    double* H_col_j = _h_H.data() + j * _current_restart;
     
     // Apply previous Givens rotations to H_col_j
     for (size_t i = 0; i < j; i++) {
@@ -628,9 +600,9 @@ void CudaGMRES::givens_rotation(double beta, size_t j, double& resid)
     
     // Apply Givens rotation to residual vector
     if (j == 0) {
-        _um_g[0] = resid;  // Initialize residual vector
+        _h_g.data()[0] = resid;  // Initialize residual vector
     }
-    _um_g[j] = _h_c[j] * resid;
+    _h_g.data()[j] = _h_c[j] * resid;
     resid *= _h_s[j];
 }
 
@@ -639,23 +611,20 @@ void CudaGMRES::solve_least_squares(size_t j)
     if (j == 0) return;
     
     // Solve upper triangular system H * y = g using CPU BLAS DTRSV
-    // H is stored in column-major format in unified memory (accessible from host)
+    // H is stored in column-major format in host memory
     // DTRSV parameters:
     // - CBLAS_ORDER: CblasColMajor (column-major storage)
     // - CBLAS_UPLO: CblasUpper (upper triangular)
     // - CBLAS_TRANSPOSE: CblasNoTrans (no transpose)
     // - CBLAS_DIAG: CblasNonUnit (non-unit diagonal)
     // - N: size of the system (j)
-    // - A: Hessenberg matrix (_um_H)
+    // - A: Hessenberg matrix (_h_H)
     // - lda: leading dimension (_current_restart)
-    // - X: right-hand side and solution vector (_um_g)
+    // - X: right-hand side and solution vector (_h_g)
     // - incX: increment for X (1)
     
-    // // Synchronize to ensure unified memory is up-to-date on host
-    // check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before CPU triangular solve");
-    
     cblas_dtrsv(CblasColMajor, CblasUpper, CblasNoTrans, CblasNonUnit,
-                static_cast<int>(j), _um_H, static_cast<int>(_current_restart), _um_g, 1);
+                static_cast<int>(j), _h_H.data(), static_cast<int>(_current_restart), _h_g.data(), 1);
 }
 
 void CudaGMRES::update_solution(double* d_x, size_t j)
@@ -664,29 +633,30 @@ void CudaGMRES::update_solution(double* d_x, size_t j)
     
     const double one = 1.0, zero = 0.0;
     
+    // Copy g from pinned memory to device for GEMV operation
+    check_cuda_error(cudaMemcpy(_d_g.data(), _h_g.data(), j * sizeof(double), cudaMemcpyHostToDevice),
+                     "Failed to copy g vector to device");
+    
     // Compute solution update: delta_x = Q[:, 0:j] * g[0:j]
     // Use GEMV: y = alpha * A * x + beta * y
     // Here: _d_tmp = 1.0 * Q[:, 0:j] * g[0:j] + 0.0 * _d_tmp
     
-    // Ensure unified memory is synchronized before use
-    // check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize before GEMV");
-    
     check_cublas_error(
         cublasDgemv(_cublas_handle, CUBLAS_OP_N,
                    _n, j,
-                   &one, _d_Q, _n,
-                   _um_g, 1,
-                   &zero, _d_tmp, 1),
+                   &one, _d_Q.data(), _n,
+                   _d_g.data(), 1,
+                   &zero, _d_tmp.data(), 1),
         "Failed to compute solution update");
     
     if (_prec_type == PreconditionerType::RIGHT) {
         // For right preconditioning: x = x + M^{-1} * delta_x
-        apply_preconditioner(_d_tmp, _d_w);
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_w, 1, d_x, 1),
+        apply_preconditioner(_d_tmp.data(), _d_w.data());
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_w.data(), 1, d_x, 1),
                            "Failed to update solution with right preconditioning");
     } else {
         // For left or no preconditioning: x = x + delta_x
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_tmp, 1, d_x, 1),
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_tmp.data(), 1, d_x, 1),
                            "Failed to update solution");
     }
 }

@@ -11,22 +11,51 @@ namespace cuda_iterative_solver
 {
 
 /**
- * @brief Helper class for managing device arrays with capacity tracking
+ * @brief Memory allocator traits for different memory types
  */
-template<typename T>
-class DeviceArray
+struct DeviceAllocator
+{
+    template<typename T>
+    static cudaError_t allocate(T** ptr, size_t count) {
+        return cudaMalloc(ptr, count * sizeof(T));
+    }
+    
+    template<typename T>
+    static cudaError_t deallocate(T* ptr) {
+        return cudaFree(ptr);
+    }
+};
+
+struct PinnedAllocator
+{
+    template<typename T>
+    static cudaError_t allocate(T** ptr, size_t count) {
+        return cudaMallocHost(ptr, count * sizeof(T));
+    }
+    
+    template<typename T>
+    static cudaError_t deallocate(T* ptr) {
+        return cudaFreeHost(ptr);
+    }
+};
+
+/**
+ * @brief Generic array class for managing CUDA memory with capacity tracking
+ */
+template<typename T, typename Allocator>
+class Array
 {
 public:
-    DeviceArray() : _data(nullptr), _size(0), _capacity(0) {}
+    Array() : _data(nullptr), _size(0), _capacity(0) {}
     
-    ~DeviceArray() { release(); }
+    ~Array() { release(); }
     
     void resize(size_t new_size) {
         if (new_size > _capacity) {
             if (_data) {
-                cudaFree(_data);
+                Allocator::deallocate(_data);
             }
-            cudaMalloc(&_data, new_size * sizeof(T));
+            Allocator::allocate(&_data, new_size);
             _capacity = new_size;
         }
         _size = new_size;
@@ -41,7 +70,7 @@ public:
     
     void release() {
         if (_data) {
-            cudaFree(_data);
+            Allocator::deallocate(_data);
             _data = nullptr;
         }
         _size = 0;
@@ -59,9 +88,16 @@ private:
     size_t _capacity;
     
     // Disable copy and assignment
-    DeviceArray(const DeviceArray&) = delete;
-    DeviceArray& operator=(const DeviceArray&) = delete;
+    Array(const Array&) = delete;
+    Array& operator=(const Array&) = delete;
 };
+
+// Type aliases for convenience
+template<typename T>
+using DeviceArray = Array<T, DeviceAllocator>;
+
+template<typename T>
+using PinnedArray = Array<T, PinnedAllocator>;
 
 /**
  * @brief Enumeration of preconditioner types.
@@ -212,25 +248,26 @@ private:
     int _index_base_L, _index_base_U;  // Index bases for L and U factors
 
     // Workspace arrays (device memory)
-    double* _d_Q;           // Krylov basis vectors: size n * (_restart + 1)
-    double* _d_tmp;         // Temporary vector: size n
-    double* _d_w;           // Work vector for SpMV: size n
+    DeviceArray<double> _d_Q;           // Krylov basis vectors: size n * (_restart + 1)
+    DeviceArray<double> _d_tmp;         // Temporary vector: size n
+    DeviceArray<double> _d_w;           // Work vector for SpMV: size n
     
     // Host workspace arrays
-    double* _h_c;           // Cosine values for Givens rotations: size _restart
-    double* _h_s;           // Sine values for Givens rotations: size _restart
-    double* _h_col_norms;   // Column norms buffer: size _restart
+    std::vector<double> _h_c;           // Cosine values for Givens rotations: size _restart
+    std::vector<double> _h_s;           // Sine values for Givens rotations: size _restart
+    std::vector<double> _h_H;           // Hessenberg matrix: size _restart * _restart
     
-    // Unified memory arrays (accessible from both host and device)
-    double* _um_H;          // Hessenberg matrix: size _restart * _restart
-    double* _um_g;          // Residual vector for least squares: size _restart
+    // Pinned memory arrays (accessible from both host and device)
+    PinnedArray<double> _h_g;           // Residual vector for least squares (pinned): size _restart
+    
+    // Device arrays for GMRES algorithm
+    DeviceArray<double> _d_g;           // Device copy of residual vector: size _restart
     
     // Current problem size
     size_t _n;
     size_t _current_restart;
     
     // Buffer sizes for SpSV operations
-    size_t _spv_buffer_size_L, _spv_buffer_size_U;
     DeviceArray<char> _d_spv_buffer_L;
     DeviceArray<char> _d_spv_buffer_U;
     
