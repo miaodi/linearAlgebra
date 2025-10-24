@@ -6,7 +6,7 @@ set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp permutatio
 # Add CUDA sources if CUDA is enabled
 if(USE_CUDA)
     enable_language(CUDA)
-    list(APPEND SPARSE_MAT_OP_SRC cuda_gmres.cu)
+    list(APPEND SPARSE_MAT_OP_SRC cuda_gmres.cu cuda_gmres_device.cu)
     set(CUDA_DEPENDENCIES CUDA::cusparse CUDA::cublas CUDA::cudart MKL::MKL)
 endif()
 
