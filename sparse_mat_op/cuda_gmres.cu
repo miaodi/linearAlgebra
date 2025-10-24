@@ -11,7 +11,6 @@ namespace cuda_iterative_solver
 CudaGMRES::CudaGMRES()
     : _cublas_handle(nullptr)
     , _cusparse_handle(nullptr)
-    , _stream(nullptr)
     , _mat_A(nullptr)
     , _vec_x(nullptr)
     , _vec_y(nullptr)
@@ -63,16 +62,16 @@ CudaGMRES::~CudaGMRES()
 
 void CudaGMRES::initialize_cuda()
 {
-    // Create CUDA stream
-    check_cuda_error(cudaStreamCreate(&_stream), "Failed to create CUDA stream");
-    
-    // Create cuBLAS handle
-    check_cublas_error(cublasCreate(&_cublas_handle), "Failed to create cuBLAS handle");
-    check_cublas_error(cublasSetStream(_cublas_handle, _stream), "Failed to set cuBLAS stream");
-    
-    // Create cuSPARSE handle
-    check_cusparse_error(cusparseCreate(&_cusparse_handle), "Failed to create cuSPARSE handle");
-    check_cusparse_error(cusparseSetStream(_cusparse_handle, _stream), "Failed to set cuSPARSE stream");
+    try {
+        // Create cuBLAS handle
+        check_cublas_error(cublasCreate(&_cublas_handle), "Failed to create cuBLAS handle");
+
+        // Create cuSPARSE handle
+        check_cusparse_error(cusparseCreate(&_cusparse_handle), "Failed to create cuSPARSE handle");
+    } catch (...) {
+        cleanup_cuda();
+        throw;
+    }
 }
 
 void CudaGMRES::cleanup_cuda()
@@ -107,7 +106,6 @@ void CudaGMRES::cleanup_cuda()
     // Destroy handles
     if (_cusparse_handle) cusparseDestroy(_cusparse_handle);
     if (_cublas_handle) cublasDestroy(_cublas_handle);
-    if (_stream) cudaStreamDestroy(_stream);
 }
 
 void CudaGMRES::initialize_workspace(size_t n)
