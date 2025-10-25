@@ -266,9 +266,8 @@ private:
     cusparseSpMatDescr_t _mat_prec_L, _mat_prec_U;
     
     // DeviceVectorView objects for cuSPARSE operations
-    DeviceVectorView _view_x, _view_y;
     DeviceVectorView _view_prec_x, _view_prec_y, _view_prec_tmp;
-    DeviceVectorView _view_d_tmp, _view_d_w;
+    DeviceVectorView _view_d_w;
     DeviceVectorView _view_q_j, _view_q_j_plus_1;
     DeviceVectorView _view_d_b, _view_d_x;
     
