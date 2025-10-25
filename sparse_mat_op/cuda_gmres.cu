@@ -362,7 +362,7 @@ State CudaGMRES::deviceSolve(const DeviceVectorView& d_b, DeviceVectorView& d_x)
     }
     
     // Initialize iteration counter
-    size_t iter = 0;
+    int iter = 0;
     _last_iterations = 0;
     
     // Compute initial residual
@@ -493,7 +493,7 @@ void CudaGMRES::apply_preconditioner(const DeviceVectorView& d_input, DeviceVect
 }
 
 State CudaGMRES::perform_restart_cycle(const DeviceVectorView& d_b, DeviceVectorView& d_x,
-                                       double init_resid, size_t& iter,
+                                       double init_resid, int& iter,
                                        double& resid)
 {
     // Normalize first Krylov vector
@@ -501,30 +501,41 @@ State CudaGMRES::perform_restart_cycle(const DeviceVectorView& d_b, DeviceVector
     check_cublas_error(cublasDscal(_cublas_handle, _n, &inv_resid, _d_Q.data(), 1),
                        "Failed to normalize first Krylov vector");
     
-    size_t j;
-    for (j = 0; j < _current_restart && iter < _max_iter; ++j, ++iter) {
-        // Arnoldi iteration: generate next Krylov vector
-        double beta = arnoldi_iteration(j);
+    int j = 0;
+    bool converged = false;
 
-        // Apply Givens rotation on host
+    while (j < _current_restart && iter < _max_iter)
+    {
+        double beta = arnoldi_iteration(j);
         givens_rotation(beta, j, resid);
-        
+
+        ++iter;
+        ++j;
+
         // print_iteration_info(iter, resid, init_resid);
-        
-        // Check convergence
-        if (check_convergence(resid, init_resid)) {
-            solve_least_squares(j + 1);
-            update_solution(d_x, j + 1);
-            return State::CONVERGED;
+
+        if (check_convergence(resid, init_resid))
+        {
+            converged = true;
+            break;
         }
     }
     
     solve_least_squares(j);
     update_solution(d_x, j);
-    return (iter >= _max_iter) ? State::MAX_ITER_REACHED : State::RUNNING;
+    
+    if (converged)
+    {
+        return State::CONVERGED;
+    }
+    if (iter >= _max_iter)
+    {
+        return State::MAX_ITER_REACHED;
+    }
+    return State::RUNNING;
 }
 
-double CudaGMRES::arnoldi_iteration(size_t j)
+double CudaGMRES::arnoldi_iteration(int j)
 {
     double* d_q_j = _d_Q.data() + j * _n;           // Current Krylov vector
     double* d_q_j_plus_1 = _d_Q.data() + (j + 1) * _n;  // Next Krylov vector
@@ -538,59 +549,9 @@ double CudaGMRES::arnoldi_iteration(size_t j)
     
     // Modified Gram-Schmidt orthogonalization
     if (_use_batch_orthogonalization) {
-        if (_d_h_batch.size() < _current_restart) {
-            _d_h_batch.resize(_current_restart);
-        }
-
-        int m = static_cast<int>(_n);
-        int k = static_cast<int>(j + 1);
-        double alpha = 1.0;
-        double zero = 0.0;
-        check_cublas_error(
-            cublasDgemv(_cublas_handle, CUBLAS_OP_T,
-                        m, k,
-                        &alpha, _d_Q.data(), m,
-                        d_q_j_plus_1, 1,
-                        &zero, _d_h_batch.data(), 1),
-            "Failed to compute batched dot products in Gram-Schmidt");
-
-        check_cuda_error(
-            cudaMemcpy(_h_H.data() + j * _current_restart,
-                       _d_h_batch.data(), k * sizeof(double),
-                       cudaMemcpyDeviceToHost),
-            "Failed to copy Hessenberg column to host");
-
-        if (k < static_cast<int>(_current_restart)) {
-            double* start = _h_H.data() + j * _current_restart + k;
-            double* end = _h_H.data() + (j + 1) * _current_restart;
-            std::fill(start, end, 0.0);
-        }
-
-        double neg_one = -1.0;
-        double one = 1.0;
-        check_cublas_error(
-            cublasDgemv(_cublas_handle, CUBLAS_OP_N,
-                        m, k,
-                        &neg_one, _d_Q.data(), m,
-                        _d_h_batch.data(), 1,
-                        &one, d_q_j_plus_1, 1),
-            "Failed to update vector in batched Gram-Schmidt");
+        batch_gram_schmidt(j, d_q_j_plus_1);
     } else {
-        for (size_t i = 0; i <= j; ++i) {
-            double* d_q_i = _d_Q.data() + i * _n;
-
-            // Compute h_{i,j} = <q_i, q_{j+1}> and store directly in Hessenberg matrix
-            check_cublas_error(
-                cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1,
-                           &_h_H.data()[i + j * _current_restart]),
-                "Failed to compute dot product in Gram-Schmidt");
-
-            // q_{j+1} = q_{j+1} - h_{i,j} * q_i
-            double neg_h_ij = -_h_H.data()[i + j * _current_restart];
-            check_cublas_error(
-                cublasDaxpy(_cublas_handle, _n, &neg_h_ij, d_q_i, 1, d_q_j_plus_1, 1),
-                "Failed to update vector in Gram-Schmidt");
-        }
+        gram_schmidt(j, d_q_j_plus_1);
     }
     
     // Compute norm of q_{j+1}
@@ -609,13 +570,74 @@ double CudaGMRES::arnoldi_iteration(size_t j)
     return beta;
 }
 
-void CudaGMRES::givens_rotation(double beta, size_t j, double& resid)
+void CudaGMRES::batch_gram_schmidt(int j, double* d_q_j_plus_1)
+{
+    int m = _n;
+    int k = j + 1;
+    double alpha = 1.0;
+    double zero = 0.0;
+    
+    // Compute all dot products in a single GEMV call: h = Q^T * q_{j+1}
+    check_cublas_error(
+        cublasDgemv(_cublas_handle, CUBLAS_OP_T,
+                    m, k,
+                    &alpha, _d_Q.data(), m,
+                    d_q_j_plus_1, 1,
+                    &zero, _d_h_batch.data(), 1),
+        "Failed to compute batched dot products in Gram-Schmidt");
+
+    // Copy Hessenberg column from device to host
+    check_cuda_error(
+        cudaMemcpy(_h_H.data() + j * _current_restart,
+                   _d_h_batch.data(), k * sizeof(double),
+                   cudaMemcpyDeviceToHost),
+        "Failed to copy Hessenberg column to host");
+
+    // Zero out remaining entries in the Hessenberg column
+    if (k < _current_restart) {
+        double* start = _h_H.data() + j * _current_restart + k;
+        double* end = _h_H.data() + (j + 1) * _current_restart;
+        std::fill(start, end, 0.0);
+    }
+
+    // Update q_{j+1} = q_{j+1} - Q * h
+    double neg_one = -1.0;
+    double one = 1.0;
+    check_cublas_error(
+        cublasDgemv(_cublas_handle, CUBLAS_OP_N,
+                    m, k,
+                    &neg_one, _d_Q.data(), m,
+                    _d_h_batch.data(), 1,
+                    &one, d_q_j_plus_1, 1),
+        "Failed to update vector in batched Gram-Schmidt");
+}
+
+void CudaGMRES::gram_schmidt(int j, double* d_q_j_plus_1)
+{
+    for (int i = 0; i <= j; ++i) {
+        double* d_q_i = _d_Q.data() + i * _n;
+
+        // Compute h_{i,j} = <q_i, q_{j+1}> and store directly in Hessenberg matrix
+        check_cublas_error(
+            cublasDdot(_cublas_handle, _n, d_q_i, 1, d_q_j_plus_1, 1,
+                       &_h_H.data()[i + j * _current_restart]),
+            "Failed to compute dot product in Gram-Schmidt");
+
+        // q_{j+1} = q_{j+1} - h_{i,j} * q_i
+        double neg_h_ij = -_h_H.data()[i + j * _current_restart];
+        check_cublas_error(
+            cublasDaxpy(_cublas_handle, _n, &neg_h_ij, d_q_i, 1, d_q_j_plus_1, 1),
+            "Failed to update vector in Gram-Schmidt");
+    }
+}
+
+void CudaGMRES::givens_rotation(double beta, int j, double& resid)
 {
     // Access Hessenberg matrix column j (host memory)
     double* H_col_j = _h_H.data() + j * _current_restart;
     
     // Apply previous Givens rotations to H_col_j
-    for (size_t i = 0; i < j; i++) {
+    for (int i = 0; i < j; i++) {
         double tmp = _h_c[i] * H_col_j[i] - _h_s[i] * H_col_j[i + 1];
         H_col_j[i + 1] = _h_s[i] * H_col_j[i] + _h_c[i] * H_col_j[i + 1];
         H_col_j[i] = tmp;
@@ -643,7 +665,7 @@ void CudaGMRES::givens_rotation(double beta, size_t j, double& resid)
     resid *= _h_s[j];
 }
 
-void CudaGMRES::solve_least_squares(size_t j)
+void CudaGMRES::solve_least_squares(int j)
 {
     if (j == 0) return;
     
@@ -661,10 +683,10 @@ void CudaGMRES::solve_least_squares(size_t j)
     // - incX: increment for X (1)
     
     cblas_dtrsv(CblasColMajor, CblasUpper, CblasNoTrans, CblasNonUnit,
-                static_cast<int>(j), _h_H.data(), static_cast<int>(_current_restart), _h_g.data(), 1);
+                j, _h_H.data(), _current_restart, _h_g.data(), 1);
 }
 
-void CudaGMRES::update_solution(DeviceVectorView& d_x, size_t j)
+void CudaGMRES::update_solution(DeviceVectorView& d_x, int j)
 {
     if (j == 0) return;
     
@@ -700,7 +722,7 @@ bool CudaGMRES::check_convergence(double resid, double init_resid) const
     return std::abs(resid) < _abs_tol || std::abs(resid) < _rel_tol * init_resid;
 }
 
-void CudaGMRES::print_iteration_info(size_t iter, double resid, double init_resid) const
+void CudaGMRES::print_iteration_info(int iter, double resid, double init_resid) const
 {
     std::cout << "iter: " << std::setw(4) << iter 
               << " resid: " << std::scientific << std::setprecision(4) << std::abs(resid)

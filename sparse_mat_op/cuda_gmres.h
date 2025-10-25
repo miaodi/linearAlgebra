@@ -203,7 +203,7 @@ public:
      * @brief Get the number of iterations from the last solve
      * @return Number of iterations performed in the last solve call
      */
-    size_t getLastIterations() const { return _last_iterations; }
+    int getLastIterations() const { return _last_iterations; }
 
     /**
      * @brief Setup matrix operator for subsequent solve operations
@@ -278,13 +278,13 @@ private:
     size_t _restart;
     PreconditionerType _prec_type;
     bool _use_batch_orthogonalization;
-    size_t _last_iterations;
+    int _last_iterations;
     
     // Setup state
     bool _is_operator_setup;
     bool _is_ilu_setup;
-    size_t _n;
-    size_t _current_restart;
+    int _n;
+    int _current_restart;
     
     // Matrix properties
     size_t _matrix_n, _matrix_nnz;
@@ -352,28 +352,38 @@ private:
      * @brief Perform one GMRES restart cycle
      */
     State perform_restart_cycle(const DeviceVectorView& d_b, DeviceVectorView& d_x, 
-                               double init_resid, size_t& iter, 
+                               double init_resid, int& iter, 
                                double& resid);
 
     /**
      * @brief Arnoldi process: build Krylov subspace and Hessenberg matrix
      */
-    double arnoldi_iteration(size_t j);
+    double arnoldi_iteration(int j);
+
+    /**
+     * @brief Batch Modified Gram-Schmidt orthogonalization using GEMV operations
+     */
+    void batch_gram_schmidt(int j, double* d_q_j_plus_1);
+
+    /**
+     * @brief Modified Gram-Schmidt orthogonalization using individual dot products
+     */
+    void gram_schmidt(int j, double* d_q_j_plus_1);
 
     /**
      * @brief Apply Givens rotation to Hessenberg matrix and residual vector (host operation)
      */
-    void givens_rotation(double beta, size_t j, double& resid);
+    void givens_rotation(double beta, int j, double& resid);
 
     /**
      * @brief Solve least squares problem using triangular solve
      */
-    void solve_least_squares(size_t j);
+    void solve_least_squares(int j);
 
     /**
      * @brief Update solution vector
      */
-    void update_solution(DeviceVectorView& d_x, size_t j);
+    void update_solution(DeviceVectorView& d_x, int j);
 
     /**
      * @brief Check convergence criteria
@@ -383,7 +393,7 @@ private:
     /**
      * @brief Print iteration information
      */
-    void print_iteration_info(size_t iter, double resid, double init_resid) const;
+    void print_iteration_info(int iter, double resid, double init_resid) const;
 
     /**
      * @brief Error checking functions for CUDA calls
