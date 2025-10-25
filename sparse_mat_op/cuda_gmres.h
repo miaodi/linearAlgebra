@@ -100,6 +100,50 @@ template<typename T>
 using PinnedArray = Array<T, PinnedAllocator>;
 
 /**
+ * @brief View wrapper for cuSPARSE dense vector descriptor with device memory pointer
+ */
+class DeviceVectorView
+{
+public:
+    DeviceVectorView() : _descriptor(nullptr), _data(nullptr), _size(0) {}
+    
+    ~DeviceVectorView() {
+        if (_descriptor) {
+            cusparseDestroyDnVec(_descriptor);
+        }
+    }
+    
+    void create(size_t size, double* data) {
+        if (_descriptor) {
+            cusparseDestroyDnVec(_descriptor);
+        }
+        _data = data;
+        _size = size;
+        cusparseCreateDnVec(&_descriptor, size, data, CUDA_R_64F);
+    }
+    
+    void setData(double* data) {
+        _data = data;
+        if (_descriptor) {
+            cusparseDnVecSetValues(_descriptor, data);
+        }
+    }
+    
+    cusparseDnVecDescr_t descriptor() const { return _descriptor; }
+    double* data() const { return _data; }
+    size_t size() const { return _size; }
+    
+private:
+    cusparseDnVecDescr_t _descriptor;
+    double* _data;
+    size_t _size;
+    
+    // Disable copy and assignment
+    DeviceVectorView(const DeviceVectorView&) = delete;
+    DeviceVectorView& operator=(const DeviceVectorView&) = delete;
+};
+
+/**
  * @brief Enumeration of preconditioner types.
  * left: M^{-1} * A * x = M^{-1} * b
  * right: A * M^{-1} * y = b, x = M^{-1} * y
@@ -154,6 +198,12 @@ public:
     void setRestart(size_t restart) { _restart = restart; }
     void setPreconditionerType(PreconditionerType prec_type) { _prec_type = prec_type; }
     void setUseBatchOrthogonalization(bool enable) { _use_batch_orthogonalization = enable; }
+    
+    /**
+     * @brief Get the number of iterations from the last solve
+     * @return Number of iterations performed in the last solve call
+     */
+    size_t getLastIterations() const { return _last_iterations; }
 
     /**
      * @brief Setup matrix operator for subsequent solve operations
@@ -210,14 +260,17 @@ private:
     cublasHandle_t _cublas_handle;
     cusparseHandle_t _cusparse_handle;
 
-    // Matrix descriptors
+    // Matrix and vector descriptors
     cusparseSpMatDescr_t _mat_A;
-    cusparseDnVecDescr_t _vec_x, _vec_y, _vec_tmp;
-    cusparseSpSVDescr_t _spv_descr_L, _spv_descr_U;  // For triangular solves
-    
-    // Preconditioner descriptors
+    cusparseSpSVDescr_t _spv_descr_L, _spv_descr_U;
     cusparseSpMatDescr_t _mat_prec_L, _mat_prec_U;
-    cusparseDnVecDescr_t _vec_prec_x, _vec_prec_y;  // Dedicated vectors for preconditioner
+    
+    // DeviceVectorView objects for cuSPARSE operations
+    DeviceVectorView _view_x, _view_y;
+    DeviceVectorView _view_prec_x, _view_prec_y, _view_prec_tmp;
+    DeviceVectorView _view_d_tmp, _view_d_w;
+    DeviceVectorView _view_q_j, _view_q_j_plus_1;
+    DeviceVectorView _view_d_b, _view_d_x;
     
     // Algorithm parameters
     size_t _max_iter;
@@ -226,56 +279,30 @@ private:
     size_t _restart;
     PreconditionerType _prec_type;
     bool _use_batch_orthogonalization;
+    size_t _last_iterations;
     
-    // Setup state tracking
-    bool _is_operator_setup;     // Whether setupOperator() has been called
-    bool _is_ilu_setup;          // Whether setupILU() has been called
-    
-    // Device storage for matrix data
-    DeviceArray<int> _d_ia_A, _d_ja_A;     // Matrix A structure
-    DeviceArray<double> _d_va_A;           // Matrix A values
-    DeviceArray<int> _d_ia_L, _d_ja_L;     // L factor structure
-    DeviceArray<double> _d_va_L;           // L factor values
-    DeviceArray<int> _d_ia_U, _d_ja_U;     // U factor structure
-    DeviceArray<double> _d_va_U;           // U factor values
-    
-    // Device storage for RHS and solution vectors
-    DeviceArray<double> _d_b;              // Right-hand side vector
-    DeviceArray<double> _d_x;              // Solution vector
+    // Setup state
+    bool _is_operator_setup;
+    bool _is_ilu_setup;
+    size_t _n;
+    size_t _current_restart;
     
     // Matrix properties
     size_t _matrix_n, _matrix_nnz;
     size_t _ilu_nnz_L, _ilu_nnz_U;
-    int _index_base;  // 0-based or 1-based indexing (deduced from ia_A[0])
-    int _index_base_L, _index_base_U;  // Index bases for L and U factors
-
-    // Workspace arrays (device memory)
-    DeviceArray<double> _d_Q;           // Krylov basis vectors: size n * (_restart + 1)
-    DeviceArray<double> _d_tmp;         // Temporary vector: size n
-    DeviceArray<double> _d_w;           // Work vector for SpMV: size n
-    DeviceArray<double> _d_h_batch;     // Workspace for batched Gram-Schmidt coefficients
+    int _index_base, _index_base_L, _index_base_U;
     
-    // Host workspace arrays
-    std::vector<double> _h_c;           // Cosine values for Givens rotations: size _restart
-    std::vector<double> _h_s;           // Sine values for Givens rotations: size _restart
-    std::vector<double> _h_H;           // Hessenberg matrix: size _restart * _restart
+    // Device memory arrays
+    DeviceArray<int> _d_ia_A, _d_ja_A, _d_ia_L, _d_ja_L, _d_ia_U, _d_ja_U;
+    DeviceArray<double> _d_va_A, _d_va_L, _d_va_U;
+    DeviceArray<double> _d_b, _d_x;
+    DeviceArray<double> _d_Q, _d_tmp, _d_w, _d_prec_tmp;
+    DeviceArray<double> _d_g, _d_h_batch;
+    DeviceArray<char> _d_spv_buffer_L, _d_spv_buffer_U, _d_spmv_buffer;
     
-    // Pinned memory arrays (accessible from both host and device)
-    PinnedArray<double> _h_g;           // Residual vector for least squares (pinned): size _restart
-    
-    // Device arrays for GMRES algorithm
-    DeviceArray<double> _d_g;           // Device copy of residual vector: size _restart
-    
-    // Current problem size
-    size_t _n;
-    size_t _current_restart;
-    
-    // Buffer sizes for SpSV operations
-    DeviceArray<char> _d_spv_buffer_L;
-    DeviceArray<char> _d_spv_buffer_U;
-    
-    // Buffer for SpMV operations
-    DeviceArray<char> _d_spmv_buffer;
+    // Host memory arrays
+    std::vector<double> _h_c, _h_s;
+    PinnedArray<double> _h_g, _h_H;
     
     /**
      * @brief Initialize CUDA handles and resources
@@ -304,36 +331,30 @@ private:
 
     /**
      * @brief Solve the linear system Ax = b using GMRES (device interface)
-     * 
-     * Internal method that operates on device pointers.
-     * 
-     * @param d_b Right-hand side vector (device pointer)
-     * @param d_x Solution vector (device pointer, input: initial guess, output: solution)
-     * @return Convergence state
      */
-    State deviceSolve(const double* d_b, double* d_x);
+    State deviceSolve(const DeviceVectorView& d_b, DeviceVectorView& d_x);
     
     /**
      * @brief Compute initial residual and setup first Krylov vector
      */
-    double compute_initial_residual(const double* d_b, const double* d_x);
+    double compute_initial_residual(const DeviceVectorView& d_b, const DeviceVectorView& d_x);
 
     /**
      * @brief Apply matrix-vector product with preconditioning
      */
-    void apply_operator_with_preconditioning(const double* d_input, double* d_output);
+    void apply_operator_with_preconditioning(const DeviceVectorView& d_input, DeviceVectorView& d_output);
 
     /**
      * @brief Apply preconditioner (triangular solve using SpSV)
      */
-    void apply_preconditioner(const double* d_input, double* d_output);
+    void apply_preconditioner(const DeviceVectorView& d_input, DeviceVectorView& d_output);
 
     /**
      * @brief Perform one GMRES restart cycle
      */
-    State perform_restart_cycle(const double* d_b, double* d_x, 
+    State perform_restart_cycle(const DeviceVectorView& d_b, DeviceVectorView& d_x, 
                                double init_resid, size_t& iter, 
-                               double& resid, size_t& cycle_iterations);
+                               double& resid);
 
     /**
      * @brief Arnoldi process: build Krylov subspace and Hessenberg matrix
@@ -353,7 +374,7 @@ private:
     /**
      * @brief Update solution vector
      */
-    void update_solution(double* d_x, size_t j);
+    void update_solution(DeviceVectorView& d_x, size_t j);
 
     /**
      * @brief Check convergence criteria
@@ -366,7 +387,7 @@ private:
     void print_iteration_info(size_t iter, double resid, double init_resid) const;
 
     /**
-     * @brief Error checking macro for CUDA calls
+     * @brief Error checking functions for CUDA calls
      */
     void check_cuda_error(cudaError_t error, const char* message);
     void check_cublas_error(cublasStatus_t status, const char* message);

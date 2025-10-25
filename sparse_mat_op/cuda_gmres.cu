@@ -12,11 +12,6 @@ CudaGMRES::CudaGMRES()
     : _cublas_handle(nullptr)
     , _cusparse_handle(nullptr)
     , _mat_A(nullptr)
-    , _vec_x(nullptr)
-    , _vec_y(nullptr)
-    , _vec_tmp(nullptr)
-    , _vec_prec_x(nullptr)
-    , _vec_prec_y(nullptr)
     , _spv_descr_L(nullptr)
     , _spv_descr_U(nullptr)
     , _mat_prec_L(nullptr)
@@ -27,6 +22,7 @@ CudaGMRES::CudaGMRES()
     , _restart(20)
     , _prec_type(PreconditionerType::LEFT)
     , _use_batch_orthogonalization(true)
+    , _last_iterations(0)
     , _is_operator_setup(false)
     , _is_ilu_setup(false)
     , _matrix_n(0)
@@ -67,21 +63,17 @@ void CudaGMRES::cleanup_cuda()
     _d_Q.release();
     _d_tmp.release();
     _d_w.release();
+    _d_prec_tmp.release();
     _d_h_batch.release();
+    _h_H.release();
     _h_g.release();
     _d_g.release();
     _d_spv_buffer_L.release();
     _d_spv_buffer_U.release();
     _d_spmv_buffer.release();
-    // Free device constants
     
     // Destroy descriptors
     if (_mat_A) cusparseDestroySpMat(_mat_A);
-    if (_vec_x) cusparseDestroyDnVec(_vec_x);
-    if (_vec_y) cusparseDestroyDnVec(_vec_y);
-    if (_vec_tmp) cusparseDestroyDnVec(_vec_tmp);
-    if (_vec_prec_x) cusparseDestroyDnVec(_vec_prec_x);
-    if (_vec_prec_y) cusparseDestroyDnVec(_vec_prec_y);
     if (_spv_descr_L) cusparseSpSV_destroyDescr(_spv_descr_L);
     if (_spv_descr_U) cusparseSpSV_destroyDescr(_spv_descr_U);
     if (_mat_prec_L) cusparseDestroySpMat(_mat_prec_L);
@@ -105,14 +97,18 @@ void CudaGMRES::initialize_workspace(size_t n)
     _d_Q.resize(n * (_current_restart + 1));
     _d_tmp.resize(n);
     _d_w.resize(n);
+    _d_prec_tmp.resize(n);
     
     // Allocate host memory using std::vector
     _h_c.resize(_current_restart);
     _h_s.resize(_current_restart);
     
     // Allocate pinned memory using PinnedArray
-    _h_H.resize(_current_restart * _current_restart, 0.0);  // Initialize to zero
+    _h_H.resize(_current_restart * _current_restart);
     _h_g.resize(_current_restart);
+    
+    // Initialize _h_H to zero
+    std::fill(_h_H.data(), _h_H.data() + _h_H.size(), 0.0);
     
     // Allocate device memory for GMRES algorithm
     _d_g.resize(_current_restart);
@@ -198,13 +194,8 @@ void CudaGMRES::setupILU(size_t n,
 
 void CudaGMRES::setup_matrix_descriptor()
 {
-    // Destroy existing descriptors
+    // Destroy existing descriptors (handled by DeviceVector destructor)
     if (_mat_A) cusparseDestroySpMat(_mat_A);
-    if (_vec_x) cusparseDestroyDnVec(_vec_x);
-    if (_vec_y) cusparseDestroyDnVec(_vec_y);
-    if (_vec_tmp) cusparseDestroyDnVec(_vec_tmp);
-    if (_vec_prec_x) cusparseDestroyDnVec(_vec_prec_x);
-    if (_vec_prec_y) cusparseDestroyDnVec(_vec_prec_y);
     
     const double one = 1.0;
 
@@ -216,37 +207,44 @@ void CudaGMRES::setup_matrix_descriptor()
                          CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, index_base, CUDA_R_64F),
         "Failed to create matrix A descriptor");
     
-    // Create vector descriptors (will be updated with actual pointers during solve)
-    check_cusparse_error(
-        cusparseCreateDnVec(&_vec_x, _matrix_n, nullptr, CUDA_R_64F),
-        "Failed to create vector x descriptor");
-    check_cusparse_error(
-        cusparseCreateDnVec(&_vec_y, _matrix_n, nullptr, CUDA_R_64F),
-        "Failed to create vector y descriptor");
-    check_cusparse_error(
-        cusparseCreateDnVec(&_vec_tmp, _matrix_n, nullptr, CUDA_R_64F),
-        "Failed to create temporary vector descriptor");
-    check_cusparse_error(
-        cusparseCreateDnVec(&_vec_prec_x, _matrix_n, nullptr, CUDA_R_64F),
-        "Failed to create preconditioner x vector descriptor");
-    check_cusparse_error(
-        cusparseCreateDnVec(&_vec_prec_y, _matrix_n, nullptr, CUDA_R_64F),
-        "Failed to create preconditioner y vector descriptor");
-    size_t spmv_buffer_size = 0;
+    // Create vector descriptors using DeviceVectorView
+    _view_x.create(_matrix_n, nullptr);
+    _view_y.create(_matrix_n, nullptr);
+    _view_prec_x.create(_matrix_n, nullptr);
+    _view_prec_y.create(_matrix_n, nullptr);
+    _view_prec_tmp.create(_matrix_n, nullptr);
+    
+    // Create DeviceVectorView wrappers for temporary vectors
+    _view_d_tmp.create(_matrix_n, nullptr);
+    _view_d_w.create(_matrix_n, nullptr);
+    
+    // Create DeviceVectorView wrappers for Krylov vectors
+    _view_q_j.create(_matrix_n, nullptr);
+    _view_q_j_plus_1.create(_matrix_n, nullptr);
+    
+    // Create DeviceVectorView wrappers for RHS and solution vectors
+    _view_d_b.create(_matrix_n, nullptr);
+    _view_d_x.create(_matrix_n, nullptr);
+    
+    // Set up DeviceVectorView wrappers to point to allocated memory
+    _view_d_tmp.setData(_d_tmp.data());
+    _view_d_w.setData(_d_w.data());
+    _view_prec_tmp.setData(_d_prec_tmp.data());
+
     // Setup SpMV buffer
+    size_t spmv_buffer_size = 0;
     check_cusparse_error(
         cusparseSpMV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                               &one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
+                               &one, _mat_A, _view_x.descriptor(), &one, _view_y.descriptor(), CUDA_R_64F,
                                CUSPARSE_SPMV_ALG_DEFAULT, &spmv_buffer_size),
         "Failed to get SpMV buffer size");
 
-    // Ensure buffer can accommodate the requested size; grow only as needed
     _d_spmv_buffer.resize(spmv_buffer_size);
 
-    // Preprocess SpMV once so repeated calls can reuse internal optimizations
+    // Preprocess SpMV
     check_cusparse_error(
         cusparseSpMV_preprocess( _cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                 &one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
+                                 &one, _mat_A, _view_x.descriptor(), &one, _view_y.descriptor(), CUDA_R_64F,
                                  CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer.data() ),
         "Failed to preprocess SpMV" );
 }
@@ -299,30 +297,29 @@ void CudaGMRES::setup_ilu_descriptors()
     size_t buffer_size;
     check_cusparse_error(
         cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                               &one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                               &one, _mat_prec_L, _view_prec_x.descriptor(), _view_prec_tmp.descriptor(), CUDA_R_64F,
                                CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, &buffer_size),
         "Failed to get SpSV L buffer size");
     _d_spv_buffer_L.resize(buffer_size);
     
     check_cusparse_error(
         cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                               &one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                               &one, _mat_prec_U, _view_prec_tmp.descriptor(), _view_prec_y.descriptor(), CUDA_R_64F,
                                CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, &buffer_size),
         "Failed to get SpSV U buffer size");
     
-    // Ensure buffers can accommodate required sizes; grow only when needed
     _d_spv_buffer_U.resize(buffer_size);
     
     // Analyze the sparsity patterns for optimal performance
     check_cusparse_error(
         cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                             &one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                             &one, _mat_prec_L, _view_prec_x.descriptor(), _view_prec_tmp.descriptor(), CUDA_R_64F,
                              CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_spv_buffer_L.data()),
         "Failed to analyze SpSV L pattern");
     
     check_cusparse_error(
         cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                             &one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                             &one, _mat_prec_U, _view_prec_tmp.descriptor(), _view_prec_y.descriptor(), CUDA_R_64F,
                              CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_spv_buffer_U.data()),
         "Failed to analyze SpSV U pattern");
 }
@@ -345,8 +342,12 @@ State CudaGMRES::solve(const double* h_b, double* h_x)
     _d_b.copyFromHost(h_b, _matrix_n);
     _d_x.copyFromHost(h_x, _matrix_n);
     
+    // Set up DeviceVectorView wrappers
+    _view_d_b.setData(_d_b.data());
+    _view_d_x.setData(_d_x.data());
+    
     // Solve on device
-    State result = deviceSolve(_d_b.data(), _d_x.data());
+    State result = deviceSolve(_view_d_b, _view_d_x);
     
     // Copy solution back to host
     cudaMemcpy(h_x, _d_x.data(), _matrix_n * sizeof(double), cudaMemcpyDeviceToHost);
@@ -354,7 +355,7 @@ State CudaGMRES::solve(const double* h_b, double* h_x)
     return result;
 }
 
-State CudaGMRES::deviceSolve(const double* d_b, double* d_x)
+State CudaGMRES::deviceSolve(const DeviceVectorView& d_b, DeviceVectorView& d_x)
 {
     // Check if setup has been called
     if (!_is_operator_setup) {
@@ -366,6 +367,10 @@ State CudaGMRES::deviceSolve(const double* d_b, double* d_x)
         throw std::runtime_error("setupILU must be called before solve when using preconditioner");
     }
     
+    // Initialize iteration counter
+    size_t iter = 0;
+    _last_iterations = 0;
+    
     // Compute initial residual
     double init_resid = compute_initial_residual(d_b, d_x);
     if (init_resid < _abs_tol) {
@@ -373,15 +378,16 @@ State CudaGMRES::deviceSolve(const double* d_b, double* d_x)
     }
     
     double resid = init_resid;
-    for (size_t iter = 0; iter < _max_iter; ) {
-        size_t cycle_iterations;
-        State restart_state = perform_restart_cycle(d_b, d_x, init_resid, iter, resid, cycle_iterations);
+    for (iter = 0; iter < _max_iter; ) {
+        State restart_state = perform_restart_cycle(d_b, d_x, init_resid, iter, resid);
         
         if (restart_state == State::CONVERGED) {
+            _last_iterations = iter;
             return State::CONVERGED;
         }
         
         if (restart_state == State::MAX_ITER_REACHED) {
+            _last_iterations = iter;
             return State::MAX_ITER_REACHED;
         }
         
@@ -393,30 +399,30 @@ State CudaGMRES::deviceSolve(const double* d_b, double* d_x)
         resid = compute_initial_residual(d_b, d_x);
     }
     
+    _last_iterations = iter;
     return State::MAX_ITER_REACHED;
 }
 
-double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
+double CudaGMRES::compute_initial_residual(const DeviceVectorView& d_b, const DeviceVectorView& d_x)
 {
     const double one = 1.0, neg_one = -1.0;
     // Copy b to first Krylov vector: Q[:, 0] = b
-    check_cuda_error(cudaMemcpy(_d_Q.data(), d_b, _n * sizeof(double), cudaMemcpyDeviceToDevice),
+    check_cuda_error(cudaMemcpy(_d_Q.data(), d_b.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
                      "Failed to copy b to Q");
     
-    // Update vector descriptors
-    check_cusparse_error(cusparseDnVecSetValues(_vec_x, const_cast<double*>(d_x)), "Failed to set vec_x");
-    check_cusparse_error(cusparseDnVecSetValues(_vec_y, _d_Q.data()), "Failed to set vec_y");
+    // Set up _view_y to point to the first Krylov vector
+    _view_y.setData(_d_Q.data());
     
     // Compute r = b - Ax: Q[:, 0] = Q[:, 0] - A * x = b - A * x
     check_cusparse_error(
         cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                    &neg_one, _mat_A, _vec_x, &one, _vec_y, CUDA_R_64F,
+                    &neg_one, _mat_A, d_x.descriptor(), &one, _view_y.descriptor(), CUDA_R_64F,
                     CUSPARSE_SPMV_ALG_DEFAULT, _d_spmv_buffer.data()),
         "Failed to compute SpMV for residual");
 
     // Apply left preconditioning if needed
     if (_prec_type == PreconditionerType::LEFT) {
-        apply_preconditioner(_d_Q.data(), _d_tmp.data());
+        apply_preconditioner(_view_y, _view_d_tmp);
         check_cuda_error(cudaMemcpy(_d_Q.data(), _d_tmp.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
                          "Failed to copy preconditioned residual");
     }
@@ -428,23 +434,18 @@ double CudaGMRES::compute_initial_residual(const double* d_b, const double* d_x)
     return norm;
 }
 
-void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, double* d_output)
+void CudaGMRES::apply_operator_with_preconditioning(const DeviceVectorView& d_input, DeviceVectorView& d_output)
 {
     const double one = 1.0, zero = 0.0;
     void* spmv_buffer = _d_spmv_buffer.data();
     
-    // Update vector descriptors
-    check_cusparse_error(cusparseDnVecSetValues(_vec_x, const_cast<double*>(d_input)), "Failed to set input vector");
-    check_cusparse_error(cusparseDnVecSetValues(_vec_y, d_output), "Failed to set output vector");
-    
     switch (_prec_type) {
     case PreconditionerType::RIGHT:
         // Right preconditioning: A * M^{-1} * input
-        apply_preconditioner(d_input, _d_tmp.data());
-        check_cusparse_error(cusparseDnVecSetValues(_vec_x, _d_tmp.data()), "Failed to set preconditioned input");
+        apply_preconditioner(d_input, _view_d_tmp);
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                        &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
+                        &one, _mat_A, _view_d_tmp.descriptor(), &zero, d_output.descriptor(), CUDA_R_64F,
                         CUSPARSE_SPMV_ALG_DEFAULT, spmv_buffer),
             "Failed to compute SpMV with right preconditioning");
         break;
@@ -453,11 +454,11 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
         // Left preconditioning: M^{-1} * A * input
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                        &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
+                        &one, _mat_A, d_input.descriptor(), &zero, d_output.descriptor(), CUDA_R_64F,
                         CUSPARSE_SPMV_ALG_DEFAULT, spmv_buffer),
             "Failed to compute SpMV");
-        apply_preconditioner(d_output, _d_tmp.data());
-        check_cuda_error(cudaMemcpy(d_output, _d_tmp.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
+        apply_preconditioner(d_output, _view_d_tmp);
+        check_cuda_error(cudaMemcpy(d_output.data(), _d_tmp.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
                          "Failed to copy preconditioned result");
         break;
         
@@ -465,18 +466,18 @@ void CudaGMRES::apply_operator_with_preconditioning(const double* d_input, doubl
         // No preconditioning: A * input
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                        &one, _mat_A, _vec_x, &zero, _vec_y, CUDA_R_64F,
+                        &one, _mat_A, d_input.descriptor(), &zero, d_output.descriptor(), CUDA_R_64F,
                         CUSPARSE_SPMV_ALG_DEFAULT, spmv_buffer),
             "Failed to compute SpMV without preconditioning");
         break;
     }
 }
 
-void CudaGMRES::apply_preconditioner(const double* d_input, double* d_output)
+void CudaGMRES::apply_preconditioner(const DeviceVectorView& d_input, DeviceVectorView& d_output)
 {
     if (_prec_type == PreconditionerType::NONE || !_spv_descr_L || !_spv_descr_U) {
         // No preconditioner, just copy
-        check_cuda_error(cudaMemcpy(d_output, d_input, _n * sizeof(double), cudaMemcpyDeviceToDevice),
+        check_cuda_error(cudaMemcpy(d_output.data(), d_input.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
                          "Failed to copy input to output");
         return;
     }
@@ -485,29 +486,23 @@ void CudaGMRES::apply_preconditioner(const double* d_input, double* d_output)
     
     // Apply ILU preconditioning: M^{-1} = U^{-1} * L^{-1}
     // First solve: L * y = input (forward substitution)
-    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_x, const_cast<double*>(d_input)), "Failed to set preconditioner input vector");
-    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_y, _d_tmp.data()), "Failed to set preconditioner intermediate vector");
-    
     check_cusparse_error(
         cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &one, _mat_prec_L, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                          &one, _mat_prec_L, d_input.descriptor(), _view_prec_tmp.descriptor(), CUDA_R_64F,
                           CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L),
         "Failed to solve forward substitution (L * y = input)");
     
     // Second solve: U * output = y (backward substitution)
-    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_x, _d_tmp.data()), "Failed to set preconditioner intermediate as input");
-    check_cusparse_error(cusparseDnVecSetValues(_vec_prec_y, d_output), "Failed to set preconditioner output vector");
-    
     check_cusparse_error(
         cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &one, _mat_prec_U, _vec_prec_x, _vec_prec_y, CUDA_R_64F,
+                          &one, _mat_prec_U, _view_prec_tmp.descriptor(), d_output.descriptor(), CUDA_R_64F,
                           CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U),
         "Failed to solve backward substitution (U * output = y)");
 }
 
-State CudaGMRES::perform_restart_cycle(const double* d_b, double* d_x,
+State CudaGMRES::perform_restart_cycle(const DeviceVectorView& d_b, DeviceVectorView& d_x,
                                        double init_resid, size_t& iter,
-                                       double& resid, size_t& cycle_iterations)
+                                       double& resid)
 {
     // Normalize first Krylov vector
     const double inv_resid = 1.0 / resid;
@@ -522,18 +517,16 @@ State CudaGMRES::perform_restart_cycle(const double* d_b, double* d_x,
         // Apply Givens rotation on host
         givens_rotation(beta, j, resid);
         
-        print_iteration_info(iter, resid, init_resid);
+        // print_iteration_info(iter, resid, init_resid);
         
         // Check convergence
         if (check_convergence(resid, init_resid)) {
-            cycle_iterations = j + 1;
             solve_least_squares(j + 1);
             update_solution(d_x, j + 1);
             return State::CONVERGED;
         }
     }
     
-    cycle_iterations = j;
     solve_least_squares(j);
     update_solution(d_x, j);
     return (iter >= _max_iter) ? State::MAX_ITER_REACHED : State::RUNNING;
@@ -544,8 +537,12 @@ double CudaGMRES::arnoldi_iteration(size_t j)
     double* d_q_j = _d_Q.data() + j * _n;           // Current Krylov vector
     double* d_q_j_plus_1 = _d_Q.data() + (j + 1) * _n;  // Next Krylov vector
     
+    // Set up DeviceVectorView wrappers for Krylov vectors
+    _view_q_j.setData(d_q_j);
+    _view_q_j_plus_1.setData(d_q_j_plus_1);
+    
     // Apply operator: q_{j+1} = A * q_j (with preconditioning)
-    apply_operator_with_preconditioning(d_q_j, d_q_j_plus_1);
+    apply_operator_with_preconditioning(_view_q_j, _view_q_j_plus_1);
     
     // Modified Gram-Schmidt orthogonalization
     if (_use_batch_orthogonalization) {
@@ -675,7 +672,7 @@ void CudaGMRES::solve_least_squares(size_t j)
                 static_cast<int>(j), _h_H.data(), static_cast<int>(_current_restart), _h_g.data(), 1);
 }
 
-void CudaGMRES::update_solution(double* d_x, size_t j)
+void CudaGMRES::update_solution(DeviceVectorView& d_x, size_t j)
 {
     if (j == 0) return;
     
@@ -686,9 +683,6 @@ void CudaGMRES::update_solution(double* d_x, size_t j)
                      "Failed to copy g vector to device");
     
     // Compute solution update: delta_x = Q[:, 0:j] * g[0:j]
-    // Use GEMV: y = alpha * A * x + beta * y
-    // Here: _d_tmp = 1.0 * Q[:, 0:j] * g[0:j] + 0.0 * _d_tmp
-    
     check_cublas_error(
         cublasDgemv(_cublas_handle, CUBLAS_OP_N,
                    _n, j,
@@ -699,12 +693,12 @@ void CudaGMRES::update_solution(double* d_x, size_t j)
     
     if (_prec_type == PreconditionerType::RIGHT) {
         // For right preconditioning: x = x + M^{-1} * delta_x
-        apply_preconditioner(_d_tmp.data(), _d_w.data());
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_w.data(), 1, d_x, 1),
+        apply_preconditioner(_view_d_tmp, _view_d_w);
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_w.data(), 1, d_x.data(), 1),
                            "Failed to update solution with right preconditioning");
     } else {
         // For left or no preconditioning: x = x + delta_x
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_tmp.data(), 1, d_x, 1),
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_tmp.data(), 1, d_x.data(), 1),
                            "Failed to update solution");
     }
 }
