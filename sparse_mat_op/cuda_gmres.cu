@@ -25,6 +25,7 @@ CudaGMRES::CudaGMRES()
     , _last_iterations(0)
     , _is_operator_setup(false)
     , _is_ilu_setup(false)
+    , _is_ilu0_setup(false)
     , _matrix_n(0)
     , _matrix_nnz(0)
     , _ilu_nnz_L(0)
@@ -34,6 +35,8 @@ CudaGMRES::CudaGMRES()
     , _index_base_U(0)
     , _n(0)
     , _current_restart(0)
+    , _ilu0_info(nullptr)
+    , _mat_ilu0(nullptr)
 {
     initialize_cuda();
 }
@@ -51,6 +54,12 @@ void CudaGMRES::initialize_cuda()
 
         // Create cuSPARSE handle
         check_cusparse_error(cusparseCreate(&_cusparse_handle), "Failed to create cuSPARSE handle");
+        
+        // Create ILU0 info (using deprecated API - will be updated in future cuSPARSE versions)
+        #pragma GCC diagnostic push
+        #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+        check_cusparse_error(cusparseCreateCsrilu02Info(&_ilu0_info), "Failed to create ILU0 info");
+        #pragma GCC diagnostic pop
     } catch (...) {
         cleanup_cuda();
         throw;
@@ -72,16 +81,85 @@ void CudaGMRES::cleanup_cuda()
     _d_spv_buffer_U.release();
     _d_spmv_buffer.release();
     
+    // Free ILU0 memory
+    _d_ia_ilu0.release();
+    _d_ja_ilu0.release();
+    _d_va_ilu0.release();
+    _d_ilu0_buffer.release();
+    
     // Destroy descriptors
     if (_mat_A) cusparseDestroySpMat(_mat_A);
     if (_spv_descr_L) cusparseSpSV_destroyDescr(_spv_descr_L);
     if (_spv_descr_U) cusparseSpSV_destroyDescr(_spv_descr_U);
     if (_mat_prec_L) cusparseDestroySpMat(_mat_prec_L);
     if (_mat_prec_U) cusparseDestroySpMat(_mat_prec_U);
+    if (_mat_ilu0) cusparseDestroySpMat(_mat_ilu0);
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    if (_ilu0_info) cusparseDestroyCsrilu02Info(_ilu0_info);
+    #pragma GCC diagnostic pop
     
     // Destroy handles
     if (_cusparse_handle) cusparseDestroy(_cusparse_handle);
     if (_cublas_handle) cublasDestroy(_cublas_handle);
+}
+
+void CudaGMRES::cleanup_ilu()
+{
+    // Clean up regular ILU resources
+    _d_ia_L.release();
+    _d_ja_L.release();
+    _d_va_L.release();
+    _d_ia_U.release();
+    _d_ja_U.release();
+    _d_va_U.release();
+    _d_spv_buffer_L.release();
+    _d_spv_buffer_U.release();
+    
+    if (_mat_prec_L) {
+        cusparseDestroySpMat(_mat_prec_L);
+        _mat_prec_L = nullptr;
+    }
+    if (_mat_prec_U) {
+        cusparseDestroySpMat(_mat_prec_U);
+        _mat_prec_U = nullptr;
+    }
+    if (_spv_descr_L) {
+        cusparseSpSV_destroyDescr(_spv_descr_L);
+        _spv_descr_L = nullptr;
+    }
+    if (_spv_descr_U) {
+        cusparseSpSV_destroyDescr(_spv_descr_U);
+        _spv_descr_U = nullptr;
+    }
+    
+    _is_ilu_setup = false;
+    _ilu_nnz_L = 0;
+    _ilu_nnz_U = 0;
+}
+
+void CudaGMRES::cleanup_ilu0()
+{
+    // Clean up ILU0 resources
+    _d_ia_ilu0.release();
+    _d_ja_ilu0.release();
+    _d_va_ilu0.release();
+    _d_ilu0_buffer.release();
+    
+    if (_mat_ilu0) {
+        cusparseDestroySpMat(_mat_ilu0);
+        _mat_ilu0 = nullptr;
+    }
+    if (_spv_descr_L) {
+        cusparseSpSV_destroyDescr(_spv_descr_L);
+        _spv_descr_L = nullptr;
+    }
+    if (_spv_descr_U) {
+        cusparseSpSV_destroyDescr(_spv_descr_U);
+        _spv_descr_U = nullptr;
+    }
+    
+    _is_ilu0_setup = false;
 }
 
 void CudaGMRES::initialize_workspace(size_t n)
@@ -154,6 +232,9 @@ void CudaGMRES::setupILU(size_t n,
     if (!_is_operator_setup || _matrix_n != n) {
         throw std::runtime_error("setupOperator must be called first with the same matrix size");
     }
+    
+    // Disable ILU0 setup if it was previously active
+    cleanup_ilu0();
     
     // Calculate number of non-zeros for L and U factors and deduce index bases
     size_t nnz_L = 0;
@@ -320,6 +401,149 @@ void CudaGMRES::setup_ilu_descriptors()
         "Failed to analyze SpSV U pattern");
 }
 
+void CudaGMRES::setupGPUILU0()
+{
+    if (!_is_operator_setup) {
+        throw std::runtime_error("setupOperator must be called before setupGPUILU0");
+    }
+    
+    // Disable regular ILU setup if it was previously active
+    cleanup_ilu();
+    
+    // Copy matrix A data to ILU0 arrays (will be modified in-place)
+    _d_ia_ilu0.resize(_matrix_n + 1);
+    _d_ja_ilu0.resize(_matrix_nnz);
+    _d_va_ilu0.resize(_matrix_nnz);
+    
+    // Copy matrix A to ILU0 storage
+    check_cuda_error(cudaMemcpy(_d_ia_ilu0.data(), _d_ia_A.data(), (_matrix_n + 1) * sizeof(int), cudaMemcpyDeviceToDevice),
+                     "Failed to copy IA array for ILU0");
+    check_cuda_error(cudaMemcpy(_d_ja_ilu0.data(), _d_ja_A.data(), _matrix_nnz * sizeof(int), cudaMemcpyDeviceToDevice),
+                     "Failed to copy JA array for ILU0");
+    check_cuda_error(cudaMemcpy(_d_va_ilu0.data(), _d_va_A.data(), _matrix_nnz * sizeof(double), cudaMemcpyDeviceToDevice),
+                     "Failed to copy VA array for ILU0");
+    
+    // Get buffer size for ILU0 factorization
+    int buffer_size;
+    cusparseMatDescr_t descr_A;
+    check_cusparse_error(cusparseCreateMatDescr(&descr_A), "Failed to create matrix descriptor for ILU0");
+    check_cusparse_error(cusparseSetMatType(descr_A, CUSPARSE_MATRIX_TYPE_GENERAL), "Failed to set matrix type");
+    check_cusparse_error(cusparseSetMatIndexBase(descr_A, (_index_base == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE), 
+                         "Failed to set matrix index base");
+    
+    // Use deprecated ILU0 API (will be updated in future cuSPARSE versions)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    
+    check_cusparse_error(
+        cusparseDcsrilu02_bufferSize(_cusparse_handle, _matrix_n, _matrix_nnz,
+                                    descr_A, _d_va_ilu0.data(), _d_ia_ilu0.data(), _d_ja_ilu0.data(),
+                                    _ilu0_info, &buffer_size),
+        "Failed to get ILU0 buffer size");
+    
+    // Allocate buffer for ILU0
+    _d_ilu0_buffer.resize(buffer_size);
+    
+    // Analyze sparsity pattern
+    check_cusparse_error(
+        cusparseDcsrilu02_analysis(_cusparse_handle, _matrix_n, _matrix_nnz,
+                                  descr_A, _d_va_ilu0.data(), _d_ia_ilu0.data(), _d_ja_ilu0.data(),
+                                  _ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL, _d_ilu0_buffer.data()),
+        "Failed to analyze ILU0 sparsity pattern");
+    
+    // Check for structural singularity
+    int structural_zero;
+    cusparseStatus_t status = cusparseXcsrilu02_zeroPivot(_cusparse_handle, _ilu0_info, &structural_zero);
+    if (status == CUSPARSE_STATUS_ZERO_PIVOT) {
+        std::cerr << "Warning: Structural zero found at index " << structural_zero << " during ILU0 analysis" << std::endl;
+    }
+    
+    // Perform ILU0 factorization
+    check_cusparse_error(
+        cusparseDcsrilu02(_cusparse_handle, _matrix_n, _matrix_nnz,
+                         descr_A, _d_va_ilu0.data(), _d_ia_ilu0.data(), _d_ja_ilu0.data(),
+                         _ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL, _d_ilu0_buffer.data()),
+        "Failed to perform ILU0 factorization");
+    
+    // Check for numerical singularity
+    int numerical_zero;
+    status = cusparseXcsrilu02_zeroPivot(_cusparse_handle, _ilu0_info, &numerical_zero);
+    if (status == CUSPARSE_STATUS_ZERO_PIVOT) {
+        std::cerr << "Warning: Numerical zero found at index " << numerical_zero << " during ILU0 factorization" << std::endl;
+    }
+    
+    #pragma GCC diagnostic pop
+    
+    // Clean up temporary descriptor
+    cusparseDestroyMatDescr(descr_A);
+    
+    // Setup ILU0 descriptors for triangular solves
+    setup_ilu0_descriptors();
+    
+    _is_ilu0_setup = true;
+}
+
+void CudaGMRES::setup_ilu0_descriptors()
+{
+    if (_prec_type == PreconditionerType::NONE) {
+        return; // No preconditioner setup needed
+    }
+    
+    // Destroy existing descriptors
+    if (_mat_ilu0) cusparseDestroySpMat(_mat_ilu0);
+    if (_spv_descr_L) cusparseSpSV_destroyDescr(_spv_descr_L);
+    if (_spv_descr_U) cusparseSpSV_destroyDescr(_spv_descr_U);
+    
+    const double one = 1.0;
+    
+    // Create ILU0 matrix descriptor
+    cusparseIndexBase_t index_base = (_index_base == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE;
+    check_cusparse_error(
+        cusparseCreateCsr(&_mat_ilu0, _matrix_n, _matrix_n, _matrix_nnz,
+                         _d_ia_ilu0.data(), _d_ja_ilu0.data(), _d_va_ilu0.data(),
+                         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, index_base, CUDA_R_64F),
+        "Failed to create ILU0 matrix descriptor");
+    
+    // Create SpSV descriptors for L and U factors
+    check_cusparse_error(cusparseSpSV_createDescr(&_spv_descr_L), "Failed to create SpSV L descriptor for ILU0");
+    check_cusparse_error(cusparseSpSV_createDescr(&_spv_descr_U), "Failed to create SpSV U descriptor for ILU0");
+    
+    // Setup buffer sizes for triangular solves
+    size_t buffer_size_L, buffer_size_U;
+    
+    // L solve: lower triangular with unit diagonal
+    check_cusparse_error(
+        cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                               &one, _mat_ilu0, _view_prec_x.descriptor(), _view_prec_tmp.descriptor(), CUDA_R_64F,
+                               CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, &buffer_size_L),
+        "Failed to get SpSV L buffer size for ILU0");
+    
+    // U solve: upper triangular with non-unit diagonal  
+    check_cusparse_error(
+        cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                               &one, _mat_ilu0, _view_prec_tmp.descriptor(), _view_prec_y.descriptor(), CUDA_R_64F,
+                               CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, &buffer_size_U),
+        "Failed to get SpSV U buffer size for ILU0");
+    
+    // Allocate buffers
+    _d_spv_buffer_L.resize(buffer_size_L);
+    _d_spv_buffer_U.resize(buffer_size_U);
+    
+    // Analyze L solve
+    check_cusparse_error(
+        cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                             &one, _mat_ilu0, _view_prec_x.descriptor(), _view_prec_tmp.descriptor(), CUDA_R_64F,
+                             CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_spv_buffer_L.data()),
+        "Failed to analyze SpSV L pattern for ILU0");
+    
+    // Analyze U solve
+    check_cusparse_error(
+        cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                             &one, _mat_ilu0, _view_prec_tmp.descriptor(), _view_prec_y.descriptor(), CUDA_R_64F,
+                             CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_spv_buffer_U.data()),
+        "Failed to analyze SpSV U pattern for ILU0");
+}
+
 State CudaGMRES::solve(const double* h_b, double* h_x)
 {
     // Check if setup has been called
@@ -328,8 +552,8 @@ State CudaGMRES::solve(const double* h_b, double* h_x)
     }
     
     // Check if ILU is required but not setup
-    if (_prec_type != PreconditionerType::NONE && !_is_ilu_setup) {
-        throw std::runtime_error("setupILU must be called before solve when using preconditioner");
+    if (_prec_type != PreconditionerType::NONE && !_is_ilu_setup && !_is_ilu0_setup) {
+        throw std::runtime_error("setupILU or setupGPUILU0 must be called before solve when using preconditioner");
     }
     
     // Copy host data to device
@@ -357,8 +581,8 @@ State CudaGMRES::deviceSolve(const DeviceVectorView& d_b, DeviceVectorView& d_x)
     }
     
     // Check if ILU is required but not setup
-    if (_prec_type != PreconditionerType::NONE && !_is_ilu_setup) {
-        throw std::runtime_error("setupILU must be called before solve when using preconditioner");
+    if (_prec_type != PreconditionerType::NONE && !_is_ilu_setup && !_is_ilu0_setup) {
+        throw std::runtime_error("setupILU or setupGPUILU0 must be called before solve when using preconditioner");
     }
     
     // Initialize iteration counter
@@ -476,20 +700,37 @@ void CudaGMRES::apply_preconditioner(const DeviceVectorView& d_input, DeviceVect
     
     const double one = 1.0;
     
-    // Apply ILU preconditioning: M^{-1} = U^{-1} * L^{-1}
-    // First solve: L * y = input (forward substitution)
-    check_cusparse_error(
-        cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &one, _mat_prec_L, d_input.descriptor(), _view_prec_tmp.descriptor(), CUDA_R_64F,
-                          CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L),
-        "Failed to solve forward substitution (L * y = input)");
-    
-    // Second solve: U * output = y (backward substitution)
-    check_cusparse_error(
-        cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &one, _mat_prec_U, _view_prec_tmp.descriptor(), d_output.descriptor(), CUDA_R_64F,
-                          CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U),
-        "Failed to solve backward substitution (U * output = y)");
+    if (_mat_ilu0) {
+        // ILU0 case: use single matrix with implicit L and U factors
+        // First solve: L * y = input (forward substitution with unit diagonal)
+        check_cusparse_error(
+            cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                              &one, _mat_ilu0, d_input.descriptor(), _view_prec_tmp.descriptor(), CUDA_R_64F,
+                              CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L),
+            "Failed to solve forward substitution (L * y = input) for ILU0");
+        
+        // Second solve: U * output = y (backward substitution with non-unit diagonal)
+        check_cusparse_error(
+            cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                              &one, _mat_ilu0, _view_prec_tmp.descriptor(), d_output.descriptor(), CUDA_R_64F,
+                              CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U),
+            "Failed to solve backward substitution (U * output = y) for ILU0");
+    } else {
+        // Separate L/U matrices case
+        // First solve: L * y = input (forward substitution)
+        check_cusparse_error(
+            cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                              &one, _mat_prec_L, d_input.descriptor(), _view_prec_tmp.descriptor(), CUDA_R_64F,
+                              CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L),
+            "Failed to solve forward substitution (L * y = input)");
+        
+        // Second solve: U * output = y (backward substitution)
+        check_cusparse_error(
+            cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                              &one, _mat_prec_U, _view_prec_tmp.descriptor(), d_output.descriptor(), CUDA_R_64F,
+                              CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U),
+            "Failed to solve backward substitution (U * output = y)");
+    }
 }
 
 State CudaGMRES::perform_restart_cycle(const DeviceVectorView& d_b, DeviceVectorView& d_x,

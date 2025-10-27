@@ -241,6 +241,18 @@ public:
                   const int* h_ia_U, const int* h_ja_U, const double* h_va_U);
 
     /**
+     * @brief Setup ILU0 preconditioner using GPU-based factorization
+     * 
+     * This method computes ILU0 factorization directly on GPU using cuSPARSE csrilu02.
+     * The matrix A must be already setup via setupOperator() before calling this function.
+     * The factorization is performed in-place on a copy of matrix A.
+     * 
+     * Note: This is more efficient than setupILU() for ILU0 since it avoids host-device transfers
+     * and uses GPU-optimized factorization algorithms.
+     */
+    void setupGPUILU0();
+
+    /**
      * @brief Solve the linear system Ax = b using GMRES (host interface)
      * 
      * This method provides a host-based interface for users without CUDA experience.
@@ -265,6 +277,13 @@ private:
     cusparseSpSVDescr_t _spv_descr_L, _spv_descr_U;
     cusparseSpMatDescr_t _mat_prec_L, _mat_prec_U;
     
+    // ILU0-specific descriptors (using deprecated API - will be updated in future cuSPARSE versions)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    csrilu02Info_t _ilu0_info;
+    #pragma GCC diagnostic pop
+    cusparseSpMatDescr_t _mat_ilu0;
+    
     // DeviceVectorView objects for cuSPARSE operations
     DeviceVectorView _view_prec_x, _view_prec_y, _view_prec_tmp;
     DeviceVectorView _view_d_w;
@@ -283,6 +302,7 @@ private:
     // Setup state
     bool _is_operator_setup;
     bool _is_ilu_setup;
+    bool _is_ilu0_setup;
     int _n;
     int _current_restart;
     
@@ -299,6 +319,11 @@ private:
     DeviceArray<double> _d_g, _d_h_batch;
     DeviceArray<char> _d_spv_buffer_L, _d_spv_buffer_U, _d_spmv_buffer;
     
+    // ILU0-specific arrays for GPU factorization
+    DeviceArray<int> _d_ia_ilu0, _d_ja_ilu0;
+    DeviceArray<double> _d_va_ilu0;
+    DeviceArray<char> _d_ilu0_buffer;
+    
     // Host memory arrays
     std::vector<double> _h_c, _h_s;
     PinnedArray<double> _h_g, _h_H;
@@ -312,6 +337,16 @@ private:
      * @brief Cleanup CUDA resources
      */
     void cleanup_cuda();
+    
+    /**
+     * @brief Cleanup regular ILU resources
+     */
+    void cleanup_ilu();
+    
+    /**
+     * @brief Cleanup ILU0 resources
+     */
+    void cleanup_ilu0();
 
     /**
      * @brief Initialize workspace memory for given problem size
@@ -327,6 +362,11 @@ private:
      * @brief Setup ILU preconditioner descriptors
      */
     void setup_ilu_descriptors();
+    
+    /**
+     * @brief Setup ILU0 descriptors for GPU factorization
+     */
+    void setup_ilu0_descriptors();
 
     /**
      * @brief Solve the linear system Ax = b using GMRES (device interface)
