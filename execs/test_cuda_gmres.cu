@@ -354,15 +354,15 @@ int main( int argc, char** argv )
 
         // Generate random initial guess
         std::vector<double> x_host( n, 0.0 );
-        std::random_device rd;
-        std::mt19937 gen( rd() );
-        std::uniform_real_distribution<double> dis( -0.1, 0.1 );
-        for ( size_t i = 0; i < n; ++i )
-        {
-            x_host[i] = dis( gen );
-        }
+        // std::random_device rd;
+        // std::mt19937 gen( rd() );
+        // std::uniform_real_distribution<double> dis( -0.1, 0.1 );
+        // for ( size_t i = 0; i < n; ++i )
+        // {
+        //     x_host[i] = dis( gen );
+        // }
 
-        std::cout << "Generated random initial guess" << std::endl;
+        // std::cout << "Generated random initial guess" << std::endl;
 
         // Create and configure GMRES solver
         CudaGMRES solver;
