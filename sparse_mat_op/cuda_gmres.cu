@@ -753,7 +753,7 @@ State CudaGMRES::perform_restart_cycle(const DeviceVectorView& d_b, DeviceVector
         ++iter;
         ++j;
 
-        // print_iteration_info(iter, resid, init_resid);
+        print_iteration_info(iter, resid, init_resid);
 
         if (check_convergence(resid, init_resid))
         {

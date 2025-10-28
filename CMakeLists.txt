@@ -49,8 +49,11 @@ option(USE_CUDSS "Use cudss library for direct solver. Note that USE_CUDA must b
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(ENABLE_TESTS "Enable building tests and downloading test data" ON)
 option(ENABLE_DATA_DOWNLOADS "Download SuiteSparse matrices into the build tree" ON)
+option(BUILD_DATA "Build data subdirectory" OFF)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH
+  "${CMAKE_SOURCE_DIR}/cmake"
+  "${CMAKE_SOURCE_DIR}/cmake/modules")
 
 include(FetchContent)
 include(cmake/SimdOptions.cmake)
@@ -122,7 +125,7 @@ find_package(OpenMP REQUIRED)
 
 find_package(LAPACK REQUIRED)
 
-if(ENABLE_TESTS OR ENABLE_DATA_DOWNLOADS)
+if(ENABLE_TESTS OR ENABLE_DATA_DOWNLOADS OR BUILD_DATA)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   message(STATUS "Using Python interpreter: ${Python3_EXECUTABLE}")
 
@@ -173,8 +176,8 @@ if(USE_CUDA)
   set(CMAKE_CUDA_STANDARD_REQUIRED ON)
   set(CMAKE_CUDA_EXTENSIONS OFF)
   
-  # Find CUDA toolkit (optional but recommended for better error messages)
-  find_package(CUDAToolkit REQUIRED)
+  # Find CUDA (handles both standard CUDA Toolkit and NVIDIA HPC SDK)
+  find_package(CUDAHPC REQUIRED)
   
   # Set CUDA architectures if not already set
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
@@ -214,7 +217,7 @@ add_subdirectory(mkl_wrapper)
 add_subdirectory(reordering)
 add_subdirectory(factorization)
 add_subdirectory(solver)
-if(ENABLE_DATA_DOWNLOADS)
+if(ENABLE_DATA_DOWNLOADS OR BUILD_DATA)
   add_subdirectory(data)
 endif()
 
