@@ -40,7 +40,11 @@ option(USE_CUDSS "Use cudss library for direct solver. Note that USE_CUDA must b
 
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 
+option(BUILD_DATA "Build data subdirectory" OFF)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
+
 # Include the init module
 include(MorseInit)
 
@@ -156,8 +160,8 @@ if(USE_CUDA)
   set(CMAKE_CUDA_STANDARD_REQUIRED ON)
   set(CMAKE_CUDA_EXTENSIONS OFF)
   
-  # Find CUDA toolkit (optional but recommended for better error messages)
-  find_package(CUDAToolkit REQUIRED)
+  # Find CUDA (handles both standard CUDA Toolkit and NVIDIA HPC SDK)
+  find_package(CUDAHPC REQUIRED)
   
   # Set CUDA architectures if not already set
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
@@ -193,7 +197,10 @@ add_subdirectory(sparse_mat_op)
 add_subdirectory(mkl_wrapper)
 add_subdirectory(reordering)
 add_subdirectory(factorization)
-add_subdirectory(data)
+
+if(BUILD_DATA)
+  add_subdirectory(data)
+endif()
 
 add_subdirectory(execs)
 enable_testing()
