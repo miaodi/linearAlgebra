@@ -44,211 +44,318 @@ template void symPermute<int, int, double>(const int rows, const int base,
                                            double *permed_av);
 
 template <typename ROWTYPE, typename COLTYPE>
-COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()(
-    const TriangularMatrix TS, const COLTYPE nodes, ROWTYPE const *ai,
-    COLTYPE const *aj, COLTYPE *perm, COLTYPE *prefix) {
-  _degrees.resize(nodes);
-  const auto base = ai[0];
-  const auto nnz = ai[nodes] - base;
+template <TriangularMatrix TS>
+COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
+                                                  ROWTYPE const* ai,
+                                                  COLTYPE const* aj,
+                                                  COLTYPE* perm,
+                                                  COLTYPE* prefix,
+                                                  bool has_diagonal )
+{
+    _degrees.resize( nodes );
+    const auto base = ai[0];
+    const auto nnz = ai[nodes] - base;
 
-  _t_ai.resize(nodes + 1);
-  _t_aj.resize(nnz);
-  COLTYPE processed = 0;
-  COLTYPE level = 0;
+    _t_ai.resize( nodes + 1 );
+    _t_aj.resize( nnz );
+    COLTYPE processed = 0;
+    COLTYPE level = 0;
 
-  //   reverse graph to get out edges
-  ParallelTranspose2(nodes, nodes, base, ai, aj, (double *)nullptr,
-                     _t_ai.data(), _t_aj.data(), (double *)nullptr);
+    // reverse graph to get out edges
+    ParallelTranspose2( nodes, nodes, base, ai, aj, (double*)nullptr,
+                        _t_ai.data(), _t_aj.data(), (double*)nullptr );
 
-  if (TS == TriangularMatrix::L) {
-    _start = 0;
-    _end = nodes;
-    _inc = 1;
-  } else {
-    _start = nodes - 1;
-    _end = -1;
-    _inc = -1;
-  }
-  prefix[0] = base;
+    prefix[0] = base;
 
-  //   node in-degrees and prepare level 0 nodes
-  for (COLTYPE i = _start; i != _end; i += _inc) {
-    _degrees[i] = ai[i + 1] - ai[i] - (TS == TriangularMatrix::U);
-    if (_degrees[i] == 0) {
-      perm[processed++] = i + base;
-    }
-  }
-
-  prefix[1] = processed + base;
-
-  //   process levels
-  while (processed != nodes) {
-    for (COLTYPE i = prefix[level] - base; i < prefix[level + 1] - base; i++) {
-      const auto idx = perm[i] - base;
-      for (auto j = _t_ai[idx] - base + (TS == TriangularMatrix::U);
-           j < _t_ai[idx + 1] - base; j++) {
-        if (--_degrees[_t_aj[j] - base] == 0) {
-          perm[processed++] = _t_aj[j];
-        }
-      }
-    }
-    prefix[++level + 1] = processed + base;
-  }
-
-  return level + 1;
-}
-
-template <typename ROWTYPE, typename COLTYPE>
-COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()(
-    const TriangularMatrix TS, const COLTYPE nodes, ROWTYPE const *ai,
-    COLTYPE const *aj, COLTYPE *perm, COLTYPE *prefix) {
-  if (_degrees_size < nodes) {
-    _degrees.reset(new std::atomic<COLTYPE>[nodes]);
-    _degrees_size = nodes;
-  }
-  const auto base = ai[0];
-  const auto nnz = ai[nodes] - base;
-
-  _t_ai.resize(nodes + 1);
-  _t_aj.resize(nnz);
-  COLTYPE processed = 0;
-  COLTYPE level = 0;
-
-  //   reverse graph
-  ParallelTranspose2(nodes, nodes, base, ai, aj, (double *)nullptr,
-                     _t_ai.data(), _t_aj.data(), (double *)nullptr);
-
-  if (TS == TriangularMatrix::L) {
-    _start = 0;
-    _end = nodes;
-    _inc = 1;
-  } else {
-    _start = nodes - 1;
-    _end = -1;
-    _inc = -1;
-  }
-  prefix[0] = base;
-  _threads_prefix[0] = base;
-//   node degrees and prepare level 0 nodes
-#pragma omp parallel num_threads(_nthreads)
-  {
-
-    const int thread_id = omp_get_thread_num();
-    _threads_nodes[thread_id].clear();
-    _threads_prefix[thread_id + 1] = 0;
-    auto _start_thread = _start + thread_id * (_end - _start) / _nthreads;
-    auto _end_thread = (_start + (thread_id + 1) * (_end - _start) / _nthreads);
-    for (COLTYPE i = _start_thread; i != _end_thread; i += _inc) {
-      _degrees[i].store(ai[i + 1] - ai[i] - (TS == TriangularMatrix::U),
-                        std::memory_order_relaxed);
-      if (_degrees[i].load(std::memory_order_relaxed) == 0) {
-        _threads_nodes[thread_id].push_back(i + base);
-      }
-    }
-    _threads_prefix[thread_id + 1] = _threads_nodes[thread_id].size();
-#pragma omp barrier
-#pragma omp single
+    auto degree_for = [&]( const COLTYPE i )
     {
-      for (size_t i = 1; i < _threads_prefix.size(); i++) {
-        _threads_prefix[i] += _threads_prefix[i - 1];
-      }
-      prefix[1] = _threads_prefix[_nthreads];
-      processed = _threads_prefix[_nthreads] - base;
-    }
-    auto thread_start = _threads_prefix[thread_id] - base;
-    for (const auto i : _threads_nodes[thread_id]) {
-      perm[thread_start++] = i;
-    }
-
-#pragma omp barrier
-#pragma omp single
-    { _threads_prefix[0] = _threads_prefix[_nthreads]; }
-    while (processed != nodes) {
-      _threads_prefix[thread_id + 1] = 0;
-      _threads_nodes[thread_id].clear();
-      auto _start_thread =
-          prefix[level] - base +
-          (prefix[level + 1] - prefix[level]) * thread_id / _nthreads;
-      auto _end_thread =
-          prefix[level] - base +
-          (prefix[level + 1] - prefix[level]) * (thread_id + 1) / _nthreads;
-
-      for (COLTYPE i = _start_thread; i < _end_thread; i++) {
-        const auto idx = perm[i] - base;
-        for (auto j = _t_ai[idx] - base + (TS == TriangularMatrix::U);
-             j < _t_ai[idx + 1] - base; j++) {
-          if (_degrees[_t_aj[j] - base].fetch_sub(
-                  1, std::memory_order_relaxed) == 1) {
-            _threads_nodes[thread_id].push_back(_t_aj[j]);
-          }
+        COLTYPE degree = ai[i + 1] - ai[i];
+        if ( has_diagonal && degree > 0 )
+        {
+            --degree;
         }
-      }
-      _threads_prefix[thread_id + 1] = _threads_nodes[thread_id].size();
-#pragma omp barrier
-#pragma omp single
-      {
-        for (size_t i = 1; i < _threads_prefix.size(); i++) {
-          _threads_prefix[i] += _threads_prefix[i - 1];
-        }
-        prefix[++level + 1] = _threads_prefix[_nthreads];
-        processed = _threads_prefix[_nthreads] - base;
-      }
-      auto thread_start = _threads_prefix[thread_id] - base;
-      for (const auto i : _threads_nodes[thread_id]) {
-        perm[thread_start++] = i;
-      }
-#pragma omp barrier
-#pragma omp single
-      { _threads_prefix[0] = _threads_prefix[_nthreads]; }
-    }
-  }
+        return degree;
+    };
 
-  return level + 1;
+    for ( COLTYPE i = 0; i < nodes; ++i )
+    {
+        _degrees[i] = degree_for( i );
+        if ( _degrees[i] == 0 )
+        {
+            perm[processed++] = i + base;
+        }
+    }
+
+    prefix[1] = processed + base;
+
+    auto process_row = [&]( const COLTYPE idx, const auto& handle_neighbor )
+    {
+        auto row_start = _t_ai[idx] - base;
+        auto row_end = _t_ai[idx + 1] - base;
+        if ( has_diagonal && row_end > row_start )
+        {
+            if constexpr ( TS == TriangularMatrix::U )
+            {
+                ++row_start;
+            }
+            else
+            {
+                --row_end;
+            }
+        }
+        for ( auto pos = row_start; pos < row_end; ++pos )
+        {
+            handle_neighbor( _t_aj[pos] );
+        }
+    };
+
+    // process levels
+    while ( processed != nodes )
+    {
+        for ( COLTYPE i = prefix[level] - base; i < prefix[level + 1] - base; ++i )
+        {
+            const auto idx = perm[i] - base;
+            process_row( idx,
+                         [&]( const COLTYPE neighbor )
+                         {
+                             if ( --_degrees[neighbor - base] == 0 )
+                             {
+                                 perm[processed++] = neighbor;
+                             }
+                         } );
+        }
+        ++level;
+        prefix[level + 1] = processed + base;
+    }
+
+    return level + 1;
 }
 
 template <typename ROWTYPE, typename COLTYPE>
-COLTYPE TopologicalSort2<ROWTYPE, COLTYPE>::operator()(
-    const TriangularMatrix TS, const COLTYPE nodes, ROWTYPE const *ai,
-    COLTYPE const *aj, COLTYPE *perm, COLTYPE *prefix) {
-  _degrees.resize(nodes);
-  std::fill(_degrees.begin(), _degrees.end(), 0);
-
-  const auto base = ai[0];
-
-  COLTYPE start, end, inc;
-  if (TS == L) {
-    start = 0;
-    end = nodes;
-    inc = 1;
-  } else {
-    start = nodes - 1;
-    end = -1;
-    inc = -1;
-  }
-
-  COLTYPE level = 0;
-  for (COLTYPE i = start; i != end; i += inc) {
-    for (auto j = ai[i] - base + (TS == TriangularMatrix::U);
-         j < ai[i + 1] - base; j++) {
-      _degrees[i] = std::max(_degrees[i], _degrees[aj[j] - base] + 1);
+template <TriangularMatrix TS>
+COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
+                                                    ROWTYPE const* ai,
+                                                    COLTYPE const* aj,
+                                                    COLTYPE* perm,
+                                                    COLTYPE* prefix,
+                                                    bool has_diagonal )
+{
+    if ( _degrees_size < nodes )
+    {
+        _degrees.reset( new std::atomic<COLTYPE>[nodes] );
+        _degrees_size = nodes;
     }
-    level = std::max(level, _degrees[i] + 1);
-  }
-  std::fill(prefix, prefix + level + 1, 0);
-  prefix[0] = base;
-  for (COLTYPE i = 0; i < nodes; i++) {
-    prefix[_degrees[i] + 1]++;
-  }
-  std::inclusive_scan(prefix, prefix + level + 1, prefix);
+    const auto base = ai[0];
+    const auto nnz = ai[nodes] - base;
 
-  for (COLTYPE i = 0; i < nodes; i++) {
-    perm[prefix[_degrees[i]]++ - base] = i + base;
-  }
-  for (COLTYPE i = level; i > 0; i--) {
-    prefix[i] = prefix[i - 1];
-  }
-  prefix[0] = base;
-  return level;
+    _t_ai.resize( nodes + 1 );
+    _t_aj.resize( nnz );
+    COLTYPE processed = 0;
+    COLTYPE level = 0;
+
+    // reverse graph
+    ParallelTranspose2( nodes, nodes, base, ai, aj, (double*)nullptr,
+                        _t_ai.data(), _t_aj.data(), (double*)nullptr );
+
+    prefix[0] = base;
+    _threads_prefix[0] = base;
+
+    auto map_index = [&]( COLTYPE local_index )
+    {
+        if constexpr ( TS == TriangularMatrix::L )
+        {
+            return local_index;
+        }
+        else
+        {
+            return nodes - 1 - local_index;
+        }
+    };
+
+    auto degree_for = [&]( const COLTYPE i )
+    {
+        COLTYPE degree = ai[i + 1] - ai[i];
+        if ( has_diagonal && degree > 0 )
+        {
+            --degree;
+        }
+        return degree;
+    };
+
+#pragma omp parallel num_threads( _nthreads )
+    {
+        const int thread_id = omp_get_thread_num();
+        _threads_nodes[thread_id].clear();
+        _threads_prefix[thread_id + 1] = 0;
+
+        auto chunk_begin = thread_id * nodes / _nthreads;
+        auto chunk_end = ( thread_id + 1 ) * nodes / _nthreads;
+
+        for ( COLTYPE local = chunk_begin; local < chunk_end; ++local )
+        {
+            const COLTYPE i = map_index( local );
+            const COLTYPE degree = degree_for( i );
+            _degrees[i].store( degree, std::memory_order_relaxed );
+            if ( degree == 0 )
+            {
+                _threads_nodes[thread_id].push_back( i + base );
+            }
+        }
+        _threads_prefix[thread_id + 1] = _threads_nodes[thread_id].size();
+#pragma omp barrier
+#pragma omp single
+        {
+            for ( size_t i = 1; i < _threads_prefix.size(); ++i )
+            {
+                _threads_prefix[i] += _threads_prefix[i - 1];
+            }
+            prefix[1] = _threads_prefix[_nthreads];
+            processed = _threads_prefix[_nthreads] - base;
+        }
+        auto thread_start = _threads_prefix[thread_id] - base;
+        for ( const auto node : _threads_nodes[thread_id] )
+        {
+            perm[thread_start++] = node;
+        }
+
+#pragma omp barrier
+#pragma omp single
+        {
+            _threads_prefix[0] = _threads_prefix[_nthreads];
+        }
+
+        auto process_row = [&]( const COLTYPE idx, const auto& handle_neighbor )
+        {
+            auto row_start = _t_ai[idx] - base;
+            auto row_end = _t_ai[idx + 1] - base;
+            if ( has_diagonal && row_end > row_start )
+            {
+                if constexpr ( TS == TriangularMatrix::U )
+                {
+                    ++row_start;
+                }
+                else
+                {
+                    --row_end;
+                }
+            }
+            for ( auto pos = row_start; pos < row_end; ++pos )
+            {
+                handle_neighbor( _t_aj[pos] );
+            }
+        };
+
+        while ( processed != nodes )
+        {
+            _threads_prefix[thread_id + 1] = 0;
+            _threads_nodes[thread_id].clear();
+            auto start_range = prefix[level] - base +
+                               ( prefix[level + 1] - prefix[level] ) * thread_id / _nthreads;
+            auto end_range =
+                prefix[level] - base +
+                ( prefix[level + 1] - prefix[level] ) * ( thread_id + 1 ) / _nthreads;
+
+            for ( COLTYPE idx_pos = start_range; idx_pos < end_range; ++idx_pos )
+            {
+                const auto idx = perm[idx_pos] - base;
+                process_row( idx,
+                             [&]( const COLTYPE neighbor )
+                             {
+                                 if ( _degrees[neighbor - base].fetch_sub(
+                                          1, std::memory_order_relaxed ) == 1 )
+                                 {
+                                     _threads_nodes[thread_id].push_back( neighbor );
+                                 }
+                             } );
+            }
+            _threads_prefix[thread_id + 1] = _threads_nodes[thread_id].size();
+#pragma omp barrier
+#pragma omp single
+            {
+                for ( size_t i = 1; i < _threads_prefix.size(); ++i )
+                {
+                    _threads_prefix[i] += _threads_prefix[i - 1];
+                }
+                ++level;
+                prefix[level + 1] = _threads_prefix[_nthreads];
+                processed = _threads_prefix[_nthreads] - base;
+            }
+            auto local_start = _threads_prefix[thread_id] - base;
+            for ( const auto node : _threads_nodes[thread_id] )
+            {
+                perm[local_start++] = node;
+            }
+#pragma omp barrier
+#pragma omp single
+            {
+                _threads_prefix[0] = _threads_prefix[_nthreads];
+            }
+        }
+    }
+
+    return level + 1;
+}
+
+template <typename ROWTYPE, typename COLTYPE>
+template <TriangularMatrix TS>
+COLTYPE TopologicalSort2<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
+                                                        ROWTYPE const* ai,
+                                                        COLTYPE const* aj,
+                                                        COLTYPE* perm,
+                                                        COLTYPE* prefix,
+                                                        bool has_diagonal )
+{
+    _degrees.resize( nodes );
+    std::fill( _degrees.begin(), _degrees.end(), 0 );
+
+    const auto base = ai[0];
+
+    COLTYPE level = 0;
+    for ( COLTYPE offset = 0; offset < nodes; ++offset )
+    {
+        COLTYPE i = offset;
+        if constexpr ( TS == TriangularMatrix::U )
+        {
+            i = nodes - 1 - offset;
+        }
+        auto row_begin = ai[i] - base;
+        auto row_end = ai[i + 1] - base;
+        if ( has_diagonal && row_end > row_begin )
+        {
+            if constexpr ( TS == TriangularMatrix::U )
+            {
+                ++row_begin;
+            }
+            else
+            {
+                --row_end;
+            }
+        }
+        for ( auto j = row_begin; j < row_end; ++j )
+        {
+            _degrees[i] = std::max(
+                _degrees[i], static_cast<COLTYPE>( _degrees[aj[j] - base] + 1 ) );
+        }
+        level = std::max( level, _degrees[i] + 1 );
+    }
+    std::fill( prefix, prefix + level + 1, 0 );
+    prefix[0] = base;
+    for ( COLTYPE i = 0; i < nodes; i++ )
+    {
+        prefix[_degrees[i] + 1]++;
+    }
+    std::inclusive_scan( prefix, prefix + level + 1, prefix );
+
+    for ( COLTYPE i = 0; i < nodes; i++ )
+    {
+        perm[prefix[_degrees[i]]++ - base] = i + base;
+    }
+    for ( COLTYPE i = level; i > 0; i-- )
+    {
+        prefix[i] = prefix[i - 1];
+    }
+    prefix[0] = base;
+    return level;
 }
 
 template bool Diagonal<int, int, double>(const int rows, int const *ai,
@@ -366,7 +473,25 @@ template void Block<int, int, double, CSRMatrixVec<int, int, double>>(
 #define INSTANTIATE_TOPOLOGICAL_SORT(ROWTYPE, COLTYPE)                         \
   template struct KahnSerial<ROWTYPE, COLTYPE>;                                \
   template struct KahnParallel<ROWTYPE, COLTYPE>;                              \
-  template struct TopologicalSort2<ROWTYPE, COLTYPE>;
+  template COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()<                   \
+      TriangularMatrix::L>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
+                           COLTYPE *, COLTYPE *, bool);                        \
+  template COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()<                   \
+      TriangularMatrix::U>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
+                           COLTYPE *, COLTYPE *, bool);                        \
+  template COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()<                 \
+      TriangularMatrix::L>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
+                           COLTYPE *, COLTYPE *, bool);                        \
+  template COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()<                 \
+      TriangularMatrix::U>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
+                           COLTYPE *, COLTYPE *, bool);                        \
+  template struct TopologicalSort2<ROWTYPE, COLTYPE>;                          \
+  template COLTYPE TopologicalSort2<ROWTYPE, COLTYPE>::operator()<             \
+      TriangularMatrix::L>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
+                           COLTYPE *, COLTYPE *, bool);                        \
+  template COLTYPE TopologicalSort2<ROWTYPE, COLTYPE>::operator()<             \
+      TriangularMatrix::U>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
+                           COLTYPE *, COLTYPE *, bool);
 
 INSTANTIATE_TOPOLOGICAL_SORT(std::int32_t, std::int32_t)
 INSTANTIATE_TOPOLOGICAL_SORT(std::int64_t, std::int64_t)

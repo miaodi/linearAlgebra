@@ -258,7 +258,7 @@ TEST(LowerTri, small) {
         EXPECT_TRUE(last_index - base <= i);
       }
     }
-    for (int i = 0; i <= triangle.rows(); i++) {
+    for (int i = 0; i < triangle.rows(); i++) {
       for (int j = triangle.get_ai()[i] - base;
            j < triangle.get_ai()[i + 1] - base; j++) {
         int mat_j =
@@ -292,7 +292,7 @@ TEST(UpperTri, small) {
         EXPECT_TRUE(triangle.get_aj()[triangle.get_ai()[i] - base] - base >= i);
       }
     }
-    for (int i = 0; i <= triangle.rows(); i++) {
+    for (int i = 0; i < triangle.rows(); i++) {
       for (int j = 1; j <= triangle.get_ai()[i + 1] - triangle.get_ai()[i];
            j++) {
         EXPECT_EQ(triangle.get_aj()[triangle.get_ai()[i + 1] - base - j],
@@ -440,8 +440,9 @@ TEST(TopologicalSort, L) {
     std::vector<std::int32_t> perm(size);
     std::vector<std::int32_t> prefix(size + 1);
     matrix_utils::KahnSerial<std::int32_t, std::int32_t> kahn;
-    std::int32_t level = kahn(matrix_utils::TriangularMatrix::L, size, L.AI(),
-                              L.AJ(), perm.data(), prefix.data());
+    std::int32_t level =
+        kahn.operator()<matrix_utils::TriangularMatrix::L>(
+            size, L.AI(), L.AJ(), perm.data(), prefix.data(), false);
     EXPECT_EQ(prefix[0], base);
     std::map<std::int32_t, std::int32_t> idx_map;
     for (int i = 0; i < size; i++) {
@@ -460,8 +461,9 @@ TEST(TopologicalSort, L) {
     std::vector<std::int32_t> prefix_parallel(size + 1);
     matrix_utils::KahnParallel<std::int32_t, std::int32_t> kahn_parallel(5);
     std::int32_t level_parallel =
-        kahn_parallel(matrix_utils::TriangularMatrix::L, size, L.AI(), L.AJ(),
-                      perm_parallel.data(), prefix_parallel.data());
+        kahn_parallel.operator()<matrix_utils::TriangularMatrix::L>(
+            size, L.AI(), L.AJ(), perm_parallel.data(),
+            prefix_parallel.data(), false);
     EXPECT_EQ(prefix_parallel[0], base);
     EXPECT_EQ(prefix_parallel[level_parallel] - base, size);
     EXPECT_EQ(level, level_parallel);
@@ -481,8 +483,8 @@ TEST(TopologicalSort, L) {
     std::vector<std::int32_t> prefix_2(size + 1);
     matrix_utils::TopologicalSort2<int, int> topSort;
     std::int32_t level_2 =
-        topSort(matrix_utils::TriangularMatrix::L, size, L.AI(), L.AJ(),
-                perm_2.data(), prefix_2.data());
+        topSort.operator()<matrix_utils::TriangularMatrix::L>(
+            size, L.AI(), L.AJ(), perm_2.data(), prefix_2.data(), false);
     EXPECT_EQ(prefix_2[0], base);
     EXPECT_EQ(prefix_2[level_2] - base, size);
     EXPECT_EQ(level, level_2);
@@ -496,6 +498,92 @@ TEST(TopologicalSort, L) {
     for (int i = 0; i < size; i++) {
       for (int j = L.AI()[i] - base; j < L.AI()[i + 1] - base; j++) {
         EXPECT_TRUE(idx_map[L.AJ()[j] - base] < idx_map[i]);
+      }
+    }
+
+    for (int i = 0; i < level; i++) {
+      EXPECT_EQ(prefix[i + 1], prefix_2[i + 1]);
+      std::sort(perm_2.data() + prefix_2[i] - base,
+                perm_2.data() + prefix_2[i + 1] - base);
+      for (int j = prefix[i] - base; j < prefix[i + 1] - base; j++) {
+        EXPECT_EQ(perm[j], perm_2[j]);
+      }
+    }
+  }
+}
+
+TEST(TopologicalSort, U) {
+  const int size = 1003;
+  const int nnz_per_row = 20;
+  for (int base = 0; base <= 1; base++) {
+    matrix_utils::CSRMatrix<std::int32_t, std::int32_t, double> U;
+    matrix_utils::RandomU(size, base, nnz_per_row, U);
+    // test random U
+    for (int i = 0; i < size; i++) {
+      EXPECT_TRUE(std::is_sorted(U.AJ() + U.AI()[i] - base,
+                                 U.AJ() + U.AI()[i + 1] - base));
+    }
+    std::vector<std::int32_t> perm(size);
+    std::vector<std::int32_t> prefix(size + 1);
+    matrix_utils::KahnSerial<std::int32_t, std::int32_t> kahn;
+    std::int32_t level =
+        kahn.operator()<matrix_utils::TriangularMatrix::U>(
+            size, U.AI(), U.AJ(), perm.data(), prefix.data(), false);
+    EXPECT_EQ(prefix[0], base);
+    std::map<std::int32_t, std::int32_t> idx_map;
+    for (int i = 0; i < size; i++) {
+      idx_map[perm[i] - base] = i;
+    }
+    // check reverse topological order
+    for (int i = 0; i < size; i++) {
+      for (int j = U.AI()[i] - base; j < U.AI()[i + 1] - base; j++) {
+        EXPECT_TRUE(idx_map[U.AJ()[j] - base] < idx_map[i]);
+      }
+    }
+    EXPECT_EQ(prefix[level] - base, size);
+
+    // test parallel kahn
+    std::vector<std::int32_t> perm_parallel(size);
+    std::vector<std::int32_t> prefix_parallel(size + 1);
+    matrix_utils::KahnParallel<std::int32_t, std::int32_t> kahn_parallel(5);
+    std::int32_t level_parallel =
+        kahn_parallel.operator()<matrix_utils::TriangularMatrix::U>(
+            size, U.AI(), U.AJ(), perm_parallel.data(), prefix_parallel.data(),
+            false);
+    EXPECT_EQ(prefix_parallel[0], base);
+    EXPECT_EQ(prefix_parallel[level_parallel] - base, size);
+    EXPECT_EQ(level, level_parallel);
+    for (int i = 0; i < level; i++) {
+      EXPECT_EQ(prefix[i + 1], prefix_parallel[i + 1]);
+      std::sort(perm.data() + prefix[i] - base,
+                perm.data() + prefix[i + 1] - base);
+      std::sort(perm_parallel.data() + prefix_parallel[i] - base,
+                perm_parallel.data() + prefix_parallel[i + 1] - base);
+      for (int j = prefix[i] - base; j < prefix[i + 1] - base; j++) {
+        EXPECT_EQ(perm[j], perm_parallel[j]);
+      }
+    }
+
+    // test topological sort
+    std::vector<std::int32_t> perm_2(size);
+    std::vector<std::int32_t> prefix_2(size + 1);
+    matrix_utils::TopologicalSort2<int, int> topSort;
+    std::int32_t level_2 =
+        topSort.operator()<matrix_utils::TriangularMatrix::U>(
+            size, U.AI(), U.AJ(), perm_2.data(), prefix_2.data(), false);
+    EXPECT_EQ(prefix_2[0], base);
+    EXPECT_EQ(prefix_2[level_2] - base, size);
+    EXPECT_EQ(level, level_2);
+
+    // check order consistency
+    idx_map.clear();
+    for (int i = 0; i < size; i++) {
+      idx_map[perm_2[i] - base] = i;
+    }
+
+    for (int i = 0; i < size; i++) {
+      for (int j = U.AI()[i] - base; j < U.AI()[i + 1] - base; j++) {
+        EXPECT_TRUE(idx_map[U.AJ()[j] - base] < idx_map[i]);
       }
     }
 

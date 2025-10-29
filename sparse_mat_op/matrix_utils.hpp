@@ -2,6 +2,7 @@
 
 #include "sparse_mat_traits.hpp"
 #include "utils.h"
+#include <cstddef>
 #include <execution>
 #include <iostream>
 #include <memory>
@@ -583,49 +584,63 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
 
 enum TriangularMatrix { L = 0, U = 1 };
 
-template <typename ROWTYPE, typename COLTYPE> struct KahnSerial {
+template <typename ROWTYPE, typename COLTYPE>
+struct KahnSerial
+{
+    // Kahn's algorithm
+    template <TriangularMatrix TS>
+    COLTYPE operator()( const COLTYPE nodes,
+                        ROWTYPE const* ai,
+                        COLTYPE const* aj,
+                        COLTYPE* perm,
+                        COLTYPE* prefix,
+                        bool has_diagonal = false );
 
-  // Kahn's algorithm
-  COLTYPE operator()(const TriangularMatrix TS, const COLTYPE nodes,
-                     ROWTYPE const *ai, COLTYPE const *aj, COLTYPE *perm,
-                     COLTYPE *prefix);
-
-  std::vector<COLTYPE> _degrees;
-  std::vector<ROWTYPE> _t_ai;
-  std::vector<COLTYPE> _t_aj;
-  COLTYPE _start, _end, _inc;
+    std::vector<COLTYPE> _degrees;
+    std::vector<ROWTYPE> _t_ai;
+    std::vector<COLTYPE> _t_aj;
 };
 
-template <typename ROWTYPE, typename COLTYPE> struct KahnParallel {
-  KahnParallel(int nthreads)
-      : _nthreads(nthreads), _threads_nodes(nthreads),
-        _threads_prefix(nthreads + 1) {}
-  // Kahn's algorithm
-  COLTYPE operator()(const TriangularMatrix TS, const COLTYPE nodes,
-                     ROWTYPE const *ai, COLTYPE const *aj, COLTYPE *perm,
-                     COLTYPE *prefix);
+template <typename ROWTYPE, typename COLTYPE>
+struct KahnParallel
+{
+    KahnParallel( int nthreads )
+        : _nthreads( nthreads ), _threads_nodes( nthreads ), _threads_prefix( nthreads + 1 )
+    {
+    }
+    // Kahn's algorithm
+    template <TriangularMatrix TS>
+    COLTYPE operator()( const COLTYPE nodes,
+                        ROWTYPE const* ai,
+                        COLTYPE const* aj,
+                        COLTYPE* perm,
+                        COLTYPE* prefix,
+                        bool has_diagonal = false );
 
-  int _nthreads;
-  std::unique_ptr<std::atomic<COLTYPE>[]> _degrees{nullptr};
-  COLTYPE _degrees_size{0};
-  std::vector<ROWTYPE> _t_ai;
-  std::vector<COLTYPE> _t_aj;
-  std::vector<std::vector<COLTYPE>> _threads_nodes;
-  std::vector<COLTYPE> _threads_prefix;
-  COLTYPE _start, _end, _inc;
+    int _nthreads;
+    std::unique_ptr<std::atomic<COLTYPE>[]> _degrees{ nullptr };
+    COLTYPE _degrees_size{ 0 };
+    std::vector<ROWTYPE> _t_ai;
+    std::vector<COLTYPE> _t_aj;
+    std::vector<std::vector<COLTYPE>> _threads_nodes;
+    std::vector<COLTYPE> _threads_prefix;
 };
 
-template <typename ROWTYPE, typename COLTYPE> struct TopologicalSort2 {
-
-  // max degree
-  COLTYPE operator()(const TriangularMatrix TS, const COLTYPE nodes,
-                     ROWTYPE const *ai, COLTYPE const *aj, COLTYPE *perm,
-                     COLTYPE *prefix);
-
-  std::vector<COLTYPE> _degrees;
-  std::vector<ROWTYPE> _t_ai;
-  std::vector<COLTYPE> _t_aj;
-  COLTYPE _start, _end, _inc;
+template <typename ROWTYPE, typename COLTYPE>
+struct TopologicalSort2
+{
+    // max degree
+    template <TriangularMatrix TS>
+    COLTYPE operator()( const COLTYPE nodes,
+                        ROWTYPE const* ai,
+                        COLTYPE const* aj,
+                        COLTYPE* perm,
+                        COLTYPE* prefix,
+                        bool has_diagonal = false );
+                        
+    std::vector<COLTYPE> _degrees;
+    std::vector<ROWTYPE> _t_ai;
+    std::vector<COLTYPE> _t_aj;
 };
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
@@ -1124,4 +1139,61 @@ void RandomL(const typename CSRMatrixType::COLTYPE rows,
     random_generator(ai[i + 1] - ai[i], base, i + base, aj + ai[i] - base);
   }
 }
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void RandomU(const typename CSRMatrixType::COLTYPE rows,
+             const typename CSRMatrixType::COLTYPE base,
+             const typename CSRMatrixType::COLTYPE nnz_per_row,
+             CSRMatrixType &U, bool include_diagonal = false) {
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using VALTYPE = typename CSRMatrixType::VALTYPE;
+
+  U.ResizeAI(rows + 1);
+  U.ResizeAJ(rows * nnz_per_row);
+  U.ResizeAV(rows * nnz_per_row);
+  U.rows = rows;
+  U.cols = rows;
+  auto ai = U.AI();
+  auto aj = U.AJ();
+  auto av = U.AV();
+  ai[0] = base;
+
+  utils::knuth_s random_generator;
+
+  for (COLTYPE i = 0; i < rows; i++) {
+    const COLTYPE remaining_strict = rows - (i + 1);
+    const COLTYPE max_total =
+        include_diagonal ? remaining_strict + COLTYPE{1} : remaining_strict;
+    const COLTYPE row_size = std::min(nnz_per_row, max_total);
+    ai[i + 1] = ai[i] + row_size;
+  }
+
+#pragma omp parallel for
+  for (COLTYPE i = 0; i < rows; i++) {
+    const COLTYPE row_len = ai[i + 1] - ai[i];
+    if (row_len == 0)
+      continue;
+
+    const COLTYPE diag_count =
+        (include_diagonal && row_len > 0) ? COLTYPE{1} : COLTYPE{0};
+    const COLTYPE strict_count = row_len - diag_count;
+
+    auto row_cols = aj + ai[i] - base;
+    auto row_vals = av + ai[i] - base;
+
+    if (diag_count == COLTYPE{1}) {
+      row_cols[0] = i + base;
+      row_vals[0] = static_cast<VALTYPE>(1);
+    }
+
+    if (strict_count > 0) {
+      random_generator(strict_count, i + 1 + base, rows + base,
+                       row_cols + diag_count);
+      for (COLTYPE k = 0; k < strict_count; ++k) {
+        row_vals[diag_count + k] = static_cast<VALTYPE>(1);
+      }
+    }
+  }
+}
+
 } // namespace matrix_utils

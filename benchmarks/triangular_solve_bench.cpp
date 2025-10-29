@@ -45,27 +45,6 @@ public:
   }
 };
 
-BENCHMARK_DEFINE_F(MyFixture, SerialForward)(benchmark::State &state) {
-  std::vector<double> x(mat->rows(), 0.0);
-  std::vector<double> b(mat->rows(), 1.0);
-
-  matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
-  std::vector<double> D;
-
-  matrix_utils::SplitLDU(mat->rows(), (int)mat->mkl_base(), mat->get_ai().get(),
-                         mat->get_aj().get(), mat->get_av().get(), L, D, U);
-
-  for (auto _ : state) {
-    for (int i = 0; i < state.range(0); i++) {
-      matrix_utils::ForwardSubstitution(L.rows, L.Base(), L.ai.get(),
-                                        L.ai.get() + 1, L.aj.get(), L.av.get(),
-                                        b.data(), x.data());
-    }
-  }
-}
-
-BENCHMARK_REGISTER_F(MyFixture, SerialForward)->Arg(100)->Arg(1000);
-
 BENCHMARK_DEFINE_F(MyFixture, ParallelForward)(benchmark::State &state) {
   omp_set_num_threads(_num_threads);
   std::vector<double> x(mat->rows(), 0.0);
