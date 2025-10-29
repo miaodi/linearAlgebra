@@ -1,16 +1,68 @@
 #include "matrix_utils.hpp"
 #include <benchmark/benchmark.h>
 #include <cxxopts.hpp>
+#include <random>
 
 using CSRMatrixType = matrix_utils::CSRMatrix<int, int, double>;
+
+// Create a matrix with better parallelization potential
+void createRandomSparseL(CSRMatrixType &L, int rows, int base, int max_deps_per_row) {
+  L.ResizeAI(rows + 1);
+  L.rows = rows;
+  L.cols = rows;
+  auto ai = L.AI();
+  ai[0] = base;
+  
+  std::vector<std::vector<int>> temp_rows(rows);
+  std::random_device rd;
+  std::mt19937 gen(42); // Fixed seed for reproducibility
+  
+  // For each row, randomly select dependencies from earlier rows
+  for (int i = 0; i < rows; i++) {
+    if (i == 0) continue;
+    
+    int num_deps = std::min(max_deps_per_row, i);
+    if (num_deps > 0) {
+      // Randomly select which earlier rows to depend on
+      std::uniform_int_distribution<int> dep_dist(0, i-1);
+      std::set<int> dependencies;
+      
+      // Add some random dependencies
+      for (int d = 0; d < num_deps/2; d++) {
+        dependencies.insert(dep_dist(gen));
+      }
+      
+      for (int dep : dependencies) {
+        temp_rows[i].push_back(dep + base);
+      }
+    }
+    
+    ai[i + 1] = ai[i] + temp_rows[i].size();
+  }
+  
+  int total_nnz = ai[rows] - base;
+  L.ResizeAJ(total_nnz);
+  L.ResizeAV(total_nnz);
+  auto aj = L.AJ();
+  auto av = L.AV();
+  
+  int pos = 0;
+  for (int i = 0; i < rows; i++) {
+    for (int dep : temp_rows[i]) {
+      aj[pos] = dep;
+      av[pos] = 1.0;
+      pos++;
+    }
+  }
+}
 int num_threads = 1;
 auto KahnSerial = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> perm(mat.rows);
   std::vector<int> prefix(mat.rows + 1);
   matrix_utils::KahnSerial<int, int> kahn;
   for (auto _ : state) {
-    kahn(matrix_utils::TriangularMatrix::L, mat.rows, mat.AI(), mat.AJ(),
-         perm.data(), prefix.data());
+    kahn.operator()<matrix_utils::TriangularMatrix::L>(
+        mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
   }
 };
 
@@ -19,8 +71,8 @@ auto KahnParallel = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> prefix(mat.rows + 1);
   matrix_utils::KahnParallel<int, int> kahn(num_threads);
   for (auto _ : state) {
-    kahn(matrix_utils::TriangularMatrix::L, mat.rows, mat.AI(), mat.AJ(),
-         perm.data(), prefix.data());
+    kahn.operator()<matrix_utils::TriangularMatrix::L>(
+        mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
   }
 };
 
@@ -29,8 +81,8 @@ auto TopologicalSort2 = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> prefix(mat.rows + 1);
   matrix_utils::TopologicalSort2<int, int> topologicalSort;
   for (auto _ : state) {
-    topologicalSort(matrix_utils::TriangularMatrix::L, mat.rows, mat.AI(),
-                    mat.AJ(), perm.data(), prefix.data());
+    topologicalSort.operator()<matrix_utils::TriangularMatrix::L>(
+        mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
   }
 };
 
@@ -57,9 +109,17 @@ int main(int argc, char **argv) {
   CSRMatrixType mat;
   matrix_utils::RandomL<CSRMatrixType>(size, 0, rnnz, mat);
 
-  benchmark::RegisterBenchmark("KahnSerial", KahnSerial, mat);
-  benchmark::RegisterBenchmark("KahnParallel", KahnParallel, mat);
-  benchmark::RegisterBenchmark("TopologicalSort2", TopologicalSort2, mat);
+  // Create a sparser matrix with better parallel potential
+  CSRMatrixType sparse_mat;
+  createRandomSparseL(sparse_mat, size, 0, std::min(rnnz/4, 10));
+
+  benchmark::RegisterBenchmark("KahnSerial_Dense", KahnSerial, mat);
+  benchmark::RegisterBenchmark("KahnParallel_Dense", KahnParallel, mat);
+  benchmark::RegisterBenchmark("TopologicalSort2_Dense", TopologicalSort2, mat);
+  
+  // Add a sparse matrix with better parallelization potential  
+  benchmark::RegisterBenchmark("KahnSerial_Sparse", KahnSerial, sparse_mat);
+  benchmark::RegisterBenchmark("KahnParallel_Sparse", KahnParallel, sparse_mat);
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();
   benchmark::Shutdown();

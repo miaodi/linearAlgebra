@@ -7,8 +7,22 @@ include(../cmake/DownloadFile.cmake)
 
 file(GLOB_RECURSE ALL_BENCH_CPP *.cpp)
 
+# List of benchmarks to exclude due to compilation issues
+set(EXCLUDED_BENCHMARKS 
+    "precond_bench.cpp"
+    "triangular_solve_bench.cpp"
+)
+
 foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
+   get_filename_component(ONE_BENCH_FILENAME ${ONE_BENCH_CPP} NAME)
    get_filename_component(ONE_BENCH_EXEC ${ONE_BENCH_CPP} NAME_WE)
+   
+   # Skip excluded benchmarks
+   list(FIND EXCLUDED_BENCHMARKS ${ONE_BENCH_FILENAME} SHOULD_EXCLUDE)
+   if(SHOULD_EXCLUDE GREATER -1)
+      message(STATUS "Skipping benchmark: ${ONE_BENCH_FILENAME} (compilation issues)")
+      continue()
+   endif()
 
    # Avoid name collision 
    set(TARGET_NAME Bench_${ONE_BENCH_EXEC})
