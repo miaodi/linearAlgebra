@@ -83,43 +83,61 @@ void TriangularSolve( const COLTYPE size,
     }
 }
 
+
 template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void LevelScheduleTriangularSubstitutionKernel( COLTYPE const* iperm,
-                                                COLTYPE const* prefix,
-                                                const COLTYPE lvls,
-                                                const COLTYPE rows,
-                                                ROWTYPE const* ai,
-                                                COLTYPE const* aj,
-                                                VALTYPE const* av,
-                                                VALTYPE const* diag,
-                                                VALTYPE const* const b,
-                                                VALTYPE* const x )
+void LevelScheduleTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::analysis(
+    const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av, VALTYPE const* diag )
 {
-    const auto base = ai[0];
-#pragma omp parallel
+    _ai = ai;
+    _aj = aj;
+    _av = av;
+    _diag = diag;
+    _size = size;
+
+    const auto base = _ai[0];
+    _iperm.resize(_size);
+    _levelPrefix.resize(_size + 1);
+    _levels = _topSort.template operator()<TM>( _size, _ai, _aj, _iperm.data(),
+                                                _levelPrefix.data(), false );
+}
+
+
+// operator() runtime execution for level-scheduled triangular substitution
+// Applies previously computed permutation (_iperm) and level prefixes
+// to perform forward or backward substitution with optional diagonal.
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void LevelScheduleTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::operator()(
+    VALTYPE const* const b, VALTYPE* const x ) const
+{
+    const auto base = _ai[0];
+
+#pragma omp parallel num_threads( _nthreads )
     {
-        for ( int l = 0; l < lvls; l++ )
+        for ( COLTYPE lvl = 0; lvl < _levels; ++lvl )
         {
 #pragma omp for
-            for ( COLTYPE i = prefix[l]; i < prefix[l + 1]; i++ )
+            for ( COLTYPE p = _levelPrefix[lvl]; p < _levelPrefix[lvl + 1]; ++p )
             {
-                const COLTYPE idx = iperm[i] - base;
-                VALTYPE val = 0;
-                for ( auto j = ai[idx] - base; j < ai[idx + 1] - base; j++ )
+                const COLTYPE row = _iperm[p] - base; // logical row index
+                VALTYPE accum = VALTYPE( 0 );
+                // Traverse adjacency of the original matrix for this row.
+                for ( auto jj = _ai[row] - base; jj < _ai[row + 1] - base; ++jj )
                 {
-                    val += av[j] * x[aj[j] - base];
+                    const COLTYPE col = _aj[jj] - base;
+                    // For L: use strictly lower entries; For U: use strictly upper entries.
+                    if constexpr ( TM == TriangularMatrix::L )
+                    {
+                        if ( col < row )
+                            accum += _av[jj] * x[col];
+                    }
+                    else // U
+                    {
+                        if ( col > row )
+                            accum += _av[jj] * x[col];
+                    }
                 }
-                
-                if constexpr ( TM == TriangularMatrix::L )
-                {
-                    // Forward substitution - unit diagonal assumed
-                    x[idx] = b[idx] - val;
-                }
-                else // TM == TriangularMatrix::U
-                {
-                    // Backward substitution - use diagonal
-                    x[idx] = ( b[idx] - val ) / diag[idx];
-                }
+                // Diagonal handling (same formula for L and U after accum defined by direction)
+                x[row] = _diag ? ( b[row] - accum ) / _diag[row] : ( b[row] - accum );
             }
 #pragma omp barrier
         }

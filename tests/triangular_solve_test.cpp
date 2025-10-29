@@ -21,6 +21,12 @@ class triangular_solve_Test : public testing::Test
 {
 protected:
     std::vector<matrix_utils::CSRMatrix<int, int, double>> _mats;
+    // Precomputed ILU(k) split factors for reuse
+    std::vector<matrix_utils::CSRMatrix<int,int,double>> _Ls;
+    std::vector<matrix_utils::CSRMatrix<int,int,double>> _Us;
+    std::vector<std::vector<double>> _Ds;
+    std::vector<bool> _factor_ok; // whether ILU succeeded for that matrix
+    int _ilu_level = 5; // default ILU level
 
     const double _tol = 1e-12;  // Relaxed tolerance for numerical comparison
     const double _MKLtol = 1e-10;
@@ -31,25 +37,39 @@ protected:
         std::vector<int> csr_cols;
         std::vector<double> csr_vals;
 
-        std::ifstream f( "data/ex5.mtx" ); // https://sparse.tamu.edu/FIDAP/ex5
-        utils::read_matrix_market_csr( f, csr_rows, csr_cols, csr_vals );
-        f.close();
-        _mats.push_back(createMatrixFromVectors(csr_rows, csr_cols, csr_vals));
+        const std::vector<std::string> matrix_files = {
+            "data/ex5.mtx", // https://sparse.tamu.edu/FIDAP/ex5
+            "data/nos5.mtx", "data/s3rmt3m3.mtx", "data/bcsstk17.mtx" };
 
-        f.open( "data/nos5.mtx" );
-        utils::read_matrix_market_csr( f, csr_rows, csr_cols, csr_vals );
-        f.close();
-        _mats.push_back(createMatrixFromVectors(csr_rows, csr_cols, csr_vals));
+        auto load_matrix = [&]( const std::string& path )
+        {
+            std::ifstream f( path );
+            if ( !f.good() )
+                return; // silently skip if not found
+            csr_rows.clear();
+            csr_cols.clear();
+            csr_vals.clear();
+            utils::read_matrix_market_csr( f, csr_rows, csr_cols, csr_vals );
+            f.close();
+            _mats.push_back( createMatrixFromVectors( csr_rows, csr_cols, csr_vals ) );
+        };
+        for ( const auto& mf : matrix_files )
+            load_matrix( mf );
 
-        f.open( "data/s3rmt3m3.mtx" );
-        utils::read_matrix_market_csr( f, csr_rows, csr_cols, csr_vals );
-        f.close();
-        _mats.push_back(createMatrixFromVectors(csr_rows, csr_cols, csr_vals));
-
-        f.open( "data/bcsstk17.mtx" );
-        utils::read_matrix_market_csr( f, csr_rows, csr_cols, csr_vals );
-        f.close();
-        _mats.push_back(createMatrixFromVectors(csr_rows, csr_cols, csr_vals));
+        // Precompute ILU(k) and LDU splits
+        _Ls.resize(_mats.size());
+        _Us.resize(_mats.size());
+        _Ds.resize(_mats.size());
+        _factor_ok.resize(_mats.size(), false);
+        for(size_t i=0;i<_mats.size();++i) {
+            auto &mat = _mats[i];
+            matrix_utils::CSRMatrix<int,int,double> ilu_matrix;
+            matrix_utils::ILULevelSymbolic<decltype(ilu_matrix)> ilu_sym;
+            if(!ilu_sym(mat.rows, mat.AI(), mat.AJ(), _ilu_level, ilu_matrix)) continue;
+            if(!matrix_utils::ILULevelNumeric(mat.rows, mat.AI(), mat.AJ(), mat.AV(), _ilu_level, ilu_matrix)) continue;
+            matrix_utils::SplitLDU(ilu_matrix.rows, ilu_matrix.Base(), ilu_matrix.AI(), ilu_matrix.AJ(), ilu_matrix.AV(), _Ls[i], _Ds[i], _Us[i]);
+            _factor_ok[i] = true;
+        }
     }
 
     ~triangular_solve_Test() override
@@ -75,7 +95,7 @@ protected:
     // Class members declared here can be used by all tests in the test suite
     // for Foo.
 
-    // Helper function to solve triangular system using BLAS DTRSM
+    // Helper: solve triangular system using BLAS DTRSM
     void solveBlasTrsm(const std::vector<double>& matrix_dense, 
                        const std::vector<double>& b,
                        std::vector<double>& x,
@@ -101,7 +121,7 @@ protected:
                matrix_dense.data(), &lda, x.data(), &ldb);
     }
 
-    // Helper function to convert CSR matrix to dense column-major format
+    // Helper: convert CSR matrix to dense column-major format
     std::vector<double> csrToDenseColumnMajor(const matrix_utils::CSRMatrix<int, int, double>& csr_mat,
                                               const std::vector<double>* diagonal = nullptr,
                                               bool is_lower = true) const
@@ -136,6 +156,77 @@ protected:
         }
         
         return dense;
+    }
+
+    // Common small helpers to reduce repetition in tests
+    bool nonZeroVector(const std::vector<double>& x) const {
+        return std::any_of(x.begin(), x.end(), [](double v){ return std::abs(v) > 1e-15; });
+    }
+
+    void checkForward(size_t midx) const {
+        if(!_factor_ok[midx]) return; // skip failed factorization
+        const auto &L = _Ls[midx];
+        const int n = L.rows;
+        std::vector<double> b(n, 1.0), x_ref(n,0.), x_blas(n,0.);
+        TriangularSolve<TriangularMatrix::L>(L.rows, L.AI(), L.AJ(), L.AV(), (double*)nullptr, b.data(), x_ref.data());
+        auto L_dense = csrToDenseColumnMajor(L, nullptr, true);
+        solveBlasTrsm(L_dense, b, x_blas, n, true, true);
+        for(int i=0;i<n;++i) {
+            EXPECT_NEAR(x_ref[i], x_blas[i], _tol * std::max(1.0, std::abs(x_blas[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_ref));
+    }
+
+    void checkBackward(size_t midx) const {
+        if(!_factor_ok[midx]) return;
+        const auto &U = _Us[midx];
+        const auto &D = _Ds[midx];
+        const int n = U.rows;
+        std::vector<double> b(n, 1.0), x_ref(n,0.), x_blas(n,0.);
+        TriangularSolve<TriangularMatrix::U>(U.rows, U.AI(), U.AJ(), U.AV(), D.data(), b.data(), x_ref.data());
+        auto U_dense = csrToDenseColumnMajor(U, &D, false);
+        solveBlasTrsm(U_dense, b, x_blas, n, false, false);
+        for(int i=0;i<n;++i) {
+            EXPECT_NEAR(x_ref[i], x_blas[i], _tol * std::max(1.0, std::abs(x_blas[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_ref));
+    }
+
+    void checkLevelForward(size_t midx) const {
+        if(!_factor_ok[midx]) return;
+        const auto &L = _Ls[midx];
+        const int n = L.rows;
+        std::vector<double> b(n,1.0), x_level(n,0.), x_ref(n,0.), x_blas(n,0.);
+        TriangularSolve<TriangularMatrix::L>(L.rows, L.AI(), L.AJ(), L.AV(), (double*)nullptr, b.data(), x_ref.data());
+        auto L_dense = csrToDenseColumnMajor(L, nullptr, true);
+        solveBlasTrsm(L_dense, b, x_blas, n, true, true);
+        LevelScheduleTriangularSubstitution<TriangularMatrix::L,int,int,double> levelSolve(omp_get_max_threads());
+        levelSolve.analysis(L.rows, L.AI(), L.AJ(), L.AV(), (double*)nullptr);
+        levelSolve(b.data(), x_level.data());
+        for(int i=0;i<n;++i) {
+            EXPECT_NEAR(x_level[i], x_ref[i], _tol * std::max(1.0, std::abs(x_ref[i])));
+            EXPECT_NEAR(x_level[i], x_blas[i], _tol * std::max(1.0, std::abs(x_blas[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_level));
+    }
+
+    void checkLevelBackward(size_t midx) const {
+        if(!_factor_ok[midx]) return;
+        const auto &U = _Us[midx];
+        const auto &D = _Ds[midx];
+        const int n = U.rows;
+        std::vector<double> b(n,1.0), x_level(n,0.), x_ref(n,0.), x_blas(n,0.);
+        TriangularSolve<TriangularMatrix::U>(U.rows, U.AI(), U.AJ(), U.AV(), D.data(), b.data(), x_ref.data());
+        auto U_dense = csrToDenseColumnMajor(U, &D, false);
+        solveBlasTrsm(U_dense, b, x_blas, n, false, false);
+        LevelScheduleTriangularSubstitution<TriangularMatrix::U,int,int,double> levelSolve(omp_get_max_threads());
+        levelSolve.analysis(U.rows, U.AI(), U.AJ(), U.AV(), D.data());
+        levelSolve(b.data(), x_level.data());
+        for(int i=0;i<n;++i) {
+            EXPECT_NEAR(x_level[i], x_ref[i], _tol * std::max(1.0, std::abs(x_ref[i])));
+            EXPECT_NEAR(x_level[i], x_blas[i], _tol * std::max(1.0, std::abs(x_blas[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_level));
     }
 
 private:
@@ -187,136 +278,22 @@ TEST_F( triangular_solve_Test, matrix_loading )
 
 TEST_F( triangular_solve_Test, forward_substitution )
 {
-    for ( auto& mat : _mats )
-    {
-        const int size = mat.rows;
-        
-        // Create ILU preconditioner using the same approach as gmres.cpp
-        matrix_utils::CSRMatrix<int, int, double> ilu_matrix;
-        
-        matrix_utils::ILULevelSymbolic<decltype( ilu_matrix )> ilu;
-        int level = 5;
-        bool success = ilu( mat.rows, mat.AI(), mat.AJ(), level, ilu_matrix );
-        
-        if ( !success )
-        {
-            continue;
-        }
-        
-        success = matrix_utils::ILULevelNumeric( mat.rows, mat.AI(), mat.AJ(), 
-                                                mat.AV(), level, ilu_matrix );
-        
-        if ( !success )
-        {
-            continue;
-        }
-
-        std::vector<double> b( size, 1.0 );
-        std::vector<double> x_serial( size, 0.0 );
-        std::vector<double> x_par( size, 0.0 );
-
-        // Split ILU matrix into L, D, U components
-        matrix_utils::CSRMatrix<int, int, double> L, U;
-        std::vector<double> D;
-        matrix_utils::SplitLDU( ilu_matrix.rows, ilu_matrix.Base(), ilu_matrix.AI(),
-                               ilu_matrix.AJ(), ilu_matrix.AV(), L, D, U );
-
-        // Test forward substitution with L (unit diagonal)
-        matrix_utils::TriangularSolve<matrix_utils::TriangularMatrix::L>(
-            L.rows, L.AI(), L.AJ(), L.AV(), (double*)( nullptr ), b.data(),
-            x_serial.data() );
-
-        // Compare with BLAS TRSM for forward substitution
-        std::vector<double> x_blas( size, 0.0 );
-        
-        // Convert CSR L matrix to dense format and solve with BLAS
-        auto L_dense = csrToDenseColumnMajor(L, nullptr, true);  // Lower triangular, unit diagonal
-        solveBlasTrsm(L_dense, b, x_blas, size, true, true);     // Lower triangular, unit diagonal
-        
-        // Compare results
-        for ( int i = 0; i < size; i++ )
-        {
-            EXPECT_NEAR( x_serial[i], x_blas[i], _tol * std::max( 1.0, std::abs( x_blas[i] ) ) );
-        }
-
-        // Basic sanity check - solution should not be all zeros for non-trivial b
-        bool non_zero_solution = false;
-        for ( double val : x_serial )
-        {
-            if ( std::abs(val) > 1e-15 )
-            {
-                non_zero_solution = true;
-                break;
-            }
-        }
-        EXPECT_TRUE( non_zero_solution );
-    }
+    for(size_t i=0;i<_mats.size();++i) checkForward(i);
 }
 
 TEST_F( triangular_solve_Test, backward_substitution )
 {
-    for ( auto& mat : _mats )
-    {
-        const int size = mat.rows;
-        
-        // Create ILU preconditioner using the same approach as gmres.cpp
-        matrix_utils::CSRMatrix<int, int, double> ilu_matrix;
-        
-        matrix_utils::ILULevelSymbolic<decltype( ilu_matrix )> ilu;
-        int level = 5;
-        bool success = ilu( mat.rows, mat.AI(), mat.AJ(), level, ilu_matrix );
-        
-        if ( !success )
-        {
-            continue;
-        }
-        
-        success = matrix_utils::ILULevelNumeric( mat.rows, mat.AI(), mat.AJ(), 
-                                                mat.AV(), level, ilu_matrix );
-        
-        if ( !success )
-        {
-            continue;
-        }
+    for(size_t i=0;i<_mats.size();++i) checkBackward(i);
+}
 
-        std::vector<double> b( size, 1.0 );
-        std::vector<double> x_serial( size, 0.0 );
+TEST_F( triangular_solve_Test, level_scheduled_forward_substitution )
+{
+    for(size_t i=0;i<_mats.size();++i) checkLevelForward(i);
+}
 
-        // Split ILU matrix into L, D, U components
-        matrix_utils::CSRMatrix<int, int, double> L, U;
-        std::vector<double> D;
-        matrix_utils::SplitLDU( ilu_matrix.rows, ilu_matrix.Base(), ilu_matrix.AI(),
-                               ilu_matrix.AJ(), ilu_matrix.AV(), L, D, U );
-
-        // Test backward substitution with U (diagonal included)
-        matrix_utils::TriangularSolve<matrix_utils::TriangularMatrix::U>( 
-            U.rows, U.AI(), U.AJ(), U.AV(), D.data(), b.data(), x_serial.data() );
-        
-        // Compare with BLAS TRSM for backward substitution
-        std::vector<double> x_blas( size, 0.0 );
-        
-        // Convert CSR U matrix to dense format and solve with BLAS
-        auto U_dense = csrToDenseColumnMajor(U, &D, false);     // Upper triangular, non-unit diagonal
-        solveBlasTrsm(U_dense, b, x_blas, size, false, false);  // Upper triangular, non-unit diagonal
-        
-        // Compare results
-        for ( int i = 0; i < size; i++ )
-        {
-            EXPECT_NEAR( x_serial[i], x_blas[i], _tol * std::max( 1.0, std::abs( x_blas[i] ) ) );
-        }
-        
-        // Basic sanity check - solution should not be all zeros for non-trivial b
-        bool non_zero_solution = false;
-        for ( double val : x_serial )
-        {
-            if ( std::abs(val) > 1e-15 )
-            {
-                non_zero_solution = true;
-                break;
-            }
-        }
-        EXPECT_TRUE( non_zero_solution );
-    }
+TEST_F( triangular_solve_Test, level_scheduled_backward_substitution )
+{
+    for(size_t i=0;i<_mats.size();++i) checkLevelBackward(i);
 }
 
 // TEST_F( triangular_solve_Test, forward_substitution_optimized )

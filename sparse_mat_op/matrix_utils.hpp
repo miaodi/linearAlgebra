@@ -639,8 +639,6 @@ struct TopologicalSort2
                         bool has_diagonal = false );
                         
     std::vector<COLTYPE> _degrees;
-    std::vector<ROWTYPE> _t_ai;
-    std::vector<COLTYPE> _t_aj;
 };
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>

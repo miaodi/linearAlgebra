@@ -16,27 +16,6 @@
 
 namespace matrix_utils
 {
-// /// @brief Level-scheduled triangular substitution with OpenMP parallelization
-// /// @tparam TM TriangularMatrix::L for forward substitution, TriangularMatrix::U for backward substitution
-// /// @tparam ROWTYPE Row pointer type
-// /// @tparam COLTYPE Column index type  
-// /// @tparam VALTYPE Value type
-// /// @param iperm Permutation array for level scheduling
-// /// @param prefix Level prefix array (prefix[l] to prefix[l+1]-1 are nodes in level l)
-// /// @param lvls Number of levels
-// /// @param rows Number of rows
-// /// @param ai Row pointers
-// /// @param aj Column indices
-// /// @param av Matrix values
-// /// @param diag Diagonal values (required for backward substitution, ignored for forward)
-// /// @param b Right-hand side vector
-// /// @param x Solution vector
-// template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-// struct LevelScheduleTriangularSubstitution{
-
-// };
-
-
 
 /// @brief Combined triangular solve function using TriangularMatrix enum with standard CSR format
 /// @tparam TM TriangularMatrix::L for forward substitution, TriangularMatrix::U for backward substitution
@@ -58,6 +37,53 @@ void TriangularSolve( const COLTYPE size,
                       VALTYPE const* diag,
                       VALTYPE const* const b,
                       VALTYPE* const x );
+
+/// @brief Level-scheduled triangular substitution with OpenMP parallelization
+/// @tparam TM TriangularMatrix::L for forward substitution, TriangularMatrix::U for backward substitution
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @tparam VALTYPE Value type
+/// @param iperm Permutation array for level scheduling
+/// @param prefix Level prefix array (prefix[l] to prefix[l+1]-1 are nodes in level l)
+/// @param lvls Number of levels
+/// @param rows Number of rows
+/// @param ai Row pointers
+/// @param aj Column indices
+/// @param av Matrix values
+/// @param diag Diagonal values (required for backward substitution, ignored for forward)
+/// @param b Right-hand side vector
+/// @param x Solution vector
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+struct LevelScheduleTriangularSubstitution
+{
+    LevelScheduleTriangularSubstitution( const int num_threads = omp_get_max_threads() )
+        : _nthreads{ num_threads }
+    {
+    }
+    void analysis( const COLTYPE size,
+                   ROWTYPE const* ai,
+                   COLTYPE const* aj,
+                   VALTYPE const* av,
+                   VALTYPE const* diag = nullptr );
+
+    void operator()( VALTYPE const* const b, VALTYPE* const x ) const;
+    void set_num_threads( const int num_threads )
+    {
+        _nthreads = num_threads;
+    }
+
+    int _nthreads;
+    std::vector<COLTYPE> _iperm;
+    std::vector<COLTYPE> _levelPrefix;
+    COLTYPE _levels;
+    TopologicalSort2<ROWTYPE, COLTYPE> _topSort;
+
+    ROWTYPE const* _ai;
+    COLTYPE const* _aj;
+    VALTYPE const* _av;
+    VALTYPE const* _diag{ nullptr };
+    COLTYPE _size{ 0 };
+};
 
 enum class FBSubstitutionType
 {
