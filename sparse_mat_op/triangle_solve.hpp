@@ -16,178 +16,27 @@
 
 namespace matrix_utils
 {
+// /// @brief Level-scheduled triangular substitution with OpenMP parallelization
+// /// @tparam TM TriangularMatrix::L for forward substitution, TriangularMatrix::U for backward substitution
+// /// @tparam ROWTYPE Row pointer type
+// /// @tparam COLTYPE Column index type  
+// /// @tparam VALTYPE Value type
+// /// @param iperm Permutation array for level scheduling
+// /// @param prefix Level prefix array (prefix[l] to prefix[l+1]-1 are nodes in level l)
+// /// @param lvls Number of levels
+// /// @param rows Number of rows
+// /// @param ai Row pointers
+// /// @param aj Column indices
+// /// @param av Matrix values
+// /// @param diag Diagonal values (required for backward substitution, ignored for forward)
+// /// @param b Right-hand side vector
+// /// @param x Solution vector
+// template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+// struct LevelScheduleTriangularSubstitution{
 
-/// @brief Forward-substitution algorithm for low triangular csr matrix L. Note
-/// that the diagonal term is assumed to be 1
-/// @tparam R
-/// @tparam C
-/// @tparam V
-/// @tparam VALTYPE
-/// @param size
-/// @param base
-/// @param ai_start
-/// @param ai_end
-/// @param aj
-/// @param av
-/// @param rhs
-/// @param x
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ForwardSubstitution( const COLTYPE size,
-                          const ROWTYPE base,
-                          ROWTYPE const* ai_start,
-                          ROWTYPE const* ai_end,
-                          COLTYPE const* aj,
-                          VALTYPE const* av,
-                          VALTYPE const* const b,
-                          VALTYPE* const x )
-{
-    for ( COLTYPE i = 0; i < size; i++ )
-    {
-        VALTYPE val = 0;
-        for ( ROWTYPE j = ai_start[i] - base; j < ai_end[i] - base; j++ )
-        {
-            val += av[j] * x[aj[j] - base];
-        }
-        x[i] = b[i] - val;
-    }
-}
+// };
 
-/// @brief Backword-substitution algorithm for low triangular csr matrix L. Note
-/// that the diagonal term is assumed to be 1
-/// @brief
-/// @tparam ROWTYPE
-/// @tparam COLTYPE
-/// @tparam VALTYPE
-/// @param size
-/// @param base
-/// @param ai_start diagonal of each row
-/// @param ai_end end of each row
-/// @param aj
-/// @param av
-/// @param diag diagonal vector
-/// @param b
-/// @param x
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void BackwardSubstitution( const COLTYPE size,
-                           const ROWTYPE base,
-                           ROWTYPE const* ai_start,
-                           ROWTYPE const* ai_end,
-                           COLTYPE const* aj,
-                           VALTYPE const* av,
-                           VALTYPE const* const b,
-                           VALTYPE* const x )
-{
-    for ( COLTYPE i = size - 1; i >= 0; i-- )
-    {
-        VALTYPE val = 0;
 
-        const COLTYPE diag_idx = ai_start[i] - base;
-        for ( ROWTYPE j = ai_end[i] - base - 1; j > ai_start[i] - base; j-- )
-        {
-            val += av[j] * x[aj[j] - base];
-        }
-        x[i] = ( b[i] - val ) / av[diag_idx];
-    }
-}
-
-/// @brief Forward-substitution algorithm for low triangular csr matrix L
-/// obtained by the transpose of a strict upper triangular csr matrix. Note that
-/// the diagonal term is assumed to be 1
-/// @tparam R
-/// @tparam C
-/// @tparam V
-/// @tparam VALTYPE
-/// @param size
-/// @param base
-/// @param ai
-/// @param aj
-/// @param av
-/// @param rhs
-/// @param x
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ForwardSubstitutionT( const COLTYPE size,
-                           const int base,
-                           ROWTYPE const* ai,
-                           COLTYPE const* aj,
-                           VALTYPE const* av,
-                           VALTYPE const* const b,
-                           VALTYPE* const x )
-{
-    ROWTYPE j;
-    std::copy( b, b + size, x );
-    for ( COLTYPE i = 0; i < size; i++ )
-    {
-        for ( j = ai[i] - base; j < ai[i + 1] - base; j++ )
-        {
-            x[aj[j] - base] -= av[j] * x[i];
-        }
-    }
-}
-
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void LevelScheduleForwardSubstitution( COLTYPE const* iperm,
-                                       COLTYPE const* prefix,
-                                       const COLTYPE lvls,
-                                       const COLTYPE rows,
-                                       const int base,
-                                       ROWTYPE const* ai,
-                                       COLTYPE const* aj,
-                                       VALTYPE const* av,
-                                       VALTYPE const* const b,
-                                       VALTYPE* const x )
-{
-#pragma omp parallel
-    {
-        for ( int l = 0; l < lvls; l++ )
-        {
-#pragma omp for
-            for ( COLTYPE i = prefix[l]; i < prefix[l + 1]; i++ )
-            {
-                const COLTYPE idx = iperm[i] - base;
-                VALTYPE val = 0;
-                for ( auto j = ai[idx] - base; j < ai[idx + 1] - base; j++ )
-                {
-                    val += av[j] * x[aj[j] - base];
-                }
-                x[idx] = b[idx] - val;
-            }
-#pragma omp barrier
-        }
-    }
-}
-
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void LevelScheduleBackwardSubstitution( COLTYPE const* iperm,
-                                        COLTYPE const* prefix,
-                                        const COLTYPE lvls,
-                                        const COLTYPE rows,
-                                        const int base,
-                                        ROWTYPE const* ai,
-                                        COLTYPE const* aj,
-                                        VALTYPE const* av,
-                                        VALTYPE const* diag,
-                                        VALTYPE const* const b,
-                                        VALTYPE* const x )
-{
-#pragma omp parallel
-    {
-        for ( int l = 0; l < lvls; l++ )
-        {
-#pragma omp for
-            for ( COLTYPE i = prefix[l]; i < prefix[l + 1]; i++ )
-            {
-                const COLTYPE idx = iperm[i] - base;
-                VALTYPE val = 0;
-                for ( auto j = ai[idx] - base; j < ai[idx + 1] - base; j++ )
-                {
-                    val += av[j] * x[aj[j] - base];
-                }
-                x[idx] = ( b[idx] - val ) / diag[idx];
-            }
-#pragma omp barrier
-        }
-    }
-}
 
 /// @brief Combined triangular solve function using TriangularMatrix enum with standard CSR format
 /// @tparam TM TriangularMatrix::L for forward substitution, TriangularMatrix::U for backward substitution
@@ -208,49 +57,7 @@ void TriangularSolve( const COLTYPE size,
                       VALTYPE const* av,
                       VALTYPE const* diag,
                       VALTYPE const* const b,
-                      VALTYPE* const x )
-{
-    // Extract base from ai[0]
-    const ROWTYPE base = ai[0];
-
-    // Lambda to process a single row - eliminates code duplication
-    auto process_row = [&]( COLTYPE row_idx )
-    {
-        VALTYPE val = VALTYPE( 0 );
-
-        for ( ROWTYPE j = ai[row_idx] - base; j < ai[row_idx + 1] - base; j++ )
-        {
-            COLTYPE col_idx = aj[j] - base;
-            val += av[j] * x[col_idx];
-        }
-
-        // Apply diagonal
-        if ( diag )
-        {
-            x[row_idx] = ( b[row_idx] - val ) / diag[row_idx];
-        }
-        else
-        {
-            x[row_idx] = b[row_idx] - val; // Unit diagonal
-        }
-    };
-
-    // Use different loop strategies for forward vs backward to handle unsigned types
-    if constexpr ( TM == TriangularMatrix::L ) // Forward substitution
-    {
-        for ( COLTYPE i = 0; i < size; i++ )
-        {
-            process_row( i );
-        }
-    }
-    else // Backward substitution (TM == TriangularMatrix::U)
-    {
-        for ( COLTYPE i = size; i > 0; i-- )
-        {
-            process_row( i - 1 );
-        }
-    }
-}
+                      VALTYPE* const x );
 
 enum class FBSubstitutionType
 {

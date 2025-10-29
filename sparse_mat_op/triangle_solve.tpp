@@ -14,6 +14,118 @@
 #include "matrix_utils.hpp"
 
 namespace matrix_utils {
+
+/// @brief Combined triangular solve function using TriangularMatrix enum with standard CSR format
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void TriangularSolve( const COLTYPE size,
+                      ROWTYPE const* ai,
+                      COLTYPE const* aj,
+                      VALTYPE const* av,
+                      VALTYPE const* diag,
+                      VALTYPE const* const b,
+                      VALTYPE* const x )
+{
+    // Extract base from ai[0]
+    const ROWTYPE base = ai[0];
+
+    // Lambda to process a single row - eliminates code duplication
+    auto process_row = [&]( COLTYPE row_idx )
+    {
+        VALTYPE val = VALTYPE( 0 );
+
+        for ( ROWTYPE j = ai[row_idx] - base; j < ai[row_idx + 1] - base; j++ )
+        {
+            COLTYPE col_idx = aj[j] - base;
+            
+            // For forward substitution (L), only use strict lower triangular elements (col < row)
+            // For backward substitution (U), only use strict upper triangular elements (col > row)
+            if constexpr ( TM == TriangularMatrix::L )
+            {
+                if ( col_idx < row_idx ) // Only lower triangular part
+                {
+                    val += av[j] * x[col_idx];
+                }
+            }
+            else // TM == TriangularMatrix::U
+            {
+                if ( col_idx > row_idx ) // Only upper triangular part
+                {
+                    val += av[j] * x[col_idx];
+                }
+            }
+        }
+
+        // Apply diagonal
+        if ( diag )
+        {
+            x[row_idx] = ( b[row_idx] - val ) / diag[row_idx];
+        }
+        else
+        {
+            x[row_idx] = b[row_idx] - val; // Unit diagonal
+        }
+    };
+
+    // Use different loop strategies for forward vs backward to handle unsigned types
+    if constexpr ( TM == TriangularMatrix::L ) // Forward substitution
+    {
+        for ( COLTYPE i = 0; i < size; i++ )
+        {
+            process_row( i );
+        }
+    }
+    else // Backward substitution (TM == TriangularMatrix::U)
+    {
+        for ( COLTYPE i = size; i > 0; i-- )
+        {
+            process_row( i - 1 );
+        }
+    }
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void LevelScheduleTriangularSubstitutionKernel( COLTYPE const* iperm,
+                                                COLTYPE const* prefix,
+                                                const COLTYPE lvls,
+                                                const COLTYPE rows,
+                                                ROWTYPE const* ai,
+                                                COLTYPE const* aj,
+                                                VALTYPE const* av,
+                                                VALTYPE const* diag,
+                                                VALTYPE const* const b,
+                                                VALTYPE* const x )
+{
+    const auto base = ai[0];
+#pragma omp parallel
+    {
+        for ( int l = 0; l < lvls; l++ )
+        {
+#pragma omp for
+            for ( COLTYPE i = prefix[l]; i < prefix[l + 1]; i++ )
+            {
+                const COLTYPE idx = iperm[i] - base;
+                VALTYPE val = 0;
+                for ( auto j = ai[idx] - base; j < ai[idx + 1] - base; j++ )
+                {
+                    val += av[j] * x[aj[j] - base];
+                }
+                
+                if constexpr ( TM == TriangularMatrix::L )
+                {
+                    // Forward substitution - unit diagonal assumed
+                    x[idx] = b[idx] - val;
+                }
+                else // TM == TriangularMatrix::U
+                {
+                    // Backward substitution - use diagonal
+                    x[idx] = ( b[idx] - val ) / diag[idx];
+                }
+            }
+#pragma omp barrier
+        }
+    }
+}
+
 template <FBSubstitutionType FBST, TriangularMatrix TS, typename ROWTYPE,
           typename COLTYPE, typename VALTYPE>
 void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::analysis(
