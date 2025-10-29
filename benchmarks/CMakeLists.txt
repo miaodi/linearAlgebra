@@ -10,7 +10,6 @@ file(GLOB_RECURSE ALL_BENCH_CPP *.cpp)
 # List of benchmarks to exclude due to compilation issues
 set(EXCLUDED_BENCHMARKS 
     "precond_bench.cpp"
-    "triangular_solve_bench.cpp"
 )
 
 foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
