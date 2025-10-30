@@ -439,9 +439,9 @@ TEST(TopologicalSort, L) {
     }
     std::vector<std::int32_t> perm(size);
     std::vector<std::int32_t> prefix(size + 1);
-    matrix_utils::KahnSerial<std::int32_t, std::int32_t> kahn;
+    matrix_utils::KahnSerial<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::L> kahn;
     std::int32_t level =
-        kahn.operator()<matrix_utils::TriangularMatrix::L>(
+        kahn.operator()(
             size, L.AI(), L.AJ(), perm.data(), prefix.data(), false);
     EXPECT_EQ(prefix[0], base);
     std::map<std::int32_t, std::int32_t> idx_map;
@@ -459,9 +459,9 @@ TEST(TopologicalSort, L) {
     // test parallel kahn
     std::vector<std::int32_t> perm_parallel(size);
     std::vector<std::int32_t> prefix_parallel(size + 1);
-    matrix_utils::KahnParallel<std::int32_t, std::int32_t> kahn_parallel(5);
+    matrix_utils::KahnParallel<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::L> kahn_parallel(5);
     std::int32_t level_parallel =
-        kahn_parallel.operator()<matrix_utils::TriangularMatrix::L>(
+        kahn_parallel.operator()(
             size, L.AI(), L.AJ(), perm_parallel.data(),
             prefix_parallel.data(), false);
     EXPECT_EQ(prefix_parallel[0], base);
@@ -481,9 +481,9 @@ TEST(TopologicalSort, L) {
     // test topological sort
     std::vector<std::int32_t> perm_2(size);
     std::vector<std::int32_t> prefix_2(size + 1);
-    matrix_utils::TopologicalSort2<int, int> topSort;
+    matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topSort;
     std::int32_t level_2 =
-        topSort.operator()<matrix_utils::TriangularMatrix::L>(
+        topSort.operator()(
             size, L.AI(), L.AJ(), perm_2.data(), prefix_2.data(), false);
     EXPECT_EQ(prefix_2[0], base);
     EXPECT_EQ(prefix_2[level_2] - base, size);
@@ -525,9 +525,9 @@ TEST(TopologicalSort, U) {
     }
     std::vector<std::int32_t> perm(size);
     std::vector<std::int32_t> prefix(size + 1);
-    matrix_utils::KahnSerial<std::int32_t, std::int32_t> kahn;
+    matrix_utils::KahnSerial<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::U> kahn;
     std::int32_t level =
-        kahn.operator()<matrix_utils::TriangularMatrix::U>(
+        kahn.operator()(
             size, U.AI(), U.AJ(), perm.data(), prefix.data(), false);
     EXPECT_EQ(prefix[0], base);
     std::map<std::int32_t, std::int32_t> idx_map;
@@ -545,9 +545,9 @@ TEST(TopologicalSort, U) {
     // test parallel kahn
     std::vector<std::int32_t> perm_parallel(size);
     std::vector<std::int32_t> prefix_parallel(size + 1);
-    matrix_utils::KahnParallel<std::int32_t, std::int32_t> kahn_parallel(5);
+    matrix_utils::KahnParallel<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::U> kahn_parallel(5);
     std::int32_t level_parallel =
-        kahn_parallel.operator()<matrix_utils::TriangularMatrix::U>(
+        kahn_parallel.operator()(
             size, U.AI(), U.AJ(), perm_parallel.data(), prefix_parallel.data(),
             false);
     EXPECT_EQ(prefix_parallel[0], base);
@@ -567,9 +567,9 @@ TEST(TopologicalSort, U) {
     // test topological sort
     std::vector<std::int32_t> perm_2(size);
     std::vector<std::int32_t> prefix_2(size + 1);
-    matrix_utils::TopologicalSort2<int, int> topSort;
+    matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::U> topSort;
     std::int32_t level_2 =
-        topSort.operator()<matrix_utils::TriangularMatrix::U>(
+        topSort.operator()(
             size, U.AI(), U.AJ(), perm_2.data(), prefix_2.data(), false);
     EXPECT_EQ(prefix_2[0], base);
     EXPECT_EQ(prefix_2[level_2] - base, size);

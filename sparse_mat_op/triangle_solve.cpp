@@ -9,28 +9,11 @@ template void TriangularSolve<TriangularMatrix::L, int, int, double>(
 template void TriangularSolve<TriangularMatrix::U, int, int, double>(
     const int, int const*, int const*, double const*, double const*, double const*, double* );
 
-// template void LevelScheduleForwardSubstitution<int, int, double>( int const* iperm,
-//                                                                   int const* prefix,
-//                                                                   const int lvls,
-//                                                                   const int rows,
-//                                                                   const int base,
-//                                                                   int const* ai,
-//                                                                   int const* aj,
-//                                                                   double const* av,
-//                                                                   double const* const b,
-//                                                                   double* const x );
+template class LevelScheduleTriangularSubstitution<TriangularMatrix::L, int, int, double>;
+template class LevelScheduleTriangularSubstitution<TriangularMatrix::U, int, int, double>;
 
-// template void LevelScheduleBackwardSubstitution<int, int, double>( int const* iperm,
-//                                                                    int const* prefix,
-//                                                                    const int lvls,
-//                                                                    const int rows,
-//                                                                    const int base,
-//                                                                    int const* ai,
-//                                                                    int const* aj,
-//                                                                    double const* av,
-//                                                                    double const* diag,
-//                                                                    double const* const b,
-//                                                                    double* const x );
+template class P2PTriangularSubstitution<TriangularMatrix::L, int, int, double>;
+template class P2PTriangularSubstitution<TriangularMatrix::U, int, int, double>;
 
 template class OptimizedTriangularSolve<FBSubstitutionType::Barrier, TriangularMatrix::L, int, int, double>;
 

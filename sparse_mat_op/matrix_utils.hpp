@@ -584,11 +584,10 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
 
 enum TriangularMatrix { L = 0, U = 1 };
 
-template <typename ROWTYPE, typename COLTYPE>
+template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
 struct KahnSerial
 {
     // Kahn's algorithm
-    template <TriangularMatrix TS>
     COLTYPE operator()( const COLTYPE nodes,
                         ROWTYPE const* ai,
                         COLTYPE const* aj,
@@ -601,7 +600,7 @@ struct KahnSerial
     std::vector<COLTYPE> _t_aj;
 };
 
-template <typename ROWTYPE, typename COLTYPE>
+template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
 struct KahnParallel
 {
     KahnParallel( int nthreads )
@@ -609,7 +608,6 @@ struct KahnParallel
     {
     }
     // Kahn's algorithm
-    template <TriangularMatrix TS>
     COLTYPE operator()( const COLTYPE nodes,
                         ROWTYPE const* ai,
                         COLTYPE const* aj,
@@ -626,11 +624,10 @@ struct KahnParallel
     std::vector<COLTYPE> _threads_prefix;
 };
 
-template <typename ROWTYPE, typename COLTYPE>
+template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
 struct TopologicalSort2
 {
     // max degree
-    template <TriangularMatrix TS>
     COLTYPE operator()( const COLTYPE nodes,
                         ROWTYPE const* ai,
                         COLTYPE const* aj,

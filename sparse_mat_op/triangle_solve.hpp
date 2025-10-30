@@ -76,13 +76,36 @@ struct LevelScheduleTriangularSubstitution
     std::vector<COLTYPE> _iperm;
     std::vector<COLTYPE> _levelPrefix;
     COLTYPE _levels;
-    TopologicalSort2<ROWTYPE, COLTYPE> _topSort;
+    TopologicalSort2<ROWTYPE, COLTYPE, TM> _topSort;
 
     ROWTYPE const* _ai;
     COLTYPE const* _aj;
     VALTYPE const* _av;
     VALTYPE const* _diag{ nullptr };
     COLTYPE _size{ 0 };
+};
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+struct P2PTriangularSubstitution
+{
+    P2PTriangularSubstitution( const int num_threads = omp_get_max_threads() )
+        : _nthreads{ num_threads }
+    {
+    }
+    
+    void analysis( const COLTYPE size,
+                   ROWTYPE const* ai,
+                   COLTYPE const* aj,
+                   VALTYPE const* av,
+                   VALTYPE const* diag = nullptr );
+
+    // void operator()( VALTYPE const* const b, VALTYPE* const x ) const;
+    
+    int _nthreads;
+    std::vector<COLTYPE> _iperm;
+    std::vector<COLTYPE> _levelPrefix;
+    COLTYPE _levels;
+    TopologicalSort2<ROWTYPE, COLTYPE, TM> _topSort;
 };
 
 enum class FBSubstitutionType

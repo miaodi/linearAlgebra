@@ -28,8 +28,8 @@ static CSRMatrix<int,int,double> loadMatrix(const std::string &path) {
 int main(int argc, char** argv) {
     cxxopts::Options options("triangular_debug", "Debug triangular solves and level scheduling");
     options.add_options()
-        ("f,file", "MatrixMarket file", cxxopts::value<std::string>()->default_value("../tests/data/ex5.mtx"))
-        ("l,ilu-level", "ILU level (for building LDU)", cxxopts::value<int>()->default_value("5"))
+        ("f,file", "MatrixMarket file", cxxopts::value<std::string>()->default_value("../data/barrier2-2.mtx"))
+        ("l,ilu-level", "ILU level (for building LDU)", cxxopts::value<int>()->default_value("0"))
         ("u,upper", "Run upper triangular solve (default: lower)")
         ("t,threads", "Number of OpenMP threads", cxxopts::value<int>()->default_value(std::to_string(omp_get_max_threads())))
         ("v,verify", "Compare against serial & BLAS")
@@ -64,33 +64,49 @@ int main(int argc, char** argv) {
     const int n = A.rows;
     std::vector<double> b(n, 1.0), x_level(n, 0.0), x_serial(n, 0.0), x_blas(n, 0.0);
 
-    if(!runUpper) {
+    if(!runUpper)
+    {
         // Lower triangular solve (unit diagonal assumed unless -d provided with D)
-        LevelScheduleTriangularSubstitution<TriangularMatrix::L,int,int,double> levelSolve(result["threads"].as<int>());
-    levelSolve.analysis(L.rows, L.AI(), L.AJ(), L.AV(), static_cast<const double*>(nullptr));
-        levelSolve(b.data(), x_level.data());
+        P2PTriangularSubstitution<TriangularMatrix::L, int, int, double> levelSolve(
+            result["threads"].as<int>() );
+        levelSolve.analysis( L.rows, L.AI(), L.AJ(), L.AV(),
+                             static_cast<const double*>( nullptr ) );
+        // levelSolve( b.data(), x_level.data() );
 
-        if(verify) {
-            TriangularSolve<TriangularMatrix::L>(L.rows, L.AI(), L.AJ(), L.AV(), static_cast<const double*>(nullptr), b.data(), x_serial.data());
-            // Simple infinity norm of difference
-            double maxdiff = 0; for(int i=0;i<n;i++) maxdiff = std::max(maxdiff, std::abs(x_level[i]-x_serial[i]));
-            std::cout << "Max |x_level - x_serial| = " << maxdiff << "\n";
-        }
-    } else {
+        // if ( verify )
+        // {
+        //     TriangularSolve<TriangularMatrix::L>(
+        //         L.rows, L.AI(), L.AJ(), L.AV(),
+        //         static_cast<const double*>( nullptr ), b.data(), x_serial.data() );
+        //     // Simple infinity norm of difference
+        //     double maxdiff = 0;
+        //     for ( int i = 0; i < n; i++ )
+        //         maxdiff = std::max( maxdiff, std::abs( x_level[i] - x_serial[i] ) );
+        //     std::cout << "Max |x_level - x_serial| = " << maxdiff << "\n";
+        // }
+    }
+    else
+    {
         // Upper triangular solve with diagonal
-        LevelScheduleTriangularSubstitution<TriangularMatrix::U,int,int,double> levelSolve(result["threads"].as<int>());
-    levelSolve.analysis(U.rows, U.AI(), U.AJ(), U.AV(), D.data());
-        levelSolve(b.data(), x_level.data());
-        if(verify) {
-            TriangularSolve<TriangularMatrix::U>(U.rows, U.AI(), U.AJ(), U.AV(), D.data(), b.data(), x_serial.data());
-            double maxdiff = 0; for(int i=0;i<n;i++) maxdiff = std::max(maxdiff, std::abs(x_level[i]-x_serial[i]));
-            std::cout << "Max |x_level - x_serial| = " << maxdiff << "\n";
-        }
+        P2PTriangularSubstitution<TriangularMatrix::U, int, int, double> levelSolve(
+            result["threads"].as<int>() );
+        levelSolve.analysis( U.rows, U.AI(), U.AJ(), U.AV(), D.data() );
+        // levelSolve( b.data(), x_level.data() );
+        // if ( verify )
+        // {
+        //     TriangularSolve<TriangularMatrix::U>(
+        //         U.rows, U.AI(), U.AJ(), U.AV(), D.data(), b.data(), x_serial.data() );
+        //     double maxdiff = 0;
+        //     for ( int i = 0; i < n; i++ )
+        //         maxdiff = std::max( maxdiff, std::abs( x_level[i] - x_serial[i] ) );
+        //     std::cout << "Max |x_level - x_serial| = " << maxdiff << "\n";
+        // }
     }
 
     // Print a few sample entries
     std::cout << "x_level first 10 entries:";
-    for(int i=0;i<std::min(10,n);++i) std::cout << " " << x_level[i];
+    for ( int i = 0; i < std::min( 10, n ); ++i )
+        std::cout << " " << x_level[i];
     std::cout << "\n";
 
     return 0;
