@@ -156,7 +156,6 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
                         _t_ai.data(), _t_aj.data(), (double*)nullptr );
 
     prefix[0] = base;
-    _threads_prefix[0] = base;
 
     auto map_index = [&]( COLTYPE local_index )
     {
@@ -180,6 +179,27 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
         return degree;
     };
 
+    auto process_row = [&]( const COLTYPE idx, const auto& handle_neighbor )
+    {
+        auto row_start = _t_ai[idx] - base;
+        auto row_end = _t_ai[idx + 1] - base;
+        if ( has_diagonal && row_end > row_start )
+        {
+            if constexpr ( TS == TriangularMatrix::U )
+            {
+                ++row_start;
+            }
+            else
+            {
+                --row_end;
+            }
+        }
+        for ( auto pos = row_start; pos < row_end; ++pos )
+        {
+            handle_neighbor( _t_aj[pos] );
+        }
+    };
+
 #pragma omp parallel num_threads( _nthreads )
     {
         const int thread_id = omp_get_thread_num();
@@ -189,12 +209,10 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
         auto chunk_begin = thread_id * nodes / _nthreads;
         auto chunk_end = ( thread_id + 1 ) * nodes / _nthreads;
 
-        for ( COLTYPE local = chunk_begin; local < chunk_end; ++local )
+        for ( COLTYPE i = chunk_begin; i < chunk_end; ++i )
         {
-            const COLTYPE i = map_index( local );
-            const COLTYPE degree = degree_for( i );
-            _degrees[i].store( degree, std::memory_order_relaxed );
-            if ( degree == 0 )
+            _degrees[i] =  degree_for( i );
+            if ( _degrees[i] == 0 )
             {
                 _threads_nodes[thread_id].push_back( i + base );
             }
@@ -203,6 +221,7 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
 #pragma omp barrier
 #pragma omp single
         {
+            _threads_prefix[0] = base;
             for ( size_t i = 1; i < _threads_prefix.size(); ++i )
             {
                 _threads_prefix[i] += _threads_prefix[i - 1];
@@ -215,34 +234,7 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
         {
             perm[thread_start++] = node;
         }
-
 #pragma omp barrier
-#pragma omp single
-        {
-            _threads_prefix[0] = _threads_prefix[_nthreads];
-        }
-
-        auto process_row = [&]( const COLTYPE idx, const auto& handle_neighbor )
-        {
-            auto row_start = _t_ai[idx] - base;
-            auto row_end = _t_ai[idx + 1] - base;
-            if ( has_diagonal && row_end > row_start )
-            {
-                if constexpr ( TS == TriangularMatrix::U )
-                {
-                    ++row_start;
-                }
-                else
-                {
-                    --row_end;
-                }
-            }
-            for ( auto pos = row_start; pos < row_end; ++pos )
-            {
-                handle_neighbor( _t_aj[pos] );
-            }
-        };
-
         while ( processed != nodes )
         {
             _threads_prefix[thread_id + 1] = 0;
@@ -270,6 +262,7 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
 #pragma omp barrier
 #pragma omp single
             {
+                _threads_prefix[0] = processed + base;
                 for ( size_t i = 1; i < _threads_prefix.size(); ++i )
                 {
                     _threads_prefix[i] += _threads_prefix[i - 1];
@@ -284,10 +277,6 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
                 perm[local_start++] = node;
             }
 #pragma omp barrier
-#pragma omp single
-            {
-                _threads_prefix[0] = _threads_prefix[_nthreads];
-            }
         }
     }
 

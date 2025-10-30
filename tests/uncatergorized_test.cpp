@@ -426,174 +426,192 @@ TEST(ObjectPool, vector) {
   }
 }
 
-TEST(TopologicalSort, L) {
-  const int size = 1000;
-  const int nnz_per_row = 20;
-  for (int base = 0; base <= 1; base++) {
-    matrix_utils::CSRMatrix<std::int32_t, std::int32_t, double> L;
-    matrix_utils::RandomL(size, base, nnz_per_row, L);
-    // test random L
-    for (int i = 0; i < size; i++) {
-      EXPECT_TRUE(std::is_sorted(L.AJ() + L.AI()[i] - base,
-                                 L.AJ() + L.AI()[i + 1] - base));
-    }
-    std::vector<std::int32_t> perm(size);
-    std::vector<std::int32_t> prefix(size + 1);
-    matrix_utils::KahnSerial<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::L> kahn;
-    std::int32_t level =
-        kahn.operator()(
-            size, L.AI(), L.AJ(), perm.data(), prefix.data(), false);
-    EXPECT_EQ(prefix[0], base);
-    std::map<std::int32_t, std::int32_t> idx_map;
-    for (int i = 0; i < size; i++) {
-      idx_map[perm[i] - base] = i;
-    }
-    // check topological order
-    for (int i = 0; i < size; i++) {
-      for (int j = L.AI()[i] - base; j < L.AI()[i + 1] - base; j++) {
-        EXPECT_TRUE(idx_map[L.AJ()[j] - base] < idx_map[i]);
-      }
-    }
-    EXPECT_EQ(prefix[level] - base, size);
+TEST(TopologicalSort, L)
+{
+    const int size = 1000;
+    const int nnz_per_row = 20;
+    for ( int base = 0; base <= 1; base++ )
+    {
+        matrix_utils::CSRMatrix<std::int32_t, std::int32_t, double> L;
+        matrix_utils::RandomL( size, base, nnz_per_row, L );
+        // test random L
+        for ( int i = 0; i < size; i++ )
+        {
+            EXPECT_TRUE( std::is_sorted( L.AJ() + L.AI()[i] - base,
+                                         L.AJ() + L.AI()[i + 1] - base ) );
+        }
+        std::vector<std::int32_t> perm( size );
+        std::vector<std::int32_t> prefix( size + 1 );
+        matrix_utils::KahnSerial<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::L> kahn;
+        std::int32_t level =
+            kahn( size, L.AI(), L.AJ(), perm.data(), prefix.data(), false );
+        EXPECT_EQ( prefix[0], base );
+        std::map<std::int32_t, std::int32_t> idx_map;
+        for ( int i = 0; i < size; i++ )
+        {
+            idx_map[perm[i] - base] = i;
+        }
+        // check topological order
+        for ( int i = 0; i < size; i++ )
+        {
+            for ( int j = L.AI()[i] - base; j < L.AI()[i + 1] - base; j++ )
+            {
+                EXPECT_TRUE( idx_map[L.AJ()[j] - base] < idx_map[i] );
+            }
+        }
+        EXPECT_EQ( prefix[level] - base, size );
 
-    // test parallel kahn
-    std::vector<std::int32_t> perm_parallel(size);
-    std::vector<std::int32_t> prefix_parallel(size + 1);
-    matrix_utils::KahnParallel<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::L> kahn_parallel(5);
-    std::int32_t level_parallel =
-        kahn_parallel.operator()(
-            size, L.AI(), L.AJ(), perm_parallel.data(),
-            prefix_parallel.data(), false);
-    EXPECT_EQ(prefix_parallel[0], base);
-    EXPECT_EQ(prefix_parallel[level_parallel] - base, size);
-    EXPECT_EQ(level, level_parallel);
-    for (int i = 0; i < level; i++) {
-      EXPECT_EQ(prefix[i + 1], prefix_parallel[i + 1]);
-      std::sort(perm.data() + prefix[i] - base,
-                perm.data() + prefix[i + 1] - base);
-      std::sort(perm_parallel.data() + prefix_parallel[i] - base,
-                perm_parallel.data() + prefix_parallel[i + 1] - base);
-      for (int j = prefix[i] - base; j < prefix[i + 1] - base; j++) {
-        EXPECT_EQ(perm[j], perm_parallel[j]);
-      }
-    }
+        // test parallel kahn
+        std::vector<std::int32_t> perm_parallel( size );
+        std::vector<std::int32_t> prefix_parallel( size + 1 );
+        matrix_utils::KahnParallel<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::L> kahn_parallel(
+            5 );
+        std::int32_t level_parallel = kahn_parallel(
+            size, L.AI(), L.AJ(), perm_parallel.data(), prefix_parallel.data(), false );
+        EXPECT_EQ( prefix_parallel[0], base );
+        EXPECT_EQ( prefix_parallel[level_parallel] - base, size );
+        EXPECT_EQ( level, level_parallel );
+        for ( int i = 0; i < level; i++ )
+        {
+            EXPECT_EQ( prefix[i + 1], prefix_parallel[i + 1] );
+            std::sort( perm.data() + prefix[i] - base, perm.data() + prefix[i + 1] - base );
+            std::sort( perm_parallel.data() + prefix_parallel[i] - base,
+                       perm_parallel.data() + prefix_parallel[i + 1] - base );
+            for ( int j = prefix[i] - base; j < prefix[i + 1] - base; j++ )
+            {
+                EXPECT_EQ( perm[j], perm_parallel[j] );
+            }
+        }
 
-    // test topological sort
-    std::vector<std::int32_t> perm_2(size);
-    std::vector<std::int32_t> prefix_2(size + 1);
-    matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topSort;
-    std::int32_t level_2 =
-        topSort.operator()(
-            size, L.AI(), L.AJ(), perm_2.data(), prefix_2.data(), false);
-    EXPECT_EQ(prefix_2[0], base);
-    EXPECT_EQ(prefix_2[level_2] - base, size);
-    EXPECT_EQ(level, level_2);
+        // test topological sort
+        std::vector<std::int32_t> perm_2( size );
+        std::vector<std::int32_t> prefix_2( size + 1 );
+        matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topSort;
+        std::int32_t level_2 =
+            topSort( size, L.AI(), L.AJ(), perm_2.data(), prefix_2.data(), false );
+        EXPECT_EQ( prefix_2[0], base );
+        EXPECT_EQ( prefix_2[level_2] - base, size );
+        EXPECT_EQ( level, level_2 );
 
-    // check topological order
-    idx_map.clear();
-    for (int i = 0; i < size; i++) {
-      idx_map[perm_2[i] - base] = i;
-    }
+        // check topological order
+        idx_map.clear();
+        for ( int i = 0; i < size; i++ )
+        {
+            idx_map[perm_2[i] - base] = i;
+        }
 
-    for (int i = 0; i < size; i++) {
-      for (int j = L.AI()[i] - base; j < L.AI()[i + 1] - base; j++) {
-        EXPECT_TRUE(idx_map[L.AJ()[j] - base] < idx_map[i]);
-      }
-    }
+        for ( int i = 0; i < size; i++ )
+        {
+            for ( int j = L.AI()[i] - base; j < L.AI()[i + 1] - base; j++ )
+            {
+                EXPECT_TRUE( idx_map[L.AJ()[j] - base] < idx_map[i] );
+            }
+        }
 
-    for (int i = 0; i < level; i++) {
-      EXPECT_EQ(prefix[i + 1], prefix_2[i + 1]);
-      std::sort(perm_2.data() + prefix_2[i] - base,
-                perm_2.data() + prefix_2[i + 1] - base);
-      for (int j = prefix[i] - base; j < prefix[i + 1] - base; j++) {
-        EXPECT_EQ(perm[j], perm_2[j]);
-      }
+        for ( int i = 0; i < level; i++ )
+        {
+            EXPECT_EQ( prefix[i + 1], prefix_2[i + 1] );
+            std::sort( perm_2.data() + prefix_2[i] - base,
+                       perm_2.data() + prefix_2[i + 1] - base );
+            for ( int j = prefix[i] - base; j < prefix[i + 1] - base; j++ )
+            {
+                EXPECT_EQ( perm[j], perm_2[j] );
+            }
+        }
     }
-  }
 }
 
-TEST(TopologicalSort, U) {
-  const int size = 1003;
-  const int nnz_per_row = 20;
-  for (int base = 0; base <= 1; base++) {
-    matrix_utils::CSRMatrix<std::int32_t, std::int32_t, double> U;
-    matrix_utils::RandomU(size, base, nnz_per_row, U);
-    // test random U
-    for (int i = 0; i < size; i++) {
-      EXPECT_TRUE(std::is_sorted(U.AJ() + U.AI()[i] - base,
-                                 U.AJ() + U.AI()[i + 1] - base));
-    }
-    std::vector<std::int32_t> perm(size);
-    std::vector<std::int32_t> prefix(size + 1);
-    matrix_utils::KahnSerial<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::U> kahn;
-    std::int32_t level =
-        kahn.operator()(
-            size, U.AI(), U.AJ(), perm.data(), prefix.data(), false);
-    EXPECT_EQ(prefix[0], base);
-    std::map<std::int32_t, std::int32_t> idx_map;
-    for (int i = 0; i < size; i++) {
-      idx_map[perm[i] - base] = i;
-    }
-    // check reverse topological order
-    for (int i = 0; i < size; i++) {
-      for (int j = U.AI()[i] - base; j < U.AI()[i + 1] - base; j++) {
-        EXPECT_TRUE(idx_map[U.AJ()[j] - base] < idx_map[i]);
-      }
-    }
-    EXPECT_EQ(prefix[level] - base, size);
+TEST(TopologicalSort, U)
+{
+    const int size = 1003;
+    const int nnz_per_row = 20;
+    for ( int base = 0; base <= 1; base++ )
+    {
+        matrix_utils::CSRMatrix<std::int32_t, std::int32_t, double> U;
+        matrix_utils::RandomU( size, base, nnz_per_row, U );
+        // test random U
+        for ( int i = 0; i < size; i++ )
+        {
+            EXPECT_TRUE( std::is_sorted( U.AJ() + U.AI()[i] - base,
+                                         U.AJ() + U.AI()[i + 1] - base ) );
+        }
+        std::vector<std::int32_t> perm( size );
+        std::vector<std::int32_t> prefix( size + 1 );
+        matrix_utils::KahnSerial<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::U> kahn;
+        std::int32_t level =
+            kahn.operator()( size, U.AI(), U.AJ(), perm.data(), prefix.data(), false );
+        EXPECT_EQ( prefix[0], base );
+        std::map<std::int32_t, std::int32_t> idx_map;
+        for ( int i = 0; i < size; i++ )
+        {
+            idx_map[perm[i] - base] = i;
+        }
+        // check reverse topological order
+        for ( int i = 0; i < size; i++ )
+        {
+            for ( int j = U.AI()[i] - base; j < U.AI()[i + 1] - base; j++ )
+            {
+                EXPECT_TRUE( idx_map[U.AJ()[j] - base] < idx_map[i] );
+            }
+        }
+        EXPECT_EQ( prefix[level] - base, size );
 
-    // test parallel kahn
-    std::vector<std::int32_t> perm_parallel(size);
-    std::vector<std::int32_t> prefix_parallel(size + 1);
-    matrix_utils::KahnParallel<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::U> kahn_parallel(5);
-    std::int32_t level_parallel =
-        kahn_parallel.operator()(
-            size, U.AI(), U.AJ(), perm_parallel.data(), prefix_parallel.data(),
-            false);
-    EXPECT_EQ(prefix_parallel[0], base);
-    EXPECT_EQ(prefix_parallel[level_parallel] - base, size);
-    EXPECT_EQ(level, level_parallel);
-    for (int i = 0; i < level; i++) {
-      EXPECT_EQ(prefix[i + 1], prefix_parallel[i + 1]);
-      std::sort(perm.data() + prefix[i] - base,
-                perm.data() + prefix[i + 1] - base);
-      std::sort(perm_parallel.data() + prefix_parallel[i] - base,
-                perm_parallel.data() + prefix_parallel[i + 1] - base);
-      for (int j = prefix[i] - base; j < prefix[i + 1] - base; j++) {
-        EXPECT_EQ(perm[j], perm_parallel[j]);
-      }
-    }
+        // test parallel kahn
+        std::vector<std::int32_t> perm_parallel( size );
+        std::vector<std::int32_t> prefix_parallel( size + 1 );
+        matrix_utils::KahnParallel<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::U> kahn_parallel(
+            5 );
+        std::int32_t level_parallel = kahn_parallel.operator()(
+            size, U.AI(), U.AJ(), perm_parallel.data(), prefix_parallel.data(), false );
+        EXPECT_EQ( prefix_parallel[0], base );
+        EXPECT_EQ( prefix_parallel[level_parallel] - base, size );
+        EXPECT_EQ( level, level_parallel );
+        for ( int i = 0; i < level; i++ )
+        {
+            EXPECT_EQ( prefix[i + 1], prefix_parallel[i + 1] );
+            std::sort( perm.data() + prefix[i] - base, perm.data() + prefix[i + 1] - base );
+            std::sort( perm_parallel.data() + prefix_parallel[i] - base,
+                       perm_parallel.data() + prefix_parallel[i + 1] - base );
+            for ( int j = prefix[i] - base; j < prefix[i + 1] - base; j++ )
+            {
+                EXPECT_EQ( perm[j], perm_parallel[j] );
+            }
+        }
 
-    // test topological sort
-    std::vector<std::int32_t> perm_2(size);
-    std::vector<std::int32_t> prefix_2(size + 1);
-    matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::U> topSort;
-    std::int32_t level_2 =
-        topSort.operator()(
-            size, U.AI(), U.AJ(), perm_2.data(), prefix_2.data(), false);
-    EXPECT_EQ(prefix_2[0], base);
-    EXPECT_EQ(prefix_2[level_2] - base, size);
-    EXPECT_EQ(level, level_2);
+        // test topological sort
+        std::vector<std::int32_t> perm_2( size );
+        std::vector<std::int32_t> prefix_2( size + 1 );
+        matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::U> topSort;
+        std::int32_t level_2 = topSort.operator()(
+            size, U.AI(), U.AJ(), perm_2.data(), prefix_2.data(), false );
+        EXPECT_EQ( prefix_2[0], base );
+        EXPECT_EQ( prefix_2[level_2] - base, size );
+        EXPECT_EQ( level, level_2 );
 
-    // check order consistency
-    idx_map.clear();
-    for (int i = 0; i < size; i++) {
-      idx_map[perm_2[i] - base] = i;
-    }
+        // check order consistency
+        idx_map.clear();
+        for ( int i = 0; i < size; i++ )
+        {
+            idx_map[perm_2[i] - base] = i;
+        }
 
-    for (int i = 0; i < size; i++) {
-      for (int j = U.AI()[i] - base; j < U.AI()[i + 1] - base; j++) {
-        EXPECT_TRUE(idx_map[U.AJ()[j] - base] < idx_map[i]);
-      }
-    }
+        for ( int i = 0; i < size; i++ )
+        {
+            for ( int j = U.AI()[i] - base; j < U.AI()[i + 1] - base; j++ )
+            {
+                EXPECT_TRUE( idx_map[U.AJ()[j] - base] < idx_map[i] );
+            }
+        }
 
-    for (int i = 0; i < level; i++) {
-      EXPECT_EQ(prefix[i + 1], prefix_2[i + 1]);
-      std::sort(perm_2.data() + prefix_2[i] - base,
-                perm_2.data() + prefix_2[i + 1] - base);
-      for (int j = prefix[i] - base; j < prefix[i + 1] - base; j++) {
-        EXPECT_EQ(perm[j], perm_2[j]);
-      }
+        for ( int i = 0; i < level; i++ )
+        {
+            EXPECT_EQ( prefix[i + 1], prefix_2[i + 1] );
+            std::sort( perm_2.data() + prefix_2[i] - base,
+                       perm_2.data() + prefix_2[i + 1] - base );
+            for ( int j = prefix[i] - base; j < prefix[i + 1] - base; j++ )
+            {
+                EXPECT_EQ( perm[j], perm_2[j] );
+            }
+        }
     }
-  }
 }
