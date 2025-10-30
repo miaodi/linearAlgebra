@@ -43,14 +43,13 @@ template void symPermute<int, int, double>(const int rows, const int base,
                                            int *permed_ai, int *permed_aj,
                                            double *permed_av);
 
-template <typename ROWTYPE, typename COLTYPE>
-template <TriangularMatrix TS>
-COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
-                                                  ROWTYPE const* ai,
-                                                  COLTYPE const* aj,
-                                                  COLTYPE* perm,
-                                                  COLTYPE* prefix,
-                                                  bool has_diagonal )
+template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
+COLTYPE KahnSerial<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
+                                                      ROWTYPE const* ai,
+                                                      COLTYPE const* aj,
+                                                      COLTYPE* perm,
+                                                      COLTYPE* prefix,
+                                                      bool has_diagonal )
 {
     _degrees.resize( nodes );
     const auto base = ai[0];
@@ -131,14 +130,13 @@ COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
     return level + 1;
 }
 
-template <typename ROWTYPE, typename COLTYPE>
-template <TriangularMatrix TS>
-COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
-                                                    ROWTYPE const* ai,
-                                                    COLTYPE const* aj,
-                                                    COLTYPE* perm,
-                                                    COLTYPE* prefix,
-                                                    bool has_diagonal )
+template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
+COLTYPE KahnParallel<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
+                                                        ROWTYPE const* ai,
+                                                        COLTYPE const* aj,
+                                                        COLTYPE* perm,
+                                                        COLTYPE* prefix,
+                                                        bool has_diagonal )
 {
     if ( _degrees_size < nodes )
     {
@@ -296,14 +294,13 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
     return level + 1;
 }
 
-template <typename ROWTYPE, typename COLTYPE>
-template <TriangularMatrix TS>
-COLTYPE TopologicalSort2<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
-                                                        ROWTYPE const* ai,
-                                                        COLTYPE const* aj,
-                                                        COLTYPE* perm,
-                                                        COLTYPE* prefix,
-                                                        bool has_diagonal )
+template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
+COLTYPE TopologicalSort2<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
+                                                            ROWTYPE const* ai,
+                                                            COLTYPE const* aj,
+                                                            COLTYPE* perm,
+                                                            COLTYPE* prefix,
+                                                            bool has_diagonal )
 {
     _degrees.resize( nodes );
     std::fill( _degrees.begin(), _degrees.end(), 0 );
@@ -471,27 +468,12 @@ template void Block<int, int, double, CSRMatrixVec<int, int, double>>(
     CSRMatrixVec<int, int, double> &);
 
 #define INSTANTIATE_TOPOLOGICAL_SORT(ROWTYPE, COLTYPE)                         \
-  template struct KahnSerial<ROWTYPE, COLTYPE>;                                \
-  template struct KahnParallel<ROWTYPE, COLTYPE>;                              \
-  template COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()<                   \
-      TriangularMatrix::L>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
-                           COLTYPE *, COLTYPE *, bool);                        \
-  template COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()<                   \
-      TriangularMatrix::U>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
-                           COLTYPE *, COLTYPE *, bool);                        \
-  template COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()<                 \
-      TriangularMatrix::L>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
-                           COLTYPE *, COLTYPE *, bool);                        \
-  template COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()<                 \
-      TriangularMatrix::U>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
-                           COLTYPE *, COLTYPE *, bool);                        \
-  template struct TopologicalSort2<ROWTYPE, COLTYPE>;                          \
-  template COLTYPE TopologicalSort2<ROWTYPE, COLTYPE>::operator()<             \
-      TriangularMatrix::L>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
-                           COLTYPE *, COLTYPE *, bool);                        \
-  template COLTYPE TopologicalSort2<ROWTYPE, COLTYPE>::operator()<             \
-      TriangularMatrix::U>(const COLTYPE, ROWTYPE const *, COLTYPE const *,    \
-                           COLTYPE *, COLTYPE *, bool);
+  template struct KahnSerial<ROWTYPE, COLTYPE, TriangularMatrix::L>;          \
+  template struct KahnSerial<ROWTYPE, COLTYPE, TriangularMatrix::U>;          \
+  template struct KahnParallel<ROWTYPE, COLTYPE, TriangularMatrix::L>;        \
+  template struct KahnParallel<ROWTYPE, COLTYPE, TriangularMatrix::U>;        \
+  template struct TopologicalSort2<ROWTYPE, COLTYPE, TriangularMatrix::L>;    \
+  template struct TopologicalSort2<ROWTYPE, COLTYPE, TriangularMatrix::U>;
 
 INSTANTIATE_TOPOLOGICAL_SORT(std::int32_t, std::int32_t)
 INSTANTIATE_TOPOLOGICAL_SORT(std::int64_t, std::int64_t)

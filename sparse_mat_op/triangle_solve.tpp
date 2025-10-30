@@ -25,6 +25,11 @@ void TriangularSolve( const COLTYPE size,
                       VALTYPE const* const b,
                       VALTYPE* const x )
 {
+    if constexpr ( TM == TriangularMatrix::U )
+    {
+        assert( diag != nullptr &&
+                "Diagonal must be provided for backward substitution." );
+    }
     // Extract base from ai[0]
     const ROWTYPE base = ai[0];
 
@@ -36,7 +41,7 @@ void TriangularSolve( const COLTYPE size,
         for ( ROWTYPE j = ai[row_idx] - base; j < ai[row_idx + 1] - base; j++ )
         {
             COLTYPE col_idx = aj[j] - base;
-            
+
             // For forward substitution (L), only use strict lower triangular elements (col < row)
             // For backward substitution (U), only use strict upper triangular elements (col > row)
             if constexpr ( TM == TriangularMatrix::L )
@@ -88,6 +93,12 @@ template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALT
 void LevelScheduleTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::analysis(
     const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av, VALTYPE const* diag )
 {
+    if constexpr ( TM == TriangularMatrix::U )
+    {
+        assert( diag != nullptr &&
+                "Diagonal must be provided for backward substitution." );
+    }
+
     _ai = ai;
     _aj = aj;
     _av = av;
@@ -97,8 +108,7 @@ void LevelScheduleTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::analysi
     const auto base = _ai[0];
     _iperm.resize(_size);
     _levelPrefix.resize(_size + 1);
-    _levels = _topSort.template operator()<TM>( _size, _ai, _aj, _iperm.data(),
-                                                _levelPrefix.data(), false );
+    _levels = _topSort( _size, _ai, _aj, _iperm.data(), _levelPrefix.data(), false );
 }
 
 
@@ -144,6 +154,24 @@ void LevelScheduleTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::operato
     }
 }
 
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::analysis(
+    const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av, VALTYPE const* diag )
+{
+    if constexpr ( TM == TriangularMatrix::U )
+    {
+        assert( diag != nullptr &&
+                "Diagonal must be provided for backward substitution." );
+    }
+
+    // Build the point-to-point communication graph
+    const auto base = ai[0];
+    _iperm.resize(size);
+    _levelPrefix.resize(size + 1);
+    _levels = _topSort.operator()( size, ai, aj, _iperm.data(), _levelPrefix.data(), false );
+    std::cout << "size: " << size << ", levels: " << _levels << std::endl;
+}
+
 template <FBSubstitutionType FBST, TriangularMatrix TS, typename ROWTYPE,
           typename COLTYPE, typename VALTYPE>
 void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::analysis(
@@ -158,11 +186,11 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::analysis(
   _reorderedMat.av.resize(nnz);
   _reorderedMat.ai[0] = base;
   _reorderedMat.rows = rows;
-  matrix_utils::TopologicalSort2<int, int> topSort;
+  matrix_utils::TopologicalSort2<int, int, TS> topSort;
   _iperm.resize(rows);
   _levelPrefix.resize(rows + 1);
   const bool has_diagonal = diag != nullptr;
-  _levels = topSort.template operator()<TS>(
+  _levels = topSort.operator()(
       rows, ai, aj, _iperm.data(), _levelPrefix.data(), has_diagonal);
   _threadlevels.resize(_nthreads);
   _threadiperm.resize(rows);
