@@ -229,6 +229,99 @@ protected:
         EXPECT_TRUE(nonZeroVector(x_level));
     }
 
+    void checkOptimizedForwardBarrier(size_t midx) const {
+        if(!_factor_ok[midx]) return;
+        const auto &L = _Ls[midx];
+        const int n = L.rows;
+        std::vector<double> b(n,1.0), x_optimized(n,0.), x_ref(n,0.);
+        TriangularSolve<TriangularMatrix::L>(L.rows, L.AI(), L.AJ(), L.AV(), (double*)nullptr, b.data(), x_ref.data());
+        OptimizedTriangularSolve<FBSubstitutionType::Barrier, TriangularMatrix::L, int, int, double> optimizedSolve(omp_get_max_threads());
+        optimizedSolve.analysis(L.rows, L.Base(), L.AI(), L.AJ(), L.AV(), (double*)nullptr);
+        optimizedSolve(b.data(), x_optimized.data());
+        for(int i=0; i<n; ++i) {
+            EXPECT_NEAR(x_optimized[i], x_ref[i], _tol * std::max(1.0, std::abs(x_ref[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_optimized));
+    }
+
+    void checkOptimizedForwardNoBarrier(size_t midx) const {
+        if(!_factor_ok[midx]) return;
+        const auto &L = _Ls[midx];
+        const int n = L.rows;
+        std::vector<double> b(n,1.0), x_optimized(n,0.), x_ref(n,0.);
+        TriangularSolve<TriangularMatrix::L>(L.rows, L.AI(), L.AJ(), L.AV(), (double*)nullptr, b.data(), x_ref.data());
+        OptimizedTriangularSolve<FBSubstitutionType::NoBarrier, TriangularMatrix::L, int, int, double> optimizedSolve(omp_get_max_threads());
+        optimizedSolve.analysis(L.rows, L.Base(), L.AI(), L.AJ(), L.AV(), (double*)nullptr);
+        optimizedSolve(b.data(), x_optimized.data());
+        for(int i=0; i<n; ++i) {
+            EXPECT_NEAR(x_optimized[i], x_ref[i], _tol * std::max(1.0, std::abs(x_ref[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_optimized));
+    }
+
+    void checkOptimizedForwardNoBarrierSuperNode(size_t midx) const {
+        if(!_factor_ok[midx]) return;
+        const auto &L = _Ls[midx];
+        const int n = L.rows;
+        std::vector<double> b(n,1.0), x_optimized(n,0.), x_ref(n,0.);
+        TriangularSolve<TriangularMatrix::L>(L.rows, L.AI(), L.AJ(), L.AV(), (double*)nullptr, b.data(), x_ref.data());
+        OptimizedTriangularSolve<FBSubstitutionType::NoBarrierSuperNode, TriangularMatrix::L, int, int, double> optimizedSolve(omp_get_max_threads());
+        optimizedSolve.analysis(L.rows, L.Base(), L.AI(), L.AJ(), L.AV(), (double*)nullptr);
+        optimizedSolve(b.data(), x_optimized.data());
+        for(int i=0; i<n; ++i) {
+            EXPECT_NEAR(x_optimized[i], x_ref[i], _tol * std::max(1.0, std::abs(x_ref[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_optimized));
+    }
+
+    void checkOptimizedBackwardBarrier(size_t midx) const {
+        if(!_factor_ok[midx]) return;
+        const auto &U = _Us[midx];
+        const auto &D = _Ds[midx];
+        const int n = U.rows;
+        std::vector<double> b(n,1.0), x_optimized(n,0.), x_ref(n,0.);
+        TriangularSolve<TriangularMatrix::U>(U.rows, U.AI(), U.AJ(), U.AV(), D.data(), b.data(), x_ref.data());
+        OptimizedTriangularSolve<FBSubstitutionType::Barrier, TriangularMatrix::U, int, int, double> optimizedSolve(omp_get_max_threads());
+        optimizedSolve.analysis(U.rows, U.Base(), U.AI(), U.AJ(), U.AV(), D.data());
+        optimizedSolve(b.data(), x_optimized.data());
+        for(int i=0; i<n; ++i) {
+            EXPECT_NEAR(x_optimized[i], x_ref[i], _tol * std::max(1.0, std::abs(x_ref[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_optimized));
+    }
+
+    void checkOptimizedBackwardNoBarrier(size_t midx) const {
+        if(!_factor_ok[midx]) return;
+        const auto &U = _Us[midx];
+        const auto &D = _Ds[midx];
+        const int n = U.rows;
+        std::vector<double> b(n,1.0), x_optimized(n,0.), x_ref(n,0.);
+        TriangularSolve<TriangularMatrix::U>(U.rows, U.AI(), U.AJ(), U.AV(), D.data(), b.data(), x_ref.data());
+        OptimizedTriangularSolve<FBSubstitutionType::NoBarrier, TriangularMatrix::U, int, int, double> optimizedSolve(omp_get_max_threads());
+        optimizedSolve.analysis(U.rows, U.Base(), U.AI(), U.AJ(), U.AV(), D.data());
+        optimizedSolve(b.data(), x_optimized.data());
+        for(int i=0; i<n; ++i) {
+            EXPECT_NEAR(x_optimized[i], x_ref[i], _tol * std::max(1.0, std::abs(x_ref[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_optimized));
+    }
+
+    void checkOptimizedBackwardNoBarrierSuperNode(size_t midx) const {
+        if(!_factor_ok[midx]) return;
+        const auto &U = _Us[midx];
+        const auto &D = _Ds[midx];
+        const int n = U.rows;
+        std::vector<double> b(n,1.0), x_optimized(n,0.), x_ref(n,0.);
+        TriangularSolve<TriangularMatrix::U>(U.rows, U.AI(), U.AJ(), U.AV(), D.data(), b.data(), x_ref.data());
+        OptimizedTriangularSolve<FBSubstitutionType::NoBarrierSuperNode, TriangularMatrix::U, int, int, double> optimizedSolve(omp_get_max_threads());
+        optimizedSolve.analysis(U.rows, U.Base(), U.AI(), U.AJ(), U.AV(), D.data());
+        optimizedSolve(b.data(), x_optimized.data());
+        for(int i=0; i<n; ++i) {
+            EXPECT_NEAR(x_optimized[i], x_ref[i], _tol * std::max(1.0, std::abs(x_ref[i])));
+        }
+        EXPECT_TRUE(nonZeroVector(x_optimized));
+    }
+
 private:
     // Helper function to create CSRMatrix from matrix market data
     matrix_utils::CSRMatrix<int, int, double> createMatrixFromVectors(
@@ -296,153 +389,32 @@ TEST_F( triangular_solve_Test, level_scheduled_backward_substitution )
     for(size_t i=0;i<_mats.size();++i) checkLevelBackward(i);
 }
 
-// TEST_F( triangular_solve_Test, forward_substitution_optimized )
-// {
-//     omp_set_num_threads( 5 );
-//     for ( auto mat : _mats )
-//     {
-//         const MKL_INT size = mat.rows();
-//         mat.to_zero_based();
-//         mkl_wrapper::incomplete_lu_k prec;
-//         prec.set_level( 5 );
-//         prec.symbolic_factorize( &mat );
-//         prec.numeric_factorize( &mat );
+TEST_F( triangular_solve_Test, optimized_forward_substitution_barrier )
+{
+    for(size_t i=0;i<_mats.size();++i) checkOptimizedForwardBarrier(i);
+}
 
-//         // std::ofstream myfile;
-//         // myfile.open("prec.svg");
-//         // prec.print_svg(myfile);
-//         // myfile.close();
+TEST_F( triangular_solve_Test, optimized_forward_substitution_no_barrier )
+{
+    for(size_t i=0;i<_mats.size();++i) checkOptimizedForwardNoBarrier(i);
+}
 
-//         std::vector<double> b( mat.rows() );
-//         std::fill( std::begin( b ), std::end( b ), 1. );
-//         std::vector<double> x( mat.rows(), 0.0 );
-//         std::vector<double> x_serial( mat.rows(), 0.0 );
+TEST_F( triangular_solve_Test, optimized_forward_substitution_no_barrier_super_node )
+{
+    for(size_t i=0;i<_mats.size();++i) checkOptimizedForwardNoBarrierSuperNode(i);
+}
 
-//         matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
-//         std::vector<double> D;
+TEST_F( triangular_solve_Test, optimized_backward_substitution_barrier )
+{
+    for(size_t i=0;i<_mats.size();++i) checkOptimizedBackwardBarrier(i);
+}
 
-//         matrix_utils::SplitLDU( prec.rows(), (int)prec.mkl_base(), prec.get_ai().get(),
-//                                 prec.get_aj().get(), prec.get_av().get(), L, D, U );
+TEST_F( triangular_solve_Test, optimized_backward_substitution_no_barrier )
+{
+    for(size_t i=0;i<_mats.size();++i) checkOptimizedBackwardNoBarrier(i);
+}
 
-//         matrix_utils::ForwardSubstitution( L.rows, L.Base(), L.ai.get(), L.aj.get(),
-//                                            L.av.get(), b.data(), x_serial.data() );
-
-//         matrix_utils::OptimizedTriangularSolve<matrix_utils::FBSubstitutionType::Barrier,
-//                                                matrix_utils::TriangularMatrix::L, int, int, double>
-//             forwardsweep_barrier;
-//         forwardsweep_barrier.analysis( L.rows, L.Base(), L.ai.get(), L.aj.get(),
-//                                        L.av.get() );
-//         for ( int i = 0; i < 100; i++ )
-//         {
-//             forwardsweep_barrier( b.data(), x.data() );
-//             for ( int i = 0; i < x.size(); i++ )
-//             {
-//                 EXPECT_NEAR( x[i], x_serial[i], _tol * std::abs( x_serial[i] ) );
-//             }
-//         }
-
-//         matrix_utils::OptimizedTriangularSolve<matrix_utils::FBSubstitutionType::NoBarrier,
-//                                                matrix_utils::TriangularMatrix::L, int, int, double>
-//             forwardsweep_nobarrier;
-//         forwardsweep_nobarrier.analysis( L.rows, L.Base(), L.ai.get(),
-//                                          L.aj.get(), L.av.get() );
-//         for ( int i = 0; i < 100; i++ )
-//         {
-//             forwardsweep_nobarrier( b.data(), x.data() );
-//             for ( int i = 0; i < x.size(); i++ )
-//             {
-//                 EXPECT_NEAR( x[i], x_serial[i], _tol * std::abs( x_serial[i] ) );
-//             }
-//         }
-
-//         matrix_utils::OptimizedTriangularSolve<matrix_utils::FBSubstitutionType::NoBarrierSuperNode,
-//                                                matrix_utils::TriangularMatrix::L, int, int, double>
-//             forwardsweep_nobarrier_sn;
-//         forwardsweep_nobarrier_sn.analysis( L.rows, L.Base(), L.ai.get(),
-//                                             L.aj.get(), L.av.get() );
-//         for ( int i = 0; i < 100; i++ )
-//         {
-//             forwardsweep_nobarrier_sn( b.data(), x.data() );
-//             for ( int i = 0; i < x.size(); i++ )
-//             {
-//                 EXPECT_NEAR( x[i], x_serial[i], _tol * std::abs( x_serial[i] ) );
-//             }
-//         }
-//     }
-// }
-
-// TEST_F( triangular_solve_Test, backward_substitution_optimized )
-// {
-//     omp_set_num_threads( 5 );
-//     for ( auto mat : _mats )
-//     {
-//         const MKL_INT size = mat.rows();
-//         mat.to_zero_based();
-//         mkl_wrapper::incomplete_lu_k prec;
-//         prec.set_level( 5 );
-//         prec.symbolic_factorize( &mat );
-//         prec.numeric_factorize( &mat );
-
-//         // std::ofstream myfile;
-//         // myfile.open("prec.svg");
-//         // prec.print_svg(myfile);
-//         // myfile.close();
-
-//         std::vector<double> b( mat.rows() );
-//         std::fill( std::begin( b ), std::end( b ), 1. );
-//         std::vector<double> x( mat.rows(), 0.0 );
-//         std::vector<double> x_serial( mat.rows(), 0.0 );
-
-//         matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> L, U;
-//         std::vector<double> D;
-
-//         matrix_utils::SplitLDU( prec.rows(), (int)prec.mkl_base(), prec.get_ai().get(),
-//                                 prec.get_aj().get(), prec.get_av().get(), L, D, U );
-
-//         matrix_utils::BackwardSubstitution( U.rows, U.Base(), U.ai.get(),
-//                                             U.aj.get(), U.av.get(), D.data(),
-//                                             b.data(), x_serial.data() );
-
-//         matrix_utils::OptimizedTriangularSolve<matrix_utils::FBSubstitutionType::Barrier,
-//                                                matrix_utils::TriangularMatrix::U, int, int, double>
-//             forwardsweep_barrier;
-//         forwardsweep_barrier.analysis( U.rows, U.Base(), U.ai.get(), U.aj.get(),
-//                                        U.av.get(), D.data() );
-//         for ( int i = 0; i < 100; i++ )
-//         {
-//             forwardsweep_barrier( b.data(), x.data() );
-//             for ( int i = 0; i < x.size(); i++ )
-//             {
-//                 EXPECT_NEAR( x[i], x_serial[i], _tol * std::abs( x_serial[i] ) );
-//             }
-//         }
-
-//         matrix_utils::OptimizedTriangularSolve<matrix_utils::FBSubstitutionType::NoBarrier,
-//                                                matrix_utils::TriangularMatrix::U, int, int, double>
-//             forwardsweep_nobarrier;
-//         forwardsweep_nobarrier.analysis( U.rows, U.Base(), U.ai.get(),
-//                                          U.aj.get(), U.av.get(), D.data() );
-//         for ( int i = 0; i < 100; i++ )
-//         {
-//             forwardsweep_nobarrier( b.data(), x.data() );
-//             for ( int i = 0; i < x.size(); i++ )
-//             {
-//                 EXPECT_NEAR( x[i], x_serial[i], _tol * std::abs( x_serial[i] ) );
-//             }
-//         }
-
-//         matrix_utils::OptimizedTriangularSolve<matrix_utils::FBSubstitutionType::NoBarrierSuperNode,
-//                                                matrix_utils::TriangularMatrix::U, int, int, double>
-//             forwardsweep_nobarrier_sn;
-//         forwardsweep_nobarrier_sn.analysis( U.rows, U.Base(), U.ai.get(),
-//                                             U.aj.get(), U.av.get(), D.data() );
-//         for ( int i = 0; i < 100; i++ )
-//         {
-//             forwardsweep_nobarrier_sn( b.data(), x.data() );
-//             for ( int i = 0; i < x.size(); i++ )
-//             {
-//                 EXPECT_NEAR( x[i], x_serial[i], _tol * std::abs( x_serial[i] ) );
-//             }
-//         }
-//     }
-// }
+TEST_F( triangular_solve_Test, optimized_backward_substitution_no_barrier_super_node )
+{
+    for(size_t i=0;i<_mats.size();++i) checkOptimizedBackwardNoBarrierSuperNode(i);
+}
