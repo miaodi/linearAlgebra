@@ -189,9 +189,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::analysis(
   matrix_utils::TopologicalSort2<int, int, TS> topSort;
   _iperm.resize(rows);
   _levelPrefix.resize(rows + 1);
-  const bool has_diagonal = diag != nullptr;
-  _levels = topSort.operator()(
-      rows, ai, aj, _iperm.data(), _levelPrefix.data(), has_diagonal);
+  _levels = topSort( rows, ai, aj, _iperm.data(), _levelPrefix.data() );
   _threadlevels.resize(_nthreads);
   _threadiperm.resize(rows);
 
