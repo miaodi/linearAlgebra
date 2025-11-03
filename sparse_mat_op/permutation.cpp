@@ -154,14 +154,13 @@ void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
   }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename... Args>
-void permuteMat(const COLTYPE rows, const COLTYPE cols,
-                COLTYPE const *const permP, COLTYPE const *const ipermQ,
-                ROWTYPE const *const ai, COLTYPE const *const aj,
-                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, Args *...args) {
-  static_assert(sizeof...(Args) % 2 == 0,
-                "Number of additional arguments must be even (pairs of "
-                "argument types and their corresponding permuted types).");
+// Internal implementation function to avoid code duplication
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+static void permuteMatImpl(const COLTYPE rows, const COLTYPE cols,
+                          COLTYPE const *const permP, COLTYPE const *const ipermQ,
+                          ROWTYPE const *const ai, COLTYPE const *const aj,
+                          ROWTYPE *const perm_ai, COLTYPE *const perm_aj,
+                          VALTYPE const *const av = nullptr, VALTYPE *const perm_av = nullptr) {
   permRowPtr(rows, ai, permP, perm_ai);
   const auto base = ai[0];
   const auto nnz = ai[rows] - base;
@@ -180,8 +179,10 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
         auto perm_j_idx = perm_ai[perm_i] - ai[i] + j_idx;
         auto j = aj[j_idx];
         perm_aj[perm_j_idx] = ipermQ ? ipermQ[j - base] : j;
-        if constexpr (sizeof...(Args) > 0) {
-          utils::variadic_assign(j_idx, perm_j_idx, args...);
+        
+        // Copy values if provided
+        if (av && perm_av) {
+          perm_av[perm_j_idx] = av[j_idx];
         }
       }
 
@@ -189,17 +190,33 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
       if (ipermQ == nullptr)
         continue;
 
-      auto oddArgsTuple = utils::extractOdd(args...);
-      std::apply(
-          [&](auto &&...odd_args) {
-            utils::variadic_quick_sort(
-                perm_ai[perm_i] - base, perm_ai[perm_i + 1] - base,
-                std::forward<decltype(perm_aj)>(perm_aj),
-                std::forward<decltype(odd_args)>(odd_args)...);
-          },
-          oddArgsTuple);
+      if (av && perm_av) {
+        utils::variadic_quick_sort(perm_ai[perm_i] - base, perm_ai[perm_i + 1] - base,
+                                  perm_aj, perm_av);
+      } else {
+        utils::variadic_quick_sort(perm_ai[perm_i] - base, perm_ai[perm_i + 1] - base,
+                                  perm_aj);
+      }
     }
   }
+}
+
+// Structure-only permutation
+template <typename ROWTYPE, typename COLTYPE>
+void permuteMat(const COLTYPE rows, const COLTYPE cols,
+                COLTYPE const *const permP, COLTYPE const *const ipermQ,
+                ROWTYPE const *const ai, COLTYPE const *const aj,
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj) {
+  permuteMatImpl<ROWTYPE, COLTYPE, int>(rows, cols, permP, ipermQ, ai, aj, perm_ai, perm_aj);
+}
+
+// Structure + values permutation
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void permuteMat(const COLTYPE rows, const COLTYPE cols,
+                COLTYPE const *const permP, COLTYPE const *const ipermQ,
+                ROWTYPE const *const ai, COLTYPE const *const aj, VALTYPE const *const av,
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, VALTYPE *const perm_av) {
+  permuteMatImpl<ROWTYPE, COLTYPE, VALTYPE>(rows, cols, permP, ipermQ, ai, aj, perm_ai, perm_aj, av, perm_av);
 }
 
 #define INSTANTIATE_PERM_FUNCS(COLTYPE, VALTYPE)                               \
@@ -234,11 +251,11 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
       COLTYPE const *const, ROWTYPE const *const, COLTYPE const *const,        \
       ROWTYPE *const, COLTYPE *const);
 
-#define INSTANTIATE_PERMUTE_MAT_FUNC(ROWTYPE, COLTYPE, VALTYPE1, VALTYPE2)     \
-  template void permuteMat<ROWTYPE, COLTYPE>(                                  \
+#define INSTANTIATE_PERMUTE_MAT_VALUES_FUNC(ROWTYPE, COLTYPE, VALTYPE)        \
+  template void permuteMat<ROWTYPE, COLTYPE, VALTYPE>(                        \
       const COLTYPE, const COLTYPE, COLTYPE const *const,                      \
       COLTYPE const *const, ROWTYPE const *const, COLTYPE const *const,        \
-      ROWTYPE *const, COLTYPE *const, VALTYPE1 *const, VALTYPE2 *const);
+      VALTYPE const *const, ROWTYPE *const, COLTYPE *const, VALTYPE *const);
 
 // Example instantiations:
 INSTANTIATE_PERM_FUNCS(int, double)
@@ -253,5 +270,6 @@ INSTANTIATE_ISPERM_SERIAL_FUNC(std::int64_t)
 INSTANTIATE_RANDPERM_FUNC(int)
 INSTANTIATE_PERM_ROW_PTR_FUNC(int)
 INSTANTIATE_PERMUTE_MAT_STRUCT_FUNC(int, int)
-INSTANTIATE_PERMUTE_MAT_FUNC(int, int, double, double)
+INSTANTIATE_PERMUTE_MAT_VALUES_FUNC(int, int, double)
+INSTANTIATE_PERMUTE_MAT_VALUES_FUNC(int, int, float)
 } // namespace matrix_utils

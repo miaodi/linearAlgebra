@@ -56,9 +56,9 @@ int main() {
   std::vector<int> perm_aj(ai_AAT.back());
   std::vector<double> perm_av(ai_AAT.back(), 1.);
 
-  matrix_utils::permuteMat(size, size, perm.data(), iperm.data(), ai_AAT.data(),
-                           aj_AAT.data(), perm_ai.data(), perm_aj.data(),
-                           av_AAT.data(), perm_av.data());
+  matrix_utils::permuteMat<int, int, double>(size, size, perm.data(), iperm.data(), ai_AAT.data(),
+                           aj_AAT.data(), av_AAT.data(), perm_ai.data(), perm_aj.data(),
+                           perm_av.data());
 
   std::ofstream out2("mat_AAT_perm.mtx");
   matrix_utils::writeMatrixMarket(size, size, perm_ai.data(), perm_aj.data(),
@@ -66,9 +66,9 @@ int main() {
   out2.close();
 
   std::ofstream out3("mat_AAT_iperm.mtx");
-  matrix_utils::permuteMat(size, size, iperm.data(), perm.data(),
-                           perm_ai.data(), perm_aj.data(), ai_AAT.data(),
-                           aj_AAT.data(), perm_av.data(), av_AAT.data());
+  matrix_utils::permuteMat<int, int, double>(size, size, iperm.data(), perm.data(),
+                           perm_ai.data(), perm_aj.data(), perm_av.data(), ai_AAT.data(),
+                           aj_AAT.data(), av_AAT.data());
   matrix_utils::writeMatrixMarket(size, size, ai_AAT.data(), aj_AAT.data(),
                                   av_AAT.data(), out3);
   out3.close();
@@ -93,7 +93,7 @@ int main() {
               << matrix_utils::isPermutation(size, ai_AAT[0], perm2.data())
               << "\n";
     std::ofstream out4("mat_AAT_qg.mtx");
-    matrix_utils::permuteMat(size, size, perm2.data(), iperm2.data(),
+    matrix_utils::permuteMat<int, int, double>(size, size, perm2.data(), iperm2.data(),
                              ai_AAT.data(), aj_AAT.data(), perm_ai.data(),
                              perm_aj.data(), av_AAT.data(), perm_av.data());
     matrix_utils::writeMatrixMarket(size, size, perm_ai.data(), perm_aj.data(),

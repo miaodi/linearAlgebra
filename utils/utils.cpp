@@ -160,6 +160,196 @@ template void printEliminationTree(const std::int64_t size,
                                    const std::int64_t base,
                                    std::int64_t *const parent,
                                    const std::string &filename);
+
+template <typename ROWTYPE, typename COLTYPE>
+void writeAdjacencyGraphDOT(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, 
+                           const std::string& filename, const std::string& title) {
+  std::ofstream dot(filename);
+  if (!dot.is_open()) {
+    std::cerr << "Error: Cannot open file " << filename << " for writing" << std::endl;
+    return;
+  }
+  
+  const int base = ai[0];
+  
+  // Create a valid DOT identifier by replacing spaces and special chars with underscores
+  std::string dot_id = title;
+  for (char& c : dot_id) {
+    if (!std::isalnum(c)) {
+      c = '_';
+    }
+  }
+  
+  // Write DOT format header
+  dot << "digraph " << dot_id << " {\n";
+  dot << "  label=\"" << title << "\";\n";  // Use label for the full title with spaces
+  dot << "  rankdir=TB;\n";  // Top to bottom layout
+  dot << "  node [shape=circle, style=filled, fillcolor=lightblue];\n";
+  dot << "  edge [color=darkblue];\n\n";
+  
+  // Write vertices with labels
+  for (COLTYPE i = 0; i < rows; i++) {
+    dot << "  " << (i + base) << " [label=\"" << (i + base) << "\"];\n";
+  }
+  dot << "\n";
+  
+  // Write edges (skip self-loops for clarity)
+  for (COLTYPE i = 0; i < rows; i++) {
+    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+      COLTYPE neighbor = aj[j] - base;
+      if (neighbor != i) { // Skip self-loops for clarity
+        dot << "  " << (i + base) << " -> " << (neighbor + base) << ";\n";
+      }
+    }
+  }
+  
+  dot << "}\n";
+  dot.close();
+}
+
+// Explicit template instantiations
+template void writeAdjacencyGraphDOT<std::int32_t, std::int32_t>(const std::int32_t rows, 
+                                              std::int32_t const* ai, std::int32_t const* aj, 
+                                              const std::string& filename, const std::string& title);
+template void writeAdjacencyGraphDOT<std::int64_t, std::int64_t>(const std::int64_t rows, 
+                                              std::int64_t const* ai, std::int64_t const* aj, 
+                                              const std::string& filename, const std::string& title);
+
+// Enhanced version with partition support
+template <typename ROWTYPE, typename COLTYPE>
+void writeAdjacencyGraphDOT(const COLTYPE rows, 
+                           ROWTYPE const* ai, 
+                           COLTYPE const* aj,
+                           COLTYPE const* partition,
+                           COLTYPE num_partitions,
+                           const std::string& filename, 
+                           const std::string& title)
+{
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open file " << filename << " for writing." << std::endl;
+        return;
+    }
+    
+    const int base = (rows > 0) ? ai[0] : 0;
+    
+    // Create a valid graph name by replacing spaces and special characters
+    std::string graph_name = title;
+    for (char& c : graph_name) {
+        if (!std::isalnum(c)) {
+            c = '_';
+        }
+    }
+    
+    // Color palette for different partitions
+    std::vector<std::string> colors = {
+        "lightblue", "lightgreen", "lightcoral", "lightyellow", "lightpink",
+        "lightgray", "lightcyan", "wheat", "lavender", "mistyrose",
+        "palegreen", "peachpuff", "plum", "powderblue", "rosybrown",
+        "sandybrown", "silver", "skyblue", "tan", "thistle"
+    };
+    
+    file << "digraph " << graph_name << " {\n";
+    file << "  label=\"" << title << "\";\n";
+    file << "  labelloc=\"t\";\n";
+    file << "  rankdir=TB;\n";
+    file << "  node [shape=circle, style=filled];\n";
+    file << "  edge [color=gray];\n\n";
+    
+    // If partitioning is provided, create subgraphs for each partition
+    if (partition != nullptr && num_partitions > 1) {
+        // Create subgraphs for each partition
+        for (COLTYPE p = 0; p < num_partitions; ++p) {
+            file << "  subgraph cluster_partition_" << p << " {\n";
+            file << "    label=\"Partition " << p << "\";\n";
+            file << "    style=\"rounded,filled\";\n";
+            file << "    color=black;\n";
+            file << "    bgcolor=\"" << colors[p % colors.size()] << "30\";\n"; // Semi-transparent background
+            file << "    penwidth=2;\n";
+            
+            // Add nodes in this partition
+            for (COLTYPE i = 0; i < rows; ++i) {
+                if (partition[i] == p) {
+                    file << "    " << (i + base) << " [label=\"" << (i + base) << "\", ";
+                    file << "fillcolor=\"" << colors[p % colors.size()] << "\"];\n";
+                }
+            }
+            file << "  }\n\n";
+        }
+    } else {
+        // Single partition case - just add all nodes with default styling
+        file << "  // All nodes in single partition\n";
+        for (COLTYPE i = 0; i < rows; ++i) {
+            file << "  " << (i + base) << " [label=\"" << (i + base) << "\", fillcolor=\"lightblue\"];\n";
+        }
+        file << "\n";
+    }
+    
+    // Add edges with special styling for cross-partition edges
+    file << "  // Edges\n";
+    for (COLTYPE i = 0; i < rows; ++i) {
+        for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; ++j) {
+            COLTYPE target = aj[j] - base;
+            if (target < rows && target != i) { // Skip self-loops and invalid targets
+                // Color edges based on whether they cross partitions
+                if (partition != nullptr && num_partitions > 1) {
+                    if (partition[i] == partition[target]) {
+                        // Same partition - blue edges
+                        file << "  " << (i + base) << " -> " << (target + base) << " [color=blue, penwidth=1];\n";
+                    } else {
+                        // Cross partition - red edges with thicker line
+                        file << "  " << (i + base) << " -> " << (target + base) << " [color=red, penwidth=3, style=bold];\n";
+                    }
+                } else {
+                    // Default single partition
+                    file << "  " << (i + base) << " -> " << (target + base) << ";\n";
+                }
+            }
+        }
+    }
+    
+    // Add legend if partitioned
+    if (partition != nullptr && num_partitions > 1) {
+        file << "\n  // Legend\n";
+        file << "  subgraph cluster_legend {\n";
+        file << "    label=\"Legend\";\n";
+        file << "    style=rounded;\n";
+        file << "    color=black;\n";
+        file << "    bgcolor=white;\n";
+        file << "    legend_intra [label=\"Intra-partition\\nedge\", shape=plaintext, color=blue];\n";
+        file << "    legend_inter [label=\"Inter-partition\\nedge\", shape=plaintext, color=red];\n";
+        file << "    legend_intra -> legend_inter [color=blue, label=\"Same partition\"];\n";
+        file << "    legend_inter -> legend_intra [color=red, style=bold, penwidth=3, label=\"Cross partition\"];\n";
+        file << "  }\n";
+    }
+    
+    file << "}\n";
+    file.close();
+    
+    std::cout << "Adjacency graph written to: " << filename << std::endl;
+    if (partition != nullptr && num_partitions > 1) {
+        std::cout << "Graph shows " << num_partitions << " partitions with colored clustering" << std::endl;
+        std::cout << "Blue edges: intra-partition, Red edges: inter-partition" << std::endl;
+    }
+    std::cout << "Generate visualization: dot -Tpng " << filename << " -o graph.png" << std::endl;
+}
+
+// Template instantiations for the enhanced version
+template void writeAdjacencyGraphDOT<std::int32_t, std::int32_t>(const std::int32_t rows, 
+                                              std::int32_t const* ai, 
+                                              std::int32_t const* aj,
+                                              std::int32_t const* partition,
+                                              std::int32_t num_partitions,
+                                              const std::string& filename, 
+                                              const std::string& title);
+
+template void writeAdjacencyGraphDOT<std::int64_t, std::int64_t>(const std::int64_t rows, 
+                                                                std::int64_t const* ai, 
+                                                                std::int64_t const* aj,
+                                                                std::int64_t const* partition,
+                                                                std::int64_t num_partitions,
+                                                                const std::string& filename, 
+                                                                const std::string& title);
 #endif
 
 #define INSTANTIATE(T)                                                         \

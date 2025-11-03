@@ -1,3 +1,4 @@
+#include "config.h"
 #include "BitVector.hpp"
 #include "utils.h"
 // #include <cereal/archives/binary.hpp>
@@ -7,11 +8,18 @@
 #include <fstream>
 #include <memory>
 #include <numeric>
+#include <algorithm>
 #include <omp.h>
 #include <tuple>
 #include <type_traits>
 
 #include "matrix_utils.hpp"
+
+#ifdef USE_METIS_LIB
+extern "C" {
+#include "metis.h"
+}
+#endif
 
 namespace matrix_utils {
 
@@ -164,12 +172,639 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::analysis(
                 "Diagonal must be provided for backward substitution." );
     }
 
-    // Build the point-to-point communication graph
-    const auto base = ai[0];
-    _iperm.resize(size);
-    _levelPrefix.resize(size + 1);
-    _levels = _topSort.operator()( size, ai, aj, _iperm.data(), _levelPrefix.data(), false );
+    computeLevelSchedule( size, ai, aj );
+
+    _taskPrefix.clear();
+    _taskToLevel.clear();
+    _taskToWork.clear();
+    _workToTask.resize( size );
+    _levelTaskPrefix.resize( _levels + 1 );
+    _taskPrefix.push_back( 0 );
+    _threadTasks.resize( _nthreads );
+    for(int i = 0;i<_nthreads;++i)
+    {
+      _threadTasks[i].clear();
+    }
+
+    _totalTasks = 0;
+
+    buildTaskPartition( size, ai );
+    reportTaskPartitionSummary( ai );
+    verifyTaskMappings();
+
+    const auto task_edges = buildTaskGraphs( size, ai, aj );
+    const auto reduced_edges = reduceTaskGraph( task_edges );
+    partitionTasksToThreads();
+    createThreadLocalizedPermutation( size );
+    reorderMatrixForCacheLocality( size, ai, aj, av );
+    outputTaskGraphDebugInfo( task_edges, reduced_edges );
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::computeLevelSchedule(
+    const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj )
+{
+    _iperm.resize( size );
+    _levelPrefix.resize( size + 1 );
+    _levels = _topSort( size, ai, aj, _iperm.data(), _levelPrefix.data(), false );
+
     std::cout << "size: " << size << ", levels: " << _levels << std::endl;
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::buildTaskPartition(
+    const COLTYPE size, ROWTYPE const* ai )
+{
+    // Partition each topological level into tasks that respect the maximum node cap,
+    // aim for roughly k · _nthreads per level, and balance by nonzero workload.
+    const auto base = ai[0];
+    COLTYPE current_task = 0;
+    _levelTaskPrefix[0] = 0;
+
+    for ( COLTYPE level = 0; level < _levels; ++level )
+    {
+        const COLTYPE level_start = _levelPrefix[level];
+        const COLTYPE level_end = _levelPrefix[level + 1];
+        const COLTYPE nodes_in_level = level_end - level_start;
+
+        if ( nodes_in_level == 0 )
+        {
+            _levelTaskPrefix[level + 1] = current_task;
+            continue;
+        }
+
+        // Prefix-sum workloads so we can slice levels using cumulative work instead of raw counts.
+        std::vector<COLTYPE> cumulative_workload( nodes_in_level + 1, 0 );
+        COLTYPE total_workload = 0;
+
+        for ( COLTYPE i = 0; i < nodes_in_level; ++i )
+        {
+            const COLTYPE node_idx = _iperm[level_start + i] - base;
+            const COLTYPE node_workload = ai[node_idx + 1] - ai[node_idx];
+            total_workload += node_workload;
+            cumulative_workload[i + 1] = total_workload;
+        }
+
+        const COLTYPE min_tasks_by_capacity = static_cast<COLTYPE>( std::max<COLTYPE>(
+            1, ( nodes_in_level + _task_maximum_size - 1 ) / _task_maximum_size ) );
+
+        const COLTYPE capacity = _task_maximum_size * static_cast<COLTYPE>( _nthreads );
+        COLTYPE k_multiplier = 1;
+        if ( capacity > 0 )
+        {
+            k_multiplier =
+                ( std::max<COLTYPE>( 1, ( nodes_in_level + capacity - 1 ) / capacity ) );
+        }
+
+        const COLTYPE desired_tasks = std::min<COLTYPE>(
+            nodes_in_level, k_multiplier * static_cast<COLTYPE>( std::max( 1, _nthreads ) ) );
+
+        COLTYPE num_tasks = std::max<COLTYPE>( min_tasks_by_capacity, desired_tasks );
+        num_tasks = std::min<COLTYPE>( num_tasks, nodes_in_level );
+
+        std::cout << "    Level " << level << " task calculation:" << std::endl;
+        std::cout << "      nodes_in_level: " << nodes_in_level << std::endl;
+        std::cout << "      total_workload: " << total_workload << std::endl;
+        std::cout << "      _task_maximum_size: " << _task_maximum_size << std::endl;
+        std::cout << "      min_tasks_by_capacity: " << min_tasks_by_capacity << std::endl;
+        std::cout << "      k (ceil(nodes / (max_size * threads))): " << k_multiplier << std::endl;
+        std::cout << "      desired_tasks (k*threads): " << desired_tasks << std::endl;
+        std::cout << "      num_tasks: " << num_tasks << std::endl;
+
+        COLTYPE current_work_start = 0;
+
+        for ( COLTYPE task_idx = 0; task_idx < num_tasks; ++task_idx )
+        {
+            const COLTYPE tasks_left = num_tasks - task_idx;
+            const COLTYPE nodes_left = nodes_in_level - current_work_start;
+            // Clamp the task's node count so we leave enough room for what remains and never exceed the cap.
+
+            // Keep enough nodes for the remaining tasks while honoring the maximum size cap.
+            COLTYPE min_nodes_for_task = std::max<COLTYPE>(
+                1, nodes_left - _task_maximum_size * static_cast<COLTYPE>( tasks_left - 1 ) );
+            COLTYPE max_nodes_for_task = std::min<COLTYPE>(
+                _task_maximum_size, nodes_left - static_cast<COLTYPE>( tasks_left - 1 ) );
+
+            if ( min_nodes_for_task > max_nodes_for_task )
+            {
+                min_nodes_for_task = max_nodes_for_task = std::min<COLTYPE>( nodes_left, _task_maximum_size );
+            }
+
+            COLTYPE current_work_end = current_work_start + min_nodes_for_task;
+
+            const COLTYPE absolute_min = current_work_start + min_nodes_for_task;
+            const COLTYPE absolute_max = current_work_start + max_nodes_for_task;
+
+            if ( total_workload > 0 && absolute_min < absolute_max )
+            {
+                // Target cumulative workload is proportional to the task index to equalize effort.
+                const COLTYPE desired_cumulative = static_cast<COLTYPE>(
+                    ( static_cast<long long>( total_workload ) * ( task_idx + 1 ) + num_tasks - 1 ) / num_tasks );
+
+                // Search only inside the feasible window so we never form an oversized or empty task.
+                auto range_begin = cumulative_workload.begin() + absolute_min;
+                auto range_end = cumulative_workload.begin() + absolute_max + 1;
+                auto it = std::lower_bound( range_begin, range_end, desired_cumulative );
+                COLTYPE candidate = static_cast<COLTYPE>(
+                    std::distance( cumulative_workload.begin(), it ) );
+                candidate = std::clamp( candidate, absolute_min, absolute_max );
+                current_work_end = candidate;
+            }
+            else if ( total_workload == 0 && absolute_min < absolute_max )
+            {
+                COLTYPE ideal_split = current_work_start + static_cast<COLTYPE>(
+                    ( static_cast<long long>( nodes_in_level ) * ( task_idx + 1 ) + num_tasks - 1 ) / num_tasks );
+                ideal_split = std::clamp( ideal_split, absolute_min, absolute_max );
+                current_work_end = ideal_split;
+            }
+            else
+            {
+                current_work_end = absolute_min;
+            }
+
+            if ( current_work_end <= current_work_start )
+            {
+                // Fall back to the tightest admissible boundary rather than emitting a zero-length task.
+                current_work_end = std::min<COLTYPE>( absolute_max, nodes_in_level );
+            }
+
+            // Finalize task metadata and map each node in the slice back to the global work index.
+            _taskToLevel.push_back( level );
+            _taskPrefix.push_back( _taskPrefix.back() + ( current_work_end - current_work_start ) );
+
+            for ( COLTYPE node_idx = current_work_start; node_idx < current_work_end; ++node_idx )
+            {
+                const COLTYPE work_idx = level_start + node_idx;
+                _taskToWork.push_back( work_idx );
+                _workToTask[work_idx] = current_task;
+            }
+            current_task++;
+            current_work_start = current_work_end;
+        }
+
+        _levelTaskPrefix[level + 1] = current_task;
+    }
+
+    _totalTasks = current_task;
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::reportTaskPartitionSummary(
+    ROWTYPE const* ai ) const
+{
+    std::cout << "Created " << _totalTasks << " tasks across " << _levels << " levels:" << std::endl;
+    std::cout << "Task-to-work mapping uses CSR format:" << std::endl;
+    std::cout << "  _taskPrefix size: " << _taskPrefix.size() << " (should be " << _totalTasks + 1 << ")"
+              << std::endl;
+    std::cout << "  _taskToWork size: " << _taskToWork.size() << " (total work items)" << std::endl;
+    std::cout << "  _nthreads: " << _nthreads << ", _task_maximum_size: " << _task_maximum_size << std::endl;
+
+    const auto base = ai[0];
+    COLTYPE total_balanced_levels = 0;
+    COLTYPE total_perfectly_balanced_levels = 0;
+
+    for ( COLTYPE level = 0; level < _levels; ++level )
+    {
+        COLTYPE nodes_in_level = _levelPrefix[level + 1] - _levelPrefix[level];
+        COLTYPE tasks_in_level = _levelTaskPrefix[level + 1] - _levelTaskPrefix[level];
+        if ( tasks_in_level > 0 )
+        {
+            bool is_multiple = ( tasks_in_level % _nthreads == 0 );
+            bool is_perfect_multiple = ( tasks_in_level == _nthreads || tasks_in_level == 2 * _nthreads ||
+                                         tasks_in_level == 3 * _nthreads || tasks_in_level == 4 * _nthreads );
+
+            if ( is_multiple )
+                total_balanced_levels++;
+            if ( is_perfect_multiple )
+                total_perfectly_balanced_levels++;
+
+            std::cout << "  Level " << level << ": " << nodes_in_level << " works -> " << tasks_in_level
+                      << " tasks";
+            if ( is_multiple )
+            {
+                std::cout << " (BALANCED: " << tasks_in_level / _nthreads << "x" << _nthreads << ")";
+            }
+            else
+            {
+                std::cout << " (unbalanced)";
+            }
+            std::cout << std::endl;
+
+            bool all_tasks_within_maximum = true;
+            for ( COLTYPE task_idx = _levelTaskPrefix[level]; task_idx < _levelTaskPrefix[level + 1]; ++task_idx )
+            {
+                COLTYPE task_start = _taskPrefix[task_idx];
+                COLTYPE task_end = _taskPrefix[task_idx + 1];
+                COLTYPE task_works = task_end - task_start;
+
+                COLTYPE task_workload = 0;
+                for ( COLTYPE csr_idx = task_start; csr_idx < task_end; ++csr_idx )
+                {
+                    COLTYPE work_idx = _taskToWork[csr_idx];
+                    COLTYPE node_idx = _iperm[work_idx] - base;
+                    COLTYPE work_workload = ai[node_idx + 1] - ai[node_idx];
+                    task_workload += work_workload;
+                }
+
+                if ( task_workload > _task_maximum_size && tasks_in_level > 1 )
+                {
+                    all_tasks_within_maximum = false;
+                }
+
+                std::cout << "    Task " << task_idx << ": " << task_works << " works (workload: "
+                          << task_workload << ")";
+                if ( task_workload > _task_maximum_size && tasks_in_level > 1 )
+                {
+                    std::cout << " [WARNING: exceeds maximum workload]";
+                }
+                std::cout << std::endl;
+            }
+
+            if ( !all_tasks_within_maximum )
+            {
+                std::cout << "    WARNING: Some tasks exceed maximum workload!" << std::endl;
+            }
+        }
+    }
+
+    std::cout << "Threading balance summary:" << std::endl;
+    std::cout << "  Levels with task count multiple of " << _nthreads << ": " << total_balanced_levels
+              << "/" << _levels << " (" << ( 100.0 * total_balanced_levels / _levels ) << "%)" << std::endl;
+    std::cout << "  Levels with perfect balance (1-4x" << _nthreads << "): "
+              << total_perfectly_balanced_levels << "/" << _levels << " ("
+              << ( 100.0 * total_perfectly_balanced_levels / _levels ) << "%)" << std::endl;
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::verifyTaskMappings() const
+{
+    std::cout << "Verifying CSR task-work mappings..." << std::endl;
+    bool mapping_ok = true;
+
+    if ( _taskPrefix.size() != _totalTasks + 1 )
+    {
+        std::cout << "ERROR: _taskPrefix size (" << _taskPrefix.size() << ") != _totalTasks + 1 ("
+                  << _totalTasks + 1 << ")" << std::endl;
+        mapping_ok = false;
+    }
+
+    if ( _taskToWork.size() != _taskPrefix.back() )
+    {
+        std::cout << "ERROR: _taskToWork size (" << _taskToWork.size() << ") != _taskPrefix.back() ("
+                  << _taskPrefix.back() << ")" << std::endl;
+        mapping_ok = false;
+    }
+
+    for ( COLTYPE task_idx = 0; task_idx < _totalTasks; ++task_idx )
+    {
+        COLTYPE task_start = _taskPrefix[task_idx];
+        COLTYPE task_end = _taskPrefix[task_idx + 1];
+
+        for ( COLTYPE csr_idx = task_start; csr_idx < task_end; ++csr_idx )
+        {
+            COLTYPE work_idx = _taskToWork[csr_idx];
+            if ( _workToTask[work_idx] != task_idx )
+            {
+                std::cout << "ERROR: Inconsistent mapping for work " << work_idx
+                          << ": _workToTask=" << _workToTask[work_idx]
+                          << " but CSR indicates task " << task_idx << std::endl;
+                mapping_ok = false;
+                break;
+            }
+        }
+        if ( !mapping_ok )
+            break;
+    }
+
+    if ( mapping_ok )
+    {
+        std::cout << "CSR task-work mappings verified successfully!" << std::endl;
+    }
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+COLTYPE P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::buildTaskGraphs(
+    const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj )
+{
+    std::cout << "\nProjecting original graph to task graph..." << std::endl;
+
+    _taskInGraph.ai.resize( _totalTasks + 1 );
+    _taskInGraph.aj.resize( _totalTasks * _totalTasks );
+
+    COLTYPE task_edges = _graphProjector( size, ai, aj, _totalTasks, _taskPrefix.data(), _taskToWork.data(),
+                                         _workToTask.data(), _taskInGraph.ai.data(), _taskInGraph.aj.data() );
+
+    _taskInGraph.aj.resize( task_edges );
+    _taskInGraph.rows = _totalTasks;
+    _taskInGraph.cols = _totalTasks;
+
+    std::cout << "Task graph projection completed:" << std::endl;
+    std::cout << "  Task graph nodes: " << _totalTasks << std::endl;
+    std::cout << "  Task graph edges: " << task_edges << std::endl;
+    std::cout << "  Task graph density: " << ( 100.0 * task_edges ) / ( _totalTasks * _totalTasks ) << "%"
+              << std::endl;
+
+    std::cout << "  Creating transpose task graph (_taskOutGraph)..." << std::endl;
+    _taskOutGraph.rows = _totalTasks;
+    _taskOutGraph.cols = _totalTasks;
+    _taskOutGraph.ai.resize( _totalTasks + 1 );
+    _taskOutGraph.aj.resize( task_edges );
+
+    matrix_utils::ParallelTranspose2( _taskInGraph.rows, _taskInGraph.cols, _taskInGraph.Base(),
+                                      _taskInGraph.ai.data(), _taskInGraph.aj.data(), (VALTYPE const*)nullptr,
+                                      _taskOutGraph.ai.data(), _taskOutGraph.aj.data(), (VALTYPE*)nullptr );
+
+    std::cout << "  Task graph transpose completed." << std::endl;
+
+    return task_edges;
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+COLTYPE P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::reduceTaskGraph(
+    COLTYPE task_edges_before )
+{
+    std::cout << "  Computing transitive reduction of task out-graph..." << std::endl;
+
+    _taskOutGraphReduced.rows = _totalTasks;
+    _taskOutGraphReduced.cols = _totalTasks;
+    _taskOutGraphReduced.ai.resize( _totalTasks + 1 );
+    _taskOutGraphReduced.aj.resize( task_edges_before );
+
+    _transitiveReducer( _totalTasks, _taskOutGraph.ai.data(), _taskOutGraph.aj.data(),
+                        _taskOutGraphReduced.ai.data(), _taskOutGraphReduced.aj.data(), false );
+
+    COLTYPE task_edges_after =
+        _taskOutGraphReduced.ai[_totalTasks] - _taskOutGraphReduced.ai[0];
+    _taskOutGraphReduced.aj.resize( task_edges_after );
+
+    std::cout << "  Transitive reduction completed:" << std::endl;
+    std::cout << "    Edges before reduction: " << task_edges_before << std::endl;
+    std::cout << "    Edges after reduction:  " << task_edges_after << std::endl;
+    std::cout << "    Edges removed:          " << ( task_edges_before - task_edges_after ) << std::endl;
+    std::cout << "    Reduction ratio:        " << (double)task_edges_after / task_edges_before * 100.0
+              << "%" << std::endl;
+
+    return task_edges_after;
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::partitionTasksToThreads()
+{
+    std::cout << "  Partitioning tasks to threads..." << std::endl;
+
+    std::cout << "    Using level-by-level partitioning with direct vector construction..." << std::endl;
+    _taskPartition.resize( _totalTasks );
+
+    for (COLTYPE level = 0; level < _levels; ++level) {
+        COLTYPE level_start_task = _levelTaskPrefix[level];
+        COLTYPE level_end_task = _levelTaskPrefix[level + 1];
+        COLTYPE tasks_in_level = level_end_task - level_start_task;
+        
+        if (tasks_in_level == 0) continue;
+        
+        // Distribute tasks in this level among threads, keeping adjacent tasks together
+        COLTYPE tasks_per_thread = (tasks_in_level + _nthreads - 1) / _nthreads;  // ceil division
+        
+        // Process tasks level by level, thread by thread to maintain adjacency
+        for (int thread = 0; thread < _nthreads; ++thread) {
+            COLTYPE start_task_in_level = thread * tasks_per_thread;
+            COLTYPE end_task_in_level = std::min((thread + 1) * tasks_per_thread, tasks_in_level);
+            
+            if (start_task_in_level >= tasks_in_level) break;
+            
+            // Assign consecutive tasks to this thread
+            for (COLTYPE task_in_level = start_task_in_level; task_in_level < end_task_in_level; ++task_in_level) {
+                COLTYPE task_id = level_start_task + task_in_level;
+                _taskPartition[task_id] = thread;
+                _threadTasks[thread].push_back(task_id);
+            }
+        }
+    }
+    
+    std::cout << "    Level-by-level partitioning with direct vector construction completed." << std::endl;
+    
+    // Report partition statistics using the vector structure
+    std::cout << "    Partition statistics:" << std::endl;
+    for (int thread = 0; thread < _nthreads; ++thread) {
+        COLTYPE task_count = _threadTasks[thread].size();
+        std::cout << "      Thread " << thread << ": " << task_count << " tasks";
+        
+        // Show first few task IDs for each thread
+        if (task_count > 0) {
+            std::cout << " [";
+            COLTYPE show_count = std::min(static_cast<COLTYPE>(5), task_count);
+            
+            for (COLTYPE i = 0; i < show_count; ++i) {
+                if (i > 0) std::cout << ", ";
+                std::cout << _threadTasks[thread][i];
+            }
+            if (task_count > 5) {
+                std::cout << ", ...";
+            }
+            std::cout << "]";
+        }
+        std::cout << std::endl;
+    }
+    
+    // Calculate load balance ratio using vector structure
+    COLTYPE min_tasks = _totalTasks;
+    COLTYPE max_tasks = 0;
+    for (int thread = 0; thread < _nthreads; ++thread) {
+        COLTYPE task_count = _threadTasks[thread].size();
+        min_tasks = std::min(min_tasks, task_count);
+        max_tasks = std::max(max_tasks, task_count);
+    }
+    double balance_ratio = (max_tasks > 0) ? (double)min_tasks / max_tasks : 1.0;
+    std::cout << "      Load balance ratio: " << balance_ratio << " (1.0 = perfect)" << std::endl;
+    
+    // Verify vector structure integrity
+    std::cout << "    Vector structure verification:" << std::endl;
+    std::cout << "      _threadTasks size: " << _threadTasks.size() << " (should be " << _nthreads << ")" << std::endl;
+    COLTYPE total_assigned_tasks = 0;
+    for (int thread = 0; thread < _nthreads; ++thread) {
+        total_assigned_tasks += _threadTasks[thread].size();
+    }
+    std::cout << "      Total assigned tasks: " << total_assigned_tasks << " (should be " << _totalTasks << ")" << std::endl;
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::outputTaskGraphDebugInfo(
+    COLTYPE task_edges_before, COLTYPE task_edges_after ) const
+{
+    std::cout << "  Task graph edge count (before -> after reduction): " << task_edges_before << " -> "
+              << task_edges_after << std::endl;
+    std::cout << "  Reduced task out-graph structure (first "
+              << std::min( _totalTasks, static_cast<COLTYPE>( 5 ) ) << " tasks):" << std::endl;
+    for ( COLTYPE task_idx = 0; task_idx < std::min( _totalTasks, static_cast<COLTYPE>( 5 ) ); ++task_idx )
+    {
+        COLTYPE edge_start = _taskOutGraphReduced.ai[task_idx] - _taskOutGraphReduced.ai[0];
+        COLTYPE edge_end = _taskOutGraphReduced.ai[task_idx + 1] - _taskOutGraphReduced.ai[0];
+        std::cout << "    Task " << task_idx << " has " << ( edge_end - edge_start ) << " outgoing edges: [";
+        for ( COLTYPE edge_idx = edge_start; edge_idx < edge_end; ++edge_idx )
+        {
+            if ( edge_idx > edge_start )
+                std::cout << ", ";
+            std::cout << ( _taskOutGraphReduced.aj[edge_idx] - _taskOutGraphReduced.ai[0] );
+        }
+        std::cout << "]" << std::endl;
+    }
+
+#ifdef USE_BOOST_LIB
+    std::string dot_filename_reduced = "task_out_graph_reduced.dot";
+    std::string dot_filename_partitioned = "task_level_partitioned.dot";
+    std::string dot_filename_threaded = "task_thread_partitioned.dot";
+
+    std::cout << "  Writing reduced task out-graph to DOT file: " << dot_filename_reduced << std::endl;
+    utils::writeAdjacencyGraphDOT( _totalTasks, _taskOutGraphReduced.ai.data(), _taskOutGraphReduced.aj.data(),
+                                   dot_filename_reduced,
+                                   "P2P Task Out-Graph Reduced" );
+
+    std::cout << "  Writing level-partitioned task graph to DOT file: " << dot_filename_partitioned << std::endl;
+    utils::writeAdjacencyGraphDOT( _totalTasks, _taskOutGraphReduced.ai.data(), _taskOutGraphReduced.aj.data(),
+                                   _taskToLevel.data(), _levels, dot_filename_partitioned,
+                                   "P2P Task Level Partitioning" );
+
+    std::cout << "  Writing thread-partitioned task graph to DOT file: " << dot_filename_threaded << std::endl;
+    utils::writeAdjacencyGraphDOT( _totalTasks, _taskOutGraphReduced.ai.data(), _taskOutGraphReduced.aj.data(),
+                                   _taskPartition.data(), _nthreads, dot_filename_threaded,
+                                   "P2P Task Thread Partitioning" );
+
+    std::cout << "  Task graph DOT files created. Visualize with:" << std::endl;
+    std::cout << "    dot -Tpng " << dot_filename_reduced << " -o task_reduced.png" << std::endl;
+    std::cout << "    dot -Tpng " << dot_filename_partitioned << " -o task_level_partitioned.png" << std::endl;
+    std::cout << "    dot -Tpng " << dot_filename_threaded << " -o task_thread_partitioned.png" << std::endl;
+#else
+    std::cout << "  Task graph DOT generation skipped (USE_BOOST_LIB not defined)" << std::endl;
+#endif
+
+    std::cout << "Task dependencies (first " << std::min( _totalTasks, static_cast<COLTYPE>( 5 ) )
+              << " tasks):" << std::endl;
+    for ( COLTYPE task_idx = 0; task_idx < std::min( _totalTasks, static_cast<COLTYPE>( 5 ) ); ++task_idx )
+    {
+        COLTYPE dep_start = _taskInGraph.ai[task_idx] - _taskPrefix[0];
+        COLTYPE dep_end = _taskInGraph.ai[task_idx + 1] - _taskPrefix[0];
+        std::cout << "  Task " << task_idx << " depends on " << ( dep_end - dep_start ) << " tasks: [";
+        for ( COLTYPE dep_idx = dep_start; dep_idx < dep_end; ++dep_idx )
+        {
+            if ( dep_idx > dep_start )
+                std::cout << ", ";
+            std::cout << ( _taskInGraph.aj[dep_idx] - _taskPrefix[0] );
+        }
+        std::cout << "]" << std::endl;
+    }
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::operator()(
+    VALTYPE const* const b, VALTYPE* const x ) const
+{
+    std::cout << "P2PTriangularSubstitution::operator() called with thread-localized matrix" << std::endl;
+  
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::createThreadLocalizedPermutation(
+    const COLTYPE size )
+{
+    std::cout << "\n  Creating thread-localized row permutation for cache optimization..." << std::endl;
+    
+    const auto base = _levelPrefix.empty() ? 0 : 0; // Assuming zero-based indexing
+    
+    _threadLocalizedRowPerm.resize( size );
+    _threadLocalizedRowInvPerm.resize( size );
+    
+    COLTYPE current_permuted_row = 0;
+    
+    // Create permutation: Thread by thread, level by level within each thread
+    for ( int thread = 0; thread < _nthreads; ++thread )
+    {
+        COLTYPE thread_start_row = current_permuted_row;
+        
+        // Process tasks for this thread in order (they're already sorted by level due to construction)
+        for ( COLTYPE task_id : _threadTasks[thread] )
+        {
+            // Get all work items (matrix rows) for this task
+            COLTYPE task_start = _taskPrefix[task_id];
+            COLTYPE task_end = _taskPrefix[task_id + 1];
+            
+            for ( COLTYPE work_idx = task_start; work_idx < task_end; ++work_idx )
+            {
+                COLTYPE original_row = _iperm[_taskToWork[work_idx]] - base;
+                _threadLocalizedRowPerm[original_row] = current_permuted_row;
+                _threadLocalizedRowInvPerm[current_permuted_row] = original_row;
+                current_permuted_row++;
+            }
+        }
+        
+        COLTYPE thread_end_row = current_permuted_row;
+        
+        std::cout << "    Thread " << thread << ": rows [" << thread_start_row 
+                  << ", " << thread_end_row << ") (" << (thread_end_row - thread_start_row) << " rows)" << std::endl;
+    }
+    
+    std::cout << "  Thread-localized permutation created. Total rows: " << current_permuted_row << std::endl;
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::reorderMatrixForCacheLocality(
+    const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av )
+{
+    std::cout << "  Reordering matrix using thread-localized permutation with permuteMat..." << std::endl;
+    
+    const auto base = ai[0];
+    const auto nnz = ai[size] - ai[0];
+    
+    // Allocate reordered matrix
+    _reorderedMatrix.ai.resize( size + 1 );
+    _reorderedMatrix.aj.resize( nnz );
+    _reorderedMatrix.av.resize( nnz );
+    _reorderedMatrix.rows = size;
+    _reorderedMatrix.cols = size;
+    
+    // Use permuteMat to perform row permutation only: pA = P * A
+    // For triangular solve, we only need row permutation (no column permutation)
+    // Use nullptr for column permutation (keeps original column indices)
+    matrix_utils::permuteMat<ROWTYPE, COLTYPE, VALTYPE>(
+        size, size,
+        _threadLocalizedRowInvPerm.data(),  // Row permutation: new -> original
+        nullptr,                            // No column permutation
+        ai, aj, av,
+        _reorderedMatrix.ai.data(), _reorderedMatrix.aj.data(), _reorderedMatrix.av.data()
+    );
+
+    std::cout << "  Matrix reordering completed using permuteMat. NNZ: " << (_reorderedMatrix.ai[size] - _reorderedMatrix.ai[0]) << std::endl;
+    
+    // Report cache locality improvement - compute thread row ranges on-demand
+    std::cout << "  Cache locality analysis:" << std::endl;
+    COLTYPE current_row = 0;
+    
+    for ( int thread = 0; thread < _nthreads; ++thread )
+    {
+        COLTYPE thread_start_row = current_row;
+        
+        // Compute number of rows for this thread based on task assignments
+        COLTYPE thread_rows = 0;
+        for ( COLTYPE task_id : _threadTasks[thread] )
+        {
+            COLTYPE task_start = _taskPrefix[task_id];
+            COLTYPE task_end = _taskPrefix[task_id + 1];
+            thread_rows += task_end - task_start; // Number of work items (rows) in this task
+        }
+        
+        COLTYPE thread_end_row = thread_start_row + thread_rows;
+        current_row = thread_end_row;
+        
+        // Count nonzeros for this thread's rows
+        COLTYPE thread_nnz = 0;
+        for ( COLTYPE row = thread_start_row; row < thread_end_row; ++row )
+        {
+            thread_nnz += _reorderedMatrix.ai[row + 1] - _reorderedMatrix.ai[row];
+        }
+        
+        std::cout << "    Thread " << thread << ": " << thread_rows << " rows, " 
+                  << thread_nnz << " nonzeros (" 
+                  << (100.0 * thread_nnz / nnz) << "% of total)" << std::endl;
+    }
 }
 
 template <FBSubstitutionType FBST, TriangularMatrix TS, typename ROWTYPE,
@@ -733,9 +1368,17 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE,
             else
               ++childPtr;
           }
+#pragma omp critical
+{
+
           if (!remove) {
+            std::cout << "tid: " << tid << " task " << task
+                      << " removing edge to parent: " << parent << " maxInvAdjSize: " << maxInvAdjSize << std::endl;
+            std::cout << _taskInvAdj[tid].size() << std::endl;
             _taskInvAdj[tid][maxInvAdjSize++] = parent;
+            std::cout<<"hello"<<std::endl;
           }
+}
         }
         _taskInvAdjGraph2.ai[task + 1] = maxInvAdjSize;
         std::copy(_taskInvAdj[tid].begin(),
