@@ -7,12 +7,15 @@
 #include <fstream>
 #include <memory>
 #include <numeric>
+#include <algorithm>
 #include <omp.h>
 #include <span>
 #include <tuple>
 #include <type_traits>
 
 #include "matrix_utils.hpp"
+#include "graph_algs.hpp"
+#include "permutation.hpp"
 
 namespace matrix_utils
 {
@@ -88,24 +91,68 @@ struct LevelScheduleTriangularSubstitution
 template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 struct P2PTriangularSubstitution
 {
-    P2PTriangularSubstitution( const int num_threads = omp_get_max_threads() )
-        : _nthreads{ num_threads }
+    P2PTriangularSubstitution( const int num_threads = omp_get_max_threads(),
+                               const COLTYPE task_maximum_size = 128 )
+        : _nthreads{ num_threads },
+          _task_maximum_size{ task_maximum_size },
+          _graphProjector{ num_threads },
+          _transitiveReducer{ num_threads }
     {
     }
-    
+
     void analysis( const COLTYPE size,
                    ROWTYPE const* ai,
                    COLTYPE const* aj,
                    VALTYPE const* av,
                    VALTYPE const* diag = nullptr );
 
-    // void operator()( VALTYPE const* const b, VALTYPE* const x ) const;
-    
+    void operator()( VALTYPE const* const b, VALTYPE* const x ) const;
+
+private:
+    void computeLevelSchedule( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj );
+    void buildTaskPartition( const COLTYPE size, ROWTYPE const* ai );
+    void reportTaskPartitionSummary( ROWTYPE const* ai ) const;
+    void verifyTaskMappings() const;
+    COLTYPE buildTaskGraphs( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj );
+    COLTYPE reduceTaskGraph( COLTYPE task_edges_before );
+    void partitionTasksToThreads();
+    void createThreadLocalizedPermutation( const COLTYPE size );
+    void reorderMatrixForCacheLocality( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av );
+    void outputTaskGraphDebugInfo( COLTYPE task_edges_before, COLTYPE task_edges_after ) const;
+
+public:
     int _nthreads;
+    COLTYPE _task_maximum_size;   // maximum work size for a task
+    
+    // Level scheduling data
     std::vector<COLTYPE> _iperm;
     std::vector<COLTYPE> _levelPrefix;
     COLTYPE _levels;
+    
+    // Task partitioning data
+    std::vector<COLTYPE> _taskPrefix;      // CSR row pointer for task-to-work mapping (task -> work indices)
+    std::vector<COLTYPE> _taskToWork;      // CSR column indices for task-to-work mapping
+    std::vector<COLTYPE> _taskToLevel;     // Map from task ID to level
+    std::vector<COLTYPE> _levelTaskPrefix; // Prefix of tasks for each level
+    std::vector<COLTYPE> _workToTask;      // Map from work index to task ID
+    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskInGraph; // Task dependency graph (projected from original graph)
+    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskOutGraph; // Transpose of task dependency graph
+    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskOutGraphReduced; // Transitive reduction of task out-graph
+    std::vector<COLTYPE> _taskPartition;   // Partition assignment for each task (0 to _nthreads-1)
+    
+    // Thread-task mapping: _threadTasks[i] contains all task IDs assigned to thread i
+    std::vector<std::vector<COLTYPE>> _threadTasks;
+    
+    // Cache-optimized matrix reordering for thread locality
+    std::vector<COLTYPE> _threadLocalizedRowPerm;    // Row permutation: original_row -> new_row
+    std::vector<COLTYPE> _threadLocalizedRowInvPerm; // Inverse permutation: new_row -> original_row  
+    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _reorderedMatrix; // Matrix reordered for thread locality
+    
+    COLTYPE _totalTasks;
+    
     TopologicalSort2<ROWTYPE, COLTYPE, TM> _topSort;
+    ProjectGraphToTaskGraph<ROWTYPE, COLTYPE> _graphProjector; // Reusable graph projection instance
+    TransitiveReduction<ROWTYPE, COLTYPE> _transitiveReducer;  // Reusable transitive reduction instance
 };
 
 enum class FBSubstitutionType

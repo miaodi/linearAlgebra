@@ -337,6 +337,37 @@ protected:
 template <typename COLTYPE>
 void printEliminationTree(const COLTYPE size, const COLTYPE base,
                           COLTYPE *const parent, const std::string &filename);
+
+/// @brief Write adjacency graph to DOT format for GraphViz visualization (original version)
+/// @tparam ROWTYPE Row pointer type (typically int or int64_t)
+/// @tparam COLTYPE Column index type (typically int or int64_t)
+/// @param rows Number of nodes in the graph
+/// @param ai Row pointers array (ai[0] contains the base indexing)
+/// @param aj Column indices array
+/// @param filename Output DOT file path
+/// @param title Graph title for the DOT file (default: "Graph")
+template <typename ROWTYPE, typename COLTYPE>
+void writeAdjacencyGraphDOT(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, 
+                           const std::string& filename, const std::string& title = "Graph");
+
+/// @brief Write adjacency graph with node partitioning to DOT format for GraphViz visualization
+/// @tparam ROWTYPE Row pointer type (typically int or int64_t)
+/// @tparam COLTYPE Column index type (typically int or int64_t)
+/// @param rows Number of nodes in the graph
+/// @param ai Row pointers array (ai[0] contains the base indexing)
+/// @param aj Column indices array
+/// @param partition Array where partition[i] gives the partition ID of node i (nullptr for single partition)
+/// @param num_partitions Number of partitions
+/// @param filename Output DOT file path
+/// @param title Graph title for the DOT file (default: "Partitioned Graph")
+template <typename ROWTYPE, typename COLTYPE>
+void writeAdjacencyGraphDOT(const COLTYPE rows, 
+                           ROWTYPE const* ai, 
+                           COLTYPE const* aj,
+                           COLTYPE const* partition,
+                           COLTYPE num_partitions,
+                           const std::string& filename, 
+                           const std::string& title = "Partitioned Graph");
 #endif
 
 // TODO: remove

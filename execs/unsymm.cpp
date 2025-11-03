@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
   permuted_matrix.ResizeAI(csr_matrix.rows + 1);
   permuted_matrix.ResizeAJ(csr_matrix.NNZ());
   permuted_matrix.ResizeAV(csr_matrix.NNZ());
-  matrix_utils::permuteMat(csr_matrix.rows, csr_matrix.cols,
+  matrix_utils::permuteMat<int, int>(csr_matrix.rows, csr_matrix.cols,
                            matching_col.data(), (int *)nullptr, csr_matrix.AI(),
                            csr_matrix.AJ(), permuted_matrix.AI(),
                            permuted_matrix.AJ());
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
     permuted_matrix.ResizeAI(csr_matrix.rows + 1);
     permuted_matrix.ResizeAJ(csr_matrix.NNZ());
     permuted_matrix.ResizeAV(csr_matrix.NNZ());
-    matrix_utils::permuteMat(csr_matrix.rows, csr_matrix.cols,
+    matrix_utils::permuteMat<int, int>(csr_matrix.rows, csr_matrix.cols,
                              matching_col.data(), (int *)nullptr,
                              csr_matrix.AI(), csr_matrix.AJ(),
                              permuted_matrix.AI(), permuted_matrix.AJ());

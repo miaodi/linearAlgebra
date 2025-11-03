@@ -70,10 +70,9 @@ int main(int argc, char **argv) {
   csr_matrix_perm.ResizeDiagonal(csr_matrix.rows);
   csr_matrix_perm.rows = csr_matrix.rows;
   csr_matrix_perm.cols = csr_matrix.cols;
-  matrix_utils::permuteMat(csr_matrix.rows, csr_matrix.cols, perm.data(),
-                           iperm.data(), csr_matrix.AI(), csr_matrix.AJ(),
-                           csr_matrix_perm.AI(), csr_matrix_perm.AJ(),
-                           csr_matrix.AV(), csr_matrix_perm.AV());
+  matrix_utils::permuteMat<int, int, double>(csr_matrix.rows, csr_matrix.cols, perm.data(),
+                           iperm.data(), csr_matrix.AI(), csr_matrix.AJ(), csr_matrix.AV(),
+                           csr_matrix_perm.AI(), csr_matrix_perm.AJ(), csr_matrix_perm.AV());
 
   std::ofstream out1("mat_csr_perm.svg");
   matrix_utils::writeSVG(csr_matrix_perm.rows, csr_matrix_perm.cols,

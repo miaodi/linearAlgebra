@@ -93,22 +93,43 @@ template <typename ROWTYPE, typename COLTYPE>
 void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
                 ROWTYPE *perm_ai);
 
-/** @brief Permute the matrix pA = P * A * Q^T based on a permutation vector
+/** @brief Permute the matrix structure only: pA = P * A * Q^T (structure only)
  *  @param rows Number of rows in the matrix
  *  @param cols Number of columns in the matrix
- *  @param ai Row pointer of the matrix
- *  @param args Additional arguments for the permutation
  *  @param permP Permutation vector for rows p[i] = j means P(i, j) = 1
- *  @param ipermQ Inverse permutation vector for columns q[j] = i means Q(i, j)
- * = 1
+ *  @param ipermQ Inverse permutation vector for columns q[j] = i means Q(i, j) = 1
+ *  @param ai Row pointer of the input matrix
+ *  @param aj Column indices of the input matrix
  *  @param perm_ai Output row pointer after permutation
+ *  @param perm_aj Output column indices after permutation
  *  @tparam ROWTYPE Type of the row indices (e.g., int, long)
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
-template <typename ROWTYPE, typename COLTYPE, typename... Args>
+template <typename ROWTYPE, typename COLTYPE>
 void permuteMat(const COLTYPE rows, const COLTYPE cols,
                 COLTYPE const *const permP, COLTYPE const *const ipermQ,
                 ROWTYPE const *const ai, COLTYPE const *const aj,
-                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, Args *...args);
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj);
+
+/** @brief Permute the matrix with values: pA = P * A * Q^T (structure + values)
+ *  @param rows Number of rows in the matrix
+ *  @param cols Number of columns in the matrix
+ *  @param permP Permutation vector for rows p[i] = j means P(i, j) = 1
+ *  @param ipermQ Inverse permutation vector for columns q[j] = i means Q(i, j) = 1
+ *  @param ai Row pointer of the input matrix
+ *  @param aj Column indices of the input matrix
+ *  @param av Values of the input matrix
+ *  @param perm_ai Output row pointer after permutation
+ *  @param perm_aj Output column indices after permutation
+ *  @param perm_av Output values after permutation
+ *  @tparam ROWTYPE Type of the row indices (e.g., int, long)
+ *  @tparam COLTYPE Type of the column indices (e.g., int, long)
+ *  @tparam VALTYPE Type of the matrix values (e.g., float, double)
+ */
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void permuteMat(const COLTYPE rows, const COLTYPE cols,
+                COLTYPE const *const permP, COLTYPE const *const ipermQ,
+                ROWTYPE const *const ai, COLTYPE const *const aj, VALTYPE const *const av,
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, VALTYPE *const perm_av);
 
 } // namespace matrix_utils

@@ -320,7 +320,9 @@ TEST(Reordering, SerialCM) {
 #ifdef USE_METIS_LIB
     std::vector<MKL_INT> nd_inv_perm, nd_perm;
     reordering::Metis(&mat, nd_inv_perm, nd_perm);
-    EXPECT_EQ(utils::isPermutation(nd_inv_perm, mat.mkl_base()), true);
+    EXPECT_EQ( matrix_utils::isPermutation(
+                   mat.rows(), static_cast<int>( mat.mkl_base() ), nd_inv_perm.data() ),
+               true );
     auto [ai1, aj1, av1] = matrix_utils::AllocateCSRData(mat.rows(), mat.nnz());
     matrix_utils::permute(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
                           mat.get_aj().get(), mat.get_av().get(),

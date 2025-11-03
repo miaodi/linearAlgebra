@@ -67,4 +67,11 @@ template int variadic_partition<int, int *, double *>(int, int, int *,
 template void variadic_quick_sort<int, int *, double *>(int, int, int *,
                                                         double *);
 
+template void variadic_insertion_sort<int, int *, float *>(int, int, int *,
+                                                           float *);
+template int variadic_partition<int, int *, float *>(int, int, int *,
+                                                     float *);
+template void variadic_quick_sort<int, int *, float *>(int, int, int *,
+                                                       float *);
+
 } // namespace utils
