@@ -194,6 +194,47 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
   template <class Archive> void serialize(Archive &ar) { ar(ai, aj, av); }
 };
 
+template <typename ROWTYPE, typename COLTYPE> struct CSRStructVec {
+  using ROW = ROWTYPE;
+  using COL = COLTYPE;
+
+  COLTYPE rows{};
+  COLTYPE cols{};
+
+  std::vector<ROWTYPE> ai;
+  std::vector<COLTYPE> aj;
+
+  ROWTYPE Base() const { return ai.empty() ? ROWTYPE{} : ai[0]; }
+  ROWTYPE NNZ() const {
+    if (ai.empty() || rows == 0) {
+      return ROWTYPE{};
+    }
+    return ai[rows] - ai[0];
+  }
+
+  ROWTYPE const *AI() const { return ai.data(); }
+  COLTYPE const *AJ() const { return aj.data(); }
+
+  ROWTYPE *AI() { return ai.data(); }
+  COLTYPE *AJ() { return aj.data(); }
+
+  ROWTYPE *ResizeAI(const size_t size) {
+    if (ai.size() < size) {
+      ai.resize(size);
+    }
+    return ai.data();
+  }
+
+  COLTYPE *ResizeAJ(const size_t size) {
+    if (aj.size() < size) {
+      aj.resize(size);
+    }
+    return aj.data();
+  }
+
+  template <class Archive> void serialize(Archive &ar) { ar(ai, aj); }
+};
+
 template <typename ROWTYPE = int, typename COLTYPE = int,
           typename VALTYPE = double>
 decltype(auto) AllocateCSRData(const COLTYPE rows, const ROWTYPE nnz) {
