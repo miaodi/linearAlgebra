@@ -42,8 +42,8 @@ struct ProjectGraphToTaskGraph
     /// @param work_aj Column indices of the original work adjacency graph
     /// @param num_tasks Number of tasks in the task graph
     /// @param task_prefix CSR row pointers for task-to-work mapping (task_prefix[0] is task graph base)
-    /// @param task_to_work CSR column indices for task-to-work mapping
-    /// @param work_to_task Map from work index to task ID
+    /// @param task_to_node CSR column indices for task-to-work mapping
+    /// @param node_to_task Map from work index to task ID
     /// @param task_ai Output row pointers for task adjacency graph (pre-allocated, size = num_tasks + 1)
     /// @param task_aj Output column indices for task adjacency graph (pre-allocated, sufficient size)
     /// @return Number of edges in the projected task graph
@@ -52,8 +52,8 @@ struct ProjectGraphToTaskGraph
                         COLTYPE const* work_aj,
                         const COLTYPE num_tasks,
                         COLTYPE const* task_prefix,
-                        COLTYPE const* task_to_work,
-                        COLTYPE const* work_to_task,
+                        COLTYPE const* task_to_node,
+                        COLTYPE const* node_to_task,
                         ROWTYPE* task_ai,
                         COLTYPE* task_aj );
 

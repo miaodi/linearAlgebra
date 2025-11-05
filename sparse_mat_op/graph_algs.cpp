@@ -72,8 +72,8 @@ COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>::operator()( const COLTYPE wor
                                                                COLTYPE const* work_aj,
                                                                const COLTYPE num_tasks,
                                                                COLTYPE const* task_prefix,
-                                                               COLTYPE const* task_to_work,
-                                                               COLTYPE const* work_to_task,
+                                                               COLTYPE const* task_to_node,
+                                                               COLTYPE const* node_to_task,
                                                                ROWTYPE* task_ai,
                                                                COLTYPE* task_aj )
 {
@@ -109,7 +109,7 @@ COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>::operator()( const COLTYPE wor
             for ( COLTYPE work_offset = task_work_start;
                   work_offset < task_work_end; ++work_offset )
             {
-                COLTYPE work_idx = task_to_work[work_offset] - work_base;
+                COLTYPE work_idx = task_to_node[work_offset] - work_base;
 
                 // Look at all dependencies of this work item in the original graph
                 for ( ROWTYPE adj_idx = work_ai[work_idx] - work_base;
@@ -118,7 +118,7 @@ COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>::operator()( const COLTYPE wor
                     COLTYPE dep_work_idx = work_aj[adj_idx] - work_base;
 
                     // Find which task this dependency work belongs to
-                    COLTYPE dep_task_id = work_to_task[dep_work_idx] - task_base;
+                    COLTYPE dep_task_id = node_to_task[dep_work_idx] - task_base;
 
                     // Only add edge if dependency is from a different task
                     if ( dep_task_id != task_id )
