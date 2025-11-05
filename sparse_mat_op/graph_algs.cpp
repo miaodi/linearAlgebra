@@ -5,16 +5,10 @@
 #include <functional>
 #include <limits>
 #include <omp.h>
-#include <queue>
 #include <iostream>
-#include <thread>
 #include <vector>
 #include <iterator>
 #include <immintrin.h>
-
-#ifndef TRANSITIVE_REDUCTION_USE_PARALLEL
-#define TRANSITIVE_REDUCTION_USE_PARALLEL 1
-#endif
 
 namespace matrix_utils
 {
@@ -96,23 +90,16 @@ COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>::operator()( const COLTYPE wor
         deps.clear();
     }
 
-    // Clear thread-local storage (size already set in constructor)
-    for ( auto& thread_vec : _thread_local_storage )
-    {
-        thread_vec.clear();
-    }
+    ROWTYPE total_task_edges = 0;
 
-    // First pass: compute dependency counts for each task in parallel
+    // Parallel region handles both passes and the sequential prefix calculation
 #pragma omp parallel num_threads( _nthreads )
     {
-        // Get thread-specific storage
-        int thread_id = omp_get_thread_num();
-        std::vector<COLTYPE>& local_dependent_tasks = _thread_local_storage[thread_id];
-
 #pragma omp for schedule( dynamic, 16 )
         for ( COLTYPE task_id = 0; task_id < num_tasks; ++task_id )
         {
-            local_dependent_tasks.clear();
+            auto& deps = _task_dependencies[task_id];
+            deps.clear();
 
             // Get all work items assigned to this task
             COLTYPE task_work_start = task_prefix[task_id] - task_base;
@@ -136,45 +123,42 @@ COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>::operator()( const COLTYPE wor
                     // Only add edge if dependency is from a different task
                     if ( dep_task_id != task_id )
                     {
-                        local_dependent_tasks.push_back( dep_task_id );
+                        deps.push_back( dep_task_id );
                     }
                 }
             }
 
             // Remove duplicates and sort
-            if ( !local_dependent_tasks.empty() )
+            if ( !deps.empty() )
             {
-                std::sort( local_dependent_tasks.begin(), local_dependent_tasks.end() );
-                auto unique_end = std::unique( local_dependent_tasks.begin(),
-                                               local_dependent_tasks.end() );
-                local_dependent_tasks.erase( unique_end, local_dependent_tasks.end() );
+                std::sort( deps.begin(), deps.end() );
+                auto unique_end = std::unique( deps.begin(), deps.end() );
+                deps.erase( unique_end, deps.end() );
             }
-
-            // Store the dependencies for this task (reusing memory)
-            _task_dependencies[task_id] =
-                local_dependent_tasks; // Copy instead of move to preserve thread-local storage
         }
-    }
 
-    // Second pass: compute row pointers sequentially (dependencies needed)
-    ROWTYPE total_task_edges = 0;
-    for ( COLTYPE task_id = 0; task_id < num_tasks; ++task_id )
-    {
-        task_ai[task_id + 1] =
-            task_ai[task_id] + static_cast<ROWTYPE>( _task_dependencies[task_id].size() );
-        total_task_edges += static_cast<ROWTYPE>( _task_dependencies[task_id].size() );
-    }
-
-    // Third pass: fill adjacency array in parallel using computed offsets
-#pragma omp parallel for schedule( dynamic, 16 ) num_threads( _nthreads )
-    for ( COLTYPE task_id = 0; task_id < num_tasks; ++task_id )
-    {
-        ROWTYPE start_offset = task_ai[task_id] - task_base;
-        const auto& deps = _task_dependencies[task_id];
-
-        for ( size_t i = 0; i < deps.size(); ++i )
+        // Compute row pointers sequentially once dependencies are ready
+#pragma omp single
         {
-            task_aj[start_offset + i] = deps[i] + task_base;
+            total_task_edges = 0;
+            for ( COLTYPE task_id = 0; task_id < num_tasks; ++task_id )
+            {
+                task_ai[task_id + 1] =
+                    task_ai[task_id] + static_cast<ROWTYPE>( _task_dependencies[task_id].size() );
+                total_task_edges += static_cast<ROWTYPE>( _task_dependencies[task_id].size() );
+            }
+        }
+
+#pragma omp for schedule( dynamic, 16 )
+        for ( COLTYPE task_id = 0; task_id < num_tasks; ++task_id )
+        {
+            ROWTYPE start_offset = task_ai[task_id] - task_base;
+            const auto& deps = _task_dependencies[task_id];
+
+            for ( size_t i = 0; i < deps.size(); ++i )
+            {
+                task_aj[start_offset + i] = deps[i] + task_base;
+            }
         }
     }
 
@@ -211,12 +195,14 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
     const int nthreads = std::max( 1, _nthreads );
 
     const auto reachability_start = std::chrono::steady_clock::now();
-#if TRANSITIVE_REDUCTION_USE_PARALLEL
+
     std::vector<std::atomic<bool>> ready_flags( static_cast<std::size_t>( rows ) );
     for ( auto& flag : ready_flags )
     {
         flag.store( false, std::memory_order_relaxed );
     }
+
+    std::chrono::steady_clock::time_point reachability_end;
 
 #pragma omp parallel num_threads( nthreads )
     {
@@ -268,134 +254,53 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
 
             ready_flags[node_j].store( true, std::memory_order_release );
         }
-    }
-#else
-    std::vector<std::pair<COLTYPE*, COLTYPE*>> sequences;
-    sequences.reserve( 16 );
-    std::vector<COLTYPE> direct_neighbors;
-    direct_neighbors.reserve( 64 );
 
-    for ( COLTYPE j = rows; j > 0; --j )
-    {
-        const COLTYPE node_j = j - 1;
-
-        sequences.clear();
-        direct_neighbors.clear();
-
-        if ( has_self_loops )
+#pragma omp single
         {
-            for ( ROWTYPE k = ai[node_j] - base; k < ai[node_j + 1] - base; ++k )
+            reachability_end = std::chrono::steady_clock::now();
+            if ( _reduced_edges.size() != static_cast<std::size_t>( rows ) )
             {
-                direct_neighbors.push_back( aj[k] - base );
-            }
-        }
-        else
-        {
-            direct_neighbors.push_back( node_j );
-            for ( ROWTYPE k = ai[node_j] - base; k < ai[node_j + 1] - base; ++k )
-            {
-                direct_neighbors.push_back( aj[k] - base );
+                _reduced_edges.resize( rows );
             }
         }
 
-        if ( !direct_neighbors.empty() )
+#pragma omp for schedule( dynamic )
+        for ( COLTYPE u = 0; u < rows; ++u )
         {
-            sequences.emplace_back( direct_neighbors.data(),
-                                    direct_neighbors.data() + direct_neighbors.size() );
-        }
+            auto& row_edges = _reduced_edges[u];
+            row_edges.clear();
 
-        for ( ROWTYPE k = ai[node_j] - base; k < ai[node_j + 1] - base; ++k )
-        {
-            const COLTYPE neighbor = aj[k] - base;
-            const auto& reachable_from_neighbor = _reachable[neighbor];
-            if ( !reachable_from_neighbor.empty() )
+            const ROWTYPE row_start = ai[u] - base;
+            const ROWTYPE row_end = ai[u + 1] - base;
+            if ( row_end > row_start )
             {
-                sequences.emplace_back( const_cast<COLTYPE*>( reachable_from_neighbor.data() ),
-                                        const_cast<COLTYPE*>( reachable_from_neighbor.data() +
-                                                              reachable_from_neighbor.size() ) );
+                row_edges.reserve( static_cast<std::size_t>( row_end - row_start ) );
             }
-        }
 
-        auto& result = _reachable[node_j];
-        result.clear();
-
-        if ( !sequences.empty() )
-        {
-            using HeapElement = std::pair<COLTYPE, std::pair<COLTYPE*, COLTYPE*>>;
-            std::priority_queue<HeapElement, std::vector<HeapElement>, std::greater<HeapElement>> heap;
-
-            for ( auto& seq : sequences )
+            for ( ROWTYPE j = row_start; j < row_end; ++j )
             {
-                if ( seq.first < seq.second )
+                COLTYPE v = aj[j] - base;
+                bool is_transitive = false;
+
+                for ( ROWTYPE k = row_start; k < row_end; ++k )
                 {
-                    heap.emplace( *seq.first, std::make_pair( seq.first, seq.second ) );
-                }
-            }
-
-            COLTYPE last_added = std::numeric_limits<COLTYPE>::max();
-            while ( !heap.empty() )
-            {
-                auto [value, ptrs] = heap.top();
-                heap.pop();
-
-                if ( value != last_added )
-                {
-                    result.push_back( value );
-                    last_added = value;
+                    COLTYPE w = aj[k] - base;
+                    if ( w != v && can_reach( w, v ) )
+                    {
+                        is_transitive = true;
+                        break;
+                    }
                 }
 
-                ptrs.first++;
-                if ( ptrs.first < ptrs.second )
+                if ( !is_transitive )
                 {
-                    heap.emplace( *ptrs.first, ptrs );
+                    row_edges.push_back( v + base );
                 }
             }
         }
     }
-#endif
 
-    const auto reachability_end = std::chrono::steady_clock::now();
     const auto reachability_ms = std::chrono::duration_cast<std::chrono::milliseconds>( reachability_end - reachability_start ).count();
-
-    if ( _reduced_edges.size() != static_cast<std::size_t>( rows ) )
-    {
-        _reduced_edges.resize( rows );
-    }
-
-#pragma omp parallel for num_threads( nthreads ) schedule( dynamic )
-    for ( COLTYPE u = 0; u < rows; ++u )
-    {
-        auto& row_edges = _reduced_edges[u];
-        row_edges.clear();
-
-        const ROWTYPE row_start = ai[u] - base;
-        const ROWTYPE row_end = ai[u + 1] - base;
-        if ( row_end > row_start )
-        {
-            row_edges.reserve( static_cast<std::size_t>( row_end - row_start ) );
-        }
-
-        for ( ROWTYPE j = row_start; j < row_end; ++j )
-        {
-            COLTYPE v = aj[j] - base;
-            bool is_transitive = false;
-
-            for ( ROWTYPE k = row_start; k < row_end; ++k )
-            {
-                COLTYPE w = aj[k] - base;
-                if ( w != v && can_reach( w, v ) )
-                {
-                    is_transitive = true;
-                    break;
-                }
-            }
-
-            if ( !is_transitive )
-            {
-                row_edges.push_back( v + base );
-            }
-        }
-    }
 
     const auto reduction_start = std::chrono::steady_clock::now();
 

@@ -34,15 +34,7 @@ struct ProjectGraphToTaskGraph
 {
     /// @brief Constructor
     /// @param nthreads Number of threads to use for parallel computation
-    ProjectGraphToTaskGraph( const int nthreads = 1 )
-        : _nthreads( nthreads ), _thread_local_storage( nthreads )
-    {
-        // Pre-allocate thread-local storage
-        for ( auto& storage : _thread_local_storage )
-        {
-            storage.reserve( 512 ); // Reserve initial space for efficiency
-        }
-    }
+    ProjectGraphToTaskGraph( const int nthreads = 1 ) : _nthreads( nthreads ) {}
 
     /// @brief Project work graph to task graph
     /// @param work_graph_rows Number of rows in the original work graph
@@ -69,7 +61,6 @@ private:
     // Data members for reusable memory allocation
     int _nthreads; // Number of threads for parallel computation
     mutable std::vector<std::vector<COLTYPE>> _task_dependencies; // dependencies for each task
-    mutable std::vector<std::vector<COLTYPE>> _thread_local_storage; // thread-local temporary vectors
 };
 
 
