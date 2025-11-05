@@ -17,12 +17,7 @@
 
 #include "matrix_utils.hpp"
 #include "permutation.hpp"
-
-#ifdef USE_METIS_LIB
-extern "C" {
-#include "metis.h"
-}
-#endif
+#include "io.hpp"
 
 namespace matrix_utils {
 
@@ -962,10 +957,10 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::createThreadLocal
             // Get all node items (matrix rows) for this task
             COLTYPE task_start = _taskPrefix[task_id];
             COLTYPE task_end = _taskPrefix[task_id + 1];
-            
-            for ( COLTYPE work_idx = task_start; work_idx < task_end; ++work_idx )
+
+            for ( COLTYPE idx = task_start; idx < task_end; ++idx )
             {
-                COLTYPE original_row = _iperm[_taskToNode[work_idx]] - base;
+                COLTYPE original_row = _taskToNode[idx];
                 _threadLocalizedRowPerm[original_row] = current_permuted_row;
                 _threadLocalizedRowInvPerm[current_permuted_row] = original_row;
                 current_permuted_row++;
@@ -1000,6 +995,12 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::reorderMatrixForC
     _reorderedMatrix.av.resize( nnz );
     _reorderedMatrix.rows = size;
     _reorderedMatrix.cols = size;
+
+    // Print out nnz of each row of original CSR
+    std::cout << "Original CSR row nnz counts:" << std::endl;
+    for (COLTYPE row = 0; row < size; ++row) {
+      std::cout << "  Row " << row << ": " << (ai[row + 1] - ai[row]) << " nnz" << std::endl;
+    }
     
     // Use permuteMat to perform row permutation only: pA = P * A
     // For triangular solve, we only need row permutation (no column permutation)
@@ -1011,6 +1012,12 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::reorderMatrixForC
         ai, aj, av,
         _reorderedMatrix.ai.data(), _reorderedMatrix.aj.data(), _reorderedMatrix.av.data()
     );
+    std::cout << "  _threadLocalizedRowInvPerm: [";
+    for (COLTYPE i = 0; i < size; ++i) {
+      if (i > 0) std::cout << ", ";
+      std::cout << _threadLocalizedRowInvPerm[i];
+    }
+    std::cout << "]" << std::endl;
 
     if ( diag )
     {
@@ -1027,6 +1034,96 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::reorderMatrixForC
     }
 
     std::cout << "  Matrix reordering completed using permuteMat. NNZ: " << (_reorderedMatrix.ai[size] - _reorderedMatrix.ai[0]) << std::endl;
+    
+    // Debug: Write SVG visualizations of original and reordered matrices with diagonal terms
+    {
+        // Helper lambda to add diagonal entries to CSR matrix structure (no values)
+        auto addDiagonalToCSR = [](const COLTYPE rows, const ROWTYPE base, 
+                                   ROWTYPE const* src_ai, COLTYPE const* src_aj,
+                                   std::vector<ROWTYPE>& dst_ai, 
+                                   std::vector<COLTYPE>& dst_aj) {
+            dst_ai.resize(rows + 1);
+            dst_ai[0] = base;
+            
+            // Count entries per row including diagonal
+            for (COLTYPE i = 0; i < rows; ++i) {
+                COLTYPE const* row_start = src_aj + src_ai[i] - base;
+                COLTYPE const* row_end = src_aj + src_ai[i + 1] - base;
+                auto diag_it = std::lower_bound(row_start, row_end, i + base);
+                bool has_diag = (diag_it != row_end && *diag_it == i + base);
+                ROWTYPE row_nnz = src_ai[i + 1] - src_ai[i];
+                dst_ai[i + 1] = row_nnz + (has_diag ? 0 : 1); // Add diagonal if missing
+            }
+            
+            // Prefix sum to get row pointers
+            for (COLTYPE i = 0; i < rows; ++i) {
+                dst_ai[i + 1] += dst_ai[i];
+            }
+            
+            ROWTYPE total_nnz = dst_ai[rows] - base;
+            dst_aj.resize(total_nnz);
+            
+            // Fill column indices with diagonal inserted
+            for (COLTYPE i = 0; i < rows; ++i) {
+                COLTYPE const* src_row_start = src_aj + src_ai[i] - base;
+                COLTYPE const* src_row_end = src_aj + src_ai[i + 1] - base;
+                COLTYPE* dst_row_start = dst_aj.data() + dst_ai[i] - base;
+                
+                auto diag_pos = std::lower_bound(src_row_start, src_row_end, i + base);
+                bool has_diag = (diag_pos != src_row_end && *diag_pos == i + base);
+                
+                if (has_diag) {
+                    // Diagonal already exists, just copy
+                    std::copy(src_row_start, src_row_end, dst_row_start);
+                } else {
+                    // Insert diagonal entry
+                    COLTYPE* insert_pos = std::copy(src_row_start, diag_pos, dst_row_start);
+                    *insert_pos = i + base;
+                    std::copy(diag_pos, src_row_end, insert_pos + 1);
+                }
+            }
+        };
+        
+        // Create original matrix with diagonal
+        std::vector<ROWTYPE> orig_with_diag_ai;
+        std::vector<COLTYPE> orig_with_diag_aj;
+        if (1) {
+            addDiagonalToCSR(size, base, ai, aj, orig_with_diag_ai, orig_with_diag_aj);
+            std::ofstream original_svg("debug_original_matrix_with_diag.svg");
+            if (original_svg.is_open()) {
+                matrix_utils::writeSVG(size, size, 
+                                       orig_with_diag_ai.data(), 
+                                       orig_with_diag_aj.data(), 
+                                       original_svg);
+                original_svg.close();
+                std::cout << "  Debug: Original matrix (with diag) written to debug_original_matrix_with_diag.svg" << std::endl;
+            }
+            
+            // Now permute the original matrix with diagonal using the same permutation
+            const auto nnz_with_diag = orig_with_diag_ai[size] - base;
+            
+            std::vector<ROWTYPE> reord_with_diag_ai(size + 1);
+            std::vector<COLTYPE> reord_with_diag_aj(nnz_with_diag);
+            
+            matrix_utils::permuteMat<ROWTYPE, COLTYPE, VALTYPE>(
+                size, size,
+                _threadLocalizedRowInvPerm.data(),  // Same row permutation as before
+                nullptr,                             // No column permutation
+                orig_with_diag_ai.data(), orig_with_diag_aj.data(), nullptr,
+                reord_with_diag_ai.data(), reord_with_diag_aj.data(), nullptr
+            );
+            
+            std::ofstream reordered_svg("debug_reordered_matrix_with_diag.svg");
+            if (reordered_svg.is_open()) {
+                matrix_utils::writeSVG(size, size, 
+                                       reord_with_diag_ai.data(), 
+                                       reord_with_diag_aj.data(), 
+                                       reordered_svg);
+                reordered_svg.close();
+                std::cout << "  Debug: Reordered matrix (with diag) written to debug_reordered_matrix_with_diag.svg" << std::endl;
+            }
+        }
+    }
     
     // Report cache locality improvement - compute thread row ranges on-demand
     std::cout << "  Cache locality analysis:" << std::endl;
