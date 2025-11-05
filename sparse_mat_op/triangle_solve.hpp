@@ -116,43 +116,57 @@ private:
     COLTYPE buildTaskGraphs( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj );
     COLTYPE reduceTaskGraph( COLTYPE task_edges_before );
     void partitionTasksToThreads();
+    void pruneThreadIntraEdgesFromReducedGraph();
     void createThreadLocalizedPermutation( const COLTYPE size );
-    void reorderMatrixForCacheLocality( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av );
+    void reorderMatrixForCacheLocality( const COLTYPE size,
+                                        ROWTYPE const* ai,
+                                        COLTYPE const* aj,
+                                        VALTYPE const* av,
+                                        VALTYPE const* diag );
     void outputTaskGraphDebugInfo( COLTYPE task_edges_before, COLTYPE task_edges_after ) const;
 
-public:
+private:
     int _nthreads;
-    COLTYPE _task_maximum_size;   // maximum work size for a task
-    
+    COLTYPE _task_maximum_size; // maximum node size for a task
+
     // Level scheduling data
     std::vector<COLTYPE> _iperm;
     std::vector<COLTYPE> _levelPrefix;
     COLTYPE _levels;
-    
+
     // Task partitioning data
-    std::vector<COLTYPE> _taskPrefix;      // CSR row pointer for task-to-work mapping (task -> work indices)
-    std::vector<COLTYPE> _taskToWork;      // CSR column indices for task-to-work mapping
+    std::vector<COLTYPE> _taskPrefix; // CSR row pointer for task-to-node mapping (task -> node indices)
+    std::vector<COLTYPE> _taskToNode; // CSR column indices for task-to-node mapping
     std::vector<COLTYPE> _taskToLevel;     // Map from task ID to level
-    std::vector<COLTYPE> _levelTaskPrefix; // Prefix of tasks for each level
-    std::vector<COLTYPE> _workToTask;      // Map from work index to task ID
-    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskInGraph; // Task dependency graph (projected from original graph)
-    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskOutGraph; // Transpose of task dependency graph
-    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskOutGraphReduced; // Transitive reduction of task out-graph
-    std::vector<COLTYPE> _taskPartition;   // Partition assignment for each task (0 to _nthreads-1)
-    
+    std::vector<COLTYPE> _levelTaskPrefix; // Prefix of tasks for each level, base = 0
+    std::vector<COLTYPE> _nodeToTask;      // Map from node index to task ID, base = 0
+    CSRStructVec<ROWTYPE, COLTYPE> _taskInGraph; // Task dependency graph (projected from original graph) (base = 0)
+    CSRStructVec<ROWTYPE, COLTYPE> _taskOutGraph; // Transpose of task dependency graph (base = 0)
+    CSRStructVec<ROWTYPE, COLTYPE> _taskOutGraphTransitiveReduced; // Transitive reduction of task out-graph (base = 0)
+    CSRStructVec<ROWTYPE, COLTYPE> _taskOutGraphIntraReduced; // Task out-graph with intra-thread edges removed (base = 0)
+    CSRStructVec<ROWTYPE, COLTYPE> _taskInGraphIntraReduced; // Transpose of intra-thread pruned task graph (base = 0)
+    std::vector<COLTYPE> _taskPartition; // Partition assignment for each task (0 to _nthreads-1)
+
     // Thread-task mapping: _threadTasks[i] contains all task IDs assigned to thread i
     std::vector<std::vector<COLTYPE>> _threadTasks;
-    
+
     // Cache-optimized matrix reordering for thread locality
-    std::vector<COLTYPE> _threadLocalizedRowPerm;    // Row permutation: original_row -> new_row
-    std::vector<COLTYPE> _threadLocalizedRowInvPerm; // Inverse permutation: new_row -> original_row  
+    std::vector<COLTYPE> _threadLocalizedRowPerm; // Row permutation: original_row -> new_row
+    std::vector<COLTYPE> _threadLocalizedRowInvPerm; // Inverse permutation: new_row -> original_row
     CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _reorderedMatrix; // Matrix reordered for thread locality
-    
+    std::vector<VALTYPE> _reorderedDiag; // Diagonal values for reordered matrix
+    mutable std::unique_ptr<std::atomic<bool>[]> _taskReady; // Task readiness flags
+    mutable std::size_t _taskReadySize{ 0 };
+
     COLTYPE _totalTasks;
-    
+
     TopologicalSort2<ROWTYPE, COLTYPE, TM> _topSort;
     ProjectGraphToTaskGraph<ROWTYPE, COLTYPE> _graphProjector; // Reusable graph projection instance
-    TransitiveReduction<ROWTYPE, COLTYPE> _transitiveReducer;  // Reusable transitive reduction instance
+    TransitiveReduction<ROWTYPE, COLTYPE> _transitiveReducer; // Reusable transitive reduction instance
+
+private:
+    std::vector<std::vector<COLTYPE>> _taskScratch; // temporary workspace (zero-based neighbors per task)
+    mutable std::vector<VALTYPE> _rhsScratch; // Permuted rhs buffer
 };
 
 enum class FBSubstitutionType

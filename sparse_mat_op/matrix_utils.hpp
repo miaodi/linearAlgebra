@@ -669,6 +669,7 @@ template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
 struct TopologicalSort2
 {
     // max degree
+    // after sorting, the base of prefix is the same as ai[0]
     COLTYPE operator()( const COLTYPE nodes,
                         ROWTYPE const* ai,
                         COLTYPE const* aj,
