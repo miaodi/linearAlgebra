@@ -62,7 +62,10 @@ struct LevelScheduleTriangularSubstitution
     LevelScheduleTriangularSubstitution( const int num_threads = omp_get_max_threads() )
         : _nthreads{ num_threads }
     {
+        if ( _nthreads < 1 )
+            throw std::runtime_error("Number of threads must be at least 1.");
     }
+
     void analysis( const COLTYPE size,
                    ROWTYPE const* ai,
                    COLTYPE const* aj,
@@ -98,6 +101,8 @@ struct P2PTriangularSubstitution
           _graphProjector{ num_threads },
           _transitiveReducer{ num_threads }
     {
+        if ( _nthreads < 1 )
+            throw std::runtime_error("Number of threads must be at least 1.");
     }
 
     void analysis( const COLTYPE size,
@@ -137,6 +142,7 @@ private:
     // Task partitioning data
     std::vector<COLTYPE> _taskPrefix; // CSR row pointer for task-to-node mapping (task -> node indices)
     std::vector<COLTYPE> _taskToNode; // CSR column indices for task-to-node mapping
+    std::vector<COLTYPE> _taskToReorderedNode; // CSR column indices for task-to-node mapping after reordering
     std::vector<COLTYPE> _taskToLevel;     // Map from task ID to level
     std::vector<COLTYPE> _levelTaskPrefix; // Prefix of tasks for each level, base = 0
     std::vector<COLTYPE> _nodeToTask;      // Map from node index to task ID, base = 0
@@ -156,7 +162,7 @@ private:
     CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _reorderedMatrix; // Matrix reordered for thread locality
     std::vector<VALTYPE> _reorderedDiag; // Diagonal values for reordered matrix
     mutable std::unique_ptr<std::atomic<bool>[]> _taskReady; // Task readiness flags
-    mutable std::size_t _taskReadySize{ 0 };
+    mutable COLTYPE _taskReadyCapacity{ 0 };
 
     COLTYPE _totalTasks;
 
@@ -166,7 +172,6 @@ private:
 
 private:
     std::vector<std::vector<COLTYPE>> _taskScratch; // temporary workspace (zero-based neighbors per task)
-    mutable std::vector<VALTYPE> _rhsScratch; // Permuted rhs buffer
 };
 
 enum class FBSubstitutionType
@@ -187,6 +192,8 @@ public:
     OptimizedTriangularSolve( const int num_threads = omp_get_num_threads() )
         : _nthreads{ num_threads }
     {
+        if ( _nthreads < 1 )
+            throw std::runtime_error("Number of threads must be at least 1.");
     }
 
     void analysis( const COLTYPE rows,
