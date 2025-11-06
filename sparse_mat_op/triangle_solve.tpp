@@ -208,6 +208,94 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::analysis(
 }
 
 template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::operator()(
+    VALTYPE const* const b, VALTYPE* const x ) const
+{
+    const COLTYPE size = _reorderedMatrix.rows;
+    if ( size == 0 )
+        return;
+
+    const ROWTYPE matrix_base = _reorderedMatrix.ai[0];
+
+    const ROWTYPE dep_base = _taskInGraphIntraReduced.ai.empty() ? ROWTYPE( 0 ) : _taskInGraphIntraReduced.ai[0];
+
+    auto solve_row = [&]( COLTYPE original_row_idx, COLTYPE reordered_row_idx )
+    {
+        const ROWTYPE row_begin = _reorderedMatrix.ai[reordered_row_idx] - matrix_base;
+        const ROWTYPE row_end = _reorderedMatrix.ai[reordered_row_idx + 1] - matrix_base;
+
+        VALTYPE diag = _reorderedDiag.empty() ? VALTYPE( 0 ) : _reorderedDiag[reordered_row_idx];
+        VALTYPE accum = VALTYPE( 0 );
+
+        for ( ROWTYPE jj = row_begin; jj < row_end; ++jj )
+        {
+            const COLTYPE col = _reorderedMatrix.aj[jj] - matrix_base;
+            const VALTYPE val = _reorderedMatrix.av[jj];
+
+            accum += val * x[col];
+        }
+
+        x[original_row_idx] = b[original_row_idx] - accum;
+        x[original_row_idx] = ( diag == VALTYPE( 0 ) ) ? x[original_row_idx] : x[original_row_idx] / diag;
+    };
+
+    if ( _taskReadyCapacity < _totalTasks )
+    {
+        // Allocate 1.5x the needed capacity to reduce future reallocations
+        _taskReadyCapacity = _totalTasks * 1.5;
+        _taskReady = std::make_unique<std::atomic<bool>[]>( _taskReadyCapacity );
+    }
+    for ( COLTYPE i = 0; i < _totalTasks; ++i )
+    {
+        _taskReady[i].store( false, std::memory_order_relaxed );
+    }
+
+#pragma omp parallel num_threads( _nthreads )
+    {
+        const int tid = omp_get_thread_num();
+        const auto& assigned_tasks = _threadTasks[tid];
+
+        for ( COLTYPE task_id : assigned_tasks )
+        {
+            // #pragma omp critical
+            // {
+            //     std::cout << "tid: " << tid << ", task_id: " << task_id << std::endl;
+            // }
+            // if (tid == 1) {
+            //     std::cout << "Thread 1 is pausing..." << std::endl;
+            //     while (true) {
+            //         std::this_thread::yield();
+            //     }
+            // }
+            const ROWTYPE dep_begin = _taskInGraphIntraReduced.ai[task_id] - dep_base;
+            const ROWTYPE dep_end = _taskInGraphIntraReduced.ai[task_id + 1] - dep_base;
+            for ( ROWTYPE dep_idx = dep_begin; dep_idx < dep_end; ++dep_idx )
+            {
+                const COLTYPE dep_task = _taskInGraphIntraReduced.aj[dep_idx] - dep_base;
+                while ( !_taskReady[static_cast<std::size_t>( dep_task )].load( std::memory_order_acquire ) )
+                {
+                    // std::this_thread::yield();
+                    _mm_pause();
+                }
+            }
+
+            const COLTYPE task_start = _taskPrefix[task_id];
+            const COLTYPE task_end = _taskPrefix[task_id + 1];
+
+            for ( COLTYPE offset = task_start; offset < task_end; ++offset )
+            {
+                const COLTYPE original_row_idx = _taskToNode[offset];
+                const COLTYPE reordered_row_idx = _taskToReorderedNode[offset];
+                solve_row( original_row_idx, reordered_row_idx );
+            }
+
+            _taskReady[static_cast<std::size_t>( task_id )].store( true, std::memory_order_release );
+        }
+    }
+
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::computeLevelSchedule(
     const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj )
 {
@@ -840,110 +928,15 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::outputTaskGraphDe
 }
 
 template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::operator()(
-    VALTYPE const* const b, VALTYPE* const x ) const
-{
-    const COLTYPE size = _reorderedMatrix.rows;
-    if ( size == 0 )
-        return;
-
-    const ROWTYPE matrix_base = _reorderedMatrix.ai[0];
-
-    if ( _rhsScratch.size() != static_cast<std::size_t>( size ) )
-    {
-        _rhsScratch.resize( size );
-    }
-    
-    VALTYPE* rhs = _rhsScratch.data();
-
-    // Permute RHS vector using the same pattern as _reorderedDiag
-    // rhs[new_row] = b[original_row] where original_row = _threadLocalizedRowInvPerm[new_row]
-    matrix_utils::permVec<COLTYPE, VALTYPE>( size,
-                                             static_cast<COLTYPE>( 0 ), // base = 0
-                                             b,
-                                             _threadLocalizedRowInvPerm.data(),
-                                             rhs );
-
-    const ROWTYPE dep_base = _taskInGraphIntraReduced.ai.empty() ? ROWTYPE( 0 ) : _taskInGraphIntraReduced.ai[0];
-
-    auto solve_row = [&]( COLTYPE original_row_idx, COLTYPE reordered_row_idx )
-    {
-        const ROWTYPE row_begin = _reorderedMatrix.ai[reordered_row_idx] - matrix_base;
-        const ROWTYPE row_end = _reorderedMatrix.ai[reordered_row_idx + 1] - matrix_base;
-
-        VALTYPE diag = _reorderedDiag.empty() ? VALTYPE( 0 ) : _reorderedDiag[reordered_row_idx];
-        VALTYPE accum = VALTYPE( 0 );
-
-        for ( ROWTYPE jj = row_begin; jj < row_end; ++jj )
-        {
-            const COLTYPE col = _reorderedMatrix.aj[jj] - matrix_base;
-            const VALTYPE val = _reorderedMatrix.av[jj];
-
-            accum += val * rhs[col];
-        }
-
-        x[original_row_idx] = rhs[reordered_row_idx] - accum;
-        x[original_row_idx] = ( diag == VALTYPE( 0 ) ) ? x[original_row_idx] : x[original_row_idx] / diag;
-    };
-
-    const std::size_t desired_ready_size = static_cast<std::size_t>( _totalTasks );
-    if ( _taskReadySize != desired_ready_size )
-    {
-        _taskReady = desired_ready_size ? std::make_unique<std::atomic<bool>[]>( desired_ready_size )
-                                        : nullptr;
-        _taskReadySize = desired_ready_size;
-    }
-    for ( std::size_t i = 0; i < _taskReadySize; ++i )
-    {
-        _taskReady[i].store( false, std::memory_order_relaxed );
-    }
-
-#pragma omp parallel num_threads( _nthreads )
-    {
-        const int tid = omp_get_thread_num();
-        const auto& assigned_tasks = _threadTasks[tid];
-
-        for ( COLTYPE task_id : assigned_tasks )
-        {
-            const ROWTYPE dep_begin = _taskInGraphIntraReduced.ai[task_id] - dep_base;
-            const ROWTYPE dep_end = _taskInGraphIntraReduced.ai[task_id + 1] - dep_base;
-            for ( ROWTYPE dep_idx = dep_begin; dep_idx < dep_end; ++dep_idx )
-            {
-                const COLTYPE dep_task = _taskInGraphIntraReduced.aj[dep_idx] - dep_base;
-                while ( !_taskReady[static_cast<std::size_t>( dep_task )].load( std::memory_order_acquire ) )
-                {
-                    // std::this_thread::yield();
-                    _mm_pause();
-                }
-            }
-
-            const COLTYPE task_start = _taskPrefix[task_id];
-            const COLTYPE task_end = _taskPrefix[task_id + 1];
-
-            for ( COLTYPE offset = task_start; offset < task_end; ++offset )
-            {
-                const COLTYPE original_row_idx = _taskToNode[offset];
-                const COLTYPE reordered_row_idx = _threadLocalizedRowPerm[original_row_idx];
-                solve_row( original_row_idx, reordered_row_idx );
-            }
-
-            _taskReady[static_cast<std::size_t>( task_id )].store( true, std::memory_order_release );
-        }
-    }
-
-}
-
-template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::createThreadLocalizedPermutation(
     const COLTYPE size )
 {
     std::cout << "\n  Creating thread-localized row permutation for cache optimization..." << std::endl;
-    
-    const auto base = _levelPrefix.empty() ? 0 : 0; // Assuming zero-based indexing
-    
+
     _threadLocalizedRowPerm.resize( size );
     _threadLocalizedRowInvPerm.resize( size );
-    
+    _taskToReorderedNode.resize( size );
+
     COLTYPE current_permuted_row = 0;
     
     // Create permutation: Thread by thread, level by level within each thread
@@ -962,6 +955,7 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::createThreadLocal
             {
                 COLTYPE original_row = _taskToNode[idx];
                 _threadLocalizedRowPerm[original_row] = current_permuted_row;
+                _taskToReorderedNode[idx] = current_permuted_row;
                 _threadLocalizedRowInvPerm[current_permuted_row] = original_row;
                 current_permuted_row++;
             }
