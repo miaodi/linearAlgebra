@@ -1,6 +1,6 @@
 
 #include "Cholesky.hpp"
-#include "aat.hpp"
+#include "symmetric_ops.hpp"
 #include "config.h"
 #include "io.hpp"
 #include "matrix_utils.hpp"
