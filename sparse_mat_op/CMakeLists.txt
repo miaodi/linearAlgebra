@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(sparse_mat_op CXX)
 
-set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp permutation.cpp io.cpp graph_algs.cpp)
+set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp permutation.cpp io.cpp graph_algs.cpp symmetric_ops.cpp)
 
 # Add CUDA sources if CUDA is enabled
 if(USE_CUDA)
