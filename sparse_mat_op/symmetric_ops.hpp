@@ -2,9 +2,10 @@
 
 #include "matrix_utils.hpp"
 #include "sparse_mat_traits.hpp"
-#include "utils.h"
+#include <atomic>
 #include <numeric>
 #include <vector>
+#include <omp.h>
 
 namespace matrix_utils {
 
@@ -15,5 +16,41 @@ void AATSymbolic(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
 template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG = true>
 void AATNumeric(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
                 ROWTYPE const *ai_AAT, COLTYPE *aj_AAT);
+
+/// @brief Functor for computing A+A^T with memory reuse
+/// @details Encapsulates both symbolic and numeric phases of A+A^T computation.
+///          Reuses internal memory across multiple invocations for efficiency.
+///          Returns CSRStructVec to avoid manual deduplication.
+template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG = true>
+struct APlusATStruct {
+    APlusATStruct( const int num_threads = omp_get_max_threads() )
+        : _nthreads{ num_threads }
+    {
+        if ( _nthreads < 1 )
+            throw std::runtime_error("Number of threads must be at least 1.");
+        _thread_sums.resize(_nthreads + 1, 0);
+    }
+    
+    /// @brief Compute A+A^T and return as CSRStructVec (handles deduplication automatically)
+    /// @return CSRStructVec containing the deduplicated structure of A+A^T
+    void operator()(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* ai_APlusAT, COLTYPE* aj_APlusAT);
+
+    void setNumThreads( const int num_threads )
+    {
+        _nthreads = num_threads;
+        _thread_sums.resize(_nthreads + 1, 0);
+    }
+
+private:
+    void prefix(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj);
+    void fillAndCompact(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* ai_APlusAT, COLTYPE* aj_APlusAT);
+
+    // Reusable memory buffers
+    int _nthreads;
+    std::vector<ROWTYPE> _thread_sums;
+    std::unique_ptr<std::atomic<ROWTYPE>[]> _row_pos;
+    size_t _row_pos_capacity = 0;
+    CSRStructVec<ROWTYPE, COLTYPE> _APAT;
+};
 
 } // namespace matrix_utils

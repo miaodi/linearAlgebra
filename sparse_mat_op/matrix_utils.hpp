@@ -1044,29 +1044,32 @@ bool ValidCSR(const COLTYPE rows, const COLTYPE cols, const int base,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool Symmetry(const COLTYPE size, const int base, ROWTYPE const *ai,
-              COLTYPE const *aj, VALTYPE const *av) {
-  const ROWTYPE nnz = ai[size] - base;
-  std::vector<ROWTYPE> tai(size + 1);
-  std::vector<COLTYPE> taj(nnz);
-  std::vector<VALTYPE> tav(nnz);
+bool IsSymmetry( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av )
+{
+    const auto base = ai[0];
+    const ROWTYPE nnz = ai[size] - base;
+    std::vector<ROWTYPE> tai( size + 1 );
+    std::vector<COLTYPE> taj( nnz );
+    std::vector<VALTYPE> tav( nnz );
 
-  ParallelTranspose2(size, size, base, ai, aj, av, tai.data(), taj.data(),
-                     tav.data());
-  for (COLTYPE i = 0; i < size; i++) {
-    if (ai[i + 1] - ai[i] != tai[i + 1] - tai[i]) {
-      std::cout << "Row " << i << " has different number of nonzeros"
-                << std::endl;
-      return false;
+    ParallelTranspose2( size, size, base, ai, aj, av, tai.data(), taj.data(), tav.data() );
+    for ( COLTYPE i = 0; i < size; i++ )
+    {
+        if ( ai[i + 1] - ai[i] != tai[i + 1] - tai[i] )
+        {
+            std::cout << "Row " << i << " has different number of nonzeros" << std::endl;
+            return false;
+        }
+        for ( ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++ )
+        {
+            if ( aj[j] != taj[j] || av[j] != tav[j] )
+            {
+                std::cout << "Row " << i << " is not symmetric" << std::endl;
+                return false;
+            }
+        }
     }
-    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
-      if (aj[j] != taj[j] || av[j] != tav[j]) {
-        std::cout << "Row " << i << " is not symmetric" << std::endl;
-        return false;
-      }
-    }
-  }
-  return true;
+    return true;
 }
 
 // alpha * diag * x + beta * y
