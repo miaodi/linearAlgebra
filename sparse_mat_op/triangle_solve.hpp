@@ -252,5 +252,3 @@ protected:
     // std::vector<COLTYPE> taskSizes;
 };
 } // namespace matrix_utils
-
-#include "triangle_solve.tpp"
