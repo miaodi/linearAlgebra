@@ -4,7 +4,7 @@
 #include "../sparse_mat_op/permutation.hpp"
 #include "MinimumDegree.hpp"
 #include "ObjectPool.hpp"
-#include "aat.hpp"
+#include "symmetric_ops.hpp"
 #include "circularbuffer.hpp"
 #include "mkl_sparse_mat.h"
 #include <vector>
