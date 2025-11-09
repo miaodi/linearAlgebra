@@ -22,20 +22,20 @@ void AATNumeric(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
 ///          Reuses internal memory across multiple invocations for efficiency.
 ///          Returns CSRStructVec to avoid manual deduplication.
 template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG = true>
-struct APlusATStruct {
-    APlusATStruct( const int num_threads = omp_get_max_threads() )
-        : _nthreads{ num_threads }
+struct APlusATStruct
+{
+    APlusATStruct(const int num_threads = omp_get_max_threads()) : _nthreads{num_threads}
     {
-        if ( _nthreads < 1 )
+        if (_nthreads < 1)
             throw std::runtime_error("Number of threads must be at least 1.");
         _thread_sums.resize(_nthreads + 1, 0);
     }
-    
+
     /// @brief Compute A+A^T and return as CSRStructVec (handles deduplication automatically)
     /// @return CSRStructVec containing the deduplicated structure of A+A^T
-    void operator()(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* ai_APlusAT, COLTYPE* aj_APlusAT);
+    void operator()(COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* ai_APlusAT, COLTYPE* aj_APlusAT);
 
-    void setNumThreads( const int num_threads )
+    void setNumThreads(const int num_threads)
     {
         _nthreads = num_threads;
         _thread_sums.resize(_nthreads + 1, 0);
@@ -43,7 +43,8 @@ struct APlusATStruct {
 
 private:
     void prefix(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj);
-    void fillAndCompact(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* ai_APlusAT, COLTYPE* aj_APlusAT);
+    void fillAndCompact(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* ai_APlusAT,
+                        COLTYPE* aj_APlusAT);
 
     // Reusable memory buffers
     int _nthreads;
@@ -53,4 +54,30 @@ private:
     CSRStructVec<ROWTYPE, COLTYPE> _APAT;
 };
 
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
+                     const typename CSRMatrixType::COLTYPE cols,
+                     typename CSRMatrixType::ROWTYPE const* ai,
+                     typename CSRMatrixType::COLTYPE const* aj,
+                     typename CSRMatrixType::VALTYPE const* av,
+                     const typename CSRMatrixType::COLTYPE col_split,
+                     const typename CSRMatrixType::ROWTYPE base,
+                     CSRMatrixType& A1,
+                     CSRMatrixType& A2,
+                     const int nthreads = omp_get_max_threads());
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void partitionCSR2x2(const typename CSRMatrixType::COLTYPE rows,
+                     const typename CSRMatrixType::COLTYPE cols,
+                     typename CSRMatrixType::ROWTYPE const* ai,
+                     typename CSRMatrixType::COLTYPE const* aj,
+                     typename CSRMatrixType::VALTYPE const* av,
+                     const typename CSRMatrixType::COLTYPE row_split,
+                     const typename CSRMatrixType::COLTYPE col_split,
+                     CSRMatrixType& A11,
+                     CSRMatrixType& A12,
+                     CSRMatrixType& A21,
+                     CSRMatrixType& A22,
+                     const int nthreads = omp_get_max_threads());
 } // namespace matrix_utils

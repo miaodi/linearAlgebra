@@ -410,37 +410,192 @@ void APlusATStruct<ROWTYPE, COLTYPE, KEEPDIAG>::fillAndCompact( const COLTYPE si
     }
 }
 
+template <ResizableCSRMatrixType CSRMatrixType>
+void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
+                        const typename CSRMatrixType::COLTYPE cols,
+                        typename CSRMatrixType::ROWTYPE const* ai,  
+                        typename CSRMatrixType::COLTYPE const* aj,
+                        typename CSRMatrixType::VALTYPE const* av,
+                        const typename CSRMatrixType::COLTYPE col_split,
+                        const typename CSRMatrixType::ROWTYPE base,
+                        CSRMatrixType& A1,
+                        CSRMatrixType& A2,
+                        const int nthreads)
+{
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+    
+    // Set dimensions
+    A1.rows = rows;
+    A1.cols = col_split;
+    A2.rows = rows;
+    A2.cols = cols - col_split;
+
+    // Resize row pointers using ResizableCSRMatrixType interface
+    ROWTYPE* ai1 = A1.ResizeAI(rows + 1);
+    ROWTYPE* ai2 = A2.ResizeAI(rows + 1);
+    
+    ai1[0] = base;
+    ai2[0] = base;
+    
+    // First pass: count entries in each block and store split positions
+    std::vector<ROWTYPE> split_pos(rows, 0);
+    std::vector<ROWTYPE> thread_sums1(nthreads + 1, 0);
+    std::vector<ROWTYPE> thread_sums2(nthreads + 1, 0);
+    // Declare pointers outside parallel region
+    COLTYPE* aj1 = nullptr;
+    COLTYPE* aj2 = nullptr;
+    
+    using VALTYPE = typename CSRMatrixType::VALTYPE;
+    VALTYPE* av1 = nullptr;
+    VALTYPE* av2 = nullptr;
+    
+#pragma omp parallel num_threads(nthreads)
+    {
+        const int tid = omp_get_thread_num();
+        const int nthreads = omp_get_num_threads();
+        
+        auto [start, end] = utils::LoadPrefixBalancedPartitionPos(ai, ai + rows, tid, nthreads);
+        
+        // First pass: count entries in each block and store split positions
+        for (COLTYPE i = start; i < end; i++) {
+            // Use lower_bound to find split point since aj is sorted
+            auto split_it = std::lower_bound(aj + ai[i] - base, aj + ai[i + 1] - base, col_split + base);
+            split_pos[i] = split_it - aj;  // Store absolute position
+            ai1[i + 1] = split_it - (aj + ai[i] - base);
+            ai2[i + 1] = (ai[i + 1] - ai[i]) - ai1[i + 1];
+        }
+        
+#pragma omp barrier
+        
+        // Build row pointers using parallel prefix sum with O(nthreads) serial work
+        // Phase 1: Local prefix sum per thread
+        auto [chunk_start, chunk_end] = utils::LoadBalancedPartitionPos(rows, tid, nthreads);
+        
+        ROWTYPE local_sum1 = 0;
+        ROWTYPE local_sum2 = 0;
+        for (COLTYPE i = chunk_start; i < chunk_end; i++) {
+            local_sum1 += ai1[i + 1];
+            local_sum2 += ai2[i + 1];
+        }
+        
+        // Use thread_local storage for thread sums (reuse split_pos vector space)
+        
+        thread_sums1[tid + 1] = local_sum1;
+        thread_sums2[tid + 1] = local_sum2;
+        
+#pragma omp barrier
+        
+        // Phase 2: Sequential scan of thread sums - O(nthreads) serial work
+#pragma omp single
+        {
+            thread_sums1[0] = base;
+            thread_sums2[0] = base;
+            for (int i = 1; i <= nthreads; i++) {
+                thread_sums1[i] += thread_sums1[i - 1];
+                thread_sums2[i] += thread_sums2[i - 1];
+            }
+            
+            // Allocate column and value arrays using ResizableCSRMatrixType interface
+            aj1 = A1.ResizeAJ(thread_sums1[nthreads] - base);
+            aj2 = A2.ResizeAJ(thread_sums2[nthreads] - base);
+            av1 = A1.ResizeAV(thread_sums1[nthreads] - base);
+            av2 = A2.ResizeAV(thread_sums2[nthreads] - base);
+        }
+        
+#pragma omp barrier
+        
+        // Phase 3: Parallel adjustment of each chunk
+        const ROWTYPE offset1 = thread_sums1[tid];
+        const ROWTYPE offset2 = thread_sums2[tid];
+        
+        ai1[chunk_start] = offset1;
+        ai2[chunk_start] = offset2;
+        for (COLTYPE i = chunk_start; i < chunk_end - 1; i++) {
+            ai1[i + 1] += ai1[i];
+            ai2[i + 1] += ai2[i];
+        }
+        if (chunk_end == rows) {
+            ai1[rows] = thread_sums1[nthreads];
+            ai2[rows] = thread_sums2[nthreads];
+        }
+        
+#pragma omp barrier
+        
+        // Second pass: fill column indices and values using stored split positions
+        for (COLTYPE i = start; i < end; i++) {
+            // Use stored split position
+            ROWTYPE split = split_pos[i];
+            
+            // Copy left block (columns < col_split)
+            std::copy(aj + ai[i] - base, aj + split, aj1 + ai1[i] - base);
+            std::copy(av + ai[i] - base, av + split, av1 + ai1[i] - base);
+            
+            // Copy right block (columns >= col_split) with adjusted column indices
+            // Subtract col_split to shift column indices, keeping the base offset
+            ROWTYPE pos2 = ai2[i] - base;
+            for (ROWTYPE j = split; j < ai[i + 1] - base; ++j) {
+                aj2[pos2] = aj[j] - col_split;
+                av2[pos2] = av[j];
+                pos2++;
+            }
+        }
+    }
+}
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void partitionCSR2x2(const typename CSRMatrixType::COLTYPE rows,
+                     const typename CSRMatrixType::COLTYPE cols,
+                     typename CSRMatrixType::ROWTYPE const* ai,
+                     typename CSRMatrixType::COLTYPE const* aj,
+                     typename CSRMatrixType::VALTYPE const* av,
+                     const typename CSRMatrixType::COLTYPE row_split,
+                     const typename CSRMatrixType::COLTYPE col_split,
+                     CSRMatrixType& A11,
+                     CSRMatrixType& A12,
+                     CSRMatrixType& A21,
+                     CSRMatrixType& A22,
+                     const int nthreads)
+{
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+    
+    const ROWTYPE base = ai[0];
+    
+    // Partition upper block [rows 0 to row_split-1] into left and right
+    partitionCSR1x2<CSRMatrixType>(row_split, cols, ai, aj, av, col_split, base, A11, A12, nthreads);
+    
+    // Partition lower block [rows row_split to rows-1] into left and right
+    partitionCSR1x2<CSRMatrixType>(rows - row_split, cols, ai + row_split, aj, av, col_split, base, A21, A22, nthreads);
+}
+
+// Macro for instantiation to reduce boilerplate
+#define INSTANTIATE_SPARSE_OPS(ROWTYPE, COLTYPE) \
+    template void AATSymbolic<ROWTYPE, COLTYPE, true>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE*); \
+    template void AATSymbolic<ROWTYPE, COLTYPE, false>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE*); \
+    template void AATNumeric<ROWTYPE, COLTYPE, true>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE const*, COLTYPE*); \
+    template void AATNumeric<ROWTYPE, COLTYPE, false>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE const*, COLTYPE*); \
+    template struct APlusATStruct<ROWTYPE, COLTYPE, true>; \
+    template struct APlusATStruct<ROWTYPE, COLTYPE, false>; \
+    template void partitionCSR1x2<CSRMatrixVec<ROWTYPE, COLTYPE, double>>( \
+        const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, double const*, const COLTYPE, const ROWTYPE, \
+        CSRMatrixVec<ROWTYPE, COLTYPE, double>&, CSRMatrixVec<ROWTYPE, COLTYPE, double>&, const int); \
+    template void partitionCSR1x2<CSRMatrixVec<ROWTYPE, COLTYPE, float>>( \
+        const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, float const*, const COLTYPE, const ROWTYPE, \
+        CSRMatrixVec<ROWTYPE, COLTYPE, float>&, CSRMatrixVec<ROWTYPE, COLTYPE, float>&, const int); \
+    template void partitionCSR2x2<CSRMatrixVec<ROWTYPE, COLTYPE, double>>( \
+        const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, double const*, const COLTYPE, const COLTYPE, \
+        CSRMatrixVec<ROWTYPE, COLTYPE, double>&, CSRMatrixVec<ROWTYPE, COLTYPE, double>&, \
+        CSRMatrixVec<ROWTYPE, COLTYPE, double>&, CSRMatrixVec<ROWTYPE, COLTYPE, double>&, const int); \
+    template void partitionCSR2x2<CSRMatrixVec<ROWTYPE, COLTYPE, float>>( \
+        const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, float const*, const COLTYPE, const COLTYPE, \
+        CSRMatrixVec<ROWTYPE, COLTYPE, float>&, CSRMatrixVec<ROWTYPE, COLTYPE, float>&, \
+        CSRMatrixVec<ROWTYPE, COLTYPE, float>&, CSRMatrixVec<ROWTYPE, COLTYPE, float>&, const int);
+
 // Explicit template instantiations
-template void AATSymbolic<int32_t, int32_t, true>( const int32_t,
-                                                   int32_t const*,
-                                                   int32_t const*,
-                                                   int32_t* );
-template void AATSymbolic<int32_t, int32_t, false>( const int32_t,
-                                                    int32_t const*,
-                                                    int32_t const*,
-                                                    int32_t* );
-template void AATSymbolic<int64_t, int64_t, true>( const int64_t,
-                                                   int64_t const*,
-                                                   int64_t const*,
-                                                   int64_t* );
-template void AATSymbolic<int64_t, int64_t, false>( const int64_t,
-                                                    int64_t const*,
-                                                    int64_t const*,
-                                                    int64_t* );
+INSTANTIATE_SPARSE_OPS(int32_t, int32_t)
+INSTANTIATE_SPARSE_OPS(int64_t, int64_t)
 
-template void AATNumeric<int32_t, int32_t, true>(
-    const int32_t, int32_t const*, int32_t const*, int32_t const*, int32_t* );
-template void AATNumeric<int32_t, int32_t, false>(
-    const int32_t, int32_t const*, int32_t const*, int32_t const*, int32_t* );
-template void AATNumeric<int64_t, int64_t, true>(
-    const int64_t, int64_t const*, int64_t const*, int64_t const*, int64_t* );
-template void AATNumeric<int64_t, int64_t, false>(
-    const int64_t, int64_t const*, int64_t const*, int64_t const*, int64_t* );
-
-// Explicit template instantiations for APlusATStruct struct
-template struct APlusATStruct<int32_t, int32_t, true>;
-template struct APlusATStruct<int32_t, int32_t, false>;
-template struct APlusATStruct<int64_t, int64_t, true>;
-template struct APlusATStruct<int64_t, int64_t, false>;
+#undef INSTANTIATE_SPARSE_OPS
 
 } // namespace matrix_utils
