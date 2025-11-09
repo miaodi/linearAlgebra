@@ -468,7 +468,6 @@ bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()( const COLTYPE size,
         visited_token++;
         _Li.clear();
 
-    int level = 0;
         int level = 0;
         while ( level <= lvl )
         {
