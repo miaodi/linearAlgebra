@@ -10,6 +10,7 @@
 #include <set>
 #include <iterator>
 #include <immintrin.h>
+#include <numeric>
 
 namespace matrix_utils
 {
@@ -327,6 +328,9 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
 }
 
 template <typename ROWTYPE, typename COLTYPE>
+
+
+template <typename ROWTYPE, typename COLTYPE>
 COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
                                          ROWTYPE const* ai,
                                          COLTYPE const* aj,
@@ -337,42 +341,42 @@ COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
     // Tarjan's algorithm for finding strongly connected components
     // Returns the number of SCCs and populates output arrays
     const int base = ai[0];
-    
+
     // Algorithm state
-    std::vector<COLTYPE> index( rows, -1 );      // Discovery index (-1 = unvisited)
-    std::vector<COLTYPE> lowlink( rows, -1 );    // Lowest reachable index
-    std::vector<char> on_stack( rows, false );   // Whether node is on stack
-    std::vector<COLTYPE> stack;                  // DFS stack
+    std::vector<COLTYPE> index( rows, -1 );   // Discovery index (-1 = unvisited)
+    std::vector<COLTYPE> lowlink( rows, -1 ); // Lowest reachable index
+    std::vector<char> on_stack( rows, false );
+    std::vector<COLTYPE> stack;
     stack.reserve( rows );
-    
+
     COLTYPE current_index = 0;
     COLTYPE scc_count = 0;
-    
+
     // Temporary storage for SCC nodes
     std::vector<std::vector<COLTYPE>> scc_nodes;
-    
+
     // Iterative DFS to avoid stack overflow on large graphs
     std::vector<COLTYPE> dfs_stack;
-    std::vector<ROWTYPE> edge_iter;  // Iterator for edges of each node on stack
+    std::vector<ROWTYPE> edge_iter; // Iterator for edges of each node on stack
     dfs_stack.reserve( rows );
     edge_iter.reserve( rows );
-    
+
     for ( COLTYPE start = 0; start < rows; ++start )
     {
         if ( index[start] != -1 )
             continue;
-        
+
         // Start DFS from unvisited node
         dfs_stack.clear();
         edge_iter.clear();
         dfs_stack.push_back( start );
         edge_iter.push_back( ai[start] - base );
-        
+
         while ( !dfs_stack.empty() )
         {
             COLTYPE u = dfs_stack.back();
             ROWTYPE& edge_pos = edge_iter.back();
-            
+
             // First visit to this node
             if ( index[u] == -1 )
             {
@@ -382,16 +386,16 @@ COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
                 stack.push_back( u );
                 on_stack[u] = true;
             }
-            
+
             // Process edges
             bool found_unvisited = false;
             const ROWTYPE edge_end = ai[u + 1] - base;
-            
+
             while ( edge_pos < edge_end )
             {
                 COLTYPE v = aj[edge_pos] - base;
                 ++edge_pos;
-                
+
                 if ( index[v] == -1 )
                 {
                     // Unvisited neighbor - recurse
@@ -406,21 +410,21 @@ COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
                     lowlink[u] = std::min( lowlink[u], index[v] );
                 }
             }
-            
+
             if ( found_unvisited )
                 continue;
-            
+
             // All edges processed - backtrack
             dfs_stack.pop_back();
             edge_iter.pop_back();
-            
+
             // Update parent's lowlink if we're not the root
             if ( !dfs_stack.empty() )
             {
                 COLTYPE parent = dfs_stack.back();
                 lowlink[parent] = std::min( lowlink[parent], lowlink[u] );
             }
-            
+
             // Check if u is a root of an SCC
             if ( lowlink[u] == index[u] )
             {
@@ -435,13 +439,13 @@ COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
                     node_to_scc[v] = scc_count + base;
                     current_scc.push_back( v );
                 } while ( v != u );
-                
+
                 scc_nodes.push_back( std::move( current_scc ) );
                 ++scc_count;
             }
         }
     }
-    
+
     // Build scc_prefix and scc_to_node arrays
     scc_prefix[0] = base;
     ROWTYPE offset = 0;
@@ -454,22 +458,100 @@ COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
         }
         scc_prefix[scc + 1] = offset + base;
     }
-    
+
     return scc_count;
 }
 
+template <typename ROWTYPE, typename COLTYPE>
+COLTYPE MISPerm( COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm )
+{
+    const ROWTYPE base = ai[0];
+    std::vector<int> visited( size, 0 ); // 0: not seen, 1: seen, 2: visited
+
+    std::vector<COLTYPE> degree( size, 0 );
+    for ( COLTYPE i = 0; i < size; ++i )
+    {
+        degree[i] = ai[i + 1] - ai[i];
+    }
+
+    // Initialize perm with identity permutation
+    std::iota( perm, perm + size, base );
+
+    // Sort nodes by degree while keeping perm and degree vectors in sync
+    std::vector<std::pair<COLTYPE, COLTYPE>> degree_perm( size );
+    for ( COLTYPE i = 0; i < size; ++i )
+    {
+        degree_perm[i] = { degree[i], perm[i] };
+    }
+
+    std::sort(
+        degree_perm.begin(), degree_perm.end(),
+        []( const auto& a, const auto& b )
+        {
+            if ( a.first != b.first )
+            {
+                return a.first > b.first; // Descending by degree
+            }
+            return a.second < b.second; // Ascending by original index for ties
+        } );
+
+    COLTYPE idx = 0;
+    // First pass: find all "not seen" nodes (state 0) and add them to perm
+    for ( COLTYPE i = 0; i < size; ++i )
+    {
+        COLTYPE node = degree_perm[i].second - base;
+        if ( visited[node] == 0 ) // Not seen
+        {
+            perm[idx++] = degree_perm[i].second;
+            visited[node] = 2; // Mark as visited
+
+            // Mark neighbors as seen (state 1) - branchless
+            for ( ROWTYPE j = ai[node] - base; j < ai[node + 1] - base; ++j )
+            {
+                COLTYPE neighbor = aj[j] - base;
+                // If visited[neighbor] == 0, set it to 1; otherwise keep current value
+                visited[neighbor] = visited[neighbor] | ( visited[neighbor] == 0 );
+            }
+        }
+    }
+
+    const COLTYPE is_size = idx;
+
+    // Second pass: fill perm with remaining "seen but not visited" nodes (state 1)
+    for ( COLTYPE i = 0; i < size; ++i )
+    {
+        COLTYPE node = degree_perm[i].second - base;
+        if ( visited[node] == 1 ) // Seen but not visited
+        {
+            perm[idx++] = degree_perm[i].second;
+        }
+    }
+
+    if ( iperm != nullptr )
+    {
+        // Compute inverse permutation
+        for ( COLTYPE i = 0; i < size; ++i )
+        {
+            iperm[perm[i] - base] = i + base;
+        }
+    }
+    return is_size;
+}
+
 // Template instantiations
-#define INSTANTIATE_GRAPH_ALGS( ROWTYPE, COLTYPE )                                   \
-    template void ElimTree<ROWTYPE, COLTYPE>(                                        \
-        const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parent ); \
-    template bool IsDAG<ROWTYPE, COLTYPE>(                                           \
-        const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj );                  \
-    template COLTYPE FindStronglyConnectedComponents<ROWTYPE, COLTYPE>(              \
-        const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,                    \
-        ROWTYPE* scc_prefix, COLTYPE* scc_to_node, COLTYPE* node_to_scc );           \
-    template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, false>;                \
-    template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, true>;                 \
-    template struct TransitiveReduction<ROWTYPE, COLTYPE>;
+#define INSTANTIATE_GRAPH_ALGS( ROWTYPE, COLTYPE )                                                        \
+    template void ElimTree<ROWTYPE, COLTYPE>( const COLTYPE rows, ROWTYPE const* ai,                      \
+                                              COLTYPE const* aj, COLTYPE* parent );                       \
+    template bool IsDAG<ROWTYPE, COLTYPE>( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj );    \
+    template COLTYPE FindStronglyConnectedComponents<ROWTYPE, COLTYPE>(                                   \
+        const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* scc_prefix,                    \
+        COLTYPE* scc_to_node, COLTYPE* node_to_scc );                                                     \
+    template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, false>;                                     \
+    template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, true>;                                      \
+    template struct TransitiveReduction<ROWTYPE, COLTYPE>;                                                \
+    template COLTYPE MISPerm<ROWTYPE, COLTYPE>( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, \
+                                                COLTYPE* perm, COLTYPE* iperm );
+
 
 // INSTANTIATE_GRAPH_ALGS(int, int)
 INSTANTIATE_GRAPH_ALGS( std::int32_t, std::int32_t )

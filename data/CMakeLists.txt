@@ -19,10 +19,6 @@ download_sparse_matrix("barrier2-2" ${CMAKE_CURRENT_BINARY_DIR})
 download_sparse_matrix("cvxbqp1" ${CMAKE_CURRENT_BINARY_DIR})
 download_sparse_matrix("c-66b" ${CMAKE_CURRENT_BINARY_DIR})
 
-
-message("CMAKE_CURRENT_BINARY_DIR: ${CMAKE_CURRENT_BINARY_DIR}")
-message("CMAKE_CURRENT_SOURCE_DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
-
 # Create symbolic links for all files in the source directory
 file(GLOB MATRIX_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*)
 foreach(MATRIX_FILE ${MATRIX_FILES})
@@ -30,7 +26,6 @@ foreach(MATRIX_FILE ${MATRIX_FILES})
       continue()
    endif()
    get_filename_component(FILENAME ${MATRIX_FILE} NAME)
-   message("FILENAME: ${FILENAME}")
    file(CREATE_LINK ${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME} ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} SYMBOLIC)
 endforeach()
 

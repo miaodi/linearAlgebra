@@ -1,12 +1,19 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 
 # Set compilers before project() to ensure proper detection
-set(CMAKE_CXX_COMPILER "g++")
-set(CMAKE_C_COMPILER "gcc")
+# Note: These can be overridden via environment variables (CC, CXX) or cmake -D flags
+if(DEFINED ENV{CC})
+  set(CMAKE_C_COMPILER $ENV{CC})
+endif()
+if(DEFINED ENV{CXX})
+  set(CMAKE_CXX_COMPILER $ENV{CXX})
+endif()
 
 project(Linear_Algebra CXX Fortran)
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -16,14 +23,13 @@ endif()
 # set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mtune=native -fno-strict-aliasing -Wno-unused-variable")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  # set(CMAKE_CXX_FLAGS "-g -O0 -Wall -Wextra -Wno-unused-variable -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -DDEBUG")
+  set(CMAKE_CXX_FLAGS "-Wno-unused-variable")
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   set(CMAKE_CXX_FLAGS "-Wno-unused-variable")
-  add_definitions(-DNDEBUG)
+  add_compile_definitions(NDEBUG)
 elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
   set(CMAKE_CXX_FLAGS "-Wno-unused-variable -O2 -g -fno-omit-frame-pointer")
 endif()
-# set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 option(USE_AMGCL_LIB "Use the amg library amgcl" OFF)
 
@@ -133,27 +139,29 @@ endif()
 
 if(USE_AMGCL_LIB)
   FetchContent_MakeAvailable(AMGCL)
-endif(USE_AMGCL_LIB)
+endif()
 
 if(USE_MUMPS_LIB)
   find_package(MUMPS REQUIRED COMPONENTS SEQ METIS OPENMP)
-endif(USE_MUMPS_LIB)
+endif()
 
 if(USE_ARPACK_LIB)
   find_package(arpackng REQUIRED)
-endif(USE_ARPACK_LIB)
+endif()
 
 if(USE_METIS_LIB)
   find_package(METIS REQUIRED)
-endif(USE_METIS_LIB)
+endif()
 
 if(USE_BOOST_LIB)
   find_package(Boost REQUIRED)
-endif(USE_BOOST_LIB)
+endif()
 
 if(USE_CUDA)
-  # Set CUDA compiler explicitly
-  set(CMAKE_CUDA_COMPILER "nvcc")
+  # Set CUDA compiler explicitly if not already set
+  if(NOT DEFINED CMAKE_CUDA_COMPILER)
+    set(CMAKE_CUDA_COMPILER "nvcc")
+  endif()
   enable_language(CUDA)
   
   # Set CUDA standard to match C++ standard
@@ -170,6 +178,7 @@ if(USE_CUDA)
   endif()
   
   # Set CUDA compiler flags for different build types
+  # Note: For multi-config generators, use CMAKE_CUDA_FLAGS_<CONFIG> instead
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G")  # Debug info for device code
   elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -178,14 +187,14 @@ if(USE_CUDA)
   
   # CUDSS support
   if(USE_CUDSS)
-    add_definitions(-DUSE_CUDSS)
+    add_compile_definitions(USE_CUDSS)
     find_package(cudss REQUIRED)
-  endif(USE_CUDSS)
+  endif()
   
   message(STATUS "CUDA enabled with architectures: ${CMAKE_CUDA_ARCHITECTURES}")
   message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER}")
   message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
-endif(USE_CUDA)
+endif()
 
 configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/config.h.in"
@@ -216,4 +225,4 @@ add_subdirectory(tests)
 
 if(BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
-endif(BUILD_BENCHMARKS)
+endif()
