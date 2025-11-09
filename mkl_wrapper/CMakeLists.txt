@@ -5,30 +5,27 @@ set(MKL_WRAPPER_SRC mkl_sparse_mat.cpp mkl_solver.cpp mkl_eigen.cpp mumps_solver
 
 set(DEPENDENCIES $<LINK_ONLY:MKL::MKL> Utils sparse_mat_op TBB::tbb OpenMP::OpenMP_CXX)
 
-# target_sources(${PROJECT_NAME} PRIVATE  ${MKL_WRAPPER_SRC} PUBLIC ${MKL_WRAPPER_INC} )
+if(USE_ARPACK_LIB)
+  set(DEPENDENCIES ${DEPENDENCIES} ARPACK::ARPACK)
+endif()
 
-if (USE_ARPACK_LIB)
- set(DEPENDENCIES ${DEPENDENCIES} ARPACK::ARPACK)
-endif(USE_ARPACK_LIB)
+if(USE_MUMPS_LIB)
+  set(DEPENDENCIES ${DEPENDENCIES} MORSE::MUMPS -lgfortran)
+endif()
 
-if (USE_MUMPS_LIB)
- set(DEPENDENCIES ${DEPENDENCIES} MORSE::MUMPS -lgfortran)
-endif(USE_MUMPS_LIB)
+if(USE_AMGCL_LIB)
+  set(DEPENDENCIES ${DEPENDENCIES} amgcl::amgcl)
+endif()
 
-if (USE_AMGCL_LIB)
- set(DEPENDENCIES ${DEPENDENCIES} amgcl::amgcl)
-endif(USE_AMGCL_LIB)
+if(USE_BOOST_LIB)
+  set(DEPENDENCIES ${DEPENDENCIES} Boost::boost)
+endif()
 
-if (USE_BOOST_LIB)
- set(DEPENDENCIES ${DEPENDENCIES} Boost::boost)
-endif(USE_BOOST_LIB)
-
-if (USE_CUDA AND USE_CUDSS)
- set(MKL_WRAPPER_SRC ${MKL_WRAPPER_SRC} cudss_wrapper.cpp)
- set_source_files_properties(cudss_wrapper.cpp PROPERTIES LANGUAGE CUDA)
- set(DEPENDENCIES ${DEPENDENCIES} cudss)
-endif(USE_CUDA AND USE_CUDSS)
-
+if(USE_CUDA AND USE_CUDSS)
+  set(MKL_WRAPPER_SRC ${MKL_WRAPPER_SRC} cudss_wrapper.cpp)
+  set_source_files_properties(cudss_wrapper.cpp PROPERTIES LANGUAGE CUDA)
+  set(DEPENDENCIES ${DEPENDENCIES} cudss)
+endif()
 
 add_library(${PROJECT_NAME} STATIC ${MKL_WRAPPER_SRC})
 

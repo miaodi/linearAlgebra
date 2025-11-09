@@ -5,6 +5,8 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include "graph_algs.hpp"
+#include "permutation.hpp"
 
 using namespace matrix_utils;
 
@@ -117,11 +119,53 @@ int main(int argc, char** argv) {
         }
         std::cout << "  Written to: " << aplusat_svg << std::endl;
     }
+    
+    // Compute MIS permutation
+    std::cout << "\nComputing MIS permutation..." << std::endl;
+    std::vector<int> perm(size);
+    std::vector<int> iperm(size);
+    matrix_utils::MISPerm(size, ai.data(), aj.data(), perm.data(), iperm.data());
+    std::cout << "  MIS permutation computed" << std::endl;
+    
+    // Verify permutation
+    if (!matrix_utils::isPermutation(size, base, perm.data())) {
+        std::cerr << "Error: Invalid permutation generated!" << std::endl;
+        return 1;
+    }
+    std::cout << "  Permutation verified: valid" << std::endl;
+    
+    // Permute the matrix: perm_A = P * A * P^T
+    std::cout << "\nPermuting matrix..." << std::endl;
+    std::vector<int> perm_ai(size + 1);
+    std::vector<int> perm_aj(nnz);
+    std::vector<double> perm_av(nnz);
+    
+    matrix_utils::permuteMat(size, size, perm.data(), iperm.data(),
+                            ai.data(), aj.data(), av.data(),
+                            perm_ai.data(), perm_aj.data(), perm_av.data());
+    
+    std::cout << "  Matrix permuted" << std::endl;
+    std::cout << "  Permuted matrix NNZ: " << (perm_ai[size] - perm_ai[0]) << std::endl;
+    
+    // Generate SVG for permuted matrix
+    std::string permuted_svg = output_prefix + "_mis_permuted.svg";
+    std::cout << "\nGenerating MIS permuted sparsity pattern: " << permuted_svg << std::endl;
+    {
+        std::ofstream svg_out(permuted_svg);
+        if (!svg_out.good()) {
+            std::cerr << "Error: Cannot create file " << permuted_svg << std::endl;
+            return 1;
+        }
+        writeSVG(size, size, perm_ai.data(), perm_aj.data(), svg_out, max_display_size);
+        svg_out.close();
+    }
+    std::cout << "  Written to: " << permuted_svg << std::endl;
 
     std::cout << "\n=== Summary ===" << std::endl;
     std::cout << "Generated SVG files:" << std::endl;
     std::cout << "  1. " << output_prefix << "_original.svg (original matrix)" << std::endl;
     std::cout << "  2. " << output_prefix << "_aplusat_keepdiag.svg (A+A^T with diagonal)" << std::endl;
+    std::cout << "  3. " << output_prefix << "_mis_permuted.svg (MIS permuted matrix)" << std::endl;
     std::cout << "\nDisplay resolution: " << max_display_size << "x" << max_display_size << std::endl;
     std::cout << "Open the SVG files in a web browser to view the sparsity patterns." << std::endl;
 

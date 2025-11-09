@@ -16,3 +16,4 @@ download_sparse_matrix("rotor2" ${CMAKE_CURRENT_BINARY_DIR})
 
 # note: GD97_b is not structurally rank full
 download_sparse_matrix("GD97_b" ${CMAKE_CURRENT_BINARY_DIR})
+download_sparse_matrix("jpwh_991" ${CMAKE_CURRENT_BINARY_DIR})
