@@ -606,6 +606,368 @@ TEST_F( SymmetricOpsTest, AllCMakeMatrices )
     }
 }
 
+// Partition tests
+class PartitionTest : public testing::Test
+{
+protected:
+    const double _tol = 1e-10;
+};
+
+TEST_F( PartitionTest, PartitionCSR2x2_Basic )
+{
+    // 4x4 matrix, base 0, CSR format
+    // [ 1 2 0 0 ]
+    // [ 3 4 5 0 ]
+    // [ 0 6 7 8 ]
+    // [ 0 0 9 10]
+    std::vector<int> ai = {0, 2, 5, 8, 10};
+    std::vector<int> aj = {0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
+    std::vector<double> av = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    int rows = 4, cols = 4;
+    int row_split = 2, col_split = 2;
+    int nthreads = 2;
+
+    CSRMatrixVec<int, int, double> A11, A12, A21, A22;
+    partitionCSR2x2<CSRMatrixVec<int, int, double>>(
+        rows, cols, ai.data(), aj.data(), av.data(),
+        row_split, col_split,
+        A11, A12, A21, A22, nthreads );
+
+    // Check dimensions
+    EXPECT_EQ( A11.rows, 2 );
+    EXPECT_EQ( A11.cols, 2 );
+    EXPECT_EQ( A12.rows, 2 );
+    EXPECT_EQ( A12.cols, 2 );
+    EXPECT_EQ( A21.rows, 2 );
+    EXPECT_EQ( A21.cols, 2 );
+    EXPECT_EQ( A22.rows, 2 );
+    EXPECT_EQ( A22.cols, 2 );
+
+    // Check NNZ counts
+    EXPECT_EQ( A11.NNZ() + A12.NNZ() + A21.NNZ() + A22.NNZ(), 10 );
+
+    // Verify A11: top-left 2x2 block
+    // [ 1 2 ]
+    // [ 3 4 ]
+    EXPECT_EQ( A11.NNZ(), 4 );
+    const int* a11_ai = A11.AI();
+    const int* a11_aj = A11.AJ();
+    EXPECT_EQ( a11_ai[0], 0 );
+    EXPECT_EQ( a11_ai[1], 2 );
+    EXPECT_EQ( a11_ai[2], 4 );
+    EXPECT_EQ( a11_aj[0], 0 );
+    EXPECT_EQ( a11_aj[1], 1 );
+    EXPECT_EQ( a11_aj[2], 0 );
+    EXPECT_EQ( a11_aj[3], 1 );
+
+    // Verify A12: top-right 2x2 block
+    // [ 0 0 ]
+    // [ 5 0 ]
+    EXPECT_EQ( A12.NNZ(), 1 );
+    const int* a12_ai = A12.AI();
+    const int* a12_aj = A12.AJ();
+    EXPECT_EQ( a12_ai[0], 0 );
+    EXPECT_EQ( a12_ai[1], 0 );
+    EXPECT_EQ( a12_ai[2], 1 );
+    EXPECT_EQ( a12_aj[0], 0 ); // column 2 becomes column 0 in A12
+
+    // Verify A21: bottom-left 2x2 block
+    // [ 0 6 ]
+    // [ 0 0 ]
+    EXPECT_EQ( A21.NNZ(), 1 );
+    const int* a21_ai = A21.AI();
+    const int* a21_aj = A21.AJ();
+    EXPECT_EQ( a21_ai[0], 0 );
+    EXPECT_EQ( a21_ai[1], 1 );
+    EXPECT_EQ( a21_ai[2], 1 );
+    EXPECT_EQ( a21_aj[0], 1 );
+
+    // Verify A22: bottom-right 2x2 block
+    // [ 7 8 ]
+    // [ 9 10]
+    EXPECT_EQ( A22.NNZ(), 4 );
+    const int* a22_ai = A22.AI();
+    const int* a22_aj = A22.AJ();
+    EXPECT_EQ( a22_ai[0], 0 );
+    EXPECT_EQ( a22_ai[1], 2 );
+    EXPECT_EQ( a22_ai[2], 4 );
+    EXPECT_EQ( a22_aj[0], 0 ); // column 2 becomes column 0 in A22
+    EXPECT_EQ( a22_aj[1], 1 ); // column 3 becomes column 1 in A22
+    EXPECT_EQ( a22_aj[2], 0 );
+    EXPECT_EQ( a22_aj[3], 1 );
+}
+
+TEST_F( PartitionTest, PartitionCSR2x2_DifferentSplits )
+{
+    // 5x5 matrix with non-uniform split
+    std::vector<int> ai = {0, 3, 5, 8, 10, 12};
+    std::vector<int> aj = {0, 1, 2, 1, 3, 0, 2, 4, 1, 3, 2, 4};
+    std::vector<double> av(12, 1.0);
+    int rows = 5, cols = 5;
+    int row_split = 3, col_split = 2;
+    int nthreads = 2;
+
+    CSRMatrixVec<int, int, double> A11, A12, A21, A22;
+    partitionCSR2x2<CSRMatrixVec<int, int, double>>(
+        rows, cols, ai.data(), aj.data(), av.data(),
+        row_split, col_split,
+        A11, A12, A21, A22, nthreads );
+
+    // Check dimensions
+    EXPECT_EQ( A11.rows, 3 );
+    EXPECT_EQ( A11.cols, 2 );
+    EXPECT_EQ( A12.rows, 3 );
+    EXPECT_EQ( A12.cols, 3 );
+    EXPECT_EQ( A21.rows, 2 );
+    EXPECT_EQ( A21.cols, 2 );
+    EXPECT_EQ( A22.rows, 2 );
+    EXPECT_EQ( A22.cols, 3 );
+
+    // Total NNZ should be preserved
+    EXPECT_EQ( A11.NNZ() + A12.NNZ() + A21.NNZ() + A22.NNZ(), 12 );
+}
+
+TEST_F( PartitionTest, PartitionCSR2x2_EmptyBlocks )
+{
+    // 4x4 matrix with some empty blocks
+    // [ 1 2 0 0 ]
+    // [ 3 4 0 0 ]
+    // [ 0 0 0 0 ]
+    // [ 0 0 0 0 ]
+    std::vector<int> ai = {0, 2, 4, 4, 4};
+    std::vector<int> aj = {0, 1, 0, 1};
+    std::vector<double> av = {1, 2, 3, 4};
+    int rows = 4, cols = 4;
+    int row_split = 2, col_split = 2;
+    int nthreads = 1;
+
+    CSRMatrixVec<int, int, double> A11, A12, A21, A22;
+    partitionCSR2x2<CSRMatrixVec<int, int, double>>(
+        rows, cols, ai.data(), aj.data(), av.data(),
+        row_split, col_split,
+        A11, A12, A21, A22, nthreads );
+
+    // Check dimensions
+    EXPECT_EQ( A11.rows, 2 );
+    EXPECT_EQ( A11.cols, 2 );
+    EXPECT_EQ( A12.rows, 2 );
+    EXPECT_EQ( A12.cols, 2 );
+    EXPECT_EQ( A21.rows, 2 );
+    EXPECT_EQ( A21.cols, 2 );
+    EXPECT_EQ( A22.rows, 2 );
+    EXPECT_EQ( A22.cols, 2 );
+
+    // A11 should have all entries
+    EXPECT_EQ( A11.NNZ(), 4 );
+    // A12, A21, A22 should be empty
+    EXPECT_EQ( A12.NNZ(), 0 );
+    EXPECT_EQ( A21.NNZ(), 0 );
+    EXPECT_EQ( A22.NNZ(), 0 );
+}
+
+TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
+{
+    // Test with real matrices from tests/data
+    std::vector<std::string> test_matrices = {
+        "data/ex5.mtx",
+        "data/bcsstk17.mtx",
+        "data/s3rmt3m3.mtx"
+    };
+
+    for ( const auto& matrix_file : test_matrices )
+    {
+        std::cout << "Testing partition with matrix: " << matrix_file << std::endl;
+
+        std::ifstream f( matrix_file );
+        if ( !f.good() )
+        {
+            std::cout << "  Skipping (file not found): " << matrix_file << std::endl;
+            continue;
+        }
+
+        std::vector<int> ai, aj;
+        std::vector<double> av;
+        utils::read_matrix_market_csr( f, ai, aj, av );
+        f.close();
+
+        if ( ai.empty() || ai.size() == 1 )
+        {
+            std::cout << "  Skipping (empty matrix): " << matrix_file << std::endl;
+            continue;
+        }
+
+        const int size = ai.size() - 1;
+        const int base = ai[0];
+        const int nnz = ai[size] - base;
+
+        // Test different split positions and thread counts
+        std::vector<std::pair<int, int>> splits = {
+            { size / 2, size / 2 },     // Mid-mid
+            { size / 3, size / 3 },     // One-third
+            { 2 * size / 3, 2 * size / 3 }, // Two-thirds
+            { size / 4, 3 * size / 4 }  // Asymmetric
+        };
+        std::vector<int> thread_counts = { 1, 2, 4, 8 };
+
+        for ( const auto& [row_split, col_split] : splits )
+        {
+            if ( row_split <= 0 || row_split >= size || col_split <= 0 || col_split >= size )
+                continue;
+
+            for ( int nthreads : thread_counts )
+            {
+                std::cout << "  Matrix size: " << size << "x" << size
+                          << ", NNZ: " << nnz
+                          << ", split: (" << row_split << ", " << col_split << ")"
+                          << ", threads: " << nthreads << std::endl;
+
+                CSRMatrixVec<int, int, double> A11, A12, A21, A22;
+                
+                // Partition the matrix
+                partitionCSR2x2<CSRMatrixVec<int, int, double>>(
+                    size, size, ai.data(), aj.data(), av.data(),
+                    row_split, col_split,
+                    A11, A12, A21, A22, nthreads );
+
+                // Verify dimensions
+                EXPECT_EQ( A11.rows, row_split );
+                EXPECT_EQ( A11.cols, col_split );
+                EXPECT_EQ( A12.rows, row_split );
+                EXPECT_EQ( A12.cols, size - col_split );
+                EXPECT_EQ( A21.rows, size - row_split );
+                EXPECT_EQ( A21.cols, col_split );
+                EXPECT_EQ( A22.rows, size - row_split );
+                EXPECT_EQ( A22.cols, size - col_split );
+
+                // Verify NNZ preservation
+                const int total_nnz = A11.NNZ() + A12.NNZ() + A21.NNZ() + A22.NNZ();
+                EXPECT_EQ( total_nnz, nnz ) << "Total NNZ should be preserved";
+
+                std::cout << "    A11: " << A11.rows << "x" << A11.cols << ", NNZ=" << A11.NNZ() << std::endl;
+                std::cout << "    A12: " << A12.rows << "x" << A12.cols << ", NNZ=" << A12.NNZ() << std::endl;
+                std::cout << "    A21: " << A21.rows << "x" << A21.cols << ", NNZ=" << A21.NNZ() << std::endl;
+                std::cout << "    A22: " << A22.rows << "x" << A22.cols << ", NNZ=" << A22.NNZ() << std::endl;
+
+                // Get pointers to all blocks
+                const int* a11_ai = A11.AI();
+                const int* a11_aj = A11.AJ();
+                const double* a11_av = A11.AV();
+                
+                const int* a12_ai = A12.AI();
+                const int* a12_aj = A12.AJ();
+                const double* a12_av = A12.AV();
+                
+                const int* a21_ai = A21.AI();
+                const int* a21_aj = A21.AJ();
+                const double* a21_av = A21.AV();
+                
+                const int* a22_ai = A22.AI();
+                const int* a22_aj = A22.AJ();
+                const double* a22_av = A22.AV();
+
+                // Traverse every element in the original matrix and verify it appears in the correct sub-matrix
+                for ( int i = 0; i < size; i++ )
+                {
+                    for ( int j_idx = ai[i] - base; j_idx < ai[i + 1] - base; j_idx++ )
+                    {
+                        const int col = aj[j_idx];
+                        const double val = av[j_idx];
+                        
+                        // Determine which block this element belongs to
+                        const bool in_top_rows = ( i < row_split );
+                        const bool in_left_cols = ( col < col_split + base );
+                        
+                        if ( in_top_rows && in_left_cols )
+                        {
+                            // Should be in A11
+                            const int local_row = i;
+                            const int expected_col = col;
+                            
+                            // Find this entry in A11
+                            bool found = false;
+                            for ( int k = a11_ai[local_row] - base; k < a11_ai[local_row + 1] - base; k++ )
+                            {
+                                if ( a11_aj[k] == expected_col )
+                                {
+                                    EXPECT_DOUBLE_EQ( a11_av[k], val ) 
+                                        << "Value mismatch in A11 at row " << i << ", col " << col;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            EXPECT_TRUE( found ) << "Element (" << i << ", " << col << ") not found in A11";
+                        }
+                        else if ( in_top_rows && !in_left_cols )
+                        {
+                            // Should be in A12
+                            const int local_row = i;
+                            const int expected_col = col - col_split; // Column index is shifted
+                            
+                            // Find this entry in A12
+                            bool found = false;
+                            for ( int k = a12_ai[local_row] - base; k < a12_ai[local_row + 1] - base; k++ )
+                            {
+                                if ( a12_aj[k] == expected_col )
+                                {
+                                    EXPECT_DOUBLE_EQ( a12_av[k], val ) 
+                                        << "Value mismatch in A12 at row " << i << ", col " << col;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            EXPECT_TRUE( found ) << "Element (" << i << ", " << col << ") not found in A12";
+                        }
+                        else if ( !in_top_rows && in_left_cols )
+                        {
+                            // Should be in A21
+                            const int local_row = i - row_split; // Row index is shifted
+                            const int expected_col = col;
+                            
+                            // Find this entry in A21
+                            bool found = false;
+                            for ( int k = a21_ai[local_row] - base; k < a21_ai[local_row + 1] - base; k++ )
+                            {
+                                if ( a21_aj[k] == expected_col )
+                                {
+                                    EXPECT_DOUBLE_EQ( a21_av[k], val ) 
+                                        << "Value mismatch in A21 at row " << i << ", col " << col;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            EXPECT_TRUE( found ) << "Element (" << i << ", " << col << ") not found in A21";
+                        }
+                        else
+                        {
+                            // Should be in A22
+                            const int local_row = i - row_split; // Row index is shifted
+                            const int expected_col = col - col_split; // Column index is shifted
+                            
+                            // Find this entry in A22
+                            bool found = false;
+                            for ( int k = a22_ai[local_row] - base; k < a22_ai[local_row + 1] - base; k++ )
+                            {
+                                if ( a22_aj[k] == expected_col )
+                                {
+                                    EXPECT_DOUBLE_EQ( a22_av[k], val ) 
+                                        << "Value mismatch in A22 at row " << i << ", col " << col;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            EXPECT_TRUE( found ) << "Element (" << i << ", " << col << ") not found in A22";
+                        }
+                    }
+                }
+
+                std::cout << "    ✓ All elements verified in correct sub-matrices with correct values" << std::endl;
+            }
+        }
+
+        std::cout << "  ✓ All checks passed for " << matrix_file << std::endl;
+    }
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

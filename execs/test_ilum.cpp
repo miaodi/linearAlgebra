@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
     std::cout << "\nComputing MIS permutation..." << std::endl;
     std::vector<int> perm(size);
     std::vector<int> iperm(size);
-    matrix_utils::MISPerm(size, ai.data(), aj.data(), perm.data(), iperm.data());
+    auto split_pos = matrix_utils::MISPerm(size, ai.data(), aj.data(), perm.data(), iperm.data());
     std::cout << "  MIS permutation computed" << std::endl;
     
     // Verify permutation
@@ -161,11 +161,83 @@ int main(int argc, char** argv) {
     }
     std::cout << "  Written to: " << permuted_svg << std::endl;
 
+    // Partition the permuted matrix at split_pos
+    std::cout << "\nPartitioning matrix at split position: " << split_pos << std::endl;
+    CSRMatrixVec<int, int, double> A11, A12, A21, A22;
+
+    partitionCSR2x2(size, size, perm_ai.data(), perm_aj.data(), perm_av.data(), split_pos,
+                    split_pos, A11, A12, A21, A22);
+
+    std::cout << "  A11 (" << A11.rows << "x" << A11.cols << "): " << A11.NNZ() << " NNZ" << std::endl;
+    std::cout << "  A12 (" << A12.rows << "x" << A12.cols << "): " << A12.NNZ() << " NNZ" << std::endl;
+    std::cout << "  A21 (" << A21.rows << "x" << A21.cols << "): " << A21.NNZ() << " NNZ" << std::endl;
+    std::cout << "  A22 (" << A22.rows << "x" << A22.cols << "): " << A22.NNZ() << " NNZ" << std::endl;
+    
+    // Generate SVG for A11
+    std::string a11_svg = output_prefix + "_A11.svg";
+    std::cout << "\nGenerating A11 sparsity pattern: " << a11_svg << std::endl;
+    {
+        std::ofstream svg_out(a11_svg);
+        if (!svg_out.good()) {
+            std::cerr << "Error: Cannot create file " << a11_svg << std::endl;
+            return 1;
+        }
+        writeSVG(A11.rows, A11.cols, A11.AI(), A11.AJ(), svg_out, max_display_size);
+        svg_out.close();
+    }
+    std::cout << "  Written to: " << a11_svg << std::endl;
+    
+    // Generate SVG for A12
+    std::string a12_svg = output_prefix + "_A12.svg";
+    std::cout << "\nGenerating A12 sparsity pattern: " << a12_svg << std::endl;
+    {
+        std::ofstream svg_out(a12_svg);
+        if (!svg_out.good()) {
+            std::cerr << "Error: Cannot create file " << a12_svg << std::endl;
+            return 1;
+        }
+        writeSVG(A12.rows, A12.cols, A12.AI(), A12.AJ(), svg_out, max_display_size);
+        svg_out.close();
+    }
+    std::cout << "  Written to: " << a12_svg << std::endl;
+    
+    // Generate SVG for A21
+    std::string a21_svg = output_prefix + "_A21.svg";
+    std::cout << "\nGenerating A21 sparsity pattern: " << a21_svg << std::endl;
+    {
+        std::ofstream svg_out(a21_svg);
+        if (!svg_out.good()) {
+            std::cerr << "Error: Cannot create file " << a21_svg << std::endl;
+            return 1;
+        }
+        writeSVG(A21.rows, A21.cols, A21.AI(), A21.AJ(), svg_out, max_display_size);
+        svg_out.close();
+    }
+    std::cout << "  Written to: " << a21_svg << std::endl;
+    
+    // Generate SVG for A22
+    std::string a22_svg = output_prefix + "_A22.svg";
+    std::cout << "\nGenerating A22 sparsity pattern: " << a22_svg << std::endl;
+    {
+        std::ofstream svg_out(a22_svg);
+        if (!svg_out.good()) {
+            std::cerr << "Error: Cannot create file " << a22_svg << std::endl;
+            return 1;
+        }
+        writeSVG(A22.rows, A22.cols, A22.AI(), A22.AJ(), svg_out, max_display_size);
+        svg_out.close();
+    }
+    std::cout << "  Written to: " << a22_svg << std::endl;
+
     std::cout << "\n=== Summary ===" << std::endl;
     std::cout << "Generated SVG files:" << std::endl;
     std::cout << "  1. " << output_prefix << "_original.svg (original matrix)" << std::endl;
     std::cout << "  2. " << output_prefix << "_aplusat_keepdiag.svg (A+A^T with diagonal)" << std::endl;
     std::cout << "  3. " << output_prefix << "_mis_permuted.svg (MIS permuted matrix)" << std::endl;
+    std::cout << "  4. " << output_prefix << "_A11.svg (top-left block)" << std::endl;
+    std::cout << "  5. " << output_prefix << "_A12.svg (top-right block)" << std::endl;
+    std::cout << "  6. " << output_prefix << "_A21.svg (bottom-left block)" << std::endl;
+    std::cout << "  7. " << output_prefix << "_A22.svg (bottom-right block)" << std::endl;
     std::cout << "\nDisplay resolution: " << max_display_size << "x" << max_display_size << std::endl;
     std::cout << "Open the SVG files in a web browser to view the sparsity patterns." << std::endl;
 
