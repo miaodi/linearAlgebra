@@ -729,24 +729,23 @@ template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
 void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
               COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &L,
               std::vector<VALTYPE> &D, CSRMatrixType &U) {
-  static_assert(
-      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
+    static_assert(CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value);
 
-  ROWTYPE nnz = ai[rows] - base;
-  L.rows = rows;
-  L.cols = rows;
-  L.ResizeAI(rows + 1);
+    ROWTYPE nnz = ai[rows] - base;
+    L.rows = rows;
+    L.cols = rows;
+    L.ResizeAI(rows + 1);
 
-  U.rows = rows;
-  U.cols = rows;
-  U.ResizeAI(rows + 1);
+    U.rows = rows;
+    U.cols = rows;
+    U.ResizeAI(rows + 1);
 
-  L.ai[0] = base;
-  U.ai[0] = base;
-  D.resize(rows);
-  std::vector<ROWTYPE> diag(rows);
-  std::vector<std::pair<ROWTYPE, ROWTYPE>> LU_prefix(omp_get_max_threads() + 1);
-  LU_prefix[0] = {base, base};
+    L.ai[0] = base;
+    U.ai[0] = base;
+    D.resize(rows);
+    std::vector<ROWTYPE> diag(rows);
+    std::vector<std::pair<ROWTYPE, ROWTYPE>> LU_prefix(omp_get_max_threads() + 1);
+    LU_prefix[0] = {base, base};
 
 #pragma omp parallel
   {
@@ -843,7 +842,7 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
                    COLTYPE const *aj, VALTYPE const *av,
                    CSRMatrixType &tri_mat) {
   static_assert(
-      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
+      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value);
 
   tri_mat.rows = rows;
   tri_mat.cols = rows;
@@ -917,7 +916,7 @@ void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
                       COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &F) {
   static_assert(TS == TriangularMatrix::U);
   static_assert(
-      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
+      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value);
 
   F.rows = rows;
   F.cols = rows;
@@ -1096,7 +1095,7 @@ void Block(const COLTYPE rows, const int base, ROWTYPE const *ai,
            const COLTYPE j, const COLTYPE p, const COLTYPE q,
            CSRMatrixType &subMat) {
   static_assert(
-      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value == true);
+      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value);
 
   if (i + p > rows) {
     std::cerr << "Block size exceeds matrix size" << std::endl;
