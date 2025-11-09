@@ -9,6 +9,7 @@
 #include <vector>
 #include <iterator>
 #include <immintrin.h>
+#include <numeric>
 
 namespace matrix_utils
 {
@@ -324,14 +325,90 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
               << " ms, reduction: " << reduction_ms << " ms" << std::endl;
 }
 
+template <typename ROWTYPE, typename COLTYPE>
+COLTYPE MISPerm(COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm)
+{
+    const ROWTYPE base = ai[0];
+    std::vector<int> visited(size, 0); // 0: not seen, 1: seen, 2: visited
+
+    std::vector<COLTYPE> degree(size, 0);
+    for (COLTYPE i = 0; i < size; ++i)
+    {
+        degree[i] = ai[i + 1] - ai[i];
+    }
+
+    // Initialize perm with identity permutation
+    std::iota(perm, perm + size, base);
+
+    // Sort nodes by degree while keeping perm and degree vectors in sync
+    std::vector<std::pair<COLTYPE, COLTYPE>> degree_perm(size);
+    for (COLTYPE i = 0; i < size; ++i)
+    {
+        degree_perm[i] = {degree[i], perm[i]};
+    }
+
+    std::sort(degree_perm.begin(), degree_perm.end(),
+              [](const auto& a, const auto& b)
+              {
+                  if (a.first != b.first)
+                  {
+                      return a.first > b.first; // Descending by degree
+                  }
+                  return a.second < b.second; // Ascending by original index for ties
+              });
+
+    COLTYPE idx = 0;
+    // First pass: find all "not seen" nodes (state 0) and add them to perm
+    for (COLTYPE i = 0; i < size; ++i)
+    {
+        COLTYPE node = degree_perm[i].second - base;
+        if (visited[node] == 0) // Not seen
+        {
+            perm[idx++] = degree_perm[i].second;
+            visited[node] = 2; // Mark as visited
+
+            // Mark neighbors as seen (state 1) - branchless
+            for (ROWTYPE j = ai[node] - base; j < ai[node + 1] - base; ++j)
+            {
+                COLTYPE neighbor = aj[j] - base;
+                // If visited[neighbor] == 0, set it to 1; otherwise keep current value
+                visited[neighbor] = visited[neighbor] | (visited[neighbor] == 0);
+            }
+        }
+    }
+
+    COLTYPE is_size = idx;
+
+    // Second pass: fill perm with remaining "seen but not visited" nodes (state 1)
+    for (COLTYPE i = 0; i < size; ++i)
+    {
+        COLTYPE node = degree_perm[i].second - base;
+        if (visited[node] == 1) // Seen but not visited
+        {
+            perm[idx++] = degree_perm[i].second;
+        }
+    }
+
+    if (iperm != nullptr)
+    {
+        // Compute inverse permutation
+        for (COLTYPE i = 0; i < size; ++i)
+        {
+            iperm[perm[i] - base] = i + base;
+        }
+    }
+    return is_size;
+}
+
 // Template instantiations
-#define INSTANTIATE_GRAPH_ALGS( ROWTYPE, COLTYPE )                                   \
-    template void ElimTree<ROWTYPE, COLTYPE>(                                        \
-        const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parent ); \
-    template bool IsDAG<ROWTYPE, COLTYPE>(                                           \
-        const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj );                  \
-    template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>;                       \
-    template struct TransitiveReduction<ROWTYPE, COLTYPE>;
+#define INSTANTIATE_GRAPH_ALGS(ROWTYPE, COLTYPE)                                                     \
+    template void ElimTree<ROWTYPE, COLTYPE>(const COLTYPE rows, ROWTYPE const* ai,                  \
+                                             COLTYPE const* aj, COLTYPE* parent);                    \
+    template bool IsDAG<ROWTYPE, COLTYPE>(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj); \
+    template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>;                                       \
+    template struct TransitiveReduction<ROWTYPE, COLTYPE>;                                           \
+    template COLTYPE MISPerm<ROWTYPE, COLTYPE>(const COLTYPE size, ROWTYPE const* ai,                   \
+                                            COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm);
 
 // INSTANTIATE_GRAPH_ALGS(int, int)
 INSTANTIATE_GRAPH_ALGS( std::int32_t, std::int32_t )

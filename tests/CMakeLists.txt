@@ -18,10 +18,9 @@ foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
    set(TARGET_NAME TEST_${ONE_TEST_EXEC})
 
    add_executable(${TARGET_NAME} ${ONE_TEST_CPP})
-   set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_TEST_EXEC}) 
-   # target_compile_features(${TARGET_NAME} PUBLIC cxx_std_20)
+   set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_TEST_EXEC})
    target_link_libraries(${TARGET_NAME} PRIVATE GTest::gtest_main GTest::gmock_main mkl_wrapper Utils reordering OpenMP::OpenMP_CXX ${LAPACK_LIBRARIES})
-   
+
    # Use add_test instead of gtest_discover_tests for better compatibility
    add_test(NAME ${ONE_TEST_EXEC} COMMAND ${TARGET_NAME})
 endforeach()

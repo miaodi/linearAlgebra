@@ -457,7 +457,7 @@ template <typename ROWTYPE, typename COLTYPE>
 void permutedAI(const COLTYPE rows, const int base, ROWTYPE const *ai,
                 COLTYPE const *iperm, ROWTYPE *permed_ai) {
   if (iperm == nullptr) {
-    std::copy(std::execution::par, ai, ai + rows + 1, permed_ai);
+    std::copy(std::execution::seq, ai, ai + rows + 1, permed_ai);
   }
 
   std::vector<ROWTYPE> localNNZ(omp_get_max_threads() + 1, 0);
