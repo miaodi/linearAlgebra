@@ -37,6 +37,8 @@ void printProgress(double percentage) {
   int rpad = PBWIDTH - lpad;
   printf("\r%3d%% [%.*s%*s]", val, lpad, PBSTR, rpad, "");
   fflush(stdout);
+  if (val == 100)
+    printf("\n");
 }
 
 void ReadFromBinaryVec(const std::string &filename, std::vector<double> &vec) {

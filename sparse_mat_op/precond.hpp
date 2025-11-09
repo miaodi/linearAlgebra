@@ -743,11 +743,55 @@ public:
                   const int lvl, CSRMatrixType &L);
 
 private:
-  std::vector<COLTYPE> _Li_path_max;// 
+  std::vector<COLTYPE> _Li_path_max; // maintain the minimum of the path max
+                                     // that reaches node i
   std::vector<COLTYPE> _visited;
   std::vector<COLTYPE> _Li;
   std::unordered_map<COLTYPE, COLTYPE> _Q;
   std::unordered_map<COLTYPE, COLTYPE> _Q_next;
+};
+
+template <ResizableDiagonalType CSRMatrixType> class ICCLevelSymbolicParallel {
+public:
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+
+  ICCLevelSymbolicParallel(const int num_threads)
+      : _num_threads(num_threads), _Li_path_max(num_threads),
+        _visited(num_threads), _Li(num_threads), _Q(num_threads),
+        _Q_next(num_threads) {}
+
+  bool operator()(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                  const int lvl, CSRMatrixType &L);
+
+private:
+  int _num_threads;
+  std::vector<std::vector<COLTYPE>> _Li_path_max; //
+  std::vector<std::vector<COLTYPE>> _visited;
+  std::vector<std::vector<COLTYPE>> _Li;
+  std::vector<std::unordered_map<COLTYPE, COLTYPE>> _Q;
+  std::vector<std::unordered_map<COLTYPE, COLTYPE>> _Q_next;
+};
+
+template <ResizableDiagonalType CSRMatrixType> class ICCLevelNumericFixedPoint {
+public:
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+  using VALTYPE = typename CSRMatrixType::VALTYPE;
+
+  ICCLevelNumericFixedPoint(const int num_threads)
+      : _num_threads(num_threads) {}
+
+  bool operator()(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                  VALTYPE const *av, CSRMatrixType &L);
+
+private:
+  int _num_threads;         // number of threads to use in parallel region
+  int _sweeps{100};      // number of sweeps to perform
+  std::vector<VALTYPE> _av; // av in L's sparsity pattern
+  std::vector<COLTYPE> _ai; // ai in COO format for L's sparsity pattern
+  std::vector<VALTYPE> _L_av_init; // initial guess for L's av
+  std::vector<VALTYPE> _L_av_next; // next iteration's L's av after a sweep
 };
 
 template <ResizableDiagonalType CSRMatrixType>
