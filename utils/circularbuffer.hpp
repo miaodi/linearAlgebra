@@ -72,6 +72,11 @@ public:
    */
   bool push(const T &value);
 
+  /**
+   * @brief Adds an element to the end of buffer.
+   * buffer will be resized automatically if necessary.
+   */
+  void autoResizePush(const T &value);
 
   void nonOverwritePush(const T &value);
 
@@ -89,7 +94,7 @@ public:
    * @warning Calling this operation on an empty buffer has an unpredictable
    behaviour.
    */
-  const T& pop();
+  const T &pop();
 
   /**
    * @brief Returns the element at the beginning of the buffer.
@@ -186,7 +191,7 @@ public:
   //  */
   // template <typename R>
   // void copyToArray( R* dest, R ( &convertFn )( const T& ) ) const;
-  
+
   bool resizePreserve(const size_t size);
 
   bool resize(const size_t size);
