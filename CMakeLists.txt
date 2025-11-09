@@ -12,8 +12,11 @@ endif()
 project(Linear_Algebra CXX Fortran)
 
 set(CMAKE_CXX_STANDARD 20)
+<<<<<<< HEAD
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+=======
+>>>>>>> 3b67f13... Add .clangd configuration, update .gitignore, and modify CMakeLists.txt for improved build settings
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE)
