@@ -1,5 +1,5 @@
 #include "io.hpp"
-#include "symmetric_ops.hpp"
+#include "sp_ops.hpp"
 #include "utils.h"
 #include <cxxopts.hpp>
 #include <fstream>

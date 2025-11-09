@@ -29,7 +29,7 @@ struct SerialSPMV {
 };
 
 struct ParallelSPMV {
-  ParallelSPMV() {}
+  ParallelSPMV() = default;
 
   template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
   void operator()(const COLTYPE size, const int base, ROWTYPE const *ai,

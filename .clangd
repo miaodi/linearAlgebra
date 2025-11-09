@@ -11,7 +11,7 @@ Diagnostics:
   UnusedIncludes: Strict # Warn about unused includes
   ClangTidy:
     Add: [performance*, modernize*, readability*]
-    Remove: [modernize-use-trailing-return-type, readability-identifier-length]
+    Remove: [modernize-use-trailing-return-type, readability-identifier-length, readability-math-missing-parentheses]
 
 InlayHints:
   Enabled: Yes
