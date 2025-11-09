@@ -64,9 +64,16 @@ void writeMatrixMarket(const COLTYPE rows, const COLTYPE cols,
 
 template <typename ROWTYPE, typename COLTYPE>
 void writeSVG(const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,
-              const COLTYPE *aj, std::ostream &outstream) {
+              const COLTYPE *aj, std::ostream &outstream,
+              const COLTYPE max_display_size) {
+  
+  // Determine if downsampling is needed
+  const bool needs_sampling = (rows > max_display_size || cols > max_display_size);
+  const COLTYPE display_rows = needs_sampling ? max_display_size : rows;
+  const COLTYPE display_cols = needs_sampling ? max_display_size : cols;
+  
   outstream << "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" "
-            << "viewBox=\"0 0 " << cols + 2 << " " << rows + 2 << " \">\n"
+            << "viewBox=\"0 0 " << display_cols + 2 << " " << display_rows + 2 << " \">\n"
             << "<style type=\"text/css\" >\n"
             << "     <![CDATA[\n"
             << "      rect.pixel {\n"
@@ -74,21 +81,56 @@ void writeSVG(const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,
             << "      }\n"
             << "    ]]>\n"
             << "  </style>\n\n"
-            << "   <rect width=\"" << cols + 2 << "\" height=\"" << rows + 2
+            << "   <rect width=\"" << display_cols + 2 << "\" height=\"" << display_rows + 2
             << "\" fill=\"rgb(128, 128, 128)\"/>\n"
-            << "   <rect x=\"1\" y=\"1\" width=\"" << cols + 0.1
-            << "\" height=\"" << rows + 0.1
+            << "   <rect x=\"1\" y=\"1\" width=\"" << display_cols + 0.1
+            << "\" height=\"" << display_rows + 0.1
             << "\" fill=\"rgb(255, 255, 255)\"/>\n\n";
 
   const ROWTYPE base = ai[0];
-  for (COLTYPE i = 0; i < rows; i++) {
-    ROWTYPE previousStart = ai[i] - base;
-    ROWTYPE end = ai[i + 1] - base;
-    for (ROWTYPE j = previousStart; j < end; j++) {
-      outstream << "  <rect class=\"pixel\" x=\"" << aj[j] - base + 1
-                << "\" y=\"" << i + 1 << "\" width=\".9\" height=\".9\"/>\n";
+  
+  if (needs_sampling) {
+    // Downsampling: use bitmap to track which display pixels have non-zeros
+    const double scale_row = static_cast<double>(rows) / display_rows;
+    const double scale_col = static_cast<double>(cols) / display_cols;
+    
+    // Use vector<bool> for space efficiency (1 bit per pixel)
+    std::vector<bool> bitmap(display_rows * display_cols, false);
+    
+    // Map each matrix non-zero to its corresponding display pixel
+    for (COLTYPE i = 0; i < rows; i++) {
+      const COLTYPE display_i = static_cast<COLTYPE>(i / scale_row);
+      const ROWTYPE row_start = ai[i] - base;
+      const ROWTYPE row_end = ai[i + 1] - base;
+      
+      for (ROWTYPE j = row_start; j < row_end; j++) {
+        const COLTYPE col = aj[j] - base;
+        const COLTYPE display_j = static_cast<COLTYPE>(col / scale_col);
+        bitmap[display_i * display_cols + display_j] = true;
+      }
+    }
+    
+    // Write only the marked display pixels
+    for (COLTYPE i = 0; i < display_rows; i++) {
+      for (COLTYPE j = 0; j < display_cols; j++) {
+        if (bitmap[i * display_cols + j]) {
+          outstream << "  <rect class=\"pixel\" x=\"" << j + 1
+                    << "\" y=\"" << i + 1 << "\" width=\".9\" height=\".9\"/>\n";
+        }
+      }
+    }
+  } else {
+    // No downsampling: write each non-zero directly
+    for (COLTYPE i = 0; i < rows; i++) {
+      const ROWTYPE row_start = ai[i] - base;
+      const ROWTYPE row_end = ai[i + 1] - base;
+      for (ROWTYPE j = row_start; j < row_end; j++) {
+        outstream << "  <rect class=\"pixel\" x=\"" << aj[j] - base + 1
+                  << "\" y=\"" << i + 1 << "\" width=\".9\" height=\".9\"/>\n";
+      }
     }
   }
+  
   outstream << "</svg>\n";
 }
 
@@ -104,7 +146,7 @@ void writeSVG(const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,
 #define INSTANTIATE_WRITESVG(ROWTYPE, COLTYPE)                                 \
   template void writeSVG<ROWTYPE, COLTYPE>(                                    \
       const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,               \
-      const COLTYPE *aj, std::ostream &outstream);
+      const COLTYPE *aj, std::ostream &outstream, const COLTYPE max_display_size);
 
 using CSRMatrixTypeDouble = matrix_utils::CSRMatrix<int, int, double>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeDouble);
