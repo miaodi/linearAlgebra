@@ -1,5 +1,5 @@
 #include "matrix_utils.hpp"
-#include "symmetric_ops.hpp"
+#include "sp_ops.hpp"
 #include "utils.h"
 #include <algorithm>
 #include <fstream>
