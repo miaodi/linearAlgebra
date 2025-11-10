@@ -10,3 +10,4 @@
 /opt
 /RelWithInfo
 /.cache
+.clangd
