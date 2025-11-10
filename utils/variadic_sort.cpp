@@ -1,4 +1,5 @@
 #include "variadic_sort.hpp"
+#include <cstdint>
 namespace utils {
 
 template <typename Idx, typename First, typename... Args>
@@ -52,26 +53,28 @@ void variadic_quick_sort(const Idx begin, const Idx end, First first,
   variadic_quick_sort(pivot + 1, end, first, args...);
 }
 
-template void variadic_insertion_sort<int, int *>(int, int, int *);
-template int variadic_partition<int, int *>(int, int, int *);
-template void variadic_quick_sort<int, int *>(int, int, int *);
-template void variadic_insertion_sort<int, int *, int *>(int, int, int *,
-                                                         int *);
-template int variadic_partition<int, int *, int *>(int, int, int *, int *);
-template void variadic_quick_sort<int, int *, int *>(int, int, int *, int *);
+// Macro for explicit instantiations
+#define INSTANTIATE_VARIADIC_SORT_1(IDX, FIRST) \
+  template void variadic_insertion_sort<IDX, FIRST *>(IDX, IDX, FIRST *); \
+  template IDX variadic_partition<IDX, FIRST *>(IDX, IDX, FIRST *); \
+  template void variadic_quick_sort<IDX, FIRST *>(IDX, IDX, FIRST *);
 
-template void variadic_insertion_sort<int, int *, double *>(int, int, int *,
-                                                            double *);
-template int variadic_partition<int, int *, double *>(int, int, int *,
-                                                      double *);
-template void variadic_quick_sort<int, int *, double *>(int, int, int *,
-                                                        double *);
+#define INSTANTIATE_VARIADIC_SORT_2(IDX, FIRST, SECOND) \
+  template void variadic_insertion_sort<IDX, FIRST *, SECOND *>(IDX, IDX, FIRST *, SECOND *); \
+  template IDX variadic_partition<IDX, FIRST *, SECOND *>(IDX, IDX, FIRST *, SECOND *); \
+  template void variadic_quick_sort<IDX, FIRST *, SECOND *>(IDX, IDX, FIRST *, SECOND *);
 
-template void variadic_insertion_sort<int, int *, float *>(int, int, int *,
-                                                           float *);
-template int variadic_partition<int, int *, float *>(int, int, int *,
-                                                     float *);
-template void variadic_quick_sort<int, int *, float *>(int, int, int *,
-                                                       float *);
+// int instantiations
+INSTANTIATE_VARIADIC_SORT_1(int, int)
+INSTANTIATE_VARIADIC_SORT_2(int, int, int)
+INSTANTIATE_VARIADIC_SORT_2(int, int, double)
+INSTANTIATE_VARIADIC_SORT_2(int, int, float)
+
+// int64_t instantiations
+INSTANTIATE_VARIADIC_SORT_1(int64_t, int64_t)
+INSTANTIATE_VARIADIC_SORT_2(int64_t, int64_t, int)
+INSTANTIATE_VARIADIC_SORT_2(int64_t, int64_t, int64_t)
+INSTANTIATE_VARIADIC_SORT_2(int64_t, int64_t, double)
+INSTANTIATE_VARIADIC_SORT_2(int64_t, int64_t, float)
 
 } // namespace utils

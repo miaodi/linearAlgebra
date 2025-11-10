@@ -150,8 +150,8 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
   using COLTYPE = C;
   using VALTYPE = V;
 
-  COLTYPE rows;
-  COLTYPE cols;
+  COLTYPE rows{0};
+  COLTYPE cols{0};
 
   std::vector<ROWTYPE> ai;
   std::vector<COLTYPE> aj;
