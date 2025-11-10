@@ -1,0 +1,149 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "default",
+            "hidden": true,
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "debug-gcc",
+            "displayName": "Debug (GCC)",
+            "description": "Debug build using GCC",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/.vscode/gcc-toolchain.cmake"
+            }
+        },
+        {
+            "name": "release-gcc",
+            "displayName": "Release (GCC)",
+            "description": "Release build using GCC",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/.vscode/gcc-toolchain.cmake"
+            }
+        },
+        {
+            "name": "debug-clang",
+            "displayName": "Debug (Clang)",
+            "description": "Debug build using Clang",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
+            "name": "release-clang",
+            "displayName": "Release (Clang)",
+            "description": "Release build using Clang",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
+            "name": "debug-intel",
+            "displayName": "Debug (Intel)",
+            "description": "Debug build using Intel compilers",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_COMPILER": "icx",
+                "CMAKE_CXX_COMPILER": "icpx"
+            }
+        },
+        {
+            "name": "release-intel",
+            "displayName": "Release (Intel)",
+            "description": "Release build using Intel compilers",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "icx",
+                "CMAKE_CXX_COMPILER": "icpx"
+            }
+        },
+        {
+            "name": "debug-cuda",
+            "displayName": "Debug with CUDA (GCC)",
+            "description": "Debug build with CUDA support",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/debug_cuda",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "USE_CUDA": "ON"
+            }
+        },
+        {
+            "name": "release-cuda",
+            "displayName": "Release with CUDA (GCC)",
+            "description": "Release build with CUDA support",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/release_nv",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "USE_CUDA": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug-gcc",
+            "configurePreset": "debug-gcc",
+            "jobs": 16
+        },
+        {
+            "name": "release-gcc",
+            "configurePreset": "release-gcc",
+            "jobs": 16
+        },
+        {
+            "name": "debug-clang",
+            "configurePreset": "debug-clang"
+        },
+        {
+            "name": "release-clang",
+            "configurePreset": "release-clang"
+        },
+        {
+            "name": "debug-intel",
+            "configurePreset": "debug-intel"
+        },
+        {
+            "name": "release-intel",
+            "configurePreset": "release-intel"
+        },
+        {
+            "name": "debug-cuda",
+            "configurePreset": "debug-cuda"
+        },
+        {
+            "name": "release-cuda",
+            "configurePreset": "release-cuda"
+        }
+    ]
+}
