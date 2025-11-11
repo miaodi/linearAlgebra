@@ -1,5 +1,6 @@
 #pragma once
 #include "sparse_mat_traits.hpp"
+#include "matrix_utils.hpp"
 #include <vector>
 
 namespace preconditioner
@@ -19,6 +20,7 @@ struct ILUMLevel
     void setNumThreads(int nthreads) { _nthreads = nthreads; }
     void setDropTolerance(VALTYPE tau) { _tau = tau; }
 
+    matrix_utils::CSRStructVec<ROWTYPE, COLTYPE> _APlusAT;
     CSRMatrixType _PAPT;
     CSRMatrixType _D;
     CSRMatrixType _F;
