@@ -44,7 +44,7 @@ void ILUMLevel<CSRMatrixType>::operator()(const COLTYPE size, ROWTYPE const* ai,
     _perm.resize(size);
     _iperm.resize(size);
 
-    // Step 1: Reorder matrix using MIS permutation
+    // Step 1: Reorder matrix using MIS permutation on symmetric structure
     reordering(size, ai, aj, av);
 
     // Step 2: Split permuted matrix into blocks D, F, E, C
@@ -64,10 +64,25 @@ template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
 void ILUMLevel<CSRMatrixType>::reordering(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj,
                                           VALTYPE const* av)
 {
-    _split_row = matrix_utils::MISPerm(size, ai, aj, _perm.data(), _iperm.data());
+    // Create symmetric structure A + A^T for MIS reordering
+    matrix_utils::APlusATStruct<ROWTYPE, COLTYPE, true> aplusatOp(_nthreads);
 
-    // Set dimensions and resize arrays
     const ROWTYPE base = ai[0];
+    const ROWTYPE input_nnz = ai[size] - base;
+
+    // Initialize symmetry struct (APlusATStruct will resize appropriately)
+    _APlusAT.ResizeAI(size + 1);
+
+    // Allocate space for symmetric structure (worst case: 2*nnz for fully asymmetric matrix)
+    _APlusAT.ResizeAJ(2 * input_nnz);
+
+    // Compute A + A^T structure
+    aplusatOp(size, ai, aj, _APlusAT.AI(), _APlusAT.AJ());
+
+    // Perform MIS-based permutation on symmetric structure
+    _split_row = matrix_utils::MISPerm(size, _APlusAT.AI(), _APlusAT.AJ(), _perm.data(), _iperm.data());
+
+    // Set dimensions and resize arrays for permuted matrix
     const ROWTYPE nnz = ai[size] - base;
     _PAPT.rows = size;
     _PAPT.cols = size;
