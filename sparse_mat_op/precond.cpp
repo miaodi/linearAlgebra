@@ -1,11 +1,12 @@
 #include "precond.hpp"
 #include "matrix_utils.hpp"
+#include "utils.h"
 #include <algorithm>
+#include <cmath>
 #include <deque>
+#include <iomanip>
 #include <numeric>
 #include <ranges>
-#include "utils.h"
-#include <iomanip>
 
 namespace matrix_utils
 {
@@ -536,216 +537,425 @@ bool ICCLevelSymbolicSerial3<CSRMatrixType>::operator()( const COLTYPE size,
     return true;
 }
 
-
 template <ResizableDiagonalType CSRMatrixType>
-bool ICCLevelSymbolicParallel<CSRMatrixType>::operator()(const COLTYPE size,
-                                                         ROWTYPE const *ai,
-                                                         COLTYPE const *aj,
-                                                         const int lvl,
-                                                         CSRMatrixType &L) {
-  _Li.resize(size);
-  const auto base = ai[0];
-  L.ResizeAI(size + 1);
-  L.rows = size;
-  L.cols = size;
-  L.AI()[0] = base;
-  std::atomic<COLTYPE> counter(0);
-#pragma omp parallel num_threads(_num_threads)
-  {
-    const int tid = omp_get_thread_num();
-    const int nthreads = omp_get_num_threads();
-    _visited[tid].resize(size);
-    std::fill(_visited[tid].begin(), _visited[tid].end(), 0);
-    _Li_path_max[tid].resize(size);
-
-#pragma omp for schedule(dynamic, 100)
-    for (COLTYPE i = 0; i < size; i++) {
-      counter++;
-#pragma omp critical
-      { utils::printProgress(counter * 1. / size); }
-      _Q[tid].clear();
-      _Q_next[tid].clear();
-      _Li[i].clear();
-      for (auto j_idx = ai[i] - base; j_idx < ai[i + 1] - base; j_idx++) {
-        const auto j = aj[j_idx] - base;
-        if (j > i) {
-          break;
-        }
-        _Q[tid][j] = j;
-      }
-      const COLTYPE visited_token = i + 1;
-      int level = 0;
-      while (level <= lvl && !_Q[tid].empty()) {
-        // #pragma omp critical
-        //         {
-        //           std::cout << "thread " << tid << " total threads " <<
-        //           nthreads
-        //                     << " processing row " << i << " level " << level
-        //                     << " Q size " << _Q[tid].size() << std::endl;
-        //         }
-        for (const auto &[k, path_max] : _Q[tid]) {
-          // skip if the the destination has been visited with a smaller
-          // path_max
-          if (_visited[tid][k] == visited_token &&
-              _Li_path_max[tid][k] <= path_max) {
-            continue;
-          }
-          if (_visited[tid][k] != visited_token) {
-            _visited[tid][k] = visited_token;
-          }
-          if (path_max == k)
-            _Li[i].push_back(k);
-          _Li_path_max[tid][k] = path_max;
-          if (level == lvl) {
-            continue;
-          }
-
-          // iterative k->j paths
-          for (auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++) {
-            auto j = aj[j_idx] - base;
-            if (j >= i) {
-              break;
-            }
-            const COLTYPE kj_path_max = std::max(j, path_max);
-            auto it = _Q_next[tid].find(j);
-            if (it != _Q_next[tid].end()) {
-              it->second = std::min(it->second, kj_path_max);
-            } else {
-              _Q_next[tid][j] = kj_path_max;
-            }
-          }
-        }
-        _Q[tid].swap(_Q_next[tid]);
-        _Q_next[tid].clear();
-        level++;
-      }
-      std::sort(_Li[i].begin(), _Li[i].end());
-      L.AI()[i + 1] = _Li[i].size();
-    }
-#pragma omp single
+bool ICCLevelSymbolicParallel<CSRMatrixType>::operator()( const COLTYPE size,
+                                                          ROWTYPE const* ai,
+                                                          COLTYPE const* aj,
+                                                          const int lvl,
+                                                          CSRMatrixType& L )
+{
+    _Li.resize( size );
+    const auto base = ai[0];
+    L.ResizeAI( size + 1 );
+    L.rows = size;
+    L.cols = size;
+    L.AI()[0] = base;
+    std::atomic<COLTYPE> counter( 0 );
+#pragma omp parallel num_threads( _num_threads )
     {
-      for (COLTYPE i = 0; i < size; i++) {
-        L.AI()[i + 1] += L.AI()[i];
-      }
-      L.ResizeAJ(L.AI()[size] - base);
-      L.ResizeAV(L.AI()[size] - base);
+        const int tid = omp_get_thread_num();
+        const int nthreads = omp_get_num_threads();
+        _visited[tid].resize( size );
+        std::fill( _visited[tid].begin(), _visited[tid].end(), 0 );
+        _Li_path_max[tid].resize( size );
+
+#pragma omp for schedule( dynamic, 100 )
+        for ( COLTYPE i = 0; i < size; i++ )
+        {
+            counter++;
+#pragma omp critical
+            {
+                utils::printProgress( counter * 1. / size );
+            }
+            _Q[tid].clear();
+            _Q_next[tid].clear();
+            _Li[i].clear();
+            for ( auto j_idx = ai[i] - base; j_idx < ai[i + 1] - base; j_idx++ )
+            {
+                const auto j = aj[j_idx] - base;
+                if ( j > i )
+                {
+                    break;
+                }
+                _Q[tid][j] = j;
+            }
+            const COLTYPE visited_token = i + 1;
+            int level = 0;
+            while ( level <= lvl && !_Q[tid].empty() )
+            {
+                // #pragma omp critical
+                //         {
+                //           std::cout << "thread " << tid << " total threads " <<
+                //           nthreads
+                //                     << " processing row " << i << " level " << level
+                //                     << " Q size " << _Q[tid].size() << std::endl;
+                //         }
+                for ( const auto& [k, path_max] : _Q[tid] )
+                {
+                    // skip if the the destination has been visited with a
+                    // smaller path_max
+                    if ( _visited[tid][k] == visited_token && _Li_path_max[tid][k] <= path_max )
+                    {
+                        continue;
+                    }
+                    if ( _visited[tid][k] != visited_token )
+                    {
+                        _visited[tid][k] = visited_token;
+                    }
+                    if ( path_max == k )
+                        _Li[i].push_back( k );
+                    _Li_path_max[tid][k] = path_max;
+                    if ( level == lvl )
+                    {
+                        continue;
+                    }
+
+                    // iterative k->j paths
+                    for ( auto j_idx = ai[k] - base; j_idx < ai[k + 1] - base; j_idx++ )
+                    {
+                        auto j = aj[j_idx] - base;
+                        if ( j >= i )
+                        {
+                            break;
+                        }
+                        const COLTYPE kj_path_max = std::max( j, path_max );
+                        auto it = _Q_next[tid].find( j );
+                        if ( it != _Q_next[tid].end() )
+                        {
+                            it->second = std::min( it->second, kj_path_max );
+                        }
+                        else
+                        {
+                            _Q_next[tid][j] = kj_path_max;
+                        }
+                    }
+                }
+                _Q[tid].swap( _Q_next[tid] );
+                _Q_next[tid].clear();
+                level++;
+            }
+            std::sort( _Li[i].begin(), _Li[i].end() );
+            L.AI()[i + 1] = _Li[i].size();
+        }
+#pragma omp single
+        {
+            for ( COLTYPE i = 0; i < size; i++ )
+            {
+                L.AI()[i + 1] += L.AI()[i];
+            }
+            L.ResizeAJ( L.AI()[size] - base );
+            L.ResizeAV( L.AI()[size] - base );
+        }
+
+        auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
+            L.AI(), L.AI() + size, tid, _num_threads );
+        for ( auto i = start; i < end; i++ )
+        {
+            ROWTYPE pos = L.AI()[i] - base;
+            for ( const auto& s : _Li[i] )
+            {
+                L.AJ()[pos++] = s + base;
+            }
+        }
     }
 
-    auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
-        L.AI(), L.AI() + size, tid, _num_threads);
-    for (auto i = start; i < end; i++) {
-      ROWTYPE pos = L.AI()[i] - base;
-      for (const auto &s : _Li[i]) {
-        L.AJ()[pos++] = s + base;
-      }
-    }
-  }
-
-  return true;
+    return true;
 }
 
 template <ResizableDiagonalType CSRMatrixType>
-bool ICCLevelNumericFixedPoint<CSRMatrixType>::operator()(const COLTYPE size,
-                                                          ROWTYPE const *ai,
-                                                          COLTYPE const *aj,
-                                                          VALTYPE const *av,
-                                                          CSRMatrixType &L) {
-  _av.resize(L.NNZ());
-  _ai.resize(L.NNZ());
-  _L_av_init.resize(L.NNZ());
-  // std::fill(_L_av_init.begin(), _L_av_init.end(), 0);
-  _L_av_next.resize(L.NNZ());
-  std::fill(_L_av_next.begin(), _L_av_next.end(), 0);
-  const auto base = ai[0];
-  assert(base == L.AI()[0]);
+bool ICCLevelNumericFixedPoint<CSRMatrixType>::operator()( const COLTYPE size,
+                                                           ROWTYPE const* ai,
+                                                           COLTYPE const* aj,
+                                                           VALTYPE const* av,
+                                                           CSRMatrixType& L )
+{
+    _av.resize( L.NNZ() );
+    _ai.resize( L.NNZ() );
+    _L_av_init.resize( L.NNZ() );
+    // std::fill(_L_av_init.begin(), _L_av_init.end(), 0);
+    _L_av_next.resize( L.NNZ() );
+    std::fill( _L_av_next.begin(), _L_av_next.end(), 0 );
+    const auto base = ai[0];
+    assert( base == L.AI()[0] );
 
-#pragma omp parallel num_threads(_num_threads)
-  {
-    const int tid = omp_get_thread_num();
+#pragma omp parallel num_threads( _num_threads )
+    {
+        const int tid = omp_get_thread_num();
 
-    // copy av to _av according to L's sparsity pattern
-    // and initialize _L_av_init
-    auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
-        L.AI(), L.AI() + size, tid, _num_threads);
-    for (auto i = start; i < end; i++) {
-      ROWTYPE i_idx = ai[i] - base;
-      VALTYPE sum_square = 0;
-      ROWTYPE ilu_i_idx;
-      for (ilu_i_idx = L.AI()[i] - base; ilu_i_idx < L.AI()[i + 1] - base;
-           ilu_i_idx++) {
-        _ai[ilu_i_idx] = i + base;
-        if (i_idx == ai[i + 1] - base || aj[i_idx] != L.AJ()[ilu_i_idx]) {
-          _av[ilu_i_idx] = 0; // initialize to zero
-          _L_av_init[ilu_i_idx] = 0;
-        } else {
-          _av[ilu_i_idx] = av[i_idx]; // copy the value
-          if (i == aj[i_idx] - base)
-            _av[ilu_i_idx] *= 2;
-          _L_av_init[ilu_i_idx] = _av[ilu_i_idx];
-          sum_square += _av[ilu_i_idx] * _av[ilu_i_idx];
-          i_idx++;
+        // copy av to _av according to L's sparsity pattern
+        // and initialize _L_av_init
+        auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
+            L.AI(), L.AI() + size, tid, _num_threads );
+        for ( auto i = start; i < end; i++ )
+        {
+            ROWTYPE i_idx = ai[i] - base;
+            VALTYPE sum_square = 0;
+            ROWTYPE ilu_i_idx;
+            for ( ilu_i_idx = L.AI()[i] - base; ilu_i_idx < L.AI()[i + 1] - base; ilu_i_idx++ )
+            {
+                _ai[ilu_i_idx] = i + base;
+                if ( i_idx == ai[i + 1] - base || aj[i_idx] != L.AJ()[ilu_i_idx] )
+                {
+                    _av[ilu_i_idx] = 0; // initialize to zero
+                    _L_av_init[ilu_i_idx] = 0;
+                }
+                else
+                {
+                    _av[ilu_i_idx] = av[i_idx]; // copy the value
+                    if ( i == aj[i_idx] - base )
+                        _av[ilu_i_idx] *= 2;
+                    _L_av_init[ilu_i_idx] = _av[ilu_i_idx];
+                    sum_square += _av[ilu_i_idx] * _av[ilu_i_idx];
+                    i_idx++;
+                }
+            }
+            assert( L.AJ()[ilu_i_idx - 1] == i + base );
+            assert( sum_square > 0 );
+            const VALTYPE weight = std::sqrt( _av[ilu_i_idx - 1] / sum_square );
+
+            for ( ROWTYPE ilu_i_idx = L.AI()[i] - base;
+                  ilu_i_idx < L.AI()[i + 1] - base; ilu_i_idx++ )
+            {
+                _L_av_init[ilu_i_idx] *= weight;
+            }
         }
-      }
-      assert(L.AJ()[ilu_i_idx - 1] == i + base);
-      assert(sum_square > 0);
-      const VALTYPE weight = std::sqrt(_av[ilu_i_idx - 1] / sum_square);
-
-      for (ROWTYPE ilu_i_idx = L.AI()[i] - base;
-           ilu_i_idx < L.AI()[i + 1] - base; ilu_i_idx++) {
-        _L_av_init[ilu_i_idx] *= weight;
-      }
     }
-  }
-  bool success = true;
-  for (int sweep = 0; sweep < _sweeps; sweep++) {
-#pragma omp parallel for num_threads(_num_threads)
-    for (ROWTYPE idx = 0; idx < L.NNZ(); idx++) {
-
-      if (!success) {
-        continue;
-      }
-      VALTYPE s = _av[idx];
-      COLTYPE i = _ai[idx] - base;
-      COLTYPE j = L.AJ()[idx] - base;
-      ROWTYPE j_idx, i_idx;
-      for (j_idx = L.AI()[j] - base, i_idx = L.AI()[i] - base;
-           j_idx < L.AI()[j + 1] - base - 1 && i_idx < L.AI()[i + 1] - base;) {
-        if (L.AJ()[j_idx] == L.AJ()[i_idx]) {
-          s -= _L_av_init[j_idx] * _L_av_init[i_idx];
-          j_idx++;
-          i_idx++;
-        } else if (L.AJ()[j_idx] < L.AJ()[i_idx]) {
-          j_idx++;
-        } else {
-          i_idx++;
+    bool success = true;
+    for ( int sweep = 0; sweep < _sweeps; sweep++ )
+    {
+#pragma omp parallel for num_threads( _num_threads )
+        for ( ROWTYPE idx = 0; idx < L.NNZ(); idx++ )
+        {
+            if ( !success )
+            {
+                continue;
+            }
+            VALTYPE s = _av[idx];
+            COLTYPE i = _ai[idx] - base;
+            COLTYPE j = L.AJ()[idx] - base;
+            ROWTYPE j_idx, i_idx;
+            for ( j_idx = L.AI()[j] - base, i_idx = L.AI()[i] - base;
+                  j_idx < L.AI()[j + 1] - base - 1 && i_idx < L.AI()[i + 1] - base; )
+            {
+                if ( L.AJ()[j_idx] == L.AJ()[i_idx] )
+                {
+                    s -= _L_av_init[j_idx] * _L_av_init[i_idx];
+                    j_idx++;
+                    i_idx++;
+                }
+                else if ( L.AJ()[j_idx] < L.AJ()[i_idx] )
+                {
+                    j_idx++;
+                }
+                else
+                {
+                    i_idx++;
+                }
+            }
+            assert( L.AJ()[j_idx] == j + base );
+            if ( i != j )
+            {
+                _L_av_next[idx] = s / _L_av_init[j_idx];
+                if ( std::isnan( _L_av_next[idx] ) || std::isinf( _L_av_next[idx] ) )
+                {
+                    success = false;
+                }
+            }
+            else
+            {
+                if ( s <= 0 )
+                {
+                    s = 1e-8;
+                    // success = false;
+                    // #pragma omp critical
+                    //           {
+                    //             std::cout << "Non-positive pivot encountered: " << s
+                    //                       << ", i = " << i << ", j = " << j <<
+                    //                       std::endl;
+                    //           }
+                }
+                _L_av_next[idx] = std::sqrt( s );
+            }
         }
-      }
-      assert(L.AJ()[j_idx] == j + base);
-      if (i != j) {
-        _L_av_next[idx] = s / _L_av_init[j_idx];
-        if (std::isnan(_L_av_next[idx]) || std::isinf(_L_av_next[idx])) {
-          success = false;
-        }
-      } else {
-        if (s <= 0) {
-          s = 1e-8;
-          // success = false;
-          // #pragma omp critical
-          //           {
-          //             std::cout << "Non-positive pivot encountered: " << s
-          //                       << ", i = " << i << ", j = " << j <<
-          //                       std::endl;
-          //           }
-        }
-        _L_av_next[idx] = std::sqrt(s);
-      }
+        std::swap( _L_av_init, _L_av_next );
     }
-    std::swap(_L_av_init, _L_av_next);
-  }
-  std::copy(_L_av_init.begin(), _L_av_init.end(), L.AV());
-  if (!success)
-    std::cout << "ICC did not converge!" << std::endl;
-  return success;
+    std::copy( _L_av_init.begin(), _L_av_init.end(), L.AV() );
+    if ( !success )
+        std::cout << "ICC did not converge!" << std::endl;
+    return success;
+}
+
+template <ResizableDiagonalType CSRMatrixType>
+bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
+                  typename CSRMatrixType::ROWTYPE const* ai,
+                  typename CSRMatrixType::COLTYPE const* aj,
+                  typename CSRMatrixType::VALTYPE const* av,
+                  const typename CSRMatrixType::VALTYPE tau,
+                  CSRMatrixType& ilu )
+{
+    const auto base = ai[0];
+    ilu.rows = size;
+    ilu.cols = size;
+    ilu.ResizeAI( size + 1 );
+    ilu.ResizeDiagonal( size );
+    auto* ilu_ai = ilu.AI();
+    auto* ilu_diag = ilu.Diagonal();
+    ilu_ai[0] = base;
+
+    using ROWT = typename CSRMatrixType::ROWTYPE;
+    using COLT = typename CSRMatrixType::COLTYPE;
+    using VALT = typename CSRMatrixType::VALTYPE;
+
+    using MarkerT = COLT;
+    const MarkerT MARKER_ABSENT = std::numeric_limits<MarkerT>::max();
+    std::vector<MarkerT> marker( size, MARKER_ABSENT );
+
+    const ROWT nnz_a = ai[size] - base;
+    ROWT nnz_cap = std::max<ROWT>( ROWT( 1 ), nnz_a );
+    ilu.ResizeAJ( nnz_cap );
+    ilu.ResizeAV( nnz_cap );
+    auto* ilu_aj = ilu.AJ();
+    auto* ilu_av = ilu.AV();
+
+    if ( size == COLT( 0 ) )
+        return true;
+
+    const size_t reserve_hint = static_cast<size_t>( std::max<ROWT>(
+        ROWT( 8 ), ( nnz_a / static_cast<ROWT>( size ) ) + ROWT( 4 ) ) );
+
+    struct Entry
+    {
+        COLT col;
+        VALT val;
+    };
+
+    std::vector<COLT> lower_cols;
+    std::vector<Entry> row_entries;
+    using LowerColsDiffT = typename std::vector<COLT>::difference_type;
+    lower_cols.reserve( reserve_hint );
+    row_entries.reserve( reserve_hint );
+
+    for ( COLT i = 0; i < size; ++i )
+    {
+        row_entries.clear();
+        lower_cols.clear();
+        VALT row_norm_sq = VALT( 0 );
+
+        // gather original row pattern
+        for ( ROWT pos = ai[i] - base; pos < ai[i + 1] - base; ++pos )
+        {
+            const COLT col = aj[pos] - base;
+            marker[col] = static_cast<MarkerT>( row_entries.size() );
+            row_entries.push_back( { col, av[pos] } );
+            row_norm_sq = std::fma( av[pos], av[pos], row_norm_sq );
+            if ( col < i )
+                lower_cols.push_back( col );
+        }
+        const VALT drop_tol = std::sqrt( row_norm_sq ) * tau;
+
+        if ( marker[i] == MARKER_ABSENT )
+        {
+            marker[i] = static_cast<MarkerT>( row_entries.size() );
+            row_entries.push_back( { i, VALT( 0 ) } );
+        }
+
+        // lower_cols is already sorted because the input CSR rows are sorted
+        // and we insert new entries using upper_bound below.
+        size_t lower_idx = 0;
+
+        while ( lower_idx < lower_cols.size() )
+        {
+            const COLT k = lower_cols[lower_idx++];
+            const MarkerT pos_k = marker[k];
+            VALT& aik = row_entries[pos_k].val;
+            if ( aik == VALT( 0 ) )
+                continue;
+
+            const ROWT diag_offset = ilu_diag[k] - base;
+            const VALT akk = ilu_av[diag_offset];
+            if ( akk == VALT( 0 ) )
+                return false;
+            aik /= akk;
+
+            const ROWT k_u_begin = diag_offset + 1;
+            const ROWT k_u_end = ilu_ai[k + 1] - base;
+            for ( ROWT j_pos = k_u_begin; j_pos < k_u_end; ++j_pos )
+            {
+                const COLT j = ilu_aj[j_pos] - base;
+                const VALT u_kj = ilu_av[j_pos];
+                MarkerT row_pos = marker[j];
+                if ( row_pos == MARKER_ABSENT )
+                {
+                    row_pos = static_cast<MarkerT>( row_entries.size() );
+                    marker[j] = row_pos;
+                    row_entries.push_back( { j, -aik * u_kj } );
+                    if ( j < i )
+                    {
+                        auto it = std::upper_bound(
+                            lower_cols.begin() + static_cast<LowerColsDiffT>( lower_idx ),
+                            lower_cols.end(), j );
+                        lower_cols.insert( it, j );
+                    }
+                }
+                else
+                {
+                    row_entries[row_pos].val =
+                        std::fma( -aik, u_kj, row_entries[row_pos].val );
+                }
+            }
+        }
+
+        bool diag_present = false;
+        VALT diag_value = VALT( 0 );
+        size_t compact_pos = 0;
+        for ( size_t idx = 0; idx < row_entries.size(); ++idx )
+        {
+            const Entry entry = row_entries[idx];
+            const COLT col = entry.col;
+            const VALT val = entry.val;
+            marker[col] = MARKER_ABSENT;
+
+            if ( std::abs( val ) <= drop_tol )
+                continue;
+            if ( col == i )
+            {
+                diag_present = true;
+                diag_value = val;
+            }
+
+            row_entries[compact_pos++] = entry;
+        }
+        row_entries.resize( compact_pos );
+
+        if ( !diag_present )
+            return false;
+
+        std::sort( row_entries.begin(), row_entries.end(),
+                   []( const Entry& a, const Entry& b ) { return a.col < b.col; } );
+
+        const ROWT write_pos = ilu_ai[i] - base;
+        const ROWT row_nnz = static_cast<ROWT>( row_entries.size() );
+        const ROWT needed = write_pos + row_nnz;
+        if ( needed > nnz_cap )
+        {
+            nnz_cap = std::max<ROWT>( needed, nnz_cap * 2 );
+            ilu_aj = ilu.ResizeAJ( nnz_cap );
+            ilu_av = ilu.ResizeAV( nnz_cap );
+        }
+
+        ROWT out_pos = write_pos;
+        for ( const auto& entry : row_entries )
+        {
+            ilu_aj[out_pos] = entry.col + base;
+            ilu_av[out_pos] = entry.val;
+            if ( entry.col == i )
+                ilu_diag[i] = out_pos + base;
+            ++out_pos;
+        }
+
+        ilu_ai[i + 1] = out_pos + base;
+    }
+    return true;
 }
 
 template class ICCLevelSymbolicSerial3<matrix_utils::CSRMatrix<int, int, double>>;
@@ -758,5 +968,12 @@ template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>(
     int const* aj,
     double const* av,
     const int lvl,
+    matrix_utils::CSRMatrix<int, int, double>& ilu );
+template bool ILUTNumeric<matrix_utils::CSRMatrix<int, int, double>>(
+    const int size,
+    int const* ai,
+    int const* aj,
+    double const* av,
+    const double tau,
     matrix_utils::CSRMatrix<int, int, double>& ilu );
 } // namespace matrix_utils

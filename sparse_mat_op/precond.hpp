@@ -865,6 +865,16 @@ bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
                       const int lvl,
                       CSRMatrixType& ilu );
 
+template <ResizableDiagonalType CSRMatrixType>
+bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
+                  typename CSRMatrixType::ROWTYPE const* ai,
+                  typename CSRMatrixType::COLTYPE const* aj,
+                  typename CSRMatrixType::VALTYPE const* av,
+                  const typename CSRMatrixType::VALTYPE tau,
+                  CSRMatrixType& ilu );
+  
+                      
+
 template <typename VT> class IdentityPrec {
 public:
   using VALTYPE = VT;
