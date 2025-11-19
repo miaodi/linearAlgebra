@@ -5,7 +5,9 @@
 #include "sparse_mat_traits.hpp"
 #include "spmv.hpp"
 #include "triangle_solve.hpp"
+#include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cxxopts.hpp>
 #include <fstream>
 #include <iomanip>
@@ -59,6 +61,9 @@ int main( int argc, char** argv )
                            cxxopts::value<std::string>()->default_value(
                                "../tests/data/ex5.mtx" ) )(
         "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )(
+        "F,factorization", "ILU variant: iluk or ilut",
+        cxxopts::value<std::string>()->default_value( "iluk" ) )(
+        "d,droptol", "ILUT drop tolerance", cxxopts::value<double>()->default_value( "1e-3" ) )(
         "p,precond",
         "Preconditioner type: none (no preconditioning), left (M^-1 A x = M^-1 "
         "b), right (A M^-1 y = b)",
@@ -79,13 +84,44 @@ int main( int argc, char** argv )
     std::string filename = result["filename"].as<std::string>();
     int level = result["level"].as<int>();
     std::string precond_type_str = result["precond"].as<std::string>();
+    std::string factorization_str = result["factorization"].as<std::string>();
+    double droptol = result["droptol"].as<double>();
     int restart = result["restart"].as<int>();
     int maxiter = result["maxiter"].as<int>();
     double reltol = result["reltol"].as<double>();
 
+    std::string factorization_lower = factorization_str;
+    std::transform( factorization_lower.begin(), factorization_lower.end(),
+                    factorization_lower.begin(), []( unsigned char c ) { return std::tolower( c ); } );
+    enum class Factorization
+    {
+        ILUK,
+        ILUT
+    };
+    Factorization factorization;
+    if ( factorization_lower == "iluk" )
+    {
+        factorization = Factorization::ILUK;
+    }
+    else if ( factorization_lower == "ilut" )
+    {
+        factorization = Factorization::ILUT;
+    }
+    else
+    {
+        std::cerr << "Invalid factorization type: " << factorization_str
+                  << ". Valid options are: iluk, ilut" << std::endl;
+        return -1;
+    }
+
     std::cout << "Options:" << std::endl;
     std::cout << "  filename: " << filename << std::endl;
     std::cout << "  level: " << level << std::endl;
+    std::cout << "  factorization: " << factorization_str << std::endl;
+    if ( factorization == Factorization::ILUT )
+    {
+        std::cout << "  droptol: " << droptol << std::endl;
+    }
     std::cout << "  precond: " << precond_type_str << std::endl;
     std::cout << "  restart: " << restart << std::endl;
     std::cout << "  maxiter: " << maxiter << std::endl;
@@ -134,27 +170,44 @@ int main( int argc, char** argv )
     //                         csr_matrix.AJ(), out0 );
     // out0.close();
     bool success = false;
-    std::cout << "Symbolic ILU factorization..." << std::endl;
     matrix_utils::ILULevelSymbolic<decltype( ilu_matrix )> ilu;
-    auto t1 = std::chrono::high_resolution_clock::now();
-    success = ilu( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(), level, ilu_matrix );
-    auto t2 = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = t2 - t1;
-    std::cout << "Symbolic ILU factorization time: " << elapsed.count() << " s"
-              << std::endl;
-    if ( !success )
+    if ( factorization == Factorization::ILUK )
     {
-        std::cout << "Symbolic ILU factorization failed." << std::endl;
-        return -1;
+        std::cout << "Symbolic ILU(k) factorization..." << std::endl;
+        auto t1 = std::chrono::high_resolution_clock::now();
+        success = ilu( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(), level, ilu_matrix );
+        auto t2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = t2 - t1;
+        std::cout << "Symbolic ILU factorization time: " << elapsed.count() << " s"
+                  << std::endl;
+        if ( !success )
+        {
+            std::cout << "Symbolic ILU factorization failed." << std::endl;
+            return -1;
+        }
+        std::cout << "Symbolic ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
     }
-    std::cout << "Symbolic ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
+    else
+    {
+        std::cout << "Skipping symbolic phase for ILUT." << std::endl;
+    }
+
     std::cout << "Numeric ILU factorization..." << std::endl;
     auto t3 = std::chrono::high_resolution_clock::now();
-    // Add option to select original/optimized ILULevelNumeric
-    std::cout << "Using ILULevelNumeric." << std::endl;
-    success = matrix_utils::ILULevelNumeric( csr_matrix.rows, csr_matrix.AI(),
+    if ( factorization == Factorization::ILUK )
+    {
+        std::cout << "Using ILULevelNumeric." << std::endl;
+        success = matrix_utils::ILULevelNumeric( csr_matrix.rows, csr_matrix.AI(),
+                                                 csr_matrix.AJ(), csr_matrix.AV(),
+                                                 level, ilu_matrix );
+    }
+    else
+    {
+        std::cout << "Using ILUTNumeric with droptol = " << droptol << std::endl;
+        success = matrix_utils::ILUTNumeric( csr_matrix.rows, csr_matrix.AI(),
                                              csr_matrix.AJ(), csr_matrix.AV(),
-                                             level, ilu_matrix );
+                                             droptol, ilu_matrix );
+    }
     auto t4 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed_numeric = t4 - t3;
     std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count()
@@ -164,7 +217,11 @@ int main( int argc, char** argv )
         std::cout << "Numeric ILU factorization failed." << std::endl;
         return -1;
     }
-    std::cout << "ILU factorization done." << std::endl;
+    std::cout << "ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
+    if ( factorization == Factorization::ILUT )
+    {
+        std::cout << "  Fill ratio: " << static_cast<double>( ilu_matrix.NNZ() ) / csr_matrix.NNZ() << std::endl;
+    }
     // std::ofstream out1( "ilu_csr.svg" );
     // matrix_utils::writeSVG( ilu_matrix.rows, ilu_matrix.cols, ilu_matrix.AI(),
     //                         ilu_matrix.AJ(), out1 );
