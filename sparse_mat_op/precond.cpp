@@ -839,19 +839,19 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
     {
         row_entries.clear();
         lower_cols.clear();
-        VALT row_norm_sq = VALT( 0 );
+        VALT row_max = VALT( 0 );
 
-        // gather original row pattern
+        // gather original row pattern and track max
         for ( ROWT pos = ai[i] - base; pos < ai[i + 1] - base; ++pos )
         {
             const COLT col = aj[pos] - base;
             marker[col] = static_cast<MarkerT>( row_entries.size() );
-            row_entries.push_back( { col, av[pos] } );
-            row_norm_sq = std::fma( av[pos], av[pos], row_norm_sq );
+            const VALT val = av[pos];
+            row_entries.push_back( { col, val } );
+            row_max = std::max( row_max, std::abs( val ) );
             if ( col < i )
                 lower_cols.push_back( col );
         }
-        const VALT drop_tol = std::sqrt( row_norm_sq ) * tau;
 
         if ( marker[i] == MARKER_ABSENT )
         {
@@ -873,9 +873,12 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
 
             const ROWT diag_offset = ilu_diag[k] - base;
             const VALT akk = ilu_av[diag_offset];
-            if ( akk == VALT( 0 ) )
+            if ( akk == VALT( 0 ) ){
+                std::cerr << "Error: zero diagonal in ILU preconditioner.\n";
                 return false;
+            }
             aik /= akk;
+            row_max = std::max( row_max, std::abs( aik ) );
 
             const ROWT k_u_begin = diag_offset + 1;
             const ROWT k_u_end = ilu_ai[k + 1] - base;
@@ -888,7 +891,25 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
                 {
                     row_pos = static_cast<MarkerT>( row_entries.size() );
                     marker[j] = row_pos;
-                    row_entries.push_back( { j, -aik * u_kj } );
+                    const VALT new_val = -aik * u_kj;
+                    row_entries.push_back( { j, new_val } );
+                    row_max = std::max( row_max, std::abs( new_val ) );
+#if defined( ILUT_MANUAL_LOWER_INSERT )
+                    if ( j < i )
+                    {
+                        const auto prev_size = lower_cols.size();
+                        lower_cols.resize( prev_size + 1 );
+                        auto insert_pos = static_cast<LowerColsDiffT>( prev_size );
+                        while ( insert_pos >
+                                static_cast<LowerColsDiffT>( lower_idx ) &&
+                                lower_cols[insert_pos - 1] > j )
+                        {
+                            lower_cols[insert_pos] = lower_cols[insert_pos - 1];
+                            --insert_pos;
+                        }
+                        lower_cols[insert_pos] = j;
+                    }
+#else
                     if ( j < i )
                     {
                         auto it = std::upper_bound(
@@ -896,14 +917,18 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
                             lower_cols.end(), j );
                         lower_cols.insert( it, j );
                     }
+#endif
                 }
                 else
                 {
                     row_entries[row_pos].val =
                         std::fma( -aik, u_kj, row_entries[row_pos].val );
+                    row_max = std::max( row_max, std::abs( row_entries[row_pos].val ) );
                 }
             }
         }
+
+        const VALT drop_tol = row_max * tau;
 
         bool diag_present = false;
         VALT diag_value = VALT( 0 );
@@ -915,20 +940,23 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
             const VALT val = entry.val;
             marker[col] = MARKER_ABSENT;
 
-            if ( std::abs( val ) <= drop_tol )
-                continue;
             if ( col == i )
             {
                 diag_present = true;
                 diag_value = val;
+            }
+            else if ( std::abs( val ) <= drop_tol ){
+                continue;
             }
 
             row_entries[compact_pos++] = entry;
         }
         row_entries.resize( compact_pos );
 
-        if ( !diag_present )
+        if ( !diag_present ){
+            std::cerr << "Error: missing diagonal in ILU preconditioner.\n";
             return false;
+        }
 
         std::sort( row_entries.begin(), row_entries.end(),
                    []( const Entry& a, const Entry& b ) { return a.col < b.col; } );
