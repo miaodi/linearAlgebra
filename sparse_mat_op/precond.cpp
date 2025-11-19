@@ -839,7 +839,8 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
     {
         row_entries.clear();
         lower_cols.clear();
-        VALT row_max = VALT( 0 );
+        // L2 norm (Euclidean) of the ORIGINAL (unfactored) row i from A
+        VALT original_row_l2_sq = VALT( 0 );
 
         // gather original row pattern and track max
         for ( ROWT pos = ai[i] - base; pos < ai[i + 1] - base; ++pos )
@@ -848,10 +849,12 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
             marker[col] = static_cast<MarkerT>( row_entries.size() );
             const VALT val = av[pos];
             row_entries.push_back( { col, val } );
-            row_max = std::max( row_max, std::abs( val ) );
+            original_row_l2_sq = std::fma( val, val, original_row_l2_sq );
             if ( col < i )
                 lower_cols.push_back( col );
         }
+
+        const VALT drop_tol = std::sqrt( original_row_l2_sq ) * tau;
 
         if ( marker[i] == MARKER_ABSENT )
         {
@@ -878,7 +881,12 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
                 return false;
             }
             aik /= akk;
-            row_max = std::max( row_max, std::abs( aik ) );
+            if ( std::abs( aik ) < drop_tol )
+            {
+                aik = VALT( 0 );
+                continue;
+            }
+            // dropping now based only on ORIGINAL row L2 norm; no need to track max during elimination
 
             const ROWT k_u_begin = diag_offset + 1;
             const ROWT k_u_end = ilu_ai[k + 1] - base;
@@ -893,7 +901,7 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
                     marker[j] = row_pos;
                     const VALT new_val = -aik * u_kj;
                     row_entries.push_back( { j, new_val } );
-                    row_max = std::max( row_max, std::abs( new_val ) );
+                    // no row_max update (using original L2)
 #if defined( ILUT_MANUAL_LOWER_INSERT )
                     if ( j < i )
                     {
@@ -923,12 +931,10 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
                 {
                     row_entries[row_pos].val =
                         std::fma( -aik, u_kj, row_entries[row_pos].val );
-                    row_max = std::max( row_max, std::abs( row_entries[row_pos].val ) );
+                    // no row_max update (using original L2)
                 }
             }
         }
-
-        const VALT drop_tol = row_max * tau;
 
         bool diag_present = false;
         VALT diag_value = VALT( 0 );
