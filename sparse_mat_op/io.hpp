@@ -22,5 +22,6 @@ void writeMatrixMarket(const CSRMatrixType &csr_matrix, std::ostream &outstream,
 
 template <typename ROWTYPE, typename COLTYPE>
 void writeSVG(const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,
-              const COLTYPE *aj, std::ostream &outstream);
+              const COLTYPE *aj, std::ostream &outstream,
+              const COLTYPE max_display_size = 2000);
 } // namespace matrix_utils
