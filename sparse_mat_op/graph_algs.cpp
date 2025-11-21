@@ -538,6 +538,44 @@ COLTYPE MISPerm( COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* pe
     return is_size;
 }
 
+template <typename ROWTYPE, typename COLTYPE>
+void BuildPermutationFromSccLevels( COLTYPE num_sccs,
+                                    ROWTYPE const* scc_prefix,
+                                    COLTYPE const* scc_to_node,
+                                    COLTYPE const* scc_perm,
+                                    ROWTYPE const* scc_level_prefix,
+                                    COLTYPE scc_levels,
+                                    COLTYPE* node_perm,
+                                    COLTYPE* node_iperm )
+{
+    const auto base = scc_prefix[0];
+    COLTYPE pos = 0;
+
+    for ( COLTYPE lvl = 0; lvl < scc_levels; ++lvl )
+    {
+        const auto level_begin = scc_level_prefix[lvl] - base;
+        const auto level_end = scc_level_prefix[lvl + 1] - base;
+        for ( auto idx = level_begin; idx < level_end; ++idx )
+        {
+            const COLTYPE scc_id = scc_perm[idx] - base;
+            const auto node_begin = scc_prefix[scc_id] - base;
+            const auto node_end = scc_prefix[scc_id + 1] - base;
+            for ( auto n = node_begin; n < node_end; ++n )
+            {
+                node_perm[pos++] = scc_to_node[n];
+            }
+        }
+    }
+
+    if ( node_iperm != nullptr )
+    {
+        for ( COLTYPE i = 0; i < pos; ++i )
+        {
+            node_iperm[node_perm[i] - base] = i + base;
+        }
+    }
+}
+
 // Template instantiations
 #define INSTANTIATE_GRAPH_ALGS( ROWTYPE, COLTYPE )                                                        \
     template void ElimTree<ROWTYPE, COLTYPE>( const COLTYPE rows, ROWTYPE const* ai,                      \
@@ -550,7 +588,11 @@ COLTYPE MISPerm( COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* pe
     template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, true>;                                      \
     template struct TransitiveReduction<ROWTYPE, COLTYPE>;                                                \
     template COLTYPE MISPerm<ROWTYPE, COLTYPE>( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, \
-                                                COLTYPE* perm, COLTYPE* iperm );
+                                                COLTYPE* perm, COLTYPE* iperm );                          \
+    template void BuildPermutationFromSccLevels<ROWTYPE, COLTYPE>(                                        \
+        COLTYPE num_sccs, ROWTYPE const* scc_prefix, COLTYPE const* scc_to_node,                          \
+        COLTYPE const* scc_perm, ROWTYPE const* scc_level_prefix, COLTYPE scc_levels,                     \
+        COLTYPE* node_perm, COLTYPE* node_iperm );
 
 
 // INSTANTIATE_GRAPH_ALGS(int, int)

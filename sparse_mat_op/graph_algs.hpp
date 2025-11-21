@@ -111,6 +111,27 @@ COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
                                          COLTYPE* scc_to_node,
                                          COLTYPE* node_to_scc );
 
+/// @brief Build a node permutation from SCC ordering across levels
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @param num_sccs Number of SCCs
+/// @param scc_prefix CSR row pointers of nodes per SCC
+/// @param scc_to_node CSR column indices of nodes per SCC
+/// @param scc_perm Permutation of SCC ids (ordered by levels)
+/// @param scc_level_prefix Level offsets into scc_perm
+/// @param scc_levels Number of levels
+/// @param node_perm Output permutation (old idx -> new idx)
+/// @param node_iperm Optional inverse permutation (new idx -> old idx)
+template <typename ROWTYPE, typename COLTYPE>
+void BuildPermutationFromSccLevels( COLTYPE num_sccs,
+                                    ROWTYPE const* scc_prefix,
+                                    COLTYPE const* scc_to_node,
+                                    COLTYPE const* scc_perm,
+                                    ROWTYPE const* scc_level_prefix,
+                                    COLTYPE scc_levels,
+                                    COLTYPE* node_perm,
+                                    COLTYPE* node_iperm );
+
 /// @brief Compute a Maximal Independent Set (MIS) permutation of a graph
 ///
 /// This function implements Algorithm 2.2 from:
@@ -153,4 +174,30 @@ COLTYPE FindStronglyConnectedComponents(const COLTYPE rows,
                                         ROWTYPE* scc_prefix,
                                         COLTYPE* scc_to_node,
                                         COLTYPE* node_to_scc);
+
+/// @brief Expand SCC level order into a node permutation.
+///
+/// The resulting permutation first groups SCCs by their topological level
+/// (computed, e.g., by TopologicalSort2 on the SCC condensation graph) and
+/// keeps all nodes that belong to the same SCC contiguous.
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @param num_sccs Number of SCCs
+/// @param scc_prefix CSR prefix for SCC-to-node mapping (size = num_sccs + 1)
+/// @param scc_to_node CSR column indices for SCC-to-node mapping (size = rows)
+/// @param scc_perm Permutation of SCC ids produced by the topological sort
+/// @param scc_level_prefix Level boundaries over scc_perm (size = scc_levels + 1)
+/// @param scc_levels Number of levels returned by the topological sort
+/// @param node_perm Output permutation over original nodes (size = rows)
+/// @param node_iperm Optional inverse permutation over original nodes (size = rows),
+///                   mapping original node id -> position in node_perm
+template <typename ROWTYPE, typename COLTYPE>
+void BuildPermutationFromSccLevels(COLTYPE num_sccs,
+                                   ROWTYPE const* scc_prefix,
+                                   COLTYPE const* scc_to_node,
+                                   COLTYPE const* scc_perm,
+                                   ROWTYPE const* scc_level_prefix,
+                                   COLTYPE scc_levels,
+                                   COLTYPE* node_perm,
+                                   COLTYPE* node_iperm = nullptr);
 } // namespace matrix_utils
