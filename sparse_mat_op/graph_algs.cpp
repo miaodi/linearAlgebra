@@ -7,6 +7,7 @@
 #include <omp.h>
 #include <iostream>
 #include <vector>
+#include <set>
 #include <iterator>
 #include <immintrin.h>
 
@@ -66,8 +67,8 @@ bool IsDAG( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj )
     return true;
 }
 
-template <typename ROWTYPE, typename COLTYPE>
-COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>::operator()( const COLTYPE work_graph_rows,
+template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG>
+COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, KEEPDIAG>::operator()( const COLTYPE work_graph_rows,
                                                                ROWTYPE const* work_ai,
                                                                COLTYPE const* work_aj,
                                                                const COLTYPE num_tasks,
@@ -120,20 +121,19 @@ COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>::operator()( const COLTYPE wor
                     // Find which task this dependency work belongs to
                     COLTYPE dep_task_id = node_to_task[dep_work_idx] - task_base;
 
-                    // Only add edge if dependency is from a different task
-                    if ( dep_task_id != task_id )
+                    // Only add edge if dependency is from a different task (unless KEEPDIAG is true)
+                    if constexpr ( KEEPDIAG )
                     {
-                        deps.push_back( dep_task_id );
+                        deps.insert( dep_task_id ); // set automatically handles duplicates and sorting
+                    }
+                    else
+                    {
+                        if ( dep_task_id != task_id )
+                        {
+                            deps.insert( dep_task_id ); // set automatically handles duplicates and sorting
+                        }
                     }
                 }
-            }
-
-            // Remove duplicates and sort
-            if ( !deps.empty() )
-            {
-                std::sort( deps.begin(), deps.end() );
-                auto unique_end = std::unique( deps.begin(), deps.end() );
-                deps.erase( unique_end, deps.end() );
             }
         }
 
@@ -155,9 +155,11 @@ COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>::operator()( const COLTYPE wor
             ROWTYPE start_offset = task_ai[task_id] - task_base;
             const auto& deps = _task_dependencies[task_id];
 
-            for ( size_t i = 0; i < deps.size(); ++i )
+            // Copy from set to output array using iterator
+            ROWTYPE idx = start_offset;
+            for ( COLTYPE dep : deps )
             {
-                task_aj[start_offset + i] = deps[i] + task_base;
+                task_aj[idx++] = dep + task_base;
             }
         }
     }
@@ -324,13 +326,149 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
               << " ms, reduction: " << reduction_ms << " ms" << std::endl;
 }
 
+template <typename ROWTYPE, typename COLTYPE>
+COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
+                                         ROWTYPE const* ai,
+                                         COLTYPE const* aj,
+                                         ROWTYPE* scc_prefix,
+                                         COLTYPE* scc_to_node,
+                                         COLTYPE* node_to_scc )
+{
+    // Tarjan's algorithm for finding strongly connected components
+    // Returns the number of SCCs and populates output arrays
+    const int base = ai[0];
+    
+    // Algorithm state
+    std::vector<COLTYPE> index( rows, -1 );      // Discovery index (-1 = unvisited)
+    std::vector<COLTYPE> lowlink( rows, -1 );    // Lowest reachable index
+    std::vector<bool> on_stack( rows, false );   // Whether node is on stack
+    std::vector<COLTYPE> stack;                  // DFS stack
+    stack.reserve( rows );
+    
+    COLTYPE current_index = 0;
+    COLTYPE scc_count = 0;
+    
+    // Temporary storage for SCC nodes
+    std::vector<std::vector<COLTYPE>> scc_nodes;
+    
+    // Iterative DFS to avoid stack overflow on large graphs
+    std::vector<COLTYPE> dfs_stack;
+    std::vector<ROWTYPE> edge_iter;  // Iterator for edges of each node on stack
+    dfs_stack.reserve( rows );
+    edge_iter.reserve( rows );
+    
+    for ( COLTYPE start = 0; start < rows; ++start )
+    {
+        if ( index[start] != -1 )
+            continue;
+        
+        // Start DFS from unvisited node
+        dfs_stack.clear();
+        edge_iter.clear();
+        dfs_stack.push_back( start );
+        edge_iter.push_back( ai[start] - base );
+        
+        while ( !dfs_stack.empty() )
+        {
+            COLTYPE u = dfs_stack.back();
+            ROWTYPE& edge_pos = edge_iter.back();
+            
+            // First visit to this node
+            if ( index[u] == -1 )
+            {
+                index[u] = current_index;
+                lowlink[u] = current_index;
+                ++current_index;
+                stack.push_back( u );
+                on_stack[u] = true;
+            }
+            
+            // Process edges
+            bool found_unvisited = false;
+            const ROWTYPE edge_end = ai[u + 1] - base;
+            
+            while ( edge_pos < edge_end )
+            {
+                COLTYPE v = aj[edge_pos] - base;
+                ++edge_pos;
+                
+                if ( index[v] == -1 )
+                {
+                    // Unvisited neighbor - recurse
+                    dfs_stack.push_back( v );
+                    edge_iter.push_back( ai[v] - base );
+                    found_unvisited = true;
+                    break;
+                }
+                else if ( on_stack[v] )
+                {
+                    // Back edge to node on stack
+                    lowlink[u] = std::min( lowlink[u], index[v] );
+                }
+            }
+            
+            if ( found_unvisited )
+                continue;
+            
+            // All edges processed - backtrack
+            dfs_stack.pop_back();
+            edge_iter.pop_back();
+            
+            // Update parent's lowlink if we're not the root
+            if ( !dfs_stack.empty() )
+            {
+                COLTYPE parent = dfs_stack.back();
+                lowlink[parent] = std::min( lowlink[parent], lowlink[u] );
+            }
+            
+            // Check if u is a root of an SCC
+            if ( lowlink[u] == index[u] )
+            {
+                // Pop all nodes in this SCC from stack
+                std::vector<COLTYPE> current_scc;
+                COLTYPE v;
+                do
+                {
+                    v = stack.back();
+                    stack.pop_back();
+                    on_stack[v] = false;
+                    node_to_scc[v] = scc_count + base;
+                    current_scc.push_back( v );
+                } while ( v != u );
+                
+                scc_nodes.push_back( std::move( current_scc ) );
+                ++scc_count;
+            }
+        }
+    }
+    
+    // Build scc_prefix and scc_to_node arrays
+    scc_prefix[0] = base;
+    ROWTYPE offset = 0;
+    for ( COLTYPE scc = 0; scc < scc_count; ++scc )
+    {
+        const auto& nodes = scc_nodes[scc];
+        for ( COLTYPE node : nodes )
+        {
+            scc_to_node[offset++] = node + base;
+        }
+        scc_prefix[scc + 1] = offset + base;
+    }
+    
+    return scc_count;
+}
+
 // Template instantiations
 #define INSTANTIATE_GRAPH_ALGS( ROWTYPE, COLTYPE )                                   \
     template void ElimTree<ROWTYPE, COLTYPE>(                                        \
         const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parent ); \
     template bool IsDAG<ROWTYPE, COLTYPE>(                                           \
         const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj );                  \
-    template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE>;                       \
+    template COLTYPE FindStronglyConnectedComponents<ROWTYPE, COLTYPE>(              \
+        const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,                    \
+        ROWTYPE* scc_prefix, COLTYPE* scc_to_node, COLTYPE* node_to_scc );           \
+    template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, false>;                \
+    template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, true>;                 \
     template struct TransitiveReduction<ROWTYPE, COLTYPE>;
 
 // INSTANTIATE_GRAPH_ALGS(int, int)

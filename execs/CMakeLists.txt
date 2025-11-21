@@ -39,6 +39,9 @@ target_link_libraries(triangular_debug PRIVATE ${libs} OpenMP::OpenMP_CXX)
 add_executable(ilu_graph_example ilu_graph_example.cpp)
 target_link_libraries(ilu_graph_example PRIVATE ${libs})
 
+add_executable(print_matrix_svg print_matrix_svg.cpp)
+target_link_libraries(print_matrix_svg PRIVATE ${libs})
+
 # CUDA executables (only build if CUDA is enabled)
 if(USE_CUDA)
   add_executable(cuda_spsv_test cuda_spsv_test.cu)
