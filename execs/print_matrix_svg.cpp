@@ -285,10 +285,68 @@ int main( int argc, char* argv[] )
             std::cout << "  Level " << lvl << ": " << sz << " SCC(s), " << nodes_in_level
                       << " node(s)" << std::endl;
         }
+
+        std::vector<int> node_perm( rows );
+        std::vector<int> node_iperm( rows );
+        matrix_utils::BuildPermutationFromSccLevels(
+            num_sccs,
+            scc_prefix.data(),
+            scc_to_node.data(),
+            scc_perm.data(),
+            scc_level_prefix.data(),
+            scc_levels,
+            node_perm.data(),
+            node_iperm.data() );
+
+        std::cout << "\nBuilt node permutation grouped by SCC level order." << std::endl;
+
+        // Build permuted matrix (rows and columns permuted by SCC/level order)
+        matrix_utils::CSRMatrix<int, int, double> permuted;
+        permuted.rows = rows;
+        permuted.cols = csr_matrix.cols;
+        permuted.ResizeAI( rows + 1 );
+        permuted.ResizeAJ( pruned_nnz );
+        permuted.ResizeAV( pruned_nnz );
+
+        matrix_utils::permute( rows, base,
+                               csr_matrix.AI(),
+                               csr_matrix.AJ(),
+                               csr_matrix.AV(),
+                               node_perm.data(),   // iperm: new row -> old row
+                               node_iperm.data(),  // perm: old col -> new col
+                               permuted.AI(),
+                               permuted.AJ(),
+                               permuted.AV() );
+
+        // Write permuted matrix to SVG
+        std::string perm_svg_file = output_file;
+        size_t dot_pos = perm_svg_file.rfind( '.' );
+        if ( dot_pos != std::string::npos )
+        {
+            perm_svg_file.insert( dot_pos, "_perm" );
+        }
+        else
+        {
+            perm_svg_file += "_perm";
+        }
+
+        std::ofstream perm_out( perm_svg_file );
+        if ( perm_out.is_open() )
+        {
+            matrix_utils::writeSVG( permuted.rows, permuted.cols,
+                                    permuted.AI(), permuted.AJ(),
+                                    perm_out, max_display_size );
+            perm_out.close();
+            std::cout << "Permuted matrix SVG written to: " << perm_svg_file << std::endl;
+        }
+        else
+        {
+            std::cerr << "Failed to create permuted SVG output file: " << perm_svg_file << std::endl;
+        }
         
         // Write SCC graph to SVG
         std::string scc_svg_file = output_file;
-        size_t dot_pos = scc_svg_file.rfind( '.' );
+        dot_pos = scc_svg_file.rfind( '.' );
         if ( dot_pos != std::string::npos )
         {
             scc_svg_file.insert( dot_pos, "_scc" );
@@ -311,26 +369,6 @@ int main( int argc, char* argv[] )
             std::cerr << "Failed to create SCC SVG output file: " << scc_svg_file << std::endl;
         }
         
-        // // Print details for small matrices or few SCCs
-        // if ( num_sccs <= 20 || rows <= 50 )
-        // {
-        //     std::cout << "\nSCC details:" << std::endl;
-        //     for ( int scc_id = 0; scc_id < num_sccs; ++scc_id )
-        //     {
-        //         int start = scc_prefix[scc_id] - base;
-        //         int end = scc_prefix[scc_id + 1] - base;
-        //         int size = end - start;
-                
-        //         std::cout << "  SCC " << scc_id + base << " (size " << size << "): ";
-        //         for ( int i = start; i < end; ++i )
-        //         {
-        //             std::cout << scc_to_node[i];
-        //             if ( i + 1 < end )
-        //                 std::cout << ", ";
-        //         }
-        //         std::cout << std::endl;
-        //     }
-        // }
     }
 
     
