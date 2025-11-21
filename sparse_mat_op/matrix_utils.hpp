@@ -1154,6 +1154,21 @@ void Block(const COLTYPE rows, const int base, ROWTYPE const *ai,
   }
 }
 
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void Prune( const COLTYPE rows,
+            ROWTYPE* ai,
+            COLTYPE* aj,
+            VALTYPE* av,
+            const VALTYPE threshold,
+            VALTYPE const* row_thresholds );
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void DiagonalScaledPrune( const COLTYPE rows,
+                          ROWTYPE* ai,
+                          COLTYPE* aj,
+                          VALTYPE* av,
+                          const VALTYPE threshold );
+
 template <ResizableCSRMatrixType CSRMatrixType>
 void RandomL(const typename CSRMatrixType::COLTYPE rows,
              const typename CSRMatrixType::COLTYPE base,
