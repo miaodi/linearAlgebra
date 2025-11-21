@@ -11,6 +11,7 @@
 #include <map>
 #include <cmath>
 #include <algorithm>
+#include <numeric>
 
 int main( int argc, char* argv[] )
 {
@@ -72,8 +73,7 @@ int main( int argc, char* argv[] )
     std::cout << "Matrix: " << csr_matrix.rows << " x " << csr_matrix.cols
               << ", NNZ: " << csr_matrix.NNZ() << std::endl;
 
-    // Prune matrix using per-row thresholds
-    std::cout << "\nPruning matrix with per-row thresholds (row_max * " << threshold << ")..." << std::endl;
+    std::cout << "\nPruning matrix with thresholds (a_ii * a_jj * " << threshold << ")..." << std::endl;
     int original_nnz = csr_matrix.NNZ();
     matrix_utils::DiagonalScaledPrune( csr_matrix.rows, csr_matrix.AI(),
                                        csr_matrix.AJ(), csr_matrix.AV(), threshold );
@@ -123,7 +123,7 @@ int main( int argc, char* argv[] )
         );
         
         std::cout << "Number of strongly connected components: " << num_sccs << std::endl;
-        
+
         // Compute SCC sizes
         std::vector<int> scc_sizes( num_sccs );
         for ( int scc_id = 0; scc_id < num_sccs; ++scc_id )
@@ -212,6 +212,79 @@ int main( int argc, char* argv[] )
         std::cout << "Original graph edges: " << csr_matrix.NNZ() << std::endl;
         std::cout << "Reduction ratio: " << ( csr_matrix.NNZ() > 0 ? 
             static_cast<double>( scc_edges ) / csr_matrix.NNZ() : 0.0 ) << std::endl;
+
+        // Topologically sort the SCC condensation graph to get level sets
+        const int scc_base = scc_ai[0];
+        bool is_lower_triangular = true;
+        for ( int row = 0; row < num_sccs && is_lower_triangular; ++row )
+        {
+            for ( int j = scc_ai[row] - scc_base; j < scc_ai[row + 1] - scc_base; ++j )
+            {
+                if ( scc_aj[j] > row + scc_base )
+                {
+                    is_lower_triangular = false;
+                    break;
+                }
+            }
+        }
+        // Check if SCC graph has all diagonal terms
+        std::cout << "\nChecking for diagonal terms in SCC graph..." << std::endl;
+        int diagonal_count = 0;
+        for ( int scc_id = 0; scc_id < num_sccs; ++scc_id )
+        {
+            for ( int j = scc_ai[scc_id] - scc_base; j < scc_ai[scc_id + 1] - scc_base; ++j )
+            {
+                if ( scc_aj[j] == scc_id + scc_base )
+                {
+                    ++diagonal_count;
+                    break;
+                }
+            }
+        }
+        std::cout << "SCCs with self-loops: " << diagonal_count << " / " << num_sccs << std::endl;
+        if ( diagonal_count == num_sccs )
+        {
+            std::cout << "All SCCs have diagonal terms (self-loops)" << std::endl;
+        }
+        else
+        {
+            std::cout << "Missing diagonal terms in " << ( num_sccs - diagonal_count ) << " SCC(s)" << std::endl;
+        }
+
+        std::vector<int> scc_perm( num_sccs );
+        std::vector<int> scc_level_prefix( num_sccs + 1 );
+        int scc_levels = 0;
+
+        if ( is_lower_triangular )
+        {
+            matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topo;
+            scc_levels = topo( num_sccs, scc_ai.data(), scc_aj.data(),
+                               scc_perm.data(), scc_level_prefix.data(), true );
+
+            // matrix_utils::KahnParallel<int, int> kahn(8);
+            // scc_levels = kahn(num_sccs, scc_ai.data(), scc_aj.data(), scc_perm.data(),
+            //                   scc_level_prefix.data(), true);
+        }
+        else
+        {
+            std::cout << "SCC graph not lower triangular; falling back to Kahn topological order." << std::endl;
+            matrix_utils::KahnParallel<int, int> kahn_parallel( omp_get_max_threads() );
+            scc_levels = kahn_parallel( num_sccs, scc_ai.data(), scc_aj.data(),
+                                        scc_perm.data(), scc_level_prefix.data(), true );
+        }
+        std::cout << "SCC graph levels: " << scc_levels << std::endl;
+        for ( int lvl = 0; lvl < scc_levels; ++lvl )
+        {
+            int sz = scc_level_prefix[lvl + 1] - scc_level_prefix[lvl];
+            int nodes_in_level = 0;
+            for ( int idx = scc_level_prefix[lvl] - scc_ai[0]; idx < scc_level_prefix[lvl + 1] - scc_ai[0]; ++idx )
+            {
+                const int scc_id = scc_perm[idx] - scc_ai[0];
+                nodes_in_level += scc_sizes[scc_id];
+            }
+            std::cout << "  Level " << lvl << ": " << sz << " SCC(s), " << nodes_in_level
+                      << " node(s)" << std::endl;
+        }
         
         // Write SCC graph to SVG
         std::string scc_svg_file = output_file;
