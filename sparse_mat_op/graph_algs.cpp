@@ -341,7 +341,7 @@ COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
     // Algorithm state
     std::vector<COLTYPE> index( rows, -1 );      // Discovery index (-1 = unvisited)
     std::vector<COLTYPE> lowlink( rows, -1 );    // Lowest reachable index
-    std::vector<bool> on_stack( rows, false );   // Whether node is on stack
+    std::vector<char> on_stack( rows, false );   // Whether node is on stack
     std::vector<COLTYPE> stack;                  // DFS stack
     stack.reserve( rows );
     
