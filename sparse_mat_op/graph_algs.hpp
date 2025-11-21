@@ -2,6 +2,7 @@
 #include "matrix_utils.hpp"
 #include <algorithm>
 #include <omp.h>
+#include <set>
 #include <vector>
 namespace matrix_utils
 {
@@ -29,7 +30,8 @@ bool IsDAG( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj );
 /// @brief Project an adjacency graph to a task graph based on task-to-work and work-to-task mappings
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
 /// @tparam COLTYPE Column index type (typically int or int64_t)
-template <typename ROWTYPE, typename COLTYPE>
+/// @tparam KEEPDIAG Whether to keep diagonal elements in the projection
+template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG = false>
 struct ProjectGraphToTaskGraph
 {
     /// @brief Constructor
@@ -60,7 +62,7 @@ struct ProjectGraphToTaskGraph
 private:
     // Data members for reusable memory allocation
     int _nthreads; // Number of threads for parallel computation
-    mutable std::vector<std::vector<COLTYPE>> _task_dependencies; // dependencies for each task
+    mutable std::vector<std::set<COLTYPE>> _task_dependencies; // dependencies for each task (set for auto-dedup)
 };
 
 
@@ -101,4 +103,28 @@ private:
     mutable std::vector<std::vector<COLTYPE>> _reachable; // reachable[i] = list of nodes reachable from i
     mutable std::vector<std::vector<COLTYPE>> _reduced_edges; // reusable storage for reduced edges per row
 };
+
+/// @brief Find Strongly Connected Components (SCCs) using Tarjan's algorithm
+/// @tparam ROWTYPE Row pointer type (typically int or int64_t)
+/// @tparam COLTYPE Column index type (typically int or int64_t)
+/// @param rows Number of rows in the graph
+/// @param ai Row pointers array (ai[0] contains the base indexing)
+/// @param aj Column indices array
+/// @param scc_prefix Output CSR row pointers for SCC-to-node mapping (pre-allocated, size = num_sccs + 1)
+/// @param scc_to_node Output CSR column indices for SCC-to-node mapping (pre-allocated, size = rows)
+/// @param node_to_scc Output array mapping each node to its SCC ID (pre-allocated, size = rows)
+/// @return Number of strongly connected components found
+/// @note SCCs are numbered from 0 to (num_sccs - 1) in reverse topological order
+///       (i.e., if there's an edge from SCC i to SCC j, then i > j)
+///       scc_prefix[i] to scc_prefix[i+1]-1 gives the range of nodes in SCC i
+///       scc_to_node contains the node IDs for each SCC
+template <typename ROWTYPE, typename COLTYPE>
+COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
+                                         ROWTYPE const* ai,
+                                         COLTYPE const* aj,
+                                         ROWTYPE* scc_prefix,
+                                         COLTYPE* scc_to_node,
+                                         COLTYPE* node_to_scc );
+
+
 } // namespace matrix_utils
