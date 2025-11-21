@@ -625,7 +625,7 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
 
 enum TriangularMatrix { L = 0, U = 1 };
 
-template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
+template <typename ROWTYPE, typename COLTYPE>
 struct KahnSerial
 {
     // Kahn's algorithm
@@ -641,7 +641,7 @@ struct KahnSerial
     std::vector<COLTYPE> _t_aj;
 };
 
-template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
+template <typename ROWTYPE, typename COLTYPE>
 struct KahnParallel
 {
     KahnParallel( int nthreads )
