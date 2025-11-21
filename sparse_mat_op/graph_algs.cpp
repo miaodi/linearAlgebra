@@ -423,10 +423,11 @@ COLTYPE FindStronglyConnectedComponents(const COLTYPE rows,
     // Returns the number of SCCs and populates output arrays
     const int base = ai[0];
 
-    std::vector<COLTYPE> index(rows, -1);    // Discovery index (-1 = unvisited)
-    std::vector<COLTYPE> lowlink(rows, -1);  // Lowest reachable index
-    std::vector<bool> on_stack(rows, false); // Whether node is on stack
-    std::vector<COLTYPE> stack;              // DFS stack
+    // Algorithm state
+    std::vector<COLTYPE> index(rows, -1);     // Discovery index (-1 = unvisited)
+    std::vector<COLTYPE> lowlink(rows, -1);   // Lowest reachable index
+    std::vector<char> on_stack(rows, false);  // Whether node is on stack
+    std::vector<COLTYPE> stack;               // DFS stack
     stack.reserve(rows);
 
     COLTYPE current_index = 0;
