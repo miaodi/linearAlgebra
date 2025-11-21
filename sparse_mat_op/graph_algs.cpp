@@ -1,5 +1,6 @@
 #include "graph_algs.hpp"
 #include <algorithm>
+#include <cassert>
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -542,6 +543,48 @@ COLTYPE FindStronglyConnectedComponents(const COLTYPE rows,
     return scc_count;
 }
 
+template <typename ROWTYPE, typename COLTYPE>
+void BuildPermutationFromSccLevels(COLTYPE num_sccs,
+                                   ROWTYPE const* scc_prefix,
+                                   COLTYPE const* scc_to_node,
+                                   COLTYPE const* scc_perm,
+                                   ROWTYPE const* scc_level_prefix,
+                                   COLTYPE scc_levels,
+                                   COLTYPE* node_perm,
+                                   COLTYPE* node_iperm)
+{
+    const auto base = scc_prefix[0];
+    COLTYPE pos = 0;
+
+    // Walk the SCCs in level order and append their member nodes.
+    for (COLTYPE lvl = 0; lvl < scc_levels; ++lvl)
+    {
+        const auto level_begin = scc_level_prefix[lvl] - base;
+        const auto level_end = scc_level_prefix[lvl + 1] - base;
+        for (auto idx = level_begin; idx < level_end; ++idx)
+        {
+            const COLTYPE scc_id = scc_perm[idx] - base;
+            const auto node_begin = scc_prefix[scc_id] - base;
+            const auto node_end = scc_prefix[scc_id + 1] - base;
+            for (auto n = node_begin; n < node_end; ++n)
+            {
+                node_perm[pos++] = scc_to_node[n];
+            }
+        }
+    }
+
+    if (node_iperm != nullptr)
+    {
+        for (COLTYPE i = 0; i < pos; ++i)
+        {
+            node_iperm[node_perm[i] - base] = i + base;
+        }
+    }
+
+    const COLTYPE expected_nodes = scc_prefix[num_sccs] - base;
+    assert(pos == expected_nodes);
+}
+
 // Template instantiations
 #define INSTANTIATE_GRAPH_ALGS(ROWTYPE, COLTYPE)                                                     \
     template void ElimTree<ROWTYPE, COLTYPE>(const COLTYPE rows, ROWTYPE const* ai,                  \
@@ -554,7 +597,11 @@ COLTYPE FindStronglyConnectedComponents(const COLTYPE rows,
                                                COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm);    \
     template COLTYPE FindStronglyConnectedComponents<ROWTYPE, COLTYPE>(                              \
         const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* scc_prefix,               \
-        COLTYPE* scc_to_node, COLTYPE* node_to_scc);
+        COLTYPE* scc_to_node, COLTYPE* node_to_scc);                                                 \
+    template void BuildPermutationFromSccLevels<ROWTYPE, COLTYPE>(                                   \
+        COLTYPE num_sccs, ROWTYPE const* scc_prefix, COLTYPE const* scc_to_node,                     \
+        COLTYPE const* scc_perm, ROWTYPE const* scc_level_prefix, COLTYPE scc_levels,                \
+        COLTYPE* node_perm, COLTYPE* node_iperm);
 
 // INSTANTIATE_GRAPH_ALGS(int, int)
 INSTANTIATE_GRAPH_ALGS(std::int32_t, std::int32_t)
