@@ -59,7 +59,7 @@ int num_threads = 1;
 auto KahnSerial = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> perm(mat.rows);
   std::vector<int> prefix(mat.rows + 1);
-  matrix_utils::KahnSerial<int, int, matrix_utils::TriangularMatrix::L> kahn;
+  matrix_utils::KahnSerial<int, int> kahn;
   for (auto _ : state) {
     kahn.operator()(
         mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
@@ -69,7 +69,7 @@ auto KahnSerial = [](benchmark::State &state, const CSRMatrixType &mat) {
 auto KahnParallel = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> perm(mat.rows);
   std::vector<int> prefix(mat.rows + 1);
-  matrix_utils::KahnParallel<int, int, matrix_utils::TriangularMatrix::L> kahn(num_threads);
+  matrix_utils::KahnParallel<int, int> kahn(num_threads);
   for (auto _ : state) {
     kahn.operator()(
         mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);

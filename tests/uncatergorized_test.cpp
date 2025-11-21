@@ -442,7 +442,7 @@ TEST(TopologicalSort, L)
         }
         std::vector<std::int32_t> perm( size );
         std::vector<std::int32_t> prefix( size + 1 );
-        matrix_utils::KahnSerial<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::L> kahn;
+        matrix_utils::KahnSerial<std::int32_t, std::int32_t> kahn;
         std::int32_t level =
             kahn( size, L.AI(), L.AJ(), perm.data(), prefix.data(), false );
         EXPECT_EQ( prefix[0], base );
@@ -464,7 +464,7 @@ TEST(TopologicalSort, L)
         // test parallel kahn
         std::vector<std::int32_t> perm_parallel( size );
         std::vector<std::int32_t> prefix_parallel( size + 1 );
-        matrix_utils::KahnParallel<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::L> kahn_parallel(
+        matrix_utils::KahnParallel<std::int32_t, std::int32_t> kahn_parallel(
             5 );
         std::int32_t level_parallel = kahn_parallel(
             size, L.AI(), L.AJ(), perm_parallel.data(), prefix_parallel.data(), false );
@@ -537,7 +537,7 @@ TEST(TopologicalSort, U)
         }
         std::vector<std::int32_t> perm( size );
         std::vector<std::int32_t> prefix( size + 1 );
-        matrix_utils::KahnSerial<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::U> kahn;
+        matrix_utils::KahnSerial<std::int32_t, std::int32_t> kahn;
         std::int32_t level =
             kahn.operator()( size, U.AI(), U.AJ(), perm.data(), prefix.data(), false );
         EXPECT_EQ( prefix[0], base );
@@ -559,7 +559,7 @@ TEST(TopologicalSort, U)
         // test parallel kahn
         std::vector<std::int32_t> perm_parallel( size );
         std::vector<std::int32_t> prefix_parallel( size + 1 );
-        matrix_utils::KahnParallel<std::int32_t, std::int32_t, matrix_utils::TriangularMatrix::U> kahn_parallel(
+        matrix_utils::KahnParallel<std::int32_t, std::int32_t> kahn_parallel(
             5 );
         std::int32_t level_parallel = kahn_parallel.operator()(
             size, U.AI(), U.AJ(), perm_parallel.data(), prefix_parallel.data(), false );

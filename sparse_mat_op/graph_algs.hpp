@@ -131,6 +131,7 @@ COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
 /// @param iperm Output inverse permutation array (maps new index to old index)
 template <typename ROWTYPE, typename COLTYPE>
 COLTYPE MISPerm(COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm);
+
 /// @brief Find Strongly Connected Components (SCCs) using Tarjan's algorithm
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
 /// @tparam COLTYPE Column index type (typically int or int64_t)
