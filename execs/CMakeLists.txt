@@ -23,8 +23,6 @@ target_link_libraries(print_matrix_svg PRIVATE ${libs})
 
 add_executable(test_ilum test_ilum.cpp)
 target_link_libraries(test_ilum PRIVATE ${libs} OpenMP::OpenMP_CXX)
-add_executable(print_matrix_svg print_matrix_svg.cpp)
-target_link_libraries(print_matrix_svg PRIVATE ${libs})
 
 # CUDA executables (only build if CUDA is enabled)
 if(USE_CUDA)
