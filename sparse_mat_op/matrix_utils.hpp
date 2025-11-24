@@ -2,13 +2,17 @@
 
 #include "sparse_mat_traits.hpp"
 #include "utils.h"
+#include <algorithm>
 #include <cstddef>
 #include <execution>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <omp.h>
+#include <random>
 #include <span>
+#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 
@@ -1088,72 +1092,17 @@ void DiagVecMul(const COLTYPE n, const VALTYPE alpha, VALTYPE const *diag,
   }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
-          ResizableCSRMatrixType CSRMatrixType>
-void Block(const COLTYPE rows, const int base, ROWTYPE const *ai,
-           COLTYPE const *aj, VALTYPE const *av, const COLTYPE i,
-           const COLTYPE j, const COLTYPE p, const COLTYPE q,
-           CSRMatrixType &subMat) {
-  static_assert(
-      CSRMatrixFormat<ROWTYPE, COLTYPE, VALTYPE, CSRMatrixType>::value);
-
-  if (i + p > rows) {
-    std::cerr << "Block size exceeds matrix size" << std::endl;
-    return;
-  }
-
-  subMat.rows = p;
-  subMat.cols = q;
-  subMat.ResizeAI(p + 1);
-
-  subMat.ai[0] = base;
-
-  std::vector<ROWTYPE> fronts(p);
-  std::vector<ROWTYPE> ends(p);
-
-#pragma omp parallel
-  {
-    const int tid = omp_get_thread_num();
-    const int nthreads = omp_get_num_threads();
-    auto [start, end] =
-        utils::LoadPrefixBalancedPartition(ai + i, ai + i + p, tid, nthreads);
-
-    for (auto it = start; it < end; it++) {
-      COLTYPE row = it - ai;
-      COLTYPE block_row = row - i;
-      fronts[block_row] = std::distance(
-          aj, std::lower_bound(aj + ai[row] - base, aj + ai[row + 1] - base,
-                               j + base));
-      ends[block_row] = std::distance(
-          aj, std::lower_bound(aj + ai[row] - base, aj + ai[row + 1] - base,
-                               j + q + base));
-      subMat.ai[block_row + 1] = ends[block_row] - fronts[block_row];
-    }
-#pragma omp barrier
-#pragma omp single
-    {
-      for (size_t _i = 0; _i < p; _i++) {
-        subMat.ai[_i + 1] += subMat.ai[_i];
-      }
-
-      const auto nnz = subMat.ai[p] - base;
-      subMat.ResizeAJ(nnz);
-      subMat.ResizeAV(nnz);
-    }
-
-    const auto nnz = subMat.ai[p] - base;
-
-    ROWTYPE pos = subMat.ai[start - ai - i] - base;
-    for (auto it = start; it < end; it++) {
-      COLTYPE block_row = it - ai - i;
-      for (ROWTYPE _j = fronts[block_row]; _j < ends[block_row]; _j++) {
-        subMat.aj[pos] = aj[_j] - j;
-        subMat.av[pos++] = av[_j];
-      }
-    }
-  }
-}
-
+/// @brief Prune small entries from a sparse matrix based on per-row thresholds
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @tparam VALTYPE Value type
+/// @param rows Number of rows in the matrix
+/// @param ai Row pointers (modified in-place)
+/// @param aj Column indices (modified in-place)
+/// @param av Matrix values (modified in-place)
+/// @param threshold Global threshold multiplier
+/// @param row_thresholds Per-row threshold values (e.g., row norms)
+/// @note Removes entries where |av[i]| < threshold * row_thresholds[row]
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void Prune( const COLTYPE rows,
             ROWTYPE* ai,
@@ -1162,12 +1111,85 @@ void Prune( const COLTYPE rows,
             const VALTYPE threshold,
             VALTYPE const* row_thresholds );
 
+/// @brief Prune small entries from a sparse matrix using diagonal scaling criterion
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @tparam VALTYPE Value type
+/// @param rows Number of rows in the matrix
+/// @param ai Row pointers (modified in-place)
+/// @param aj Column indices (modified in-place)
+/// @param av Matrix values (modified in-place)
+/// @param threshold Threshold multiplier
+/// @note Removes entries where |a_{i,j}| < |a_{i,i}| * |a_{j,j}| * threshold. Diagonal entries are preserved.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void DiagonalScaledPrune( const COLTYPE rows,
                           ROWTYPE* ai,
                           COLTYPE* aj,
                           VALTYPE* av,
                           const VALTYPE threshold );
+
+/// @brief Fill CSR arrays with random sparsity pattern using pre-sized buffers.
+/// @details Uses Knuth's algorithm S to generate sorted, unique column indices
+///          for each row based on the row pointer layout in @p ai. Column
+///          indices are generated in the range [ai[0], cols + ai[0]).
+///          Values are zero-initialized when @p av is non-null.
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void RandomCSR( const COLTYPE rows,
+                const COLTYPE cols,
+                ROWTYPE const* ai,
+                COLTYPE* aj,
+                VALTYPE* av )
+{
+    if ( ai == nullptr || aj == nullptr )
+    {
+        throw std::invalid_argument( "RandomCSR requires non-null ai and aj" );
+    }
+
+    const ROWTYPE base = ai[0];
+    const bool init_vals = ( av != nullptr );
+    #pragma omp parallel
+    {
+        utils::knuth_s rand;
+        std::mt19937 val_rng( std::random_device{}() );
+        #pragma omp for
+        for ( COLTYPE i = 0; i < rows; ++i )
+        {
+            const ROWTYPE row_start = ai[i] - base;
+            const ROWTYPE row_end = ai[i + 1] - base;
+            const ROWTYPE row_len = row_end - row_start;
+            if ( row_len <= 0 )
+                continue;
+
+            rand( row_len, base, cols + base, aj + row_start );
+
+            if ( init_vals )
+            {
+                if constexpr ( std::is_floating_point_v<VALTYPE> )
+                {
+                    std::uniform_real_distribution<VALTYPE> dist(
+                        std::numeric_limits<VALTYPE>::lowest(), std::numeric_limits<VALTYPE>::max() );
+                    for ( ROWTYPE k = row_start; k < row_end; ++k )
+                    {
+                        av[k] = dist( val_rng );
+                    }
+                }
+                else if constexpr ( std::is_integral_v<VALTYPE> )
+                {
+                    std::uniform_int_distribution<VALTYPE> dist(
+                        std::numeric_limits<VALTYPE>::min(), std::numeric_limits<VALTYPE>::max() );
+                    for ( ROWTYPE k = row_start; k < row_end; ++k )
+                    {
+                        av[k] = dist( val_rng );
+                    }
+                }
+                else
+                {
+                    std::fill_n( av + row_start, static_cast<std::size_t>( row_len ), VALTYPE{} );
+                }
+            }
+        }
+    }
+}
 
 template <ResizableCSRMatrixType CSRMatrixType>
 void RandomL(const typename CSRMatrixType::COLTYPE rows,

@@ -1,10 +1,13 @@
 #include "matrix_utils.hpp"
 #include "sp_ops.hpp"
 #include "utils.h"
+#include "mkl_sparse_mat.h"
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <set>
+#include <omp.h>
 
 using namespace matrix_utils;
 
@@ -129,6 +132,288 @@ protected:
         }
     }
 };
+
+TEST( PartitionOpsTest, Partition1xNZeroBased )
+{
+    const int32_t rows = 3;
+    const int32_t cols = 6;
+    const int32_t base = 0;
+
+    // CSR for:
+    // row0: (0,10) (2,20) (4,30)
+    // row1: (1,40) (2,50) (3,60)
+    // row2: (0,70) (5,80)
+    std::vector<int32_t> ai = { 0, 3, 6, 8 };
+    std::vector<int32_t> aj = { 0, 2, 4, 1, 2, 3, 0, 5 };
+    std::vector<double>   av = { 10, 20, 30, 40, 50, 60, 70, 80 };
+
+    // Split columns into [0,2), [2,4), [4,6)
+    constexpr int N = 3;
+    std::array<int32_t, N + 1> col_splits{ 0, 2, 4, 6 };
+
+    CSRMatrixVec<int32_t, int32_t, double> blocks[N];
+    partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
+                     col_splits.data(), base, blocks, /*nthreads=*/1 );
+
+    auto expect_block = [&]( const CSRMatrixVec<int32_t, int32_t, double>& blk,
+                             int32_t expected_cols,
+                             std::vector<int32_t> expected_ai,
+                             std::vector<int32_t> expected_aj,
+                             std::vector<double> expected_av )
+    {
+        ASSERT_EQ( blk.rows, rows );
+        ASSERT_EQ( blk.cols, expected_cols );
+        ASSERT_EQ( blk.ai.size(), expected_ai.size() );
+        ASSERT_EQ( blk.aj.size(), expected_aj.size() );
+        ASSERT_EQ( blk.av.size(), expected_av.size() );
+
+        EXPECT_TRUE( std::equal( blk.ai.begin(), blk.ai.end(), expected_ai.begin() ) );
+        EXPECT_TRUE( std::equal( blk.aj.begin(), blk.aj.end(), expected_aj.begin() ) );
+        EXPECT_TRUE( std::equal( blk.av.begin(), blk.av.end(), expected_av.begin() ) );
+    };
+
+    // Block 0: columns [0,2)
+    expect_block( blocks[0], 2,
+                  { 0, 1, 2, 3 },
+                  { 0, 1, 0 },
+                  { 10, 40, 70 } );
+
+    // Block 1: columns [2,4) shifted to 0-based
+    expect_block( blocks[1], 2,
+                  { 0, 1, 3, 3 },
+                  { 0, 0, 1 },
+                  { 20, 50, 60 } );
+
+    // Block 2: columns [4,6) shifted to 0-based
+    expect_block( blocks[2], 2,
+                  { 0, 1, 1, 2 },
+                  { 0, 1 },
+                  { 30, 80 } );
+}
+
+TEST( PartitionOpsTest, Partition1xNOneBased )
+{
+    const int32_t rows = 3;
+    const int32_t cols = 6;
+    const int32_t base = 1;
+
+    // Same pattern as zero-based test but shifted to base=1
+    std::vector<int32_t> ai = { 1, 4, 7, 9 };
+    std::vector<int32_t> aj = { 1, 3, 5, 2, 3, 4, 1, 6 };
+    std::vector<double>   av = { 10, 20, 30, 40, 50, 60, 70, 80 };
+
+    constexpr int N = 3;
+    std::array<int32_t, N + 1> col_splits{ 1, 3, 5, 7 }; // includes start/end with base
+
+    CSRMatrixVec<int32_t, int32_t, double> blocks[N];
+    partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
+                     col_splits.data(), base, blocks, /*nthreads=*/1 );
+
+    auto expect_block = [&]( const CSRMatrixVec<int32_t, int32_t, double>& blk,
+                             int32_t expected_cols,
+                             std::vector<int32_t> expected_ai,
+                             std::vector<int32_t> expected_aj,
+                             std::vector<double> expected_av )
+    {
+        ASSERT_EQ( blk.rows, rows );
+        ASSERT_EQ( blk.cols, expected_cols );
+        ASSERT_EQ( blk.ai.size(), expected_ai.size() );
+        ASSERT_EQ( blk.aj.size(), expected_aj.size() );
+        ASSERT_EQ( blk.av.size(), expected_av.size() );
+
+        EXPECT_TRUE( std::equal( blk.ai.begin(), blk.ai.end(), expected_ai.begin() ) );
+        EXPECT_TRUE( std::equal( blk.aj.begin(), blk.aj.end(), expected_aj.begin() ) );
+        EXPECT_TRUE( std::equal( blk.av.begin(), blk.av.end(), expected_av.begin() ) );
+    };
+
+    // Block 0: columns [1,3)
+    expect_block( blocks[0], 2,
+                  { 1, 2, 3, 4 },
+                  { 1, 2, 1 },
+                  { 10, 40, 70 } );
+
+    // Block 1: columns [3,5) shifted to base=1
+    expect_block( blocks[1], 2,
+                  { 1, 2, 4, 4 },
+                  { 1, 1, 2 },
+                  { 20, 50, 60 } );
+
+    // Block 2: columns [5,7) shifted to base=1
+    expect_block( blocks[2], 2,
+                  { 1, 2, 2, 3 },
+                  { 1, 2 },
+                  { 30, 80 } );
+}
+
+TEST( PartitionOpsTest, Partition1xNLargeRecompose )
+{
+    const int32_t rows = 5;
+    const int32_t cols = 8;
+    const int32_t base = 0;
+
+    // Construct a moderately sized, sorted CSR
+    std::vector<int32_t> ai = { 0, 3, 5, 9, 11, 14 };
+    std::vector<int32_t> aj = { 0, 3, 7, 1, 2, 0, 2, 4, 6, 1, 5, 3, 4, 7 };
+    std::vector<double>   av = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
+
+    constexpr int N = 4;
+    std::array<int32_t, N + 1> col_splits{ 0, 2, 4, 6, 8 };
+
+    CSRMatrixVec<int32_t, int32_t, double> blocks[N];
+    partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
+                     col_splits.data(), base, blocks, /*nthreads=*/1 );
+
+    // Recompose the original matrix from blocks and ensure it matches input
+    std::vector<int32_t> rec_ai( rows + 1, 0 );
+    std::vector<int32_t> rec_aj;
+    std::vector<double>  rec_av;
+    rec_ai[0] = base;
+
+    for ( int32_t r = 0; r < rows; ++r )
+    {
+        for ( int b = 0; b < N; ++b )
+        {
+            const auto col_shift = col_splits[b] - base;
+            auto* ai_b = blocks[b].AI();
+            auto* aj_b = blocks[b].AJ();
+            auto* av_b = blocks[b].AV();
+
+            const int32_t start = ai_b[r] - base;
+            const int32_t end   = ai_b[r + 1] - base;
+            for ( int32_t k = start; k < end; ++k )
+            {
+                rec_aj.push_back( aj_b[k] + col_shift );
+                rec_av.push_back( av_b[k] );
+            }
+        }
+        rec_ai[r + 1] = static_cast<int32_t>( rec_aj.size() ) + base;
+    }
+
+    ASSERT_EQ( rec_ai, ai );
+    ASSERT_EQ( rec_aj, aj );
+    ASSERT_EQ( rec_av, av );
+}
+
+TEST( PartitionOpsTest, Partition1xNParallelRecompose )
+{
+    const int32_t rows = 5;
+    const int32_t cols = 8;
+    const int32_t base = 0;
+
+    std::vector<int32_t> ai = { 0, 3, 5, 9, 11, 14 };
+    std::vector<int32_t> aj = { 0, 3, 7, 1, 2, 0, 2, 4, 6, 1, 5, 3, 4, 7 };
+    std::vector<double>   av = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
+
+    constexpr int N = 4;
+    std::array<int32_t, N + 1> col_splits{ 0, 2, 4, 6, 8 };
+    const int max_threads = std::max( 2, std::min( 8, omp_get_max_threads() ) );
+    for ( int nthreads = 2; nthreads <= max_threads; ++nthreads )
+    {
+        CSRMatrixVec<int32_t, int32_t, double> blocks[N];
+        partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
+                         col_splits.data(), base, blocks, nthreads );
+
+        std::vector<int32_t> rec_ai( rows + 1, base );
+        std::vector<int32_t> rec_aj;
+        std::vector<double>  rec_av;
+
+        for ( int32_t r = 0; r < rows; ++r )
+        {
+            for ( int b = 0; b < N; ++b )
+            {
+                const auto col_shift = col_splits[b] - base;
+                auto* ai_b = blocks[b].AI();
+                auto* aj_b = blocks[b].AJ();
+                auto* av_b = blocks[b].AV();
+
+                const int32_t start = ai_b[r] - base;
+                const int32_t end   = ai_b[r + 1] - base;
+                for ( int32_t k = start; k < end; ++k )
+                {
+                    rec_aj.push_back( aj_b[k] + col_shift );
+                    rec_av.push_back( av_b[k] );
+                }
+            }
+            rec_ai[r + 1] = static_cast<int32_t>( rec_aj.size() ) + base;
+        }
+
+        ASSERT_EQ( rec_ai, ai );
+        ASSERT_EQ( rec_aj, aj );
+        ASSERT_EQ( rec_av, av );
+    }
+}
+
+TEST( PartitionOpsTest, Partition1xNBoundaryCases )
+{
+    const int32_t rows = 3;
+    const int32_t cols = 4;
+    const int32_t base = 0;
+
+    // CSR for:
+    // row0: (0,1) (2,2)
+    // row1: (1,3)
+    // row2: (3,4)
+    std::vector<int32_t> ai = { 0, 2, 3, 4 };
+    std::vector<int32_t> aj = { 0, 2, 1, 3 };
+    std::vector<double>   av = { 1, 2, 3, 4 };
+
+    // N=1 should return the same matrix; test threads 1..8
+    for ( int nthreads = 1; nthreads <= 8; ++nthreads )
+    {
+        constexpr int N = 1;
+        std::array<int32_t, N + 1> col_splits{ base, cols + base };
+        CSRMatrixVec<int32_t, int32_t, double> blocks[N];
+        partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
+                         col_splits.data(), base, blocks, nthreads );
+        EXPECT_EQ( blocks[0].rows, rows );
+        EXPECT_EQ( blocks[0].cols, cols );
+        EXPECT_EQ( blocks[0].ai, ai );
+        EXPECT_EQ( blocks[0].aj, aj );
+        EXPECT_EQ( blocks[0].av, av );
+    }
+
+    // N = number of columns: each column becomes its own block (may be empty); test threads 1..8
+    for ( int nthreads = 1; nthreads <= 8; ++nthreads )
+    {
+        const int N = cols;
+        std::vector<int32_t> col_splits( static_cast<size_t>( N + 1 ) );
+        for ( int i = 0; i <= N; ++i ) col_splits[i] = base + i;
+
+        std::vector<CSRMatrixVec<int32_t, int32_t, double>> blocks( static_cast<size_t>( N ) );
+        partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
+                         col_splits.data(), base, blocks.data(), nthreads );
+
+        // Recompose and compare
+        std::vector<int32_t> rec_ai( rows + 1, base );
+        std::vector<int32_t> rec_aj;
+        std::vector<double>  rec_av;
+
+        for ( int32_t r = 0; r < rows; ++r )
+        {
+            for ( int c = 0; c < N; ++c )
+            {
+                const int col_shift = col_splits[c] - base;
+                auto& blk = blocks[c];
+                auto* ai_b = blk.AI();
+                auto* aj_b = blk.AJ();
+                auto* av_b = blk.AV();
+
+                const int start = ai_b[r] - base;
+                const int end   = ai_b[r + 1] - base;
+                for ( int k = start; k < end; ++k )
+                {
+                    rec_aj.push_back( aj_b[k] + col_shift );
+                    rec_av.push_back( av_b[k] );
+                }
+            }
+            rec_ai[r + 1] = static_cast<int32_t>( rec_aj.size() ) + base;
+        }
+
+        EXPECT_EQ( rec_ai, ai );
+        EXPECT_EQ( rec_aj, aj );
+        EXPECT_EQ( rec_av, av );
+    }
+}
 
 // Test basic functionality with small matrix
 TEST_F( SymmetricOpsTest, SmallMatrix_KeepDiag )
@@ -609,9 +894,70 @@ TEST_F( SymmetricOpsTest, AllCMakeMatrices )
 // Partition tests
 class PartitionTest : public testing::Test
 {
-protected:
-    const double _tol = 1e-10;
 };
+
+TEST_F( PartitionTest, PartitionCSRMxN_Basic )
+{
+    // 4x4 matrix, base 0, CSR format
+    // [ 1 2 0 0 ]
+    // [ 3 4 5 0 ]
+    // [ 0 6 7 8 ]
+    // [ 0 0 9 10]
+    std::vector<int> ai = {0, 2, 5, 8, 10};
+    std::vector<int> aj = {0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
+    std::vector<double> av = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    const int rows = 4, cols = 4;
+    const int base = ai[0];
+    const int M = 2, N = 2;
+    int row_splits[M + 1] = { base, 2 + base, 4 + base };
+    int col_splits[N + 1] = { base, 2 + base, 4 + base };
+
+    CSRMatrixVec<int, int, double> blocks[M * N];
+    partitionCSRMxN<CSRMatrixVec<int, int, double>>(
+        rows, cols, ai.data(), aj.data(), av.data(),
+        M, row_splits, N, col_splits, blocks, /*nthreads=*/2 );
+
+    auto& A11 = blocks[0];
+    auto& A12 = blocks[1];
+    auto& A21 = blocks[2];
+    auto& A22 = blocks[3];
+
+    EXPECT_EQ( A11.rows, 2 ); EXPECT_EQ( A11.cols, 2 );
+    EXPECT_EQ( A12.rows, 2 ); EXPECT_EQ( A12.cols, 2 );
+    EXPECT_EQ( A21.rows, 2 ); EXPECT_EQ( A21.cols, 2 );
+    EXPECT_EQ( A22.rows, 2 ); EXPECT_EQ( A22.cols, 2 );
+
+    EXPECT_EQ( A11.NNZ(), 4 );
+    EXPECT_EQ( A12.NNZ(), 1 );
+    EXPECT_EQ( A21.NNZ(), 1 );
+    EXPECT_EQ( A22.NNZ(), 4 );
+}
+
+TEST_F( PartitionTest, PartitionCSRMxN_MixedSplits )
+{
+    // 5x5 matrix with non-uniform splits
+    std::vector<int> ai = {0, 3, 5, 8, 10, 12};
+    std::vector<int> aj = {0, 1, 2, 1, 3, 0, 2, 4, 1, 3, 2, 4};
+    std::vector<double> av(12, 1.0);
+    const int rows = 5, cols = 5;
+    const int base = ai[0];
+    const int M = 3, N = 2;
+    int row_splits[M + 1] = { base, 2 + base, 3 + base, 5 + base };
+    int col_splits[N + 1] = { base, 2 + base, 5 + base };
+
+    CSRMatrixVec<int, int, double> blocks[M * N];
+    partitionCSRMxN<CSRMatrixVec<int, int, double>>(
+        rows, cols, ai.data(), aj.data(), av.data(),
+        M, row_splits, N, col_splits, blocks, /*nthreads=*/2 );
+
+    int total_nnz = 0;
+    for ( int i = 0; i < M * N; ++i )
+    {
+        total_nnz += blocks[i].NNZ();
+        ASSERT_EQ( blocks[i].rows, row_splits[i / N + 1] - row_splits[i / N] );
+    }
+    EXPECT_EQ( total_nnz, ai.back() - ai.front() );
+}
 
 TEST_F( PartitionTest, PartitionCSR2x2_Basic )
 {
@@ -765,6 +1111,33 @@ TEST_F( PartitionTest, PartitionCSR2x2_EmptyBlocks )
     EXPECT_EQ( A22.NNZ(), 0 );
 }
 
+TEST_F( PartitionTest, PartitionCSRMxN_EmptyBlocks )
+{
+    // 4x4 matrix with some empty blocks
+    // [ 1 2 0 0 ]
+    // [ 3 4 0 0 ]
+    // [ 0 0 0 0 ]
+    // [ 0 0 0 0 ]
+    std::vector<int> ai = {0, 2, 4, 4, 4};
+    std::vector<int> aj = {0, 1, 0, 1};
+    std::vector<double> av = {1, 2, 3, 4};
+    const int rows = 4, cols = 4;
+    const int base = ai[0];
+    const int M = 2, N = 2;
+    int row_splits[M + 1] = { base, 2 + base, 4 + base };
+    int col_splits[N + 1] = { base, 2 + base, 4 + base };
+    CSRMatrixVec<int, int, double> blocks[M * N];
+
+    partitionCSRMxN<CSRMatrixVec<int, int, double>>(
+        rows, cols, ai.data(), aj.data(), av.data(),
+        M, row_splits, N, col_splits, blocks, /*nthreads=*/1 );
+
+    EXPECT_EQ( blocks[0].NNZ(), 4 );
+    EXPECT_EQ( blocks[1].NNZ(), 0 );
+    EXPECT_EQ( blocks[2].NNZ(), 0 );
+    EXPECT_EQ( blocks[3].NNZ(), 0 );
+}
+
 TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
 {
     // Test with real matrices from tests/data
@@ -807,7 +1180,8 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
             { 2 * size / 3, 2 * size / 3 }, // Two-thirds
             { size / 4, 3 * size / 4 }  // Asymmetric
         };
-        std::vector<int> thread_counts = { 1, 2, 4, 8 };
+        std::vector<int> thread_counts;
+        for ( int t = 1; t <= 8; ++t ) thread_counts.push_back( t );
 
         for ( const auto& [row_split, col_split] : splits )
         {
@@ -965,6 +1339,224 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
         }
 
         std::cout << "  ✓ All checks passed for " << matrix_file << std::endl;
+    }
+}
+
+TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
+{
+    std::vector<std::string> test_matrices = {
+        "data/ex5.mtx",
+        "data/bcsstk17.mtx",
+        "data/s3rmt3m3.mtx"
+    };
+    constexpr int max_grids = 5;
+
+    for ( const auto& matrix_file : test_matrices )
+    {
+        std::cout << "Testing CSRMxN partition with matrix: " << matrix_file << std::endl;
+
+        std::ifstream f( matrix_file );
+        if ( !f.good() )
+        {
+            std::cout << "  Skipping (file not found): " << matrix_file << std::endl;
+            continue;
+        }
+
+        std::vector<int> ai, aj;
+        std::vector<double> av;
+        utils::read_matrix_market_csr( f, ai, aj, av );
+        f.close();
+
+        if ( ai.empty() || ai.size() == 1 )
+        {
+            std::cout << "  Skipping (empty matrix): " << matrix_file << std::endl;
+            continue;
+        }
+
+        const int size = static_cast<int>( ai.size() - 1 );
+        const int base = ai[0];
+        const int nnz = ai[size] - base;
+
+        std::vector<std::pair<int, int>> grid_shapes;
+        for ( int m = 1; m <= max_grids; ++m )
+        {
+            for ( int n = 1; n <= max_grids; ++n )
+            {
+                grid_shapes.emplace_back( m, n );
+            }
+        }
+        std::vector<int> thread_counts;
+        for ( int t = 1; t <= 4; ++t ) thread_counts.push_back( t );
+
+        for ( const auto& [M, N] : grid_shapes )
+        {
+            if ( M <= 0 || N <= 0 ) continue;
+
+            std::vector<int> row_splits( static_cast<size_t>( M + 1 ) );
+            std::vector<int> col_splits( static_cast<size_t>( N + 1 ) );
+
+            for ( int i = 0; i <= M; ++i )
+            {
+                row_splits[i] = base + static_cast<int>( ( static_cast<long long>( size ) * i ) / M );
+            }
+            row_splits.back() = size + base;
+
+            for ( int j = 0; j <= N; ++j )
+            {
+                col_splits[j] = base + static_cast<int>( ( static_cast<long long>( size ) * j ) / N );
+            }
+            col_splits.back() = size + base;
+
+            for ( int nthreads : thread_counts )
+            {
+
+                std::vector<CSRMatrixVec<int, int, double>> blocks( static_cast<size_t>( M * N ) );
+
+                partitionCSRMxN<CSRMatrixVec<int, int, double>>(
+                    size, size, ai.data(), aj.data(), av.data(),
+                    M, row_splits.data(), N, col_splits.data(), blocks.data(), nthreads );
+
+                int total_nnz = 0;
+                for ( int idx = 0; idx < M * N; ++idx )
+                {
+                    total_nnz += blocks[idx].NNZ();
+                }
+                EXPECT_EQ( total_nnz, nnz );
+
+                std::vector<int> combined_ai( size + 1, base );
+                std::vector<int> combined_aj;
+                std::vector<double> combined_av;
+
+                for ( int rb = 0; rb < M; ++rb )
+                {
+                    const int global_row_start = row_splits[rb] - base;
+                    const int block_rows = row_splits[rb + 1] - row_splits[rb];
+                    for ( int local_r = 0; local_r < block_rows; ++local_r )
+                    {
+                        const int global_r = global_row_start + local_r;
+                        for ( int cb = 0; cb < N; ++cb )
+                        {
+                            const int col_shift = col_splits[cb] - base;
+                            auto& blk = blocks[rb * N + cb];
+                            auto* ai_b = blk.AI();
+                            auto* aj_b = blk.AJ();
+                            auto* av_b = blk.AV();
+
+                            const int start = ai_b[local_r] - base;
+                            const int end   = ai_b[local_r + 1] - base;
+                            for ( int k = start; k < end; ++k )
+                            {
+                                combined_aj.push_back( aj_b[k] + col_shift );
+                                combined_av.push_back( av_b[k] );
+                            }
+                        }
+                        combined_ai[global_r + 1] = static_cast<int>( combined_aj.size() ) + base;
+                    }
+                }
+
+                ASSERT_EQ( combined_ai, ai );
+                ASSERT_EQ( combined_aj, aj );
+                ASSERT_EQ( combined_av, av );
+
+                // Verify every element is placed into the correct block with correct value
+                for ( int i = 0; i < size; ++i )
+                {
+                    for ( int j_idx = ai[i] - base; j_idx < ai[i + 1] - base; ++j_idx )
+                    {
+                        const int col = aj[j_idx];
+                        const double val = av[j_idx];
+
+                        const int rb = static_cast<int>(
+                            std::upper_bound( row_splits.begin(), row_splits.end(), i + base )
+                            - row_splits.begin() - 1 );
+                        const int cb = static_cast<int>(
+                            std::upper_bound( col_splits.begin(), col_splits.end(), col )
+                            - col_splits.begin() - 1 );
+
+                        auto& blk = blocks[rb * N + cb];
+                        auto* ai_b = blk.AI();
+                        auto* aj_b = blk.AJ();
+                        auto* av_b = blk.AV();
+
+                        const int local_row = i - ( row_splits[rb] - base );
+                        const int expected_col = col - ( col_splits[cb] - base );
+
+                        bool found = false;
+                        for ( int k = ai_b[local_row] - base; k < ai_b[local_row + 1] - base; ++k )
+                        {
+                            if ( aj_b[k] == expected_col )
+                            {
+                                EXPECT_DOUBLE_EQ( av_b[k], val );
+                                found = true;
+                                break;
+                            }
+                        }
+                        EXPECT_TRUE( found ) << "Element (" << i << "," << col
+                                             << ") not found in block (" << rb << "," << cb
+                                             << ") for grid " << M << "x" << N;
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(Block, Submatrix)
+{
+    for (int nthreads = 1; nthreads <= 4; nthreads++)
+    {
+        omp_set_num_threads(nthreads);
+        constexpr int rows = 1000;
+        constexpr int nnz_per_row = 15;
+
+        matrix_utils::CSRMatrix<int, int, double> mat;
+        mat.rows = rows;
+        mat.cols = rows;
+        mat.ResizeAI(rows + 1);
+        mat.ResizeAJ(static_cast<std::size_t>(rows) * nnz_per_row);
+        mat.ResizeAV(static_cast<std::size_t>(rows) * nnz_per_row);
+
+        for (int iter = 0; iter < 4; iter++)
+        {
+            const int base = (iter % 2 == 0) ? 1 : 0;
+            auto* ai = mat.AI();
+            ai[0] = base;
+            for (int r = 0; r < rows; ++r)
+            {
+                ai[r + 1] = ai[r] + nnz_per_row;
+            }
+            matrix_utils::RandomCSR(rows, rows, mat.AI(), mat.AJ(), mat.AV());
+
+            const int start_row = 20;
+            const int start_col = 32;
+            const int p  = 123;
+            const int q = 234;
+            matrix_utils::CSRMatrix<int, int, double> block;
+            matrix_utils::Block(mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), start_row,
+                                start_col, p, q, block);
+
+            auto* aj = mat.AJ();
+            auto* av = mat.AV();
+            EXPECT_EQ(block.rows, p);
+            EXPECT_EQ(block.cols, q);
+            EXPECT_EQ(block.Base(), base);
+
+            for (int i = 0; i < block.rows; i++)
+            {
+                if (block.ai[i] != block.ai[i + 1])
+                {
+                    EXPECT_LT(block.aj[block.ai[i + 1] - 1 - block.Base()] - block.Base(), q);
+                }
+                auto* it = std::lower_bound(aj + ai[start_row + i] - base,
+                                            aj + ai[start_row + i + 1] - base, start_col + base);
+                for (int j = block.ai[i] - base; j < block.ai[i + 1] - base; j++)
+                {
+                    EXPECT_EQ(block.aj[j], *it - start_col);
+                    EXPECT_EQ(block.av[j], av[it - aj]);
+                    it++;
+                }
+            }
+        }
     }
 }
 

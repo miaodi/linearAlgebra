@@ -401,6 +401,138 @@ void SplitLU<CSRMatrixType>::operator()(const COLTYPE rows, ROWTYPE const *ai,
   }
 }
 
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void Prune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av, const VALTYPE threshold,
+           VALTYPE const* row_thresholds)
+{
+    const ROWTYPE base = ai[0];
+    const ROWTYPE old_nnz = ai[rows] - base;
+
+    // Store original ai values before modifying
+    std::vector<ROWTYPE> old_ai(rows + 1);
+    std::memcpy(old_ai.data(), ai, (rows + 1) * sizeof(ROWTYPE));
+
+    std::vector<ROWTYPE> new_row_sizes(rows);
+    std::vector<ROWTYPE> thread_prefix(omp_get_max_threads() + 1, 0);
+    std::vector<VALTYPE> av_tmp(old_nnz);
+    std::vector<COLTYPE> aj_tmp(old_nnz);
+
+    auto get_threshold = [&](COLTYPE row)
+    { return row_thresholds ? row_thresholds[row] : threshold; };
+
+#pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        const int num_threads = omp_get_num_threads();
+        auto [start, end] =
+            utils::LoadPrefixBalancedPartitionPos(old_ai.data(), old_ai.data() + rows, tid, num_threads);
+
+        // Phase 1: Filter and count surviving entries per row
+        ROWTYPE local_nnz = 0;
+        for (COLTYPE i = start; i < end; i++)
+        {
+            ROWTYPE row_size = 0;
+            const ROWTYPE row_start = old_ai[i] - base;
+            const ROWTYPE row_end = old_ai[i + 1] - base;
+            const auto row_threshold = get_threshold(i);
+
+            for (ROWTYPE j = row_start; j < row_end; j++)
+            {
+                if (std::abs(av[j]) > row_threshold)
+                {
+                    aj_tmp[row_start + row_size] = aj[j];
+                    av_tmp[row_start + row_size] = av[j];
+                    row_size++;
+                }
+            }
+            new_row_sizes[i] = row_size;
+            local_nnz += row_size;
+        }
+        thread_prefix[tid + 1] = local_nnz;
+
+#pragma omp barrier
+#pragma omp single
+        {
+            // Compute thread prefix sums
+            for (size_t i = 1; i < thread_prefix.size(); i++)
+            {
+                thread_prefix[i] += thread_prefix[i - 1];
+            }
+        }
+
+        // Phase 2: Compute new ai array (CSR row pointers)
+        ROWTYPE row_offset = thread_prefix[tid] + base;
+        for (COLTYPE i = start; i < end; i++)
+        {
+            row_offset += new_row_sizes[i];
+            ai[i + 1] = row_offset;
+        }
+
+#pragma omp barrier
+
+        // Phase 3: Copy filtered data to final positions
+        for (COLTYPE i = start; i < end; i++)
+        {
+            const ROWTYPE old_row_start = old_ai[i] - base;
+            const ROWTYPE new_row_start = ai[i] - base;
+            const ROWTYPE row_size = new_row_sizes[i];
+
+            if (row_size > 0)
+            {
+                std::memcpy(aj + new_row_start, aj_tmp.data() + old_row_start, row_size * sizeof(COLTYPE));
+                std::memcpy(av + new_row_start, av_tmp.data() + old_row_start, row_size * sizeof(VALTYPE));
+            }
+        }
+    }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void DiagonalScaledPrune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av, const VALTYPE threshold)
+{
+    const ROWTYPE base = ai[0];
+
+    // Step 1: Extract diagonal values
+    std::vector<VALTYPE> diag(rows, 0.0);
+
+#pragma omp parallel for
+    for (COLTYPE i = 0; i < rows; ++i)
+    {
+        const ROWTYPE row_start = ai[i] - base;
+        const ROWTYPE row_end = ai[i + 1] - base;
+        const COLTYPE diag_col = i + base;
+
+        // Binary search for diagonal element
+        auto it = std::lower_bound(aj + row_start, aj + row_end, diag_col);
+        if (it != aj + row_end && *it == diag_col)
+        {
+            diag[i] = av[it - aj];
+        }
+    }
+
+    // Step 2: Zero out entries where |a_ii| * |a_jj| * threshold < |a_ij|
+#pragma omp parallel for
+    for (COLTYPE i = 0; i < rows; ++i)
+    {
+        const VALTYPE abs_diag_i = std::abs(diag[i]);
+        for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; ++j)
+        {
+            const COLTYPE col = aj[j] - base;
+            if (col != i) // Skip diagonal
+            {
+                const VALTYPE abs_diag_j = std::abs(diag[col]);
+                const VALTYPE threshold_ij = abs_diag_i * abs_diag_j * threshold;
+                if (av[j] * av[j] < threshold_ij)
+                {
+                    av[j] = 0.0;
+                }
+            }
+        }
+    }
+
+    // Step 3: Prune zeros
+    Prune(rows, ai, aj, av, static_cast<VALTYPE>(0.0), (VALTYPE*)nullptr);
+}
+
 template void SplitTriangle<TriangularMatrix::U, int, int, double,
                             CSRMatrix<int, int, double>>(
     const int rows, const int base, int const *ai, int const *aj,
@@ -431,153 +563,6 @@ template void TriangularToFull<TriangularMatrix::U, int, int, double,
     const int rows, const int base, int const *ai, int const *aj,
     double const *av, CSRMatrixVec<int, int, double> &F);
 
-template void Block<int, int, double, CSRMatrixVec<int, int, double>>(
-    const int rows, const int base, int const *ai, int const *aj,
-    double const *av, const int i, const int j, const int p, const int q,
-    CSRMatrixVec<int, int, double> &);
-
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void Prune( const COLTYPE rows,
-            ROWTYPE* ai,
-            COLTYPE* aj,
-            VALTYPE* av,
-            const VALTYPE threshold,
-            VALTYPE const* row_thresholds )
-{
-    const ROWTYPE base = ai[0];
-    const ROWTYPE old_nnz = ai[rows] - base;
-    
-    // Store original ai values before modifying
-    std::vector<ROWTYPE> old_ai( rows + 1 );
-    std::memcpy( old_ai.data(), ai, (rows + 1) * sizeof(ROWTYPE) );
-    
-    std::vector<ROWTYPE> new_row_sizes( rows );
-    std::vector<ROWTYPE> thread_prefix( omp_get_max_threads() + 1, 0 );
-    std::vector<VALTYPE> av_tmp( old_nnz );
-    std::vector<COLTYPE> aj_tmp( old_nnz );
-    
-    auto get_threshold = [&]( COLTYPE row ) {
-        return row_thresholds ? row_thresholds[row] : threshold;
-    };
-    
-#pragma omp parallel
-    {
-        const int tid = omp_get_thread_num();
-        const int num_threads = omp_get_num_threads();
-        auto [start, end] =
-            utils::LoadPrefixBalancedPartitionPos( old_ai.data(), old_ai.data() + rows, tid, num_threads );
-        
-        // Phase 1: Filter and count surviving entries per row
-        ROWTYPE local_nnz = 0;
-        for ( COLTYPE i = start; i < end; i++ )
-        {
-            ROWTYPE row_size = 0;
-            const ROWTYPE row_start = old_ai[i] - base;
-            const ROWTYPE row_end = old_ai[i + 1] - base;
-            const auto row_threshold = get_threshold( i );
-            
-            for ( ROWTYPE j = row_start; j < row_end; j++ )
-            {
-                if ( std::abs( av[j] ) > row_threshold )
-                {
-                    aj_tmp[row_start + row_size] = aj[j];
-                    av_tmp[row_start + row_size] = av[j];
-                    row_size++;
-                }
-            }
-            new_row_sizes[i] = row_size;
-            local_nnz += row_size;
-        }
-        thread_prefix[tid + 1] = local_nnz;
-        
-#pragma omp barrier
-#pragma omp single
-        {
-            // Compute thread prefix sums
-            for ( size_t i = 1; i < thread_prefix.size(); i++ )
-            {
-                thread_prefix[i] += thread_prefix[i - 1];
-            }
-        }
-        
-        // Phase 2: Compute new ai array (CSR row pointers)
-        ROWTYPE row_offset = thread_prefix[tid] + base;
-        for ( COLTYPE i = start; i < end; i++ )
-        {
-            row_offset += new_row_sizes[i];
-            ai[i + 1] = row_offset;
-        }
-        
-#pragma omp barrier
-        
-        // Phase 3: Copy filtered data to final positions
-        for ( COLTYPE i = start; i < end; i++ )
-        {
-            const ROWTYPE old_row_start = old_ai[i] - base;
-            const ROWTYPE new_row_start = ai[i] - base;
-            const ROWTYPE row_size = new_row_sizes[i];
-            
-            if ( row_size > 0 )
-            {
-                std::memcpy( aj + new_row_start, aj_tmp.data() + old_row_start, 
-                            row_size * sizeof( COLTYPE ) );
-                std::memcpy( av + new_row_start, av_tmp.data() + old_row_start, 
-                            row_size * sizeof( VALTYPE ) );
-            }
-        }
-    }
-}
-
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void DiagonalScaledPrune( const COLTYPE rows,
-                          ROWTYPE* ai,
-                          COLTYPE* aj,
-                          VALTYPE* av,
-                          const VALTYPE threshold )
-{
-    const ROWTYPE base = ai[0];
-    
-    // Step 1: Extract diagonal values
-    std::vector<VALTYPE> diag( rows, 0.0 );
-    
-#pragma omp parallel for
-    for ( COLTYPE i = 0; i < rows; ++i )
-    {
-        const ROWTYPE row_start = ai[i] - base;
-        const ROWTYPE row_end = ai[i + 1] - base;
-        const COLTYPE diag_col = i + base;
-        
-        // Binary search for diagonal element
-        auto it = std::lower_bound( aj + row_start, aj + row_end, diag_col );
-        if ( it != aj + row_end && *it == diag_col )
-        {
-            diag[i] = av[it - aj];
-        }
-    }
-    
-    // Step 2: Zero out entries where |a_ii| * |a_jj| * threshold < |a_ij|
-#pragma omp parallel for
-    for ( COLTYPE i = 0; i < rows; ++i )
-    {
-        const VALTYPE abs_diag_i = std::abs( diag[i] );
-        for ( ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; ++j )
-        {
-            const COLTYPE col = aj[j] - base;
-            if ( col != i )  // Skip diagonal
-            {
-                const VALTYPE abs_diag_j = std::abs( diag[col] );
-                const VALTYPE threshold_ij = abs_diag_i * abs_diag_j * threshold;
-                if ( av[j] * av[j] < threshold_ij )
-                {
-                    av[j] = 0.0;
-                }
-            }
-        }
-    }
-    
-    // Step 3: Prune zeros
-    Prune( rows, ai, aj, av, static_cast<VALTYPE>(0.0), (VALTYPE*)nullptr );
-}
 
 #define INSTANTIATE_TOPOLOGICAL_SORT(ROWTYPE, COLTYPE)                       \
     template struct KahnSerial<ROWTYPE, COLTYPE>;                            \
