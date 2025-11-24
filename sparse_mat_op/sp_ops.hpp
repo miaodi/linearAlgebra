@@ -54,6 +54,18 @@ private:
     CSRStructVec<ROWTYPE, COLTYPE> _APAT;
 };
 
+template <ResizableCSRMatrixType CSRMatrixType>
+void Block(const typename CSRMatrixType::COLTYPE rows,
+           const typename CSRMatrixType::ROWTYPE base,
+           typename CSRMatrixType::ROWTYPE const* ai,
+           typename CSRMatrixType::COLTYPE const* aj,
+           typename CSRMatrixType::VALTYPE const* av,
+           const typename CSRMatrixType::COLTYPE i,
+           const typename CSRMatrixType::COLTYPE j,
+           const typename CSRMatrixType::COLTYPE p,
+           const typename CSRMatrixType::COLTYPE q,
+           CSRMatrixType& subMat);
+
 
 template <ResizableCSRMatrixType CSRMatrixType>
 void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
@@ -79,5 +91,30 @@ void partitionCSR2x2(const typename CSRMatrixType::COLTYPE rows,
                      CSRMatrixType& A12,
                      CSRMatrixType& A21,
                      CSRMatrixType& A22,
+                     const int nthreads = omp_get_max_threads());
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void partitionCSR1xN(const typename CSRMatrixType::COLTYPE rows,
+                     const typename CSRMatrixType::COLTYPE cols,
+                     typename CSRMatrixType::ROWTYPE const* ai,
+                     typename CSRMatrixType::COLTYPE const* aj,
+                     typename CSRMatrixType::VALTYPE const* av,
+                     const int N,
+                     typename CSRMatrixType::COLTYPE const* col_splits,
+                     const typename CSRMatrixType::ROWTYPE base,
+                     CSRMatrixType* blocks,
+                     const int nthreads = omp_get_max_threads());
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void partitionCSRMxN(const typename CSRMatrixType::COLTYPE rows,
+                     const typename CSRMatrixType::COLTYPE cols,
+                     typename CSRMatrixType::ROWTYPE const* ai,
+                     typename CSRMatrixType::COLTYPE const* aj,
+                     typename CSRMatrixType::VALTYPE const* av,
+                     const int M,
+                     typename CSRMatrixType::COLTYPE const* row_splits,
+                     const int N,
+                     typename CSRMatrixType::COLTYPE const* col_splits,
+                     CSRMatrixType* blocks,
                      const int nthreads = omp_get_max_threads());
 } // namespace matrix_utils
