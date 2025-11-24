@@ -914,15 +914,17 @@ mkl_sparse_mat random_sparse(const MKL_INT row, const MKL_INT nnzRow) {
 
   auto ai = res.get_ai();
   auto aj = res.get_aj();
+  auto av = res.get_av();
+  const MKL_INT base = res.mkl_base();
 
-  for (MKL_INT i = 0; i <= row; i++) {
-    ai[i] = i * nnzRow;
+  ai[0] = base;
+  for ( MKL_INT i = 0; i < row; ++i )
+  {
+      ai[i + 1] = ai[i] + nnzRow;
   }
-  utils::knuth_s rand;
-#pragma omp parallel for private(rand)
-  for (MKL_INT i = 0; i < row; i++) {
-    rand(nnzRow, 0, row, aj.get() + ai[i]);
-  }
+
+  matrix_utils::RandomCSR<MKL_INT, MKL_INT, double>( row, row,
+                                                     ai.get(), aj.get(), av.get() );
   return res;
 }
 } // namespace mkl_wrapper

@@ -1,7 +1,10 @@
 #include "sp_ops.hpp"
 #include "utils.h"
+#include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <iostream>
+#include <stdexcept>
 
 namespace matrix_utils
 {
@@ -411,9 +414,81 @@ void APlusATStruct<ROWTYPE, COLTYPE, KEEPDIAG>::fillAndCompact( const COLTYPE si
 }
 
 template <ResizableCSRMatrixType CSRMatrixType>
+void Block( const typename CSRMatrixType::COLTYPE rows,
+            const typename CSRMatrixType::ROWTYPE base,
+            typename CSRMatrixType::ROWTYPE const* ai,
+            typename CSRMatrixType::COLTYPE const* aj,
+            typename CSRMatrixType::VALTYPE const* av,
+            const typename CSRMatrixType::COLTYPE i,
+            const typename CSRMatrixType::COLTYPE j,
+            const typename CSRMatrixType::COLTYPE p,
+            const typename CSRMatrixType::COLTYPE q,
+            CSRMatrixType& subMat )
+{
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+
+    if ( i + p > rows )
+    {
+        std::cerr << "Block size exceeds matrix size" << std::endl;
+        return;
+    }
+
+    subMat.rows = p;
+    subMat.cols = q;
+    subMat.ResizeAI( p + 1 );
+
+    subMat.ai[0] = base;
+
+    std::vector<ROWTYPE> fronts( p );
+    std::vector<ROWTYPE> ends( p );
+
+#pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        const int nthreads = omp_get_num_threads();
+        auto [start, end] = utils::LoadPrefixBalancedPartition( ai + i, ai + i + p, tid, nthreads );
+
+        for ( auto it = start; it < end; it++ )
+        {
+            COLTYPE row = it - ai;
+            COLTYPE block_row = row - i;
+            fronts[block_row] = std::distance(
+                aj, std::lower_bound( aj + ai[row] - base, aj + ai[row + 1] - base, j + base ) );
+            ends[block_row] = std::distance(
+                aj, std::lower_bound( aj + ai[row] - base, aj + ai[row + 1] - base, j + q + base ) );
+            subMat.ai[block_row + 1] = ends[block_row] - fronts[block_row];
+        }
+#pragma omp barrier
+#pragma omp single
+        {
+            for ( size_t _i = 0; _i < p; _i++ )
+            {
+                subMat.ai[_i + 1] += subMat.ai[_i];
+            }
+
+            const auto nnz = subMat.ai[p] - base;
+            subMat.ResizeAJ( nnz );
+            subMat.ResizeAV( nnz );
+        }
+
+        ROWTYPE pos = subMat.ai[start - ai - i] - base;
+        for ( auto it = start; it < end; it++ )
+        {
+            COLTYPE block_row = it - ai - i;
+            for ( ROWTYPE _j = fronts[block_row]; _j < ends[block_row]; _j++ )
+            {
+                subMat.aj[pos] = aj[_j] - j;
+                subMat.av[pos++] = av[_j];
+            }
+        }
+    }
+}
+
+template <ResizableCSRMatrixType CSRMatrixType>
 void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
-                        const typename CSRMatrixType::COLTYPE cols,
-                        typename CSRMatrixType::ROWTYPE const* ai,  
+                     const typename CSRMatrixType::COLTYPE cols,
+                     typename CSRMatrixType::ROWTYPE const* ai,
                         typename CSRMatrixType::COLTYPE const* aj,
                         typename CSRMatrixType::VALTYPE const* av,
                         const typename CSRMatrixType::COLTYPE col_split,
@@ -533,13 +608,257 @@ void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
             
             // Copy right block (columns >= col_split) with adjusted column indices
             // Subtract col_split to shift column indices, keeping the base offset
-            ROWTYPE pos2 = ai2[i] - base;
-            for (ROWTYPE j = split; j < ai[i + 1] - base; ++j) {
-                aj2[pos2] = aj[j] - col_split;
-                av2[pos2] = av[j];
-                pos2++;
+            const ROWTYPE dest_offset = ai2[i] - base;
+            const auto right_begin = aj + split;
+            const auto right_end = aj + ai[i + 1] - base;
+
+            std::transform( right_begin, right_end, aj2 + dest_offset,
+                            [col_split]( COLTYPE col ) { return col - col_split; } );
+
+            std::copy( av + split, av + ai[i + 1] - base, av2 + dest_offset );
+        }
+    }
+}
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void partitionCSR1xN( const typename CSRMatrixType::COLTYPE rows,
+                      const typename CSRMatrixType::COLTYPE cols,
+                      typename CSRMatrixType::ROWTYPE const* ai,
+                      typename CSRMatrixType::COLTYPE const* aj,
+                      typename CSRMatrixType::VALTYPE const* av,
+                      const int N,
+                      typename CSRMatrixType::COLTYPE const* col_splits,
+                      const typename CSRMatrixType::ROWTYPE base,
+                      CSRMatrixType* blocks,
+                      const int nthreads )
+{
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+    using VALTYPE = typename CSRMatrixType::VALTYPE;
+
+    if ( blocks == nullptr )
+    {
+        throw std::invalid_argument( "blocks pointer must not be null" );
+    }
+    if ( nthreads < 1 )
+    {
+        throw std::invalid_argument( "nthreads must be at least 1" );
+    }
+
+    if ( N < 1 )
+    {
+        throw std::invalid_argument( "N must be at least 1 (number of column blocks)" );
+    }
+    if ( col_splits == nullptr )
+    {
+        throw std::invalid_argument( "col_splits must not be null" );
+    }
+
+    const std::size_t nblocks = static_cast<std::size_t>( N );
+    const std::size_t nsplits = nblocks > 0 ? nblocks - 1 : 0;
+    const std::size_t total_bounds = nblocks + 1;
+
+    if ( !std::is_sorted( col_splits, col_splits + total_bounds ) )
+    {
+        throw std::invalid_argument( "col_splits must be sorted in ascending order" );
+    }
+    for ( std::size_t idx = 1; idx < total_bounds; ++idx )
+    {
+        if ( col_splits[idx] == col_splits[idx - 1] )
+        {
+            throw std::invalid_argument( "col_splits must contain unique split positions" );
+        }
+    }
+    if ( col_splits[0] != base || col_splits[total_bounds - 1] != cols + base )
+    {
+        throw std::invalid_argument( "col_splits must include start (base) and end (cols + base)" );
+    }
+
+    for ( std::size_t b = 0; b < nblocks; ++b )
+    {
+        const COLTYPE start_base = col_splits[b];
+        const COLTYPE end_base = col_splits[b + 1];
+
+        blocks[b].rows = rows;
+        blocks[b].cols = end_base - start_base;
+
+        auto* ai_block = blocks[b].ResizeAI( rows + 1 );
+        ai_block[0] = base;
+    }
+
+    std::vector<ROWTYPE> split_positions( rows * nsplits, 0 );
+    const std::size_t thread_stride = static_cast<std::size_t>( nthreads ) + 1;
+    std::vector<ROWTYPE> thread_sums( nblocks * thread_stride, 0 );
+
+#pragma omp parallel num_threads( nthreads )
+    {
+        const int tid = omp_get_thread_num();
+        const int thread_count = omp_get_num_threads();
+
+        auto [row_start, row_end] =
+            utils::LoadPrefixBalancedPartitionPos( ai, ai + rows, tid, thread_count );
+
+        for ( COLTYPE i = row_start; i < row_end; ++i )
+        {
+            auto row_begin = aj + ai[i] - base;
+            auto row_end_ptr = aj + ai[i + 1] - base;
+
+            ROWTYPE previous = ai[i] - base;
+            ROWTYPE* row_splits =
+                nsplits ? split_positions.data() + static_cast<std::size_t>( i ) * nsplits : nullptr;
+
+            for ( std::size_t s = 0; s < nsplits; ++s )
+            {
+                const auto boundary_value = col_splits[s + 1];
+                auto split_it = std::lower_bound( row_begin, row_end_ptr, boundary_value );
+                const ROWTYPE boundary_pos = static_cast<ROWTYPE>( split_it - aj );
+                row_splits[s] = boundary_pos;
+                blocks[s].AI()[i + 1] = boundary_pos - previous;
+                previous = boundary_pos;
+                row_begin = split_it; // advance because splits are sorted
+            }
+            blocks[nblocks - 1].AI()[i + 1] = ( ai[i + 1] - base ) - previous;
+        }
+
+#pragma omp barrier
+
+        auto [chunk_start, chunk_end] = utils::LoadBalancedPartitionPos( rows, tid, thread_count );
+
+        for ( std::size_t b = 0; b < nblocks; ++b )
+        {
+            ROWTYPE local_sum = 0;
+            for ( COLTYPE i = chunk_start; i < chunk_end; ++i )
+            {
+                local_sum += blocks[b].AI()[i + 1];
+            }
+            thread_sums[b * thread_stride + tid + 1] = local_sum;
+        }
+
+#pragma omp barrier
+
+#pragma omp single
+        {
+            for ( std::size_t b = 0; b < nblocks; ++b )
+            {
+                ROWTYPE* sums = thread_sums.data() + b * thread_stride;
+                sums[0] = base;
+                for ( int t = 1; t <= thread_count; ++t )
+                {
+                    sums[t] += sums[t - 1];
+                }
+                const ROWTYPE nnz_block = sums[thread_count] - base;
+                blocks[b].ResizeAJ( nnz_block );
+                blocks[b].ResizeAV( nnz_block );
             }
         }
+
+#pragma omp barrier
+
+        for ( std::size_t b = 0; b < nblocks; ++b )
+        {
+            const ROWTYPE* sums = thread_sums.data() + b * thread_stride;
+            const ROWTYPE offset = sums[tid];
+            auto* ai_block = blocks[b].AI();
+            ai_block[chunk_start] = offset;
+            for ( COLTYPE i = chunk_start; i + 1 < chunk_end; ++i )
+            {
+                ai_block[i + 1] += ai_block[i];
+            }
+            if ( chunk_end == rows )
+            {
+                ai_block[rows] = sums[thread_count];
+            }
+        }
+
+#pragma omp barrier
+
+        for ( COLTYPE i = row_start; i < row_end; ++i )
+        {
+            ROWTYPE current = ai[i] - base;
+            const ROWTYPE row_end_pos = ai[i + 1] - base;
+            const ROWTYPE* row_splits =
+                nsplits ? split_positions.data() + static_cast<std::size_t>( i ) * nsplits : nullptr;
+
+            for ( std::size_t b = 0; b < nblocks; ++b )
+            {
+                const ROWTYPE block_end = ( b < nsplits ) ? row_splits[b] : row_end_pos;
+                const ROWTYPE dest = blocks[b].AI()[i] - base;
+                const COLTYPE col_shift = col_splits[b] - base;
+
+                if ( col_shift == 0 )
+                {
+                    std::copy( aj + current, aj + block_end, blocks[b].AJ() + dest );
+                }
+                else
+                {
+                    std::transform( aj + current, aj + block_end, blocks[b].AJ() + dest,
+                                    [col_shift]( COLTYPE col ) { return col - col_shift; } );
+                }
+
+                std::copy( av + current, av + block_end, blocks[b].AV() + dest );
+                current = block_end;
+            }
+        }
+    }
+}
+
+template <ResizableCSRMatrixType CSRMatrixType>
+void partitionCSRMxN( const typename CSRMatrixType::COLTYPE rows,
+                      const typename CSRMatrixType::COLTYPE cols,
+                      typename CSRMatrixType::ROWTYPE const* ai,
+                      typename CSRMatrixType::COLTYPE const* aj,
+                      typename CSRMatrixType::VALTYPE const* av,
+                      const int M,
+                      typename CSRMatrixType::COLTYPE const* row_splits,
+                      const int N,
+                      typename CSRMatrixType::COLTYPE const* col_splits,
+                      CSRMatrixType* blocks,
+                      const int nthreads )
+{
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+
+    if ( blocks == nullptr )
+    {
+        throw std::invalid_argument( "blocks pointer must not be null" );
+    }
+    if ( M < 1 || N < 1 )
+    {
+        throw std::invalid_argument( "M and N must be at least 1" );
+    }
+    if ( row_splits == nullptr || col_splits == nullptr )
+    {
+        throw std::invalid_argument( "row_splits and col_splits must not be null" );
+    }
+    const std::size_t total_row_bounds = static_cast<std::size_t>( M ) + 1;
+    if ( !std::is_sorted( row_splits, row_splits + total_row_bounds ) )
+    {
+        throw std::invalid_argument( "row_splits must be sorted" );
+    }
+    for ( std::size_t i = 1; i < total_row_bounds; ++i )
+    {
+        if ( row_splits[i] == row_splits[i - 1] )
+        {
+            throw std::invalid_argument( "row_splits entries must be unique" );
+        }
+    }
+    const ROWTYPE base = ai[0];
+    if ( row_splits[0] != base || row_splits[total_row_bounds - 1] != rows + base )
+    {
+        throw std::invalid_argument( "row_splits must include start (base) and end (rows + base)" );
+    }
+
+    // For each row block, partition columns using partitionCSR1xN
+    for ( int rb = 0; rb < M; ++rb )
+    {
+        const COLTYPE row_start = row_splits[rb] - base;
+        const COLTYPE row_end = row_splits[rb + 1] - base;
+        const COLTYPE block_rows = row_end - row_start;
+
+        CSRMatrixType* row_blocks = blocks + rb * N;
+        partitionCSR1xN( block_rows, cols,
+                         ai + row_start, aj, av,
+                         N, col_splits, base, row_blocks, nthreads );
     }
 }
 
@@ -583,6 +902,18 @@ void partitionCSR2x2(const typename CSRMatrixType::COLTYPE rows,
     template void partitionCSR1x2<CSRMatrixVec<ROWTYPE, COLTYPE, float>>( \
         const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, float const*, const COLTYPE, const ROWTYPE, \
         CSRMatrixVec<ROWTYPE, COLTYPE, float>&, CSRMatrixVec<ROWTYPE, COLTYPE, float>&, const int); \
+    template void partitionCSR1xN<CSRMatrixVec<ROWTYPE, COLTYPE, double>>( \
+        const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, double const*, const int, const COLTYPE*, \
+        const ROWTYPE, CSRMatrixVec<ROWTYPE, COLTYPE, double>*, const int); \
+    template void partitionCSR1xN<CSRMatrixVec<ROWTYPE, COLTYPE, float>>( \
+        const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, float const*, const int, const COLTYPE*, \
+        const ROWTYPE, CSRMatrixVec<ROWTYPE, COLTYPE, float>*, const int); \
+    template void partitionCSRMxN<CSRMatrixVec<ROWTYPE, COLTYPE, double>>( \
+        const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, double const*, const int, const COLTYPE*, \
+        const int, const COLTYPE*, CSRMatrixVec<ROWTYPE, COLTYPE, double>*, const int); \
+    template void partitionCSRMxN<CSRMatrixVec<ROWTYPE, COLTYPE, float>>( \
+        const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, float const*, const int, const COLTYPE*, \
+        const int, const COLTYPE*, CSRMatrixVec<ROWTYPE, COLTYPE, float>*, const int); \
     template void partitionCSR2x2<CSRMatrixVec<ROWTYPE, COLTYPE, double>>( \
         const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, double const*, const COLTYPE, const COLTYPE, \
         CSRMatrixVec<ROWTYPE, COLTYPE, double>&, CSRMatrixVec<ROWTYPE, COLTYPE, double>&, \
@@ -590,7 +921,13 @@ void partitionCSR2x2(const typename CSRMatrixType::COLTYPE rows,
     template void partitionCSR2x2<CSRMatrixVec<ROWTYPE, COLTYPE, float>>( \
         const COLTYPE, const COLTYPE, ROWTYPE const*, COLTYPE const*, float const*, const COLTYPE, const COLTYPE, \
         CSRMatrixVec<ROWTYPE, COLTYPE, float>&, CSRMatrixVec<ROWTYPE, COLTYPE, float>&, \
-        CSRMatrixVec<ROWTYPE, COLTYPE, float>&, CSRMatrixVec<ROWTYPE, COLTYPE, float>&, const int);
+        CSRMatrixVec<ROWTYPE, COLTYPE, float>&, CSRMatrixVec<ROWTYPE, COLTYPE, float>&, const int); \
+    template void Block<CSRMatrix<ROWTYPE, COLTYPE, double>>( \
+        const COLTYPE, const ROWTYPE, ROWTYPE const*, COLTYPE const*, double const*, const COLTYPE, const COLTYPE, \
+        const COLTYPE, const COLTYPE, CSRMatrix<ROWTYPE, COLTYPE, double>&); \
+    template void Block<CSRMatrix<ROWTYPE, COLTYPE, float>>( \
+        const COLTYPE, const ROWTYPE, ROWTYPE const*, COLTYPE const*, float const*, const COLTYPE, const COLTYPE, \
+        const COLTYPE, const COLTYPE, CSRMatrix<ROWTYPE, COLTYPE, float>&);
 
 // Explicit template instantiations
 INSTANTIATE_SPARSE_OPS(int32_t, int32_t)
