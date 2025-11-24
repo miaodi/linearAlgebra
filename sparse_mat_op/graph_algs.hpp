@@ -89,49 +89,6 @@ private:
     mutable std::vector<std::vector<COLTYPE>> _reduced_edges; // reusable storage for reduced edges per row
 };
 
-/// @brief Find Strongly Connected Components (SCCs) using Tarjan's algorithm
-/// @tparam ROWTYPE Row pointer type (typically int or int64_t)
-/// @tparam COLTYPE Column index type (typically int or int64_t)
-/// @param rows Number of rows in the graph
-/// @param ai Row pointers array (ai[0] contains the base indexing)
-/// @param aj Column indices array
-/// @param scc_prefix Output CSR row pointers for SCC-to-node mapping (pre-allocated, size = num_sccs + 1)
-/// @param scc_to_node Output CSR column indices for SCC-to-node mapping (pre-allocated, size = rows)
-/// @param node_to_scc Output array mapping each node to its SCC ID (pre-allocated, size = rows)
-/// @return Number of strongly connected components found
-/// @note SCCs are numbered from 0 to (num_sccs - 1) in reverse topological order
-///       (i.e., if there's an edge from SCC i to SCC j, then i > j)
-///       scc_prefix[i] to scc_prefix[i+1]-1 gives the range of nodes in SCC i
-///       scc_to_node contains the node IDs for each SCC
-template <typename ROWTYPE, typename COLTYPE>
-COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
-                                         ROWTYPE const* ai,
-                                         COLTYPE const* aj,
-                                         ROWTYPE* scc_prefix,
-                                         COLTYPE* scc_to_node,
-                                         COLTYPE* node_to_scc );
-
-/// @brief Build a node permutation from SCC ordering across levels
-/// @tparam ROWTYPE Row pointer type
-/// @tparam COLTYPE Column index type
-/// @param num_sccs Number of SCCs
-/// @param scc_prefix CSR row pointers of nodes per SCC
-/// @param scc_to_node CSR column indices of nodes per SCC
-/// @param scc_perm Permutation of SCC ids (ordered by levels)
-/// @param scc_level_prefix Level offsets into scc_perm
-/// @param scc_levels Number of levels
-/// @param node_perm Output permutation (old idx -> new idx)
-/// @param node_iperm Optional inverse permutation (new idx -> old idx)
-template <typename ROWTYPE, typename COLTYPE>
-void BuildPermutationFromSccLevels( COLTYPE num_sccs,
-                                    ROWTYPE const* scc_prefix,
-                                    COLTYPE const* scc_to_node,
-                                    COLTYPE const* scc_perm,
-                                    ROWTYPE const* scc_level_prefix,
-                                    COLTYPE scc_levels,
-                                    COLTYPE* node_perm,
-                                    COLTYPE* node_iperm );
-
 /// @brief Compute a Maximal Independent Set (MIS) permutation of a graph
 ///
 /// This function implements Algorithm 2.2 from:

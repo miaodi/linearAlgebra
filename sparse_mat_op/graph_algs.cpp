@@ -328,9 +328,6 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
 }
 
 template <typename ROWTYPE, typename COLTYPE>
-
-
-template <typename ROWTYPE, typename COLTYPE>
 COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
                                          ROWTYPE const* ai,
                                          COLTYPE const* aj,
