@@ -329,6 +329,9 @@ template bool Diagonal<int, int, double>(const int rows, int const *ai,
                                          int *diagpos, double *diag,
                                          const bool invert);
 
+template bool IsSymmetry<int, int, double>(const int size, int const *ai,
+                                            int const *aj, double const *av);
+
 template void SplitLDU(const int rows, const int base, int const *ai,
                        int const *aj, double const *av,
                        CSRMatrix<int, int, double> &L, std::vector<double> &D,
@@ -402,8 +405,8 @@ void SplitLU<CSRMatrixType>::operator()(const COLTYPE rows, ROWTYPE const *ai,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void Prune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av, const VALTYPE threshold,
-           VALTYPE const* row_thresholds)
+ROWTYPE Prune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av, const VALTYPE threshold,
+              VALTYPE const* row_thresholds)
 {
     const ROWTYPE base = ai[0];
     const ROWTYPE old_nnz = ai[rows] - base;
@@ -484,10 +487,12 @@ void Prune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av, const VALT
             }
         }
     }
+    
+    return old_nnz - (ai[rows] - base);
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void DiagonalScaledPrune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av, const VALTYPE threshold)
+ROWTYPE DiagonalScaledPrune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av, const VALTYPE threshold)
 {
     const ROWTYPE base = ai[0];
 
@@ -530,7 +535,7 @@ void DiagonalScaledPrune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* 
     }
 
     // Step 3: Prune zeros
-    Prune(rows, ai, aj, av, static_cast<VALTYPE>(0.0), (VALTYPE*)nullptr);
+    return Prune(rows, ai, aj, av, static_cast<VALTYPE>(0.0), (VALTYPE*)nullptr);
 }
 
 template void SplitTriangle<TriangularMatrix::U, int, int, double,
@@ -581,10 +586,10 @@ INSTANTIATE_SPLIT_LU(std::int32_t, std::int32_t, double)
 INSTANTIATE_SPLIT_LU(int, int, float)
 
 #define INSTANTIATE_MATRIX_OPS(ROWTYPE, COLTYPE, VALTYPE)                     \
-  template void Prune<ROWTYPE, COLTYPE, VALTYPE>(                             \
+  template ROWTYPE Prune<ROWTYPE, COLTYPE, VALTYPE>(                          \
       const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av,              \
       const VALTYPE threshold, VALTYPE const* row_thresholds);                 \
-  template void DiagonalScaledPrune<ROWTYPE, COLTYPE, VALTYPE>(               \
+  template ROWTYPE DiagonalScaledPrune<ROWTYPE, COLTYPE, VALTYPE>(            \
       const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av,              \
       const VALTYPE threshold);
 
