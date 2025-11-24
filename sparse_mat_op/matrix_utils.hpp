@@ -1102,14 +1102,15 @@ void DiagVecMul(const COLTYPE n, const VALTYPE alpha, VALTYPE const *diag,
 /// @param av Matrix values (modified in-place)
 /// @param threshold Global threshold multiplier
 /// @param row_thresholds Per-row threshold values (e.g., row norms)
+/// @return Number of pruned (removed) entries
 /// @note Removes entries where |av[i]| < threshold * row_thresholds[row]
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void Prune( const COLTYPE rows,
-            ROWTYPE* ai,
-            COLTYPE* aj,
-            VALTYPE* av,
-            const VALTYPE threshold,
-            VALTYPE const* row_thresholds );
+ROWTYPE Prune( const COLTYPE rows,
+               ROWTYPE* ai,
+               COLTYPE* aj,
+               VALTYPE* av,
+               const VALTYPE threshold,
+               VALTYPE const* row_thresholds );
 
 /// @brief Prune small entries from a sparse matrix using diagonal scaling criterion
 /// @tparam ROWTYPE Row pointer type
@@ -1120,13 +1121,14 @@ void Prune( const COLTYPE rows,
 /// @param aj Column indices (modified in-place)
 /// @param av Matrix values (modified in-place)
 /// @param threshold Threshold multiplier
+/// @return Number of pruned (removed) entries
 /// @note Removes entries where |a_{i,j}| < |a_{i,i}| * |a_{j,j}| * threshold. Diagonal entries are preserved.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void DiagonalScaledPrune( const COLTYPE rows,
-                          ROWTYPE* ai,
-                          COLTYPE* aj,
-                          VALTYPE* av,
-                          const VALTYPE threshold );
+ROWTYPE DiagonalScaledPrune( const COLTYPE rows,
+                              ROWTYPE* ai,
+                              COLTYPE* aj,
+                              VALTYPE* av,
+                              const VALTYPE threshold );
 
 /// @brief Fill CSR arrays with random sparsity pattern using pre-sized buffers.
 /// @details Uses Knuth's algorithm S to generate sorted, unique column indices
