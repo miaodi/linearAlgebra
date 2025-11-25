@@ -166,6 +166,7 @@ bool ILULevelSymbolicParallel<CSRMatrixType>::operator()(const COLTYPE size, ROW
     const int reserve_size = 32;
     const COLTYPE not_visited = std::numeric_limits<COLTYPE>::max();
     _Ui.resize(size);
+    const int chunk_size = 32;
 
 #pragma omp parallel num_threads(_nthreads)
     {
@@ -179,10 +180,8 @@ bool ILULevelSymbolicParallel<CSRMatrixType>::operator()(const COLTYPE size, ROW
         Q_thread.reserve(reserve_size);
         Q_next_thread.reserve(reserve_size);
 
-        // Use prefix-based load balancing
-        auto [i_start, i_end] = utils::LoadPrefixBalancedPartitionPos(ai, ai + size + 1, tid, _nthreads);
-        
-        for (COLTYPE i = i_start; i < i_end; i++)
+#pragma omp for schedule(dynamic, chunk_size)
+        for (COLTYPE i = 0; i < size; i++)
         {
             Q_thread.clear();
             Q_next_thread.clear();
@@ -229,7 +228,7 @@ bool ILULevelSymbolicParallel<CSRMatrixType>::operator()(const COLTYPE size, ROW
 #pragma omp parallel num_threads(_nthreads)
     {
         const int tid = omp_get_thread_num();
-        auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos(u_ai, u_ai + size + 1, tid, _nthreads);
+    auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos(u_ai, u_ai + size, tid, _nthreads);
         
         for (COLTYPE i = copy_start; i < copy_end; i++)
         {

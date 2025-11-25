@@ -19,6 +19,46 @@
 #include <string>
 #include <vector>
 
+enum class Factorization
+{
+    ILUK,
+    ILUT
+};
+
+struct Options
+{
+    std::string filename;
+    std::string output_file;
+    int max_display_size;
+    double threshold;
+    int level;
+    Factorization factorization;
+    double droptol;
+    iterative_solver::PreconditionerType precond_type;
+    int restart;
+    int maxiter;
+    double reltol;
+};
+
+void printOptions(const Options& opts, const std::string& factorization_str, const std::string& precond_str)
+{
+    std::cout << "Options:" << std::endl;
+    std::cout << "  filename: " << opts.filename << std::endl;
+    std::cout << "  output: " << opts.output_file << std::endl;
+    std::cout << "  max_display_size: " << opts.max_display_size << std::endl;
+    std::cout << "  threshold: " << opts.threshold << std::endl;
+    std::cout << "  level: " << opts.level << std::endl;
+    std::cout << "  factorization: " << factorization_str << std::endl;
+    if (opts.factorization == Factorization::ILUT)
+    {
+        std::cout << "  droptol: " << opts.droptol << std::endl;
+    }
+    std::cout << "  precond: " << precond_str << std::endl;
+    std::cout << "  restart: " << opts.restart << std::endl;
+    std::cout << "  maxiter: " << opts.maxiter << std::endl;
+    std::cout << "  reltol: " << opts.reltol << std::endl;
+}
+
 template <matrix_utils::ResizableDiagonalType CSRMatrixType>
 class ILUPrec
 {
@@ -56,201 +96,45 @@ public:
     static constexpr VALTYPE* null_diag = nullptr;
 };
 
-int main(int argc, char* argv[])
+iterative_solver::State solveWithPreconditioner(const Options& opts,
+                                                const matrix_utils::CSRMatrix<int, int, double>& csr_matrix,
+                                                const matrix_utils::CSRMatrix<int, int, double>& pruned)
 {
-    cxxopts::Options options("drop_global_precond", "Test GMRES with global preconditioner dropping");
-
-    // clang-format off
-    options.add_options()
-        ( "f,filename", "Matrix Market file to read", cxxopts::value<std::string>()->default_value( "../../tests/data/ex5.mtx" ) )
-        ( "o,output", "Output SVG file path", cxxopts::value<std::string>()->default_value( "matrix.svg" ) )
-        ( "s,size", "Maximum display size (pixels)", cxxopts::value<int>()->default_value( "2000" ) )
-        ( "t,threshold", "Pruning threshold (absolute value)", cxxopts::value<double>()->default_value( "0.0" ) )
-        ( "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )
-        ( "F,factorization", "ILU variant: iluk or ilut", cxxopts::value<std::string>()->default_value( "iluk" ) )
-        ( "d,droptol", "ILUT drop tolerance", cxxopts::value<double>()->default_value( "1e-3" ) )
-        ( "p,precond", "Preconditioner type: none (no preconditioning), left (M^-1 A x = M^-1 b), right (A M^-1 y = b)",
-          cxxopts::value<std::string>()->default_value( "left" ) )
-        ( "r,restart", "GMRES restart parameter", cxxopts::value<int>()->default_value( "60" ) )
-        ( "m,maxiter", "Maximum number of GMRES iterations", cxxopts::value<int>()->default_value( "1000" ) )
-        ( "reltol", "Relative tolerance for GMRES convergence", cxxopts::value<double>()->default_value( "1e-10" ) )
-        ( "h,help", "Print usage" );
-    // clang-format on
-
-    auto result = options.parse(argc, argv);
-
-    if (result.count("help"))
-    {
-        std::cout << options.help() << std::endl;
-        return 0;
-    }
-
-    std::string filename = result["filename"].as<std::string>();
-    std::string output_file = result["output"].as<std::string>();
-    int max_display_size = result["size"].as<int>();
-    double threshold = result["threshold"].as<double>();
-    int level = result["level"].as<int>();
-    std::string precond_type_str = result["precond"].as<std::string>();
-    std::string factorization_str = result["factorization"].as<std::string>();
-    double droptol = result["droptol"].as<double>();
-    int restart = result["restart"].as<int>();
-    int maxiter = result["maxiter"].as<int>();
-    double reltol = result["reltol"].as<double>();
-
-    std::string factorization_lower = factorization_str;
-    std::transform(factorization_lower.begin(), factorization_lower.end(),
-                   factorization_lower.begin(), [](unsigned char c) { return std::tolower(c); });
-    enum class Factorization
-    {
-        ILUK,
-        ILUT
-    };
-    Factorization factorization;
-    if (factorization_lower == "iluk")
-    {
-        factorization = Factorization::ILUK;
-    }
-    else if (factorization_lower == "ilut")
-    {
-        factorization = Factorization::ILUT;
-    }
-    else
-    {
-        std::cerr << "Invalid factorization type: " << factorization_str
-                  << ". Valid options are: iluk, ilut" << std::endl;
-        return -1;
-    }
-
-    std::cout << "Options:" << std::endl;
-    std::cout << "  filename: " << filename << std::endl;
-    std::cout << "  output: " << output_file << std::endl;
-    std::cout << "  max_display_size: " << max_display_size << std::endl;
-    std::cout << "  threshold: " << threshold << std::endl;
-    std::cout << "  level: " << level << std::endl;
-    std::cout << "  factorization: " << factorization_str << std::endl;
-    if (factorization == Factorization::ILUT)
-    {
-        std::cout << "  droptol: " << droptol << std::endl;
-    }
-    std::cout << "  precond: " << precond_type_str << std::endl;
-    std::cout << "  restart: " << restart << std::endl;
-    std::cout << "  maxiter: " << maxiter << std::endl;
-    std::cout << "  reltol: " << reltol << std::endl;
-
-    // Validate max_display_size
-    if (max_display_size <= 0)
-    {
-        std::cerr << "Invalid max_display_size: " << max_display_size
-                  << ". Must be a positive integer." << std::endl;
-        return -1;
-    }
-
-    // Validate restart parameter
-    if (restart <= 0)
-    {
-        std::cerr << "Invalid restart parameter: " << restart
-                  << ". Must be a positive integer." << std::endl;
-        return -1;
-    }
-
-    // Parse preconditioner type
-    iterative_solver::PreconditionerType precond_type;
-    if (precond_type_str == "none")
-    {
-        precond_type = iterative_solver::PreconditionerType::NONE;
-    }
-    else if (precond_type_str == "left")
-    {
-        precond_type = iterative_solver::PreconditionerType::LEFT;
-    }
-    else if (precond_type_str == "right")
-    {
-        precond_type = iterative_solver::PreconditionerType::RIGHT;
-    }
-    else
-    {
-        std::cerr << "Invalid preconditioner type: " << precond_type_str
-                  << ". Valid options are: none, left, right" << std::endl;
-        return -1;
-    }
-
-    omp_set_num_threads(8);
-    std::ifstream f(filename);
-    if (!f.is_open())
-    {
-        std::cerr << "Failed to open file: " << filename << std::endl;
-        return -1;
-    }
-
-    f.clear();
-    f.seekg(0, std::ios::beg);
-    matrix_utils::CSRMatrix<int, int, double> csr_matrix;
-    matrix_utils::readMatrixMarket(f, csr_matrix);
-    f.close();
-
-    std::cout << "Matrix: " << csr_matrix.rows << " x " << csr_matrix.cols
-              << ", NNZ: " << csr_matrix.NNZ() << std::endl;
-
-    // Deep copy matrix for pruning
-    matrix_utils::CSRMatrix<int, int, double> pruned;
-    pruned.rows = csr_matrix.rows;
-    pruned.cols = csr_matrix.cols;
-    pruned.ResizeAI(csr_matrix.rows + 1);
-    pruned.ResizeAJ(csr_matrix.NNZ());
-    pruned.ResizeAV(csr_matrix.NNZ());
-    std::memcpy(pruned.AI(), csr_matrix.AI(), (csr_matrix.rows + 1) * sizeof(int));
-    std::memcpy(pruned.AJ(), csr_matrix.AJ(), csr_matrix.NNZ() * sizeof(int));
-    std::memcpy(pruned.AV(), csr_matrix.AV(), csr_matrix.NNZ() * sizeof(double));
-
-    std::cout << "\nPruning matrix with thresholds (a_ii * a_jj * " << threshold << ")..." << std::endl;
-    int original_nnz = pruned.NNZ();
-    auto removed = matrix_utils::DiagonalScaledPrune(pruned.rows, pruned.AI(),
-                                                     pruned.AJ(), pruned.AV(), threshold);
-    int pruned_nnz = pruned.NNZ();
-    std::cout << "Original NNZ: " << original_nnz << std::endl;
-    std::cout << "Pruned NNZ: " << pruned_nnz << std::endl;
-    std::cout << "Removed entries: " << removed << std::endl;
-    if (original_nnz > 0)
-    {
-        std::cout << "Retention rate: " << (static_cast<double>(pruned_nnz) / original_nnz * 100.0)
-                  << "%" << std::endl;
-    }
-
     // Build ILU preconditioner from pruned matrix
     std::cout << "\nBuilding ILU preconditioner from pruned matrix..." << std::endl;
     matrix_utils::CSRMatrix<int, int, double> ilu_matrix;
     bool success = false;
 
-    if (factorization == Factorization::ILUK)
+    if (opts.factorization == Factorization::ILUK)
     {
         std::cout << "Symbolic ILU(k) factorization..." << std::endl;
         matrix_utils::ILULevelSymbolic<decltype(ilu_matrix)> ilu;
         auto t1 = std::chrono::high_resolution_clock::now();
-        success = ilu(pruned.rows, pruned.AI(), pruned.AJ(), level, ilu_matrix);
+        success = ilu(pruned.rows, pruned.AI(), pruned.AJ(), opts.level, ilu_matrix);
         auto t2 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed = t2 - t1;
         std::cout << "Symbolic ILU factorization time: " << elapsed.count() << " s" << std::endl;
         if (!success)
         {
             std::cout << "Symbolic ILU factorization failed." << std::endl;
-            return -1;
+            return iterative_solver::State::FAILED;
         }
         std::cout << "Symbolic ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
 
         std::cout << "Numeric ILU factorization..." << std::endl;
         auto t3 = std::chrono::high_resolution_clock::now();
         success = matrix_utils::ILULevelNumeric(pruned.rows, pruned.AI(), pruned.AJ(), pruned.AV(),
-                                                level, ilu_matrix);
+                                                opts.level, ilu_matrix);
         auto t4 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed_numeric = t4 - t3;
         std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count() << " s" << std::endl;
     }
     else
     {
-        std::cout << "Using ILUTNumeric with droptol = " << droptol << std::endl;
+        std::cout << "Using ILUTNumeric with droptol = " << opts.droptol << std::endl;
         auto t3 = std::chrono::high_resolution_clock::now();
         success = matrix_utils::ILUTNumeric(pruned.rows, pruned.AI(), pruned.AJ(), pruned.AV(),
-                                            droptol, ilu_matrix);
+                                            opts.droptol, ilu_matrix);
         auto t4 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed_numeric = t4 - t3;
         std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count() << " s" << std::endl;
@@ -259,10 +143,10 @@ int main(int argc, char* argv[])
     if (!success)
     {
         std::cout << "Numeric ILU factorization failed." << std::endl;
-        return -1;
+        return iterative_solver::State::FAILED;
     }
     std::cout << "ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
-    if (factorization == Factorization::ILUT)
+    if (opts.factorization == Factorization::ILUT)
     {
         std::cout << "  Fill ratio: " << static_cast<double>(ilu_matrix.NNZ()) / pruned.NNZ() << std::endl;
     }
@@ -286,10 +170,10 @@ int main(int argc, char* argv[])
 
     std::cout << "\nRunning GMRES..." << std::endl;
     iterative_solver::GMRES<double> gmres_solver;
-    gmres_solver.setMaxIter(maxiter);
-    gmres_solver.setRelTol(reltol);
-    gmres_solver.setRestart(restart);
-    gmres_solver.setPreconditionerType(precond_type);
+    gmres_solver.setMaxIter(opts.maxiter);
+    gmres_solver.setRelTol(opts.reltol);
+    gmres_solver.setRestart(opts.restart);
+    gmres_solver.setPreconditionerType(opts.precond_type);
     
     auto solve_start = std::chrono::high_resolution_clock::now();
     auto state = gmres_solver(&spmv, &ilu_prec, b.data(), x.data());
@@ -344,19 +228,168 @@ int main(int argc, char* argv[])
     std::cout << "  Relative L2 norm: " << std::scientific << std::setprecision(6) << relative_residual_norm << std::endl;
     std::cout << "  RHS L2 norm:      " << std::scientific << std::setprecision(6) << b_norm << std::endl;
 
-    // Write pruned matrix SVG to file
-    std::cout << "\nWriting pruned matrix to SVG..." << std::endl;
-    std::ofstream out(output_file);
-    if (!out.is_open())
+    return state;
+}
+
+int main(int argc, char* argv[])
+{
+    cxxopts::Options options("drop_global_precond", "Test GMRES with global preconditioner dropping");
+
+    // clang-format off
+    options.add_options()
+        ( "f,filename", "Matrix Market file to read", cxxopts::value<std::string>()->default_value( "../../tests/data/ex5.mtx" ) )
+        ( "o,output", "Output SVG file path", cxxopts::value<std::string>()->default_value( "matrix.svg" ) )
+        ( "s,size", "Maximum display size (pixels)", cxxopts::value<int>()->default_value( "2000" ) )
+        ( "t,threshold", "Pruning threshold (absolute value)", cxxopts::value<double>()->default_value( "0.0" ) )
+        ( "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )
+        ( "F,factorization", "ILU variant: iluk or ilut", cxxopts::value<std::string>()->default_value( "iluk" ) )
+        ( "d,droptol", "ILUT drop tolerance", cxxopts::value<double>()->default_value( "1e-3" ) )
+        ( "p,precond", "Preconditioner type: none (no preconditioning), left (M^-1 A x = M^-1 b), right (A M^-1 y = b)",
+          cxxopts::value<std::string>()->default_value( "left" ) )
+        ( "r,restart", "GMRES restart parameter", cxxopts::value<int>()->default_value( "60" ) )
+        ( "m,maxiter", "Maximum number of GMRES iterations", cxxopts::value<int>()->default_value( "1000" ) )
+        ( "reltol", "Relative tolerance for GMRES convergence", cxxopts::value<double>()->default_value( "1e-10" ) )
+        ( "h,help", "Print usage" );
+    // clang-format on
+
+    auto result = options.parse(argc, argv);
+
+    if (result.count("help"))
     {
-        std::cerr << "Failed to create output file: " << output_file << std::endl;
+        std::cout << options.help() << std::endl;
+        return 0;
+    }
+
+    // Parse all options into Options struct
+    Options opts;
+    opts.filename = result["filename"].as<std::string>();
+    opts.output_file = result["output"].as<std::string>();
+    opts.max_display_size = result["size"].as<int>();
+    opts.threshold = result["threshold"].as<double>();
+    opts.level = result["level"].as<int>();
+    opts.droptol = result["droptol"].as<double>();
+    opts.restart = result["restart"].as<int>();
+    opts.maxiter = result["maxiter"].as<int>();
+    opts.reltol = result["reltol"].as<double>();
+
+    std::string precond_type_str = result["precond"].as<std::string>();
+    std::string factorization_str = result["factorization"].as<std::string>();
+
+    // Parse factorization type
+    std::string factorization_lower = factorization_str;
+    std::transform(factorization_lower.begin(), factorization_lower.end(),
+                   factorization_lower.begin(), [](unsigned char c) { return std::tolower(c); });
+
+    if (factorization_lower == "iluk")
+    {
+        opts.factorization = Factorization::ILUK;
+    }
+    else if (factorization_lower == "ilut")
+    {
+        opts.factorization = Factorization::ILUT;
+    }
+    else
+    {
+        std::cerr << "Invalid factorization type: " << factorization_str
+                  << ". Valid options are: iluk, ilut" << std::endl;
         return -1;
     }
 
-    matrix_utils::writeSVG(pruned.rows, pruned.cols, pruned.AI(), pruned.AJ(), out, max_display_size);
+    // Parse preconditioner type
+    if (precond_type_str == "none")
+    {
+        opts.precond_type = iterative_solver::PreconditionerType::NONE;
+    }
+    else if (precond_type_str == "left")
+    {
+        opts.precond_type = iterative_solver::PreconditionerType::LEFT;
+    }
+    else if (precond_type_str == "right")
+    {
+        opts.precond_type = iterative_solver::PreconditionerType::RIGHT;
+    }
+    else
+    {
+        std::cerr << "Invalid preconditioner type: " << precond_type_str
+                  << ". Valid options are: none, left, right" << std::endl;
+        return -1;
+    }
+
+    // Validate parameters
+    if (opts.max_display_size <= 0)
+    {
+        std::cerr << "Invalid max_display_size: " << opts.max_display_size
+                  << ". Must be a positive integer." << std::endl;
+        return -1;
+    }
+
+    if (opts.restart <= 0)
+    {
+        std::cerr << "Invalid restart parameter: " << opts.restart
+                  << ". Must be a positive integer." << std::endl;
+        return -1;
+    }
+
+    printOptions(opts, factorization_str, precond_type_str);
+
+    omp_set_num_threads(8);
+    std::ifstream f(opts.filename);
+    if (!f.is_open())
+    {
+        std::cerr << "Failed to open file: " << opts.filename << std::endl;
+        return -1;
+    }
+
+    f.clear();
+    f.seekg(0, std::ios::beg);
+    matrix_utils::CSRMatrix<int, int, double> csr_matrix;
+    matrix_utils::readMatrixMarket(f, csr_matrix);
+    f.close();
+
+    std::cout << "Matrix: " << csr_matrix.rows << " x " << csr_matrix.cols
+              << ", NNZ: " << csr_matrix.NNZ() << std::endl;
+
+    // Deep copy matrix for pruning
+    matrix_utils::CSRMatrix<int, int, double> pruned;
+    pruned.rows = csr_matrix.rows;
+    pruned.cols = csr_matrix.cols;
+    pruned.ResizeAI(csr_matrix.rows + 1);
+    pruned.ResizeAJ(csr_matrix.NNZ());
+    pruned.ResizeAV(csr_matrix.NNZ());
+    std::memcpy(pruned.AI(), csr_matrix.AI(), (csr_matrix.rows + 1) * sizeof(int));
+    std::memcpy(pruned.AJ(), csr_matrix.AJ(), csr_matrix.NNZ() * sizeof(int));
+    std::memcpy(pruned.AV(), csr_matrix.AV(), csr_matrix.NNZ() * sizeof(double));
+
+    std::cout << "\nPruning matrix with thresholds (a_ii * a_jj * " << opts.threshold << ")..." << std::endl;
+    int original_nnz = pruned.NNZ();
+    auto removed = matrix_utils::DiagonalScaledPrune(pruned.rows, pruned.AI(),
+                                                     pruned.AJ(), pruned.AV(), opts.threshold);
+    int pruned_nnz = pruned.NNZ();
+    std::cout << "Original NNZ: " << original_nnz << std::endl;
+    std::cout << "Pruned NNZ: " << pruned_nnz << std::endl;
+    std::cout << "Removed entries: " << removed << std::endl;
+    if (original_nnz > 0)
+    {
+        std::cout << "Retention rate: " << (static_cast<double>(pruned_nnz) / original_nnz * 100.0)
+                  << "%" << std::endl;
+    }
+
+    // Solve with preconditioner
+    auto state = solveWithPreconditioner(opts, csr_matrix, pruned);
+
+    // Write pruned matrix SVG to file
+    std::cout << "\nWriting pruned matrix to SVG..." << std::endl;
+    std::ofstream out(opts.output_file);
+    if (!out.is_open())
+    {
+        std::cerr << "Failed to create output file: " << opts.output_file << std::endl;
+        return -1;
+    }
+
+    matrix_utils::writeSVG(pruned.rows, pruned.cols, pruned.AI(), pruned.AJ(), out, opts.max_display_size);
     out.close();
 
-    std::cout << "SVG written to: " << output_file << std::endl;
+    std::cout << "SVG written to: " << opts.output_file << std::endl;
 
     return (state == iterative_solver::State::CONVERGED) ? 0 : -1;
 }
