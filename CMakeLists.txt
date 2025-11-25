@@ -206,6 +206,7 @@ add_subdirectory(factorization)
 add_subdirectory(data)
 
 add_subdirectory(execs)
+add_subdirectory(scratch)
 enable_testing()
 add_subdirectory(tests)
 
