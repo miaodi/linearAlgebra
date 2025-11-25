@@ -858,6 +858,28 @@ private:
 };
 
 template <ResizableDiagonalType CSRMatrixType>
+class ILULevelSymbolicParallel
+{
+public:
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+    ILULevelSymbolicParallel(const int nthreads)
+        : _nthreads(nthreads), _visited(nthreads), _Q(nthreads), _Q_next(nthreads), _Ui(nthreads)
+    {
+    }
+
+    bool operator()(const typename CSRMatrixType::COLTYPE size, typename CSRMatrixType::ROWTYPE const* ai,
+                    typename CSRMatrixType::COLTYPE const* aj, const int lvl, CSRMatrixType& U);
+
+private:
+    int _nthreads;
+    std::vector<std::vector<COLTYPE>> _visited;
+    std::vector<std::vector<COLTYPE>> _Q;
+    std::vector<std::vector<COLTYPE>> _Q_next;
+    std::vector<std::vector<COLTYPE>> _Ui;
+};
+
+template <ResizableDiagonalType CSRMatrixType>
 bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
                       typename CSRMatrixType::ROWTYPE const* ai,
                       typename CSRMatrixType::COLTYPE const* aj,

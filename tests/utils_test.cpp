@@ -12,20 +12,16 @@ TEST(Utils, knuth_s) {
       0, 100000000); // distribution in range [1, 100000000]
   size_t size = dist1(rng);
   size_t lower_bound = dist1(rng);
-  std::uniform_int_distribution<std::mt19937::result_type> dist2(
-      100000000, 10000000000); // distribution in range [100000000, 10000000000]
-
   size_t upper_bound = std::max(size + lower_bound, dist1(rng));
 
   std::vector<int> randVec(size, 0);
 
   utils::knuth_s rand;
-  for (int i = 0; i < 10; i++) {
-    rand(size, lower_bound, upper_bound, randVec.begin());
-    for (auto i : randVec) {
+  rand(size, lower_bound, upper_bound, randVec.begin());
+  for (auto i : randVec)
+  {
       EXPECT_GE(i, lower_bound);
       EXPECT_LT(i, upper_bound);
-    }
   }
 }
 
@@ -106,4 +102,169 @@ TEST(sort, quicksort_2) {
 
   utils::variadic_quick_sort(0, size, vec.data(), val.data());
   EXPECT_TRUE(vec == val);
+}
+
+TEST(Utils, ParallelPrefixSum) {
+  const int size = 1000;
+  std::vector<int32_t> input(size);
+  std::iota(input.begin(), input.end(), 1); // 1, 2, 3, ..., 1000
+  
+  std::vector<int32_t> output(size + 1);
+  
+  std::vector<int> bases = {0, 1};
+  std::vector<int> thread_counts = {1, 2, 4, 8};
+  
+  for (int base : bases) {
+    for (int nthreads : thread_counts) {
+      std::fill(output.begin() + 1, output.end(), 0);
+      output[0] = base;
+      
+      utils::ParallelPrefixSum(nthreads, input.data(), input.data() + size, output.data());
+      
+      // Verify prefix sum: output[i] should be base + sum of input[0..i-1]
+      int32_t expected_sum = base;
+      EXPECT_EQ(output[0], base);
+      for (int i = 0; i < size; ++i) {
+        expected_sum += input[i];
+        EXPECT_EQ(output[i + 1], expected_sum) 
+          << "Failed at index " << i + 1 << " with base=" << base 
+          << " and " << nthreads << " threads";
+      }
+    }
+  }
+}
+
+TEST(Utils, ParallelPrefixSum_Large) {
+  const int size = 10000;
+  std::vector<int64_t> input(size);
+  std::iota(input.begin(), input.end(), 1);
+  
+  std::vector<int64_t> output(size + 1);
+  
+  std::vector<int> bases = {0, 1};
+  std::vector<int> thread_counts = {1, 2, 3, 4, 6, 8, 12};
+  
+  for (int base : bases) {
+    for (int nthreads : thread_counts) {
+      std::fill(output.begin() + 1, output.end(), 0);
+      output[0] = base;
+      
+      utils::ParallelPrefixSum(nthreads, input.data(), input.data() + size, output.data());
+      
+      // Verify correctness
+      int64_t expected_sum = base;
+      for (int i = 0; i < size; ++i) {
+        expected_sum += input[i];
+        EXPECT_EQ(output[i + 1], expected_sum)
+          << "Failed at index " << i + 1 << " with base=" << base 
+          << " and " << nthreads << " threads";
+      }
+    }
+  }
+}
+
+TEST(Utils, ParallelPrefixSum_RandomData) {
+  const int size = 5000;
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int32_t> dis(1, 100);
+  
+  std::vector<int32_t> input(size);
+  std::generate(input.begin(), input.end(), [&]{ return dis(gen); });
+  
+  std::vector<int> bases = {0, 1};
+  std::vector<int> thread_counts = {1, 2, 4, 8};
+  
+  for (int base : bases) {
+    for (int nthreads : thread_counts) {
+      std::vector<int32_t> output(size + 1);
+      output[0] = base;
+      
+      utils::ParallelPrefixSum(nthreads, input.data(), input.data() + size, output.data());
+      
+      // Verify correctness
+      int32_t expected_sum = base;
+      EXPECT_EQ(output[0], base);
+      for (int i = 0; i < size; ++i) {
+        expected_sum += input[i];
+        EXPECT_EQ(output[i + 1], expected_sum)
+          << "Failed at index " << i + 1 << " with base=" << base 
+          << " and " << nthreads << " threads";
+      }
+    }
+  }
+}
+
+TEST(Utils, ParallelPrefixSumInplace) {
+  const int size = 256;
+  std::vector<int32_t> input(size);
+  std::iota(input.begin(), input.end(), 1); // 1..256
+
+  std::vector<int> thread_counts = {1, 2, 4, 8};
+  for (int nthreads : thread_counts) {
+    auto data = input;
+    utils::ParallelPrefixSumInplace(nthreads, data.data(), data.data() + data.size());
+
+    int32_t running = 0;
+    for (int i = 0; i < size; ++i) {
+      running += input[i];
+      EXPECT_EQ(data[i], running) << "nthreads=" << nthreads << " idx=" << i;
+    }
+  }
+}
+
+TEST(Utils, ParallelPrefixSumInplace_Random) {
+  const int size = 513;
+  std::mt19937 gen(42);
+  std::uniform_int_distribution<int32_t> dis(0, 10);
+  std::vector<int32_t> input(size);
+  std::generate(input.begin(), input.end(), [&] { return dis(gen); });
+
+  for (int nthreads : {1, 3, 4}) {
+    auto data = input;
+    utils::ParallelPrefixSumInplace(nthreads, data.begin(), data.end());
+
+    int32_t ref = 0;
+    for (int i = 0; i < size; ++i) {
+      ref += input[i];
+      EXPECT_EQ(data[i], ref) << "nthreads=" << nthreads << " idx=" << i;
+    }
+  }
+}
+
+TEST(Utils, ParallelPrefixSum_EdgeCases) {
+  // Test with size 1
+  {
+    std::vector<int32_t> input = {42};
+    std::vector<int32_t> output(2);
+    output[0] = 0;
+    
+    utils::ParallelPrefixSum(4, input.data(), input.data() + 1, output.data());
+    EXPECT_EQ(output[0], 0);
+    EXPECT_EQ(output[1], 42);
+  }
+  
+  // Test with base 1
+  {
+    std::vector<int32_t> input = {42};
+    std::vector<int32_t> output(2);
+    output[0] = 1;
+    
+    utils::ParallelPrefixSum(4, input.data(), input.data() + 1, output.data());
+    EXPECT_EQ(output[0], 1);
+    EXPECT_EQ(output[1], 43);
+  }
+  
+  // Test with all zeros
+  {
+    std::vector<int32_t> input(100, 0);
+    std::vector<int32_t> output(101);
+    output[0] = 0;
+    
+    utils::ParallelPrefixSum(4, input.data(), input.data() + 100, output.data());
+    
+    for (int i = 0; i <= 100; ++i) {
+      EXPECT_EQ(output[i], 0);
+    }
+  }
 }
