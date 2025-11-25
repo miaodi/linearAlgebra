@@ -213,6 +213,7 @@ if(BUILD_DATA)
 endif()
 
 add_subdirectory(execs)
+add_subdirectory(scratch)
 enable_testing()
 add_subdirectory(tests)
 
