@@ -174,7 +174,7 @@ TEST_F(precond_Test, ilu_level_symbolic_parallel_matches_upper) {
     const auto base = mat.mkl_base();
     const auto size = mat.rows();
     ILULevelSymbolic<CSRMatrix<MKL_INT, MKL_INT, double>> serial;
-    ILULevelSymbolicParallel<CSRMatrix<MKL_INT, MKL_INT, double>> parallel(4);
+    ILULevelSymbolicParallelU<CSRMatrix<MKL_INT, MKL_INT, double>> parallel(4);
 
     auto upper_cols = [base](const CSRMatrix<MKL_INT, MKL_INT, double> &m,
                              MKL_INT row) {
@@ -197,7 +197,7 @@ TEST_F(precond_Test, ilu_level_symbolic_parallel_matches_upper) {
           parallel(size, mat.get_ai().get(), mat.get_aj().get(), lvl,
                    ilu_parallel);
       if (!ok_parallel) {
-        GTEST_SKIP() << "ILULevelSymbolicParallel not implemented for lvl="
+        GTEST_SKIP() << "ILULevelSymbolicParallelU not implemented for lvl="
                      << lvl;
       }
 
