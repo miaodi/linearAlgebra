@@ -1,6 +1,8 @@
 #include "utils.h"
 #include <Eigen/Sparse>
 #include <omp.h>
+#include <numeric>
+#include <type_traits>
 
 #ifdef USE_BOOST_LIB
 #include <boost/graph/adjacency_list.hpp>
@@ -116,6 +118,119 @@ void inversePermute(std::vector<COLTYPE> &iperm,
     iperm[perm[i] - base] = i + base;
   }
 }
+
+template <class InputIt, class OutputIt>
+OutputIt ParallelPrefixSum(const int nthreads, InputIt first, InputIt last, OutputIt d_first)
+{
+    using ValueType = typename std::iterator_traits<InputIt>::value_type;
+    const auto total_size = std::distance(first, last);
+    std::vector<ValueType> offsets(nthreads + 1, 0);
+    offsets[0] = *d_first;
+#pragma omp parallel num_threads(nthreads)
+    {
+        const int tid = omp_get_thread_num();
+
+        // Step 1: Each thread computes local prefix sum
+        auto [local_first, local_last] = utils::LoadBalancedPartitionPos(total_size, tid, nthreads);
+        
+        ValueType local_sum = 0;
+        auto input_it = first + local_first;
+        auto output_it = d_first + 1 + local_first;
+        const auto input_end = first + local_last;
+        
+        for (; input_it != input_end; ++input_it, ++output_it)
+        {
+            local_sum += *input_it;
+            *output_it = local_sum;
+        }
+        offsets[tid + 1] = local_sum;
+
+// Step 2: Compute offsets
+#pragma omp barrier
+#pragma omp single
+        {
+            std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+        }
+
+        // Step 3: Add offsets to local results
+        const ValueType offset = offsets[tid];
+        auto add_begin = d_first + 1 + local_first;
+        auto add_end = d_first + 1 + local_last;
+
+#if defined(_OPENMP) && defined(__cpp_if_constexpr) && __cpp_if_constexpr >= 201606
+        if constexpr ( std::is_pointer_v<OutputIt> )
+        {
+#pragma omp simd
+            for ( auto* out = add_begin; out < add_end; ++out )
+            {
+                *out += offset;
+            }
+        }
+        else
+#endif
+        {
+            for ( auto out = add_begin; out != add_end; ++out )
+            {
+                *out += offset;
+            }
+        }
+    }
+    return d_first + total_size + 1;
+}
+
+template <class Iter>
+Iter ParallelPrefixSumInplace(const int nthreads, Iter first, Iter last)
+{
+    using ValueType = typename std::iterator_traits<Iter>::value_type;
+    const auto total_size = std::distance( first, last );
+    if ( total_size <= 0 )
+        return last;
+
+    std::vector<ValueType> offsets( nthreads + 1, 0 );
+#pragma omp parallel num_threads( nthreads )
+    {
+        const int tid = omp_get_thread_num();
+        auto [local_first, local_last] = utils::LoadBalancedPartitionPos( total_size, tid, nthreads );
+
+        ValueType local_sum = 0;
+        auto it = first + local_first;
+        const auto it_end = first + local_last;
+        for ( ; it != it_end; ++it )
+        {
+            local_sum += *it;
+            *it = local_sum;
+        }
+        offsets[tid + 1] = local_sum;
+
+#pragma omp barrier
+#pragma omp single
+        { std::partial_sum( offsets.begin(), offsets.end(), offsets.begin() ); }
+
+        const ValueType offset = offsets[tid];
+        auto add_begin = first + local_first;
+        auto add_end = first + local_last;
+
+#if defined(_OPENMP) && defined(__cpp_if_constexpr) && __cpp_if_constexpr >= 201606
+        if constexpr ( std::is_pointer_v<Iter> )
+        {
+#pragma omp simd
+            for ( auto* out = add_begin; out < add_end; ++out )
+            {
+                *out += offset;
+            }
+        }
+        else
+#endif
+        {
+            for ( auto out = add_begin; out != add_end; ++out )
+            {
+                *out += offset;
+            }
+        }
+    }
+    return last;
+}
+
 
 #ifdef USE_BOOST_LIB
 template <typename COLTYPE>
@@ -354,12 +469,29 @@ template void writeAdjacencyGraphDOT<std::int64_t, std::int64_t>(const std::int6
                                                                 const std::string& title);
 #endif
 
-#define INSTANTIATE(T)                                                         \
-  template std::vector<T> randomPermute(const T n, const T base);              \
-  template void inversePermute(std::vector<T> &iperm,                          \
-                               const std::vector<T> &perm, const T base);
+#define INSTANTIATE_UTILS(T)                                                   \
+    template std::vector<T> randomPermute( const T n, const T base );         \
+    template void inversePermute( std::vector<T>& iperm,                      \
+                                  const std::vector<T>& perm,                 \
+                                  const T base );                             \
+    template T* ParallelPrefixSum( const int nthreads, T* first, T* last, T* d_first ); \
+    template T* ParallelPrefixSumInplace( const int nthreads, T* first, T* last );      \
+    template typename std::vector<T>::iterator                                \
+    ParallelPrefixSum<typename std::vector<T>::iterator,                      \
+                      typename std::vector<T>::iterator>(                     \
+        const int nthreads,                                                   \
+        typename std::vector<T>::iterator first,                              \
+        typename std::vector<T>::iterator last,                               \
+        typename std::vector<T>::iterator d_first );                          \
+    template typename std::vector<T>::iterator                                \
+    ParallelPrefixSumInplace<typename std::vector<T>::iterator>(              \
+        const int nthreads,                                                   \
+        typename std::vector<T>::iterator first,                              \
+        typename std::vector<T>::iterator last );
 
-INSTANTIATE(std::int32_t)
-INSTANTIATE(std::int64_t)
+INSTANTIATE_UTILS( std::int32_t )
+INSTANTIATE_UTILS( std::int64_t )
+
+#undef INSTANTIATE_UTILS
 
 } // namespace utils

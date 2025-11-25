@@ -154,6 +154,94 @@ bool ILULevelSymbolic<CSRMatrixType>::operator()( const typename CSRMatrixType::
     return true;
 }
 
+template <ResizableDiagonalType CSRMatrixType>
+bool ILULevelSymbolicParallel<CSRMatrixType>::operator()(const COLTYPE size, ROWTYPE const* ai,
+                                                         COLTYPE const* aj, const int lvl, CSRMatrixType& U)
+{
+    _Ui.resize(size);
+    const auto base = ai[0];
+    U.ResizeAI(size + 1);
+    auto* u_ai = U.AI();
+    u_ai[0] = base;
+    const int reserve_size = 32;
+    const COLTYPE not_visited = std::numeric_limits<COLTYPE>::max();
+    _Ui.resize(size);
+
+#pragma omp parallel num_threads(_nthreads)
+    {
+        const int tid = omp_get_thread_num();
+        auto& visited_thread = _visited[tid];
+        visited_thread.resize(size);
+        std::fill(visited_thread.begin(), visited_thread.end(), not_visited);
+
+        auto& Q_thread = _Q[tid];
+        auto& Q_next_thread = _Q_next[tid];
+        Q_thread.reserve(reserve_size);
+        Q_next_thread.reserve(reserve_size);
+
+        // Use prefix-based load balancing
+        auto [i_start, i_end] = utils::LoadPrefixBalancedPartitionPos(ai, ai + size + 1, tid, _nthreads);
+        
+        for (COLTYPE i = i_start; i < i_end; i++)
+        {
+            Q_thread.clear();
+            Q_next_thread.clear();
+            Q_thread.push_back(i);
+            int level = 0;
+            visited_thread[i] = i;
+            _Ui[i].clear();
+            while (level <= lvl && Q_thread.size())
+            {
+                for (const auto row : Q_thread)
+                {
+                    const ROWTYPE row_start = ai[row] - base;
+                    const ROWTYPE row_end = ai[row + 1] - base;
+                    for (auto adj_idx = row_start; adj_idx < row_end; ++adj_idx)
+                    {
+                        const COLTYPE col = aj[adj_idx] - base;
+                        if (visited_thread[col] == i)
+                            continue;
+                        visited_thread[col] = i;
+                        if (col < i)
+                        {
+                            Q_next_thread.push_back(col);
+                        }
+                        else if (col > i)
+                        {
+                            _Ui[i].push_back(col);
+                        }
+                    }
+                }
+                level++;
+                std::swap(Q_thread, Q_next_thread);
+            }
+            std::sort(_Ui[i].begin(), _Ui[i].end());
+            u_ai[i + 1] = static_cast<ROWTYPE>(_Ui[i].size());
+        }
+    }
+    utils::ParallelPrefixSumInplace(_nthreads, u_ai, u_ai + size + 1);
+    const ROWTYPE nnz = u_ai[size] - base;
+    U.ResizeAJ(nnz);
+    U.ResizeAV(nnz);
+    auto *u_aj = U.AJ();
+    
+    // Parallel copy _Ui to u_aj using prefix-based load balancing
+#pragma omp parallel num_threads(_nthreads)
+    {
+        const int tid = omp_get_thread_num();
+        auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos(u_ai, u_ai + size + 1, tid, _nthreads);
+        
+        for (COLTYPE i = copy_start; i < copy_end; i++)
+        {
+            const ROWTYPE row_start = u_ai[i] - base;
+            const size_t num_bytes = _Ui[i].size() * sizeof(COLTYPE);
+            std::memcpy(u_aj + row_start, _Ui[i].data(), num_bytes);
+        }
+    }
+    
+    return true;
+}
+
 template void ICCLevel0SymSymbolic<int, int, CSRMatrix<int, int, double>>(
     const int rows, int const* ai, int const* aj, CSRMatrix<int, int, double>& icc );
 
@@ -551,15 +639,15 @@ bool ICCLevelSymbolicParallel<CSRMatrixType>::operator()( const COLTYPE size,
     L.cols = size;
     L.AI()[0] = base;
     std::atomic<COLTYPE> counter( 0 );
+    const int chunk_size = 32;
 #pragma omp parallel num_threads( _num_threads )
     {
         const int tid = omp_get_thread_num();
-        const int nthreads = omp_get_num_threads();
         _visited[tid].resize( size );
         std::fill( _visited[tid].begin(), _visited[tid].end(), 0 );
         _Li_path_max[tid].resize( size );
 
-#pragma omp for schedule( dynamic, 100 )
+#pragma omp for schedule( dynamic, chunk_size )
         for ( COLTYPE i = 0; i < size; i++ )
         {
             counter++;
@@ -996,6 +1084,7 @@ template class ICCLevelSymbolicSerial3<matrix_utils::CSRMatrix<int, int, double>
 template class ICCLevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>>;
 template class ICCLevelNumericFixedPoint<matrix_utils::CSRMatrix<int, int, double>>;
 template class ILULevelSymbolic<matrix_utils::CSRMatrix<int, int, double>>;
+template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>>;
 template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>(
     const int size,
     int const* ai,

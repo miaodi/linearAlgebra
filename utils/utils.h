@@ -333,6 +333,50 @@ protected:
   C _comp;
 };
 
+/// @brief Compute parallel prefix sum (cumulative sum) with a specified base value
+/// @tparam InputIt Input iterator type
+/// @tparam OutputIt Output iterator type
+/// @param nthreads Number of threads to use for parallel computation
+/// @param first Iterator to the beginning of the input range
+/// @param last Iterator to the end of the input range
+/// @param d_first Iterator to the beginning of the output range (base value stored at *d_first)
+/// @return Iterator to one past the last element written (d_first + (last - first) + 1)
+///
+/// @details This function computes a parallel prefix sum where:
+/// - The base value is read from *d_first (typically 0 or 1 for 0-based/1-based indexing)
+/// - Output is written starting at d_first[1], with d_first[i+1] = base + sum(input[0..i])
+/// - The output array must have size >= (last - first) + 1 to accommodate the base value
+///
+/// The algorithm uses a three-phase approach:
+/// 1. Each thread computes local prefix sums for its partition
+/// 2. Thread-local sums are combined using std::partial_sum to compute global offsets
+/// 3. Each thread adds its offset to its local results
+///
+/// @par Example:
+/// @code
+/// std::vector<int> input = {1, 2, 3, 4, 5};
+/// std::vector<int> output(input.size() + 1);
+/// output[0] = 0;  // Base value
+/// ParallelPrefixSum(4, input.begin(), input.end(), output.begin());
+/// // Result: output = {0, 1, 3, 6, 10, 15}
+/// @endcode
+///
+/// @note Thread-safe and uses OpenMP for parallelization
+/// @note The base value at d_first[0] is preserved and used as the starting point
+template <class InputIt, class OutputIt>
+OutputIt ParallelPrefixSum(const int nthreads, InputIt first, InputIt last, OutputIt d_first);
+
+/// @brief In-place inclusive prefix sum (a[i] becomes sum_{k<=i} a[k])
+/// @tparam Iter Random access iterator or pointer
+/// @param nthreads Number of threads to use
+/// @param first Iterator to the beginning of the range (inclusive)
+/// @param last Iterator to the end of the range (exclusive)
+/// @return Iterator to one past the last element written (same as last)
+///
+/// @note The operation is in-place; the original values are overwritten by the prefix sums.
+template <class Iter>
+Iter ParallelPrefixSumInplace(const int nthreads, Iter first, Iter last);
+
 #ifdef USE_BOOST_LIB
 template <typename COLTYPE>
 void printEliminationTree(const COLTYPE size, const COLTYPE base,

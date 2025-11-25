@@ -1273,5 +1273,4 @@ void RandomU(const typename CSRMatrixType::COLTYPE rows,
     }
   }
 }
-
 } // namespace matrix_utils
