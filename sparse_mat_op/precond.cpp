@@ -2,6 +2,7 @@
 #include "matrix_utils.hpp"
 #include "utils.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <deque>
 #include <iomanip>
@@ -1037,49 +1038,78 @@ bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYP
     return true;
 }
 
-template <ResizableDiagonalType CSRMatrixType>
-bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
-                      typename CSRMatrixType::ROWTYPE const* ai,
-                      typename CSRMatrixType::COLTYPE const* aj,
-                      typename CSRMatrixType::VALTYPE const* av,
-                      const int lvl,
-                      CSRMatrixType& ilu )
+// Policy classes for sequential vs parallel elimination
+struct SequentialPolicy
 {
-    const auto base = ai[0];
-    auto const* ilu_ai = ilu.AI();
-    auto const* ilu_aj = ilu.AJ();
-    auto* ilu_av = ilu.AV();
-    auto const* ilu_diag = ilu.Diagonal();
+    SequentialPolicy(std::size_t /*size*/) {}
+    
+    template<typename COLT>
+    void wait_for_row(COLT /*k*/) const {}
+    
+    template<typename COLT>
+    void mark_row_ready(COLT /*i*/) {}
+};
 
-    using ROWT = typename CSRMatrixType::ROWTYPE;
-    using COLT = typename CSRMatrixType::COLTYPE;
-    using VALT = typename CSRMatrixType::VALTYPE;
-    const ROWT MARKER_ABSENT = std::numeric_limits<ROWT>::max();
-    // Reusable marker: position of column j in current row i (or ABSENT)
-    std::vector<ROWT> marker( size, MARKER_ABSENT );
-
-    for ( COLT i = 0; i < size; i++ )
+struct ParallelPolicy
+{
+    std::atomic<std::int32_t>* ready;
+    
+    ParallelPolicy(std::size_t size) : ready(nullptr) {}
+    
+    void set_ready_array(std::atomic<std::int32_t>* ready_arr)
     {
-        // ---- Initialize row i entries ----
-        const ROWT row_start = ilu_ai[i] - base;
-        const ROWT row_end = ilu_ai[i + 1] - base;
-        ROWT a_pos = ai[i] - base;
-        const ROWT a_row_end = ai[i + 1] - base;
-        // build marker for current row
-        for ( ROWT pos = row_start; pos < row_end; ++pos )
+        ready = ready_arr;
+    }
+    
+    template<typename COLT>
+    void wait_for_row(COLT k) const
+    {
+        while (ready[k].load(std::memory_order_acquire) == 0)
         {
-            COLT col = ilu_aj[pos] - base;
-            marker[col] = pos; // record position
-            if ( a_pos == a_row_end || aj[a_pos] != ilu_aj[pos] )
-            {
-                ilu_av[pos] = VALT( 0 );
-            }
-            else
-            {
-                ilu_av[pos] = av[a_pos++ - base];
-            }
+            // Spin-wait until row k is ready
         }
+    }
+    
+    template<typename COLT>
+    void mark_row_ready(COLT i)
+    {
+        ready[i].store(1, std::memory_order_release);
+    }
+};
 
+// Helper struct for ILU row elimination (factorization without initialization)
+template <typename ROWT, typename COLT, typename VALT, typename Policy = SequentialPolicy>
+struct ILURowEliminator
+{
+    static constexpr ROWT MARKER_ABSENT = std::numeric_limits<ROWT>::max();
+    
+    // Workspace for marker array
+    std::vector<ROWT> marker;
+    Policy policy;
+    
+    ILURowEliminator(COLT size) : marker(size, MARKER_ABSENT), policy(size) {}
+    
+    // For parallel version: set the ready array
+    void set_ready_array(std::atomic<std::int32_t>* ready_arr)
+    {
+        if constexpr (std::is_same_v<Policy, ParallelPolicy>)
+        {
+            policy.set_ready_array(ready_arr);
+        }
+    }
+    
+    // Perform elimination on row i using previously factorized rows
+    // Assumes row i has been initialized with values from A
+    // Returns false if singular pivot encountered
+    bool eliminate_row(
+        COLT i,
+        ROWT base,
+        ROWT row_start,
+        ROWT row_end,
+        // ILU matrix being built
+        ROWT const* ilu_ai, COLT const* ilu_aj, VALT* ilu_av,
+        ROWT const* ilu_diag)
+    {
         // ---- Elimination: process L part entries (pivot columns k < i) ----
         for ( ROWT k_pos = row_start; k_pos < row_end; ++k_pos )
         {
@@ -1088,6 +1118,10 @@ bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
                 break; // reached diagonal / upper part
             if ( ilu_av[k_pos] == VALT( 0 ) )
                 continue; // nothing to eliminate
+            
+            // Wait for row k to be ready (no-op in sequential, spin-wait in parallel)
+            policy.wait_for_row(k);
+            
             const VALT akk = ilu_av[ilu_diag[k] - base];
             if ( akk == VALT( 0 ) )
                 return false; // singular pivot
@@ -1113,6 +1147,61 @@ bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
             COLT col = ilu_aj[pos] - base;
             marker[col] = MARKER_ABSENT;
         }
+        
+        // Mark this row as ready (no-op in sequential)
+        policy.mark_row_ready(i);
+        
+        return true;
+    }
+};
+
+template <ResizableDiagonalType CSRMatrixType>
+bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
+                      typename CSRMatrixType::ROWTYPE const* ai,
+                      typename CSRMatrixType::COLTYPE const* aj,
+                      typename CSRMatrixType::VALTYPE const* av,
+                      const int lvl,
+                      CSRMatrixType& ilu )
+{
+    const auto base = ai[0];
+    auto const* ilu_ai = ilu.AI();
+    auto const* ilu_aj = ilu.AJ();
+    auto* ilu_av = ilu.AV();
+    auto const* ilu_diag = ilu.Diagonal();
+
+    using ROWT = typename CSRMatrixType::ROWTYPE;
+    using COLT = typename CSRMatrixType::COLTYPE;
+    using VALT = typename CSRMatrixType::VALTYPE;
+
+    // Create row eliminator with workspace
+    ILURowEliminator<ROWT, COLT, VALT> eliminator(size);
+
+    for ( COLT i = 0; i < size; i++ )
+    {
+        // ---- Initialize row i entries ----
+        const ROWT row_start = ilu_ai[i] - base;
+        const ROWT row_end = ilu_ai[i + 1] - base;
+        ROWT a_pos = ai[i] - base;
+        const ROWT a_row_end = ai[i + 1] - base;
+        
+        // Build marker for current row and copy values from A
+        for ( ROWT pos = row_start; pos < row_end; ++pos )
+        {
+            COLT col = ilu_aj[pos] - base;
+            eliminator.marker[col] = pos; // record position
+            if ( a_pos == a_row_end || aj[a_pos] != ilu_aj[pos] )
+            {
+                ilu_av[pos] = VALT( 0 );
+            }
+            else
+            {
+                ilu_av[pos] = av[a_pos++ - base];
+            }
+        }
+
+        // Perform elimination
+        if (!eliminator.eliminate_row(i, base, row_start, row_end, ilu_ai, ilu_aj, ilu_av, ilu_diag))
+            return false;
     }
     return true;
 }
