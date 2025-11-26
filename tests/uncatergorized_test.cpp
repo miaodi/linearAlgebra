@@ -17,13 +17,13 @@ TEST(transpose_and_partranspose, base0) {
   mat.randomVals();
   auto t_csr = matrix_utils::AllocateCSRData(mat.cols(), mat.nnz());
   matrix_utils::SerialTranspose(
-      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.rows(), mat.cols(), mat.get_ai().get(),
       mat.get_aj().get(), mat.get_av().get(), std::get<0>(t_csr).get(),
       std::get<1>(t_csr).get(), std::get<2>(t_csr).get());
 
   auto tt_csr = matrix_utils::AllocateCSRData(mat.cols(), mat.nnz());
   matrix_utils::SerialTranspose(
-      mat.cols(), mat.rows(), (int)mat.mkl_base(), std::get<0>(t_csr).get(),
+      mat.cols(), mat.rows(), std::get<0>(t_csr).get(),
       std::get<1>(t_csr).get(), std::get<2>(t_csr).get(),
       std::get<0>(tt_csr).get(), std::get<1>(tt_csr).get(),
       std::get<2>(tt_csr).get());
@@ -38,7 +38,7 @@ TEST(transpose_and_partranspose, base0) {
 
   auto ptt_csr = matrix_utils::AllocateCSRData(mat.cols(), mat.nnz());
   matrix_utils::ParallelTranspose(
-      mat.cols(), mat.rows(), (int)mat.mkl_base(), std::get<0>(t_csr).get(),
+      mat.cols(), mat.rows(), std::get<0>(t_csr).get(),
       std::get<1>(t_csr).get(), std::get<2>(t_csr).get(),
       std::get<0>(ptt_csr).get(), std::get<1>(ptt_csr).get(),
       std::get<2>(ptt_csr).get());
@@ -53,7 +53,7 @@ TEST(transpose_and_partranspose, base0) {
 
   auto pt2_csr = matrix_utils::AllocateCSRData(mat.cols(), mat.nnz());
   matrix_utils::ParallelTranspose2(
-      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.rows(), mat.cols(), mat.get_ai().get(),
       mat.get_aj().get(), mat.get_av().get(), std::get<0>(pt2_csr).get(),
       std::get<1>(pt2_csr).get(), std::get<2>(pt2_csr).get());
 
@@ -78,13 +78,13 @@ TEST(transpose_and_partranspose, base1) {
 
   auto t_csr = matrix_utils::AllocateCSRData(mat.cols(), mat.nnz());
   matrix_utils::SerialTranspose(
-      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.rows(), mat.cols(), mat.get_ai().get(),
       mat.get_aj().get(), mat.get_av().get(), std::get<0>(t_csr).get(),
       std::get<1>(t_csr).get(), std::get<2>(t_csr).get());
 
   auto tt_csr = matrix_utils::AllocateCSRData(mat.cols(), mat.nnz());
   matrix_utils::SerialTranspose(
-      mat.cols(), mat.rows(), (int)mat.mkl_base(), std::get<0>(t_csr).get(),
+      mat.cols(), mat.rows(), std::get<0>(t_csr).get(),
       std::get<1>(t_csr).get(), std::get<2>(t_csr).get(),
       std::get<0>(tt_csr).get(), std::get<1>(tt_csr).get(),
       std::get<2>(tt_csr).get());
@@ -99,7 +99,7 @@ TEST(transpose_and_partranspose, base1) {
 
   auto pt_csr = matrix_utils::AllocateCSRData(mat.cols(), mat.nnz());
   matrix_utils::ParallelTranspose(
-      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.rows(), mat.cols(), mat.get_ai().get(),
       mat.get_aj().get(), mat.get_av().get(), std::get<0>(pt_csr).get(),
       std::get<1>(pt_csr).get(), std::get<2>(pt_csr).get());
 
@@ -113,7 +113,7 @@ TEST(transpose_and_partranspose, base1) {
 
   auto pt2_csr = matrix_utils::AllocateCSRData(mat.cols(), mat.nnz());
   matrix_utils::ParallelTranspose2(
-      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.rows(), mat.cols(), mat.get_ai().get(),
       mat.get_aj().get(), mat.get_av().get(), std::get<0>(pt2_csr).get(),
       std::get<1>(pt2_csr).get(), std::get<2>(pt2_csr).get());
 
@@ -146,7 +146,7 @@ TEST(transpose_and_partranspose, no_av) {
 
   auto t_csr = matrix_utils::AllocateCSRData(mat.cols(), mat.nnz());
   matrix_utils::SerialTranspose(
-      mat.rows(), mat.cols(), (int)mat.mkl_base(), mat.get_ai().get(),
+      mat.rows(), mat.cols(), mat.get_ai().get(),
       mat.get_aj().get(), (double *)nullptr, std::get<0>(t_csr).get(),
       std::get<1>(t_csr).get(), std::get<2>(t_csr).get());
 }

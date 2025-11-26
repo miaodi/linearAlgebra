@@ -5,19 +5,19 @@ template class CSRMatrix<int, int, double>;
 template class CSRMatrixVec<int, int, double>;
 
 template void SerialTranspose<int, int, double>(const int rows, const int cols,
-                                                const int base, int const *ai,
+                                                int const *ai,
                                                 int const *aj, double const *av,
                                                 int *ai_transpose,
                                                 int *aj_transpose,
                                                 double *av_transpose);
 
 template void ParallelTranspose<int, int, double>(
-    const int rows, const int cols, const int base, int const *ai,
+    const int rows, const int cols, int const *ai,
     int const *aj, double const *av, int *ai_transpose, int *aj_transpose,
     double *av_transpose);
 
 template void ParallelTranspose2<int, int, double>(
-    const int rows, const int cols, const int base, int const *ai,
+    const int rows, const int cols, int const *ai,
     int const *aj, double const *av, int *ai_transpose, int *aj_transpose,
     double *av_transpose);
 
@@ -61,7 +61,7 @@ COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
     COLTYPE level = 0;
 
     // reverse graph to get out edges
-    ParallelTranspose2( nodes, nodes, base, ai, aj, (double*)nullptr,
+    ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr,
                         _t_ai.data(), _t_aj.data(), (double*)nullptr );
 
     prefix[0] = base;
@@ -148,7 +148,7 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
     COLTYPE level = 0;
 
     // reverse graph
-    ParallelTranspose2( nodes, nodes, base, ai, aj, (double*)nullptr,
+    ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr,
                         _t_ai.data(), _t_aj.data(), (double*)nullptr );
 
     prefix[0] = base;

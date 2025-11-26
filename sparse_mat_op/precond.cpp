@@ -944,10 +944,12 @@ bool ILULevelSymbolic<CSRMatrixType>::operator()( const typename CSRMatrixType::
     return true;
 }
 
-template <ResizableDiagonalType CSRMatrixType>
-bool ILULevelSymbolicParallelU<CSRMatrixType>::operator()(const COLTYPE size, ROWTYPE const* ai,
+template <ResizableDiagonalType CSRMatrixType, bool keepdiag>
+bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYPE size, ROWTYPE const* ai,
                                                          COLTYPE const* aj, const int lvl, CSRMatrixType& U)
 {
+    U.rows = size;
+    U.cols = size;
     _Ui.resize(size);
     const auto base = ai[0];
     U.ResizeAI(size + 1);
@@ -979,6 +981,10 @@ bool ILULevelSymbolicParallelU<CSRMatrixType>::operator()(const COLTYPE size, RO
             int level = 0;
             visited_thread[i] = i;
             _Ui[i].clear();
+            if constexpr (keepdiag)
+            {
+                _Ui[i].push_back(i);
+            }
             while (level <= lvl && Q_thread.size())
             {
                 for (const auto row : Q_thread)
@@ -1620,7 +1626,8 @@ template bool ILULevel0Symbolic<matrix_utils::CSRMatrix<int, int, double>>(
     int const* aj,
     matrix_utils::CSRMatrix<int, int, double>& ilu );
 template class ILULevelSymbolic<matrix_utils::CSRMatrix<int, int, double>>;
-template class ILULevelSymbolicParallelU<matrix_utils::CSRMatrix<int, int, double>>;
+template class ILULevelSymbolicParallelU<matrix_utils::CSRMatrix<int, int, double>, false>;
+template class ILULevelSymbolicParallelU<matrix_utils::CSRMatrix<int, int, double>, true>;
 template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>(
     const int size,
     int const* ai,

@@ -253,7 +253,6 @@ decltype(auto) AllocateCSRData(const COLTYPE rows, const ROWTYPE nnz) {
 /// @param rows number of rows of the matrix about to be transposed
 /// @param cols number of columns of the matrix about to be transposed
 /// @param nnz number of nonzeros of the matrix about to be transposed
-/// @param base matrix index base (0 or 1)
 /// @param ai row index
 /// @param aj column index
 /// @param av value vector
@@ -261,10 +260,11 @@ decltype(auto) AllocateCSRData(const COLTYPE rows, const ROWTYPE nnz) {
 /// @param aj_transpose column index transpose matrix
 /// @param av_transpose value vector transpose matrix
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void SerialTranspose(const COLTYPE rows, const COLTYPE cols, const int base,
+void SerialTranspose(const COLTYPE rows, const COLTYPE cols,
                      ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
                      ROWTYPE *ai_transpose, COLTYPE *aj_transpose,
                      VALTYPE *av_transpose) {
+  const int base = ai[0];
   const bool update_av = av_transpose != nullptr && av != nullptr;
   const COLTYPE cols_transpose = rows;
   const COLTYPE rows_transpose = cols;
@@ -296,15 +296,15 @@ void SerialTranspose(const COLTYPE rows, const COLTYPE cols, const int base,
 /// @param rows number of rows of the matrix about to be transposed
 /// @param cols number of columns of the matrix about to be transposed
 /// @param nnz number of nonzeros of the matrix about to be transposed
-/// @param base matrix index base (0 or 1)
 /// @param ai row index
 /// @param aj column index
 /// @param av value vector
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ParallelTranspose(const COLTYPE rows, const COLTYPE cols, const int base,
+void ParallelTranspose(const COLTYPE rows, const COLTYPE cols,
                        ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
                        ROWTYPE *ai_transpose, COLTYPE *aj_transpose,
                        VALTYPE *av_transpose) {
+  const int base = ai[0];
   const COLTYPE cols_transpose = rows;
   const COLTYPE rows_transpose = cols;
   const auto nnz = ai[rows] - base;
@@ -372,15 +372,15 @@ void ParallelTranspose(const COLTYPE rows, const COLTYPE cols, const int base,
 /// @param rows number of rows of the matrix about to be transposed
 /// @param cols number of columns of the matrix about to be transposed
 /// @param nnz number of nonzeros of the matrix about to be transposed
-/// @param base matrix index base (0 or 1)
 /// @param ai row index
 /// @param aj column index
 /// @param av value vector
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void ParallelTranspose2(const COLTYPE rows, const COLTYPE cols, const int base,
+void ParallelTranspose2(const COLTYPE rows, const COLTYPE cols,
                         ROWTYPE const *ai, COLTYPE const *aj, VALTYPE const *av,
                         ROWTYPE *ai_transpose, COLTYPE *aj_transpose,
                         VALTYPE *av_transpose) {
+  const int base = ai[0];
   const COLTYPE cols_transpose = rows;
   const COLTYPE rows_transpose = cols;
   const auto nnz = ai[rows] - base;
@@ -1055,7 +1055,7 @@ bool IsSymmetry( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTY
     std::vector<COLTYPE> taj( nnz );
     std::vector<VALTYPE> tav( nnz );
 
-    ParallelTranspose2( size, size, base, ai, aj, av, tai.data(), taj.data(), tav.data() );
+    ParallelTranspose2( size, size, ai, aj, av, tai.data(), taj.data(), tav.data() );
     for ( COLTYPE i = 0; i < size; i++ )
     {
         if ( ai[i + 1] - ai[i] != tai[i + 1] - tai[i] )

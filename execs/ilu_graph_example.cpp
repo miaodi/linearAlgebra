@@ -139,7 +139,7 @@ int main(int argc, char **argv) {
   
   // Compute transpose using parallel transpose
   matrix_utils::ParallelTranspose2<int, int, double>(
-    L.rows, L.cols, L.Base(),
+    L.rows, L.cols,
     L.AI(), L.AJ(), L.AV(),
     Lt_ai, Lt_aj, Lt_av
   );
