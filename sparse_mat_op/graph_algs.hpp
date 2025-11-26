@@ -1,9 +1,11 @@
 #pragma once
-#include "matrix_utils.hpp"
+#include "matrix_enums.hpp"
 #include <algorithm>
 #include <omp.h>
 #include <set>
 #include <vector>
+#include <memory>
+
 namespace matrix_utils
 {
 
@@ -157,4 +159,109 @@ void BuildPermutationFromSccLevels(COLTYPE num_sccs,
                                    COLTYPE scc_levels,
                                    COLTYPE* node_perm,
                                    COLTYPE* node_iperm = nullptr);
+
+/// @brief Serial implementation of Kahn's algorithm for topological sorting
+///
+/// Kahn's algorithm computes a topological ordering of a directed acyclic graph (DAG)
+/// by repeatedly removing nodes with zero in-degree. This implementation also computes
+/// level sets (nodes at the same topological distance from sources).
+///
+/// @tparam ROWTYPE Row pointer type (typically int or int64_t)
+/// @tparam COLTYPE Column index type (typically int or int64_t)
+template <typename ROWTYPE, typename COLTYPE>
+struct KahnSerial
+{
+    /// @brief Compute topological sort using Kahn's algorithm
+    /// @param nodes Number of nodes in the graph
+    /// @param ai Row pointers array (ai[0] contains the base indexing)
+    /// @param aj Column indices array
+    /// @param perm Output array for topological ordering (size = nodes)
+    /// @param prefix Output array for level set boundaries (size = num_levels + 1)
+    /// @param has_diagonal If true, graph contains self-loops that should be ignored
+    /// @return Number of levels in the topological ordering
+    COLTYPE operator()( const COLTYPE nodes,
+                        ROWTYPE const* ai,
+                        COLTYPE const* aj,
+                        COLTYPE* perm,
+                        COLTYPE* prefix,
+                        bool has_diagonal = false );
+
+    std::vector<COLTYPE> _degrees;    // In-degree of each node
+    std::vector<ROWTYPE> _t_ai;       // Transpose graph row pointers
+    std::vector<COLTYPE> _t_aj;       // Transpose graph column indices
+};
+
+/// @brief Parallel implementation of Kahn's algorithm for topological sorting
+///
+/// This parallel version uses atomic operations on in-degrees and thread-local
+/// queues to process nodes in parallel while maintaining topological constraints.
+/// Level sets are computed by synchronizing between BFS-style iterations.
+///
+/// @tparam ROWTYPE Row pointer type (typically int or int64_t)
+/// @tparam COLTYPE Column index type (typically int or int64_t)
+template <typename ROWTYPE, typename COLTYPE>
+struct KahnParallel
+{
+    /// @brief Constructor
+    /// @param nthreads Number of threads to use for parallel computation
+    KahnParallel( int nthreads )
+        : _nthreads( nthreads ), _threads_nodes( nthreads ), _threads_prefix( nthreads + 1 )
+    {
+    }
+    
+    /// @brief Compute topological sort using parallel Kahn's algorithm
+    /// @param nodes Number of nodes in the graph
+    /// @param ai Row pointers array (ai[0] contains the base indexing)
+    /// @param aj Column indices array
+    /// @param perm Output array for topological ordering (size = nodes)
+    /// @param prefix Output array for level set boundaries (size = num_levels + 1)
+    /// @param has_diagonal If true, graph contains self-loops that should be ignored
+    /// @return Number of levels in the topological ordering
+    COLTYPE operator()( const COLTYPE nodes,
+                        ROWTYPE const* ai,
+                        COLTYPE const* aj,
+                        COLTYPE* perm,
+                        COLTYPE* prefix,
+                        bool has_diagonal = false );
+
+    int _nthreads;                                      // Number of threads
+    std::unique_ptr<std::atomic<COLTYPE>[]> _degrees;  // Atomic in-degrees for parallel updates
+    COLTYPE _degrees_size{ 0 };                        // Current size of _degrees array
+    std::vector<ROWTYPE> _t_ai;                        // Transpose graph row pointers
+    std::vector<COLTYPE> _t_aj;                        // Transpose graph column indices
+    std::vector<std::vector<COLTYPE>> _threads_nodes;  // Per-thread queue of nodes to process
+    std::vector<COLTYPE> _threads_prefix;              // Per-thread prefix sums for output positions
+};
+
+/// @brief Topological sort using maximum degree ordering
+///
+/// This algorithm processes nodes in order of decreasing out-degree (for upper triangular)
+/// or in-degree (for lower triangular), which can provide good parallelism for sparse
+/// triangular solves. The template parameter TS determines the matrix type.
+///
+/// @tparam ROWTYPE Row pointer type (typically int or int64_t)
+/// @tparam COLTYPE Column index type (typically int or int64_t)
+/// @tparam TS Triangular matrix type (U for upper, L for lower)
+template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
+struct TopologicalSort2
+{
+    /// @brief Compute degree-based topological sort
+    /// @param nodes Number of nodes in the graph
+    /// @param ai Row pointers array (ai[0] contains the base indexing)
+    /// @param aj Column indices array
+    /// @param perm Output array for topological ordering (size = nodes)
+    /// @param prefix Output array for level set boundaries (size = num_levels + 1)
+    ///               After sorting, the base of prefix matches ai[0]
+    /// @param has_diagonal If true, graph contains self-loops that should be excluded from degree count
+    /// @return Number of levels in the topological ordering
+    COLTYPE operator()( const COLTYPE nodes,
+                        ROWTYPE const* ai,
+                        COLTYPE const* aj,
+                        COLTYPE* perm,
+                        COLTYPE* prefix,
+                        bool has_diagonal = false );
+                        
+    std::vector<COLTYPE> _degrees;  // Degree of each node (in-degree or out-degree based on TS)
+};
+
 } // namespace matrix_utils

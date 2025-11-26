@@ -1,7 +1,9 @@
 #pragma once
 
+#include "matrix_enums.hpp"
 #include "sparse_mat_traits.hpp"
 #include "utils.h"
+#include "graph_algs.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <execution>
@@ -271,7 +273,7 @@ void SerialTranspose(const COLTYPE rows, const COLTYPE cols,
   const auto nnz = ai[rows] - base;
 
   ai_transpose[0] = base;
-  std::fill_n(std::execution::seq, ai_transpose + 1, rows_transpose, 0);
+  std::memset(ai_transpose + 1, 0, rows_transpose * sizeof(ROWTYPE));
 
   // assign size of row i to ai[i+1]
   for (auto i = 0; i < nnz; i++) {
@@ -282,12 +284,20 @@ void SerialTranspose(const COLTYPE rows, const COLTYPE cols,
   std::inclusive_scan(ai_transpose, ai_transpose + rows_transpose + 1,
                       ai_transpose);
 
-  for (COLTYPE i = 0; i < rows; i++) {
-    for (COLTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
-      const COLTYPE idx = ai_transpose[aj[j] - base + 1]++ - base;
-      aj_transpose[idx] = i + base;
-      if (update_av)
+  if (update_av) {
+    for (COLTYPE i = 0; i < rows; i++) {
+      for (COLTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+        const COLTYPE idx = ai_transpose[aj[j] - base + 1]++ - base;
+        aj_transpose[idx] = i + base;
         av_transpose[idx] = av[j];
+      }
+    }
+  } else {
+    for (COLTYPE i = 0; i < rows; i++) {
+      for (COLTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+        const COLTYPE idx = ai_transpose[aj[j] - base + 1]++ - base;
+        aj_transpose[idx] = i + base;
+      }
     }
   }
 }
@@ -356,13 +366,22 @@ void ParallelTranspose(const COLTYPE rows, const COLTYPE cols,
 
 #pragma omp barrier
 
-    for (auto it = start; it < end; it++) {
-      for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
-        const COLTYPE rowID = it - ai;
-        const COLTYPE idx = threadPrefixSum[tid][aj[j] - base]++ - base;
-        aj_transpose[idx] = rowID + base;
-        if (update_av)
+    if (update_av) {
+      for (auto it = start; it < end; it++) {
+        for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
+          const COLTYPE rowID = it - ai;
+          const COLTYPE idx = threadPrefixSum[tid][aj[j] - base]++ - base;
+          aj_transpose[idx] = rowID + base;
           av_transpose[idx] = av[j];
+        }
+      }
+    } else {
+      for (auto it = start; it < end; it++) {
+        for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
+          const COLTYPE rowID = it - ai;
+          const COLTYPE idx = threadPrefixSum[tid][aj[j] - base]++ - base;
+          aj_transpose[idx] = rowID + base;
+        }
       }
     }
   }
@@ -445,13 +464,22 @@ void ParallelTranspose2(const COLTYPE rows, const COLTYPE cols,
     }
 
 #pragma omp barrier
-    for (auto it = start; it < end; it++) {
-      for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
-        const COLTYPE rowID = it - ai;
-        const COLTYPE idx = threadPrefixSum[IdxMap(tid, aj[j] - base)]++ - base;
-        aj_transpose[idx] = rowID + base;
-        if (update_av)
+    if (update_av) {
+      for (auto it = start; it < end; it++) {
+        for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
+          const COLTYPE rowID = it - ai;
+          const COLTYPE idx = threadPrefixSum[IdxMap(tid, aj[j] - base)]++ - base;
+          aj_transpose[idx] = rowID + base;
           av_transpose[idx] = av[j];
+        }
+      }
+    } else {
+      for (auto it = start; it < end; it++) {
+        for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
+          const COLTYPE rowID = it - ai;
+          const COLTYPE idx = threadPrefixSum[IdxMap(tid, aj[j] - base)]++ - base;
+          aj_transpose[idx] = rowID + base;
+        }
       }
     }
   }
@@ -626,63 +654,6 @@ void symPermute(const COLTYPE rows, const int base, ROWTYPE const *ai,
     }
   }
 }
-
-enum TriangularMatrix { L = 0, U = 1 };
-
-template <typename ROWTYPE, typename COLTYPE>
-struct KahnSerial
-{
-    // Kahn's algorithm
-    COLTYPE operator()( const COLTYPE nodes,
-                        ROWTYPE const* ai,
-                        COLTYPE const* aj,
-                        COLTYPE* perm,
-                        COLTYPE* prefix,
-                        bool has_diagonal = false );
-
-    std::vector<COLTYPE> _degrees;
-    std::vector<ROWTYPE> _t_ai;
-    std::vector<COLTYPE> _t_aj;
-};
-
-template <typename ROWTYPE, typename COLTYPE>
-struct KahnParallel
-{
-    KahnParallel( int nthreads )
-        : _nthreads( nthreads ), _threads_nodes( nthreads ), _threads_prefix( nthreads + 1 )
-    {
-    }
-    // Kahn's algorithm
-    COLTYPE operator()( const COLTYPE nodes,
-                        ROWTYPE const* ai,
-                        COLTYPE const* aj,
-                        COLTYPE* perm,
-                        COLTYPE* prefix,
-                        bool has_diagonal = false );
-
-    int _nthreads;
-    std::unique_ptr<std::atomic<COLTYPE>[]> _degrees{ nullptr };
-    COLTYPE _degrees_size{ 0 };
-    std::vector<ROWTYPE> _t_ai;
-    std::vector<COLTYPE> _t_aj;
-    std::vector<std::vector<COLTYPE>> _threads_nodes;
-    std::vector<COLTYPE> _threads_prefix;
-};
-
-template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
-struct TopologicalSort2
-{
-    // max degree
-    // after sorting, the base of prefix is the same as ai[0]
-    COLTYPE operator()( const COLTYPE nodes,
-                        ROWTYPE const* ai,
-                        COLTYPE const* aj,
-                        COLTYPE* perm,
-                        COLTYPE* prefix,
-                        bool has_diagonal = false );
-                        
-    std::vector<COLTYPE> _degrees;
-};
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 bool Diagonal(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
@@ -1273,4 +1244,23 @@ void RandomU(const typename CSRMatrixType::COLTYPE rows,
     }
   }
 }
+
+/// @brief Embed a source CSR matrix into a target CSR sparsity pattern
+/// @param rows Number of rows in both matrices
+/// @param ai_source Row pointers of source matrix to embed
+/// @param aj_source Column indices of source matrix
+/// @param av_source Values of source matrix
+/// @param ai_target Row pointers of target (destination) matrix with larger sparsity pattern
+/// @param aj_target Column indices of target matrix
+/// @param av_target Values of target matrix (output, will be filled)
+/// @param num_threads Number of threads to use for parallel processing
+/// @details The target matrix must contain all nonzero positions of the source matrix.
+///          Positions in target not present in source will be set to zero.
+///          This is useful for embedding ILU(0) into ILU(k) pattern or similar operations.
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void EmbedCSR(const COLTYPE rows,
+              ROWTYPE const *ai_source, COLTYPE const *aj_source, VALTYPE const *av_source,
+              ROWTYPE const *ai_target, COLTYPE const *aj_target, VALTYPE *av_target,
+              const int num_threads);
+
 } // namespace matrix_utils

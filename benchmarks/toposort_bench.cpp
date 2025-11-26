@@ -56,7 +56,7 @@ void createRandomSparseL(CSRMatrixType &L, int rows, int base, int max_deps_per_
   }
 }
 int num_threads = 1;
-auto KahnSerial = [](benchmark::State &state, const CSRMatrixType &mat) {
+auto KahnSerialBench = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> perm(mat.rows);
   std::vector<int> prefix(mat.rows + 1);
   matrix_utils::KahnSerial<int, int> kahn;
@@ -66,7 +66,7 @@ auto KahnSerial = [](benchmark::State &state, const CSRMatrixType &mat) {
   }
 };
 
-auto KahnParallel = [](benchmark::State &state, const CSRMatrixType &mat) {
+auto KahnParallelBench = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> perm(mat.rows);
   std::vector<int> prefix(mat.rows + 1);
   matrix_utils::KahnParallel<int, int> kahn(num_threads);
@@ -76,7 +76,7 @@ auto KahnParallel = [](benchmark::State &state, const CSRMatrixType &mat) {
   }
 };
 
-auto TopologicalSort2 = [](benchmark::State &state, const CSRMatrixType &mat) {
+auto TopologicalSort2Bench = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> perm(mat.rows);
   std::vector<int> prefix(mat.rows + 1);
   matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topologicalSort;
@@ -113,13 +113,13 @@ int main(int argc, char **argv) {
   CSRMatrixType sparse_mat;
   createRandomSparseL(sparse_mat, size, 0, std::min(rnnz/4, 10));
 
-  benchmark::RegisterBenchmark("KahnSerial_Dense", KahnSerial, mat);
-  benchmark::RegisterBenchmark("KahnParallel_Dense", KahnParallel, mat);
-  benchmark::RegisterBenchmark("TopologicalSort2_Dense", TopologicalSort2, mat);
+  benchmark::RegisterBenchmark("KahnSerial_Dense", KahnSerialBench, mat);
+  benchmark::RegisterBenchmark("KahnParallel_Dense", KahnParallelBench, mat);
+  benchmark::RegisterBenchmark("TopologicalSort2_Dense", TopologicalSort2Bench, mat);
   
   // Add a sparse matrix with better parallelization potential  
-  benchmark::RegisterBenchmark("KahnSerial_Sparse", KahnSerial, sparse_mat);
-  benchmark::RegisterBenchmark("KahnParallel_Sparse", KahnParallel, sparse_mat);
+  benchmark::RegisterBenchmark("KahnSerial_Sparse", KahnSerialBench, sparse_mat);
+  benchmark::RegisterBenchmark("KahnParallel_Sparse", KahnParallelBench, sparse_mat);
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();
   benchmark::Shutdown();
