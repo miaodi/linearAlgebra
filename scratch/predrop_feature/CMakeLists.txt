@@ -5,7 +5,7 @@ add_executable(drop_global_precond drop_global_precond.cpp)
 
 # Link against project libraries
 target_link_libraries(drop_global_precond PRIVATE
-    Utils
+    utils
     fast_matrix_market::fast_matrix_market
     Eigen3::Eigen
     mkl_wrapper

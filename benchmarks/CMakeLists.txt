@@ -28,7 +28,7 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
 
    add_executable(${TARGET_NAME} ${ONE_BENCH_CPP})
    set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_BENCH_EXEC})
-   target_link_libraries(${TARGET_NAME} PRIVATE benchmark::benchmark reordering Utils OpenMP::OpenMP_CXX cxxopts)
+   target_link_libraries(${TARGET_NAME} PRIVATE benchmark::benchmark reordering utils OpenMP::OpenMP_CXX cxxopts)
 endforeach()
 
 # https://sparse.tamu.edu/VLSI/nv2
