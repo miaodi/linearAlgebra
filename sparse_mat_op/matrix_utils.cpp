@@ -3,6 +3,8 @@
 namespace matrix_utils {
 template class CSRMatrix<int, int, double>;
 template class CSRMatrixVec<int, int, double>;
+template class CSRMatrixVec<int, int, int8_t>;
+template class CSRMatrixVec<int64_t, int64_t, int8_t>;
 
 template void SerialTranspose<int, int, double>(const int rows, const int cols,
                                                 int const *ai,

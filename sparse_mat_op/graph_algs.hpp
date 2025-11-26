@@ -264,4 +264,38 @@ struct TopologicalSort2
     std::vector<COLTYPE> _degrees;  // Degree of each node (in-degree or out-degree based on TS)
 };
 
+/**
+ * @brief Compute Jaccard similarity between two CSR structures
+ * 
+ * Jaccard similarity = |A ∩ B| / |A ∪ B|
+ * Where A and B are the sets of non-zero positions in the matrices.
+ * 
+ * This function treats both matrices as binary (presence/absence of entries),
+ * computes their union using SpADD with all values set to 1, and then
+ * calculates the ratio of overlapping entries to total unique entries.
+ * 
+ * @tparam ROWTYPE Type for row pointers
+ * @tparam COLTYPE Type for column indices
+ * @param A_rows Number of rows in matrix A
+ * @param A_cols Number of columns in matrix A (must equal B_cols)
+ * @param A_ai Row pointers of matrix A
+ * @param A_aj Column indices of matrix A
+ * @param B_rows Number of rows in matrix B (must equal A_rows)
+ * @param B_cols Number of columns in matrix B (must equal A_cols)
+ * @param B_ai Row pointers of matrix B
+ * @param B_aj Column indices of matrix B
+ * @param num_threads Number of OpenMP threads to use
+ * @return Jaccard similarity coefficient in range [0, 1]
+ */
+template <typename ROWTYPE, typename COLTYPE>
+double jaccardSimilarity( const COLTYPE A_rows,
+                          const COLTYPE A_cols,
+                          const ROWTYPE* A_ai,
+                          const COLTYPE* A_aj,
+                          const COLTYPE B_rows,
+                          const COLTYPE B_cols,
+                          const ROWTYPE* B_ai,
+                          const COLTYPE* B_aj,
+                          int num_threads = omp_get_max_threads() );
+
 } // namespace matrix_utils
