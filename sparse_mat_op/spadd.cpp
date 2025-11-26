@@ -191,5 +191,6 @@ template struct SpADD<CSRMatrixVec<int, int, double>>;
 template struct SpADD<CSRMatrixVec<int64_t, int64_t, double>>;
 template struct SpADD<CSRMatrixVec<int, int, float>>;
 template struct SpADD<CSRMatrixVec<int64_t, int64_t, float>>;
+template struct SpADD<CSRMatrix<int, int, double>>;
 
 } // namespace matrix_utils

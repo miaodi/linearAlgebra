@@ -422,7 +422,7 @@ void mkl_sparse_mat::transpose() {
   auto csr_data = matrix_utils::AllocateCSRData(_ncol, _nnz);
 
   matrix_utils::ParallelTranspose2(
-      _nrow, _ncol, _mkl_base, _ai.get(), _aj.get(), _av.get(),
+      _nrow, _ncol, _ai.get(), _aj.get(), _av.get(),
       std::get<0>(csr_data).get(), std::get<1>(csr_data).get(),
       std::get<2>(csr_data).get());
   _ai = std::move(std::get<0>(csr_data));

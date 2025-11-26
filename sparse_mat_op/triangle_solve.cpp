@@ -604,7 +604,7 @@ COLTYPE P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::buildTaskGraph
     _taskOutGraph.ai.resize( _totalTasks + 1 );
     _taskOutGraph.aj.resize( task_edges );
 
-    matrix_utils::ParallelTranspose2( _taskInGraph.rows, _taskInGraph.cols, _taskInGraph.Base(),
+    matrix_utils::ParallelTranspose2( _taskInGraph.rows, _taskInGraph.cols,
                                       _taskInGraph.ai.data(), _taskInGraph.aj.data(), (VALTYPE const*)nullptr,
                                       _taskOutGraph.ai.data(), _taskOutGraph.aj.data(), (VALTYPE*)nullptr );
 
@@ -814,7 +814,6 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::pruneThreadIntraE
 
     matrix_utils::ParallelTranspose2( _taskOutGraphIntraReduced.rows,
                                       _taskOutGraphIntraReduced.cols,
-                                      _taskOutGraphIntraReduced.Base(),
                                       _taskOutGraphIntraReduced.ai.data(),
                                       _taskOutGraphIntraReduced.aj.data(),
                                       static_cast<VALTYPE const*>( nullptr ),
@@ -1603,7 +1602,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE,
 
   _taskAdjGraph.aj.resize(_taskInvAdjGraph.NNZ());
   matrix_utils::ParallelTranspose2(
-      _taskInvAdjGraph.rows, _taskInvAdjGraph.cols, _taskInvAdjGraph.Base(),
+      _taskInvAdjGraph.rows, _taskInvAdjGraph.cols,
       _taskInvAdjGraph.ai.data(), _taskInvAdjGraph.aj.data(),
       (VALTYPE const *)nullptr, _taskAdjGraph.ai.data(),
       _taskAdjGraph.aj.data(), (VALTYPE *)nullptr);

@@ -138,7 +138,7 @@ private:
   std::deque<typename CSRMatrixType::COLTYPE> _q; // queue of pivot candidates < i
 };
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonalType CSRMatrixType, bool keepdiag = false>
 class ILULevelSymbolicParallelU
 {
 public:
