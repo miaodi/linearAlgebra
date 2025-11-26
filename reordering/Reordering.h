@@ -143,5 +143,62 @@ void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
 // nested dissection from metis
 void Metis(mkl_wrapper::mkl_sparse_mat const *const mat,
            std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm);
+
+/// @brief Configuration options for METIS nested dissection
+struct MetisNDOptions {
+  /// @brief Number of different separators to try (1-10+, default: 1)
+  /// Higher values may produce better quality orderings but take longer
+  int nseps = 1;
+  
+  /// @brief Number of refinement iterations (default: 10)
+  /// Higher values may produce better quality orderings but take longer
+  int niter = 10;
+  
+  /// @brief Random seed for reproducibility (default: -1 for random)
+  /// Set to a fixed value (e.g., 0, 42) for reproducible results
+  int seed = -1;
+  
+  /// @brief Compress graph by removing self-loops and duplicate edges (default: true)
+  bool compress = true;
+  
+  /// @brief Order connected components of the graph separately (default: false)
+  /// Useful for disconnected graphs
+  bool ccorder = false;
+  
+  /// @brief Coarsening type (default: 1 = METIS_CTYPE_SHEM - sorted heavy-edge matching)
+  /// 0 = METIS_CTYPE_RM (random matching)
+  /// 1 = METIS_CTYPE_SHEM (sorted heavy-edge matching, usually better)
+  int ctype = 1;
+  
+  /// @brief Refinement type (default: 3 = METIS_RTYPE_SEP1SIDED)
+  /// 0 = METIS_RTYPE_FM (Fiduccia-Mattheyses)
+  /// 1 = METIS_RTYPE_GREEDY
+  /// 2 = METIS_RTYPE_SEP2SIDED (2-sided separator refinement)
+  /// 3 = METIS_RTYPE_SEP1SIDED (1-sided separator refinement, usually best for ND)
+  int rtype = 3;
+  
+  /// @brief Debug level (default: 0 = no output)
+  /// Higher values produce more diagnostic output
+  int dbglvl = 0;
+};
+
+/// @brief METIS nested dissection reordering for general CSR matrices
+/// @tparam ROWTYPE Type for row pointers (ai array) - supports int32_t or int64_t
+/// @tparam COLTYPE Type for column indices (aj array) - supports int32_t or int64_t
+/// @param nrows Number of rows in the matrix
+/// @param ncols Number of columns in the matrix (must equal nrows for square matrix)
+/// @param ai Row pointer array of size (nrows + 1) - base is derived from ai[0]
+/// @param aj Column index array
+/// @param iperm Inverse permutation array: iperm[i] = k means new row i comes from old row k
+/// @param perm Permutation array: perm[i] = k means old row i goes to new row k
+/// @param opts METIS options (optional, uses defaults if not provided)
+/// @return 0 on success, non-zero on failure
+template <typename ROWTYPE, typename COLTYPE>
+int MetisND(const COLTYPE nrows, const COLTYPE ncols,
+            const ROWTYPE* ai, const COLTYPE* aj,
+            COLTYPE* iperm, COLTYPE* perm,
+            const MetisNDOptions& opts = MetisNDOptions());
 #endif
+
+
 } // namespace reordering

@@ -153,5 +153,87 @@ void Metis(mkl_wrapper::mkl_sparse_mat const *const mat,
   METIS_NodeND(&nvtxs, xadj.data(), adjncy.data(), NULL, options.data(),
                iperm.data(), perm.data());
 }
+
+template <typename ROWTYPE, typename COLTYPE>
+int MetisND(const COLTYPE nrows, const COLTYPE ncols,
+            const ROWTYPE* ai, const COLTYPE* aj,
+            COLTYPE* iperm, COLTYPE* perm, const MetisNDOptions& opts) {
+  
+  // METIS requires square matrix
+  if (nrows != ncols) {
+    return -1;
+  }
+  
+  // METIS uses idx_t (typically int32 or int64 depending on build)
+  // Build adjacency list without self-loops
+  const ROWTYPE base = ai[0];
+  std::vector<idx_t> xadj(nrows + 1);
+  xadj[0] = base;
+  
+  // Count non-diagonal entries per row directly into xadj
+  for (COLTYPE i = 0; i < nrows; ++i) {
+    idx_t count = 0;
+    for (ROWTYPE j = ai[i]; j < ai[i + 1]; ++j) {
+      if (aj[j - base] != i + base) {  // Skip diagonal
+        count++;
+      }
+    }
+    xadj[i + 1] = xadj[i] + count;
+  }
+  
+  // Fill adjncy without diagonal entries
+  const idx_t nnz = xadj[nrows] - xadj[0];
+  std::vector<idx_t> adjncy(nnz);
+  idx_t pos = 0;
+  for (COLTYPE i = 0; i < nrows; ++i) {
+    for (ROWTYPE j = ai[i]; j < ai[i + 1]; ++j) {
+      COLTYPE col = aj[j - base];
+      if (col != i + base) {  // Skip diagonal
+        adjncy[pos++] = static_cast<idx_t>(col);
+      }
+    }
+  }
+  
+  // Prepare output arrays
+  std::vector<idx_t> iperm_metis(nrows);
+  std::vector<idx_t> perm_metis(nrows);
+  
+  // Set METIS options
+  std::vector<idx_t> options(METIS_NOPTIONS);
+  METIS_SetDefaultOptions(options.data());
+  options[METIS_OPTION_NUMBERING] = base;
+  options[METIS_OPTION_NSEPS] = opts.nseps;
+  options[METIS_OPTION_NITER] = opts.niter;
+  options[METIS_OPTION_SEED] = opts.seed;
+  options[METIS_OPTION_COMPRESS] = opts.compress ? 1 : 0;
+  options[METIS_OPTION_CCORDER] = opts.ccorder ? 1 : 0;
+  options[METIS_OPTION_CTYPE] = opts.ctype;
+  options[METIS_OPTION_RTYPE] = opts.rtype;
+  options[METIS_OPTION_DBGLVL] = opts.dbglvl;
+  
+  // Call METIS nested dissection
+  idx_t nvtxs = static_cast<idx_t>(nrows);
+  int result = METIS_NodeND(&nvtxs, xadj.data(), adjncy.data(), NULL, 
+                             options.data(), perm_metis.data(), iperm_metis.data());
+  
+  // Convert results back to requested type
+  for (COLTYPE i = 0; i < nrows; ++i) {
+    iperm[i] = static_cast<COLTYPE>(iperm_metis[i]);
+    perm[i] = static_cast<COLTYPE>(perm_metis[i]);
+  }
+  
+  return (result == METIS_OK) ? 0 : -1;
+}
+
+// Explicit template instantiations for common type combinations
+template int MetisND<int32_t, int32_t>(const int32_t, const int32_t,
+                                        const int32_t*, const int32_t*,
+                                        int32_t*, int32_t*, const MetisNDOptions&);
+template int MetisND<int64_t, int64_t>(const int64_t, const int64_t,
+                                        const int64_t*, const int64_t*,
+                                        int64_t*, int64_t*, const MetisNDOptions&);
+template int MetisND<int64_t, int32_t>(const int32_t, const int32_t,
+                                        const int64_t*, const int32_t*,
+                                        int32_t*, int32_t*, const MetisNDOptions&);
 #endif
 } // namespace reordering
