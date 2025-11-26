@@ -3,7 +3,7 @@ project(sparse_mat_op CXX)
 
 set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp permutation.cpp io.cpp graph_algs.cpp sp_ops.cpp spgemm.cpp spadd.cpp ilum.cpp symmetric_ops.cpp)
 
-set(DEPENDENCIES Utils OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_market::fast_matrix_market)
+set(DEPENDENCIES utils OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_market::fast_matrix_market)
 
 if(USE_METIS_LIB)
   set(DEPENDENCIES ${DEPENDENCIES} MORSE::METIS)

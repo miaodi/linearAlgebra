@@ -203,6 +203,7 @@ add_subdirectory(sparse_mat_op)
 add_subdirectory(mkl_wrapper)
 add_subdirectory(reordering)
 add_subdirectory(factorization)
+add_subdirectory(solver)
 add_subdirectory(data)
 
 add_subdirectory(execs)
