@@ -1,4 +1,5 @@
 #include "graph_algs.hpp"
+#include "spadd.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <iterator>
 #include <immintrin.h>
 #include <numeric>
+#include <stdexcept>
 #include "matrix_utils.hpp"
 
 namespace matrix_utils
@@ -883,5 +885,83 @@ INSTANTIATE_GRAPH_ALGS( std::int32_t, std::int32_t )
 INSTANTIATE_GRAPH_ALGS( std::int64_t, std::int64_t )
 
 #undef INSTANTIATE_GRAPH_ALGS
+
+template <typename ROWTYPE, typename COLTYPE>
+double jaccardSimilarity( const COLTYPE A_rows,
+                          const COLTYPE A_cols,
+                          const ROWTYPE* A_ai,
+                          const COLTYPE* A_aj,
+                          const COLTYPE B_rows,
+                          const COLTYPE B_cols,
+                          const ROWTYPE* B_ai,
+                          const COLTYPE* B_aj,
+                          int num_threads )
+{
+    // Check dimensions
+    if ( A_rows != B_rows || A_cols != B_cols )
+    {
+        throw std::invalid_argument( "Matrix dimensions do not match for Jaccard similarity" );
+    }
+
+    const ROWTYPE A_base = A_ai[0];
+    const ROWTYPE B_base = B_ai[0];
+    const ROWTYPE A_nnz = A_ai[A_rows] - A_base;
+    const ROWTYPE B_nnz = B_ai[B_rows] - B_base;
+
+    // Handle empty matrices
+    if ( A_nnz == 0 && B_nnz == 0 )
+    {
+        return 1.0; // Both empty, perfectly similar
+    }
+    if ( A_nnz == 0 || B_nnz == 0 )
+    {
+        return 0.0; // One empty, no similarity
+    }
+
+    // Create value vectors filled with 1
+    std::vector<int8_t> A_av( A_nnz, 1 );
+    std::vector<int8_t> B_av( B_nnz, 1 );
+
+    // Use SpADD to compute union: C = 1*A + 1*B
+    SpADD<CSRMatrixVec<ROWTYPE, COLTYPE, int8_t>> spadd( num_threads );
+    CSRMatrixVec<ROWTYPE, COLTYPE, int8_t> C;
+
+    // Analysis phase
+    spadd.analysis( A_rows, A_cols, A_ai, A_aj,
+                    B_rows, B_cols, B_ai, B_aj, C );
+
+    // Numerical phase with alpha=1, beta=1
+    spadd( A_rows, A_cols, A_ai, A_aj, A_av.data(), static_cast<int8_t>(1),
+           B_rows, B_cols, B_ai, B_aj, B_av.data(), static_cast<int8_t>(1), C );
+
+    const ROWTYPE C_base = C.AI()[0];
+    const ROWTYPE C_nnz = C.AI()[C.rows] - C_base;
+
+    // Count entries with value 2 (intersection)
+    ROWTYPE intersection_count = 0;
+    const int8_t* C_av = C.AV();
+
+#pragma omp parallel for reduction( + : intersection_count ) num_threads( num_threads )
+    for ( ROWTYPE i = 0; i < C_nnz; i++ )
+    {
+        if ( C_av[i] == 2 ) // Exact comparison for int8_t
+        {
+            intersection_count++;
+        }
+    }
+
+    // Jaccard similarity = |A ∩ B| / |A ∪ B|
+    return static_cast<double>( intersection_count ) / static_cast<double>( C_nnz );
+}
+
+// Explicit instantiation for common types
+template double jaccardSimilarity<int, int>( const int, const int,
+                                              const int*, const int*,
+                                              const int, const int,
+                                              const int*, const int*, int );
+template double jaccardSimilarity<int64_t, int64_t>( const int64_t, const int64_t,
+                                                      const int64_t*, const int64_t*,
+                                                      const int64_t, const int64_t,
+                                                      const int64_t*, const int64_t*, int );
 
 } // namespace matrix_utils

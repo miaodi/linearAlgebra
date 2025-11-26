@@ -1,5 +1,7 @@
 #include "matrix_utils.hpp"
 #include "sp_ops.hpp"
+#include "spadd.hpp"
+#include "graph_algs.hpp"
 #include "utils.h"
 #include "mkl_sparse_mat.h"
 #include <algorithm>
@@ -1558,6 +1560,812 @@ TEST(Block, Submatrix)
             }
         }
     }
+}
+
+// SpADD Tests
+class SpADDTest : public testing::Test
+{
+protected:
+    const double _tol = 1e-10;
+
+    // Helper function to verify CSR matrix validity
+    template <typename CSRMatrixType>
+    void verifyCsrMatrix( const CSRMatrixType& mat )
+    {
+        using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+        using COLTYPE = typename CSRMatrixType::COLTYPE;
+        
+        const ROWTYPE* ai = mat.AI();
+        const COLTYPE* aj = mat.AJ();
+        const ROWTYPE base = ai[0];
+
+        ASSERT_EQ( ai[0], base ) << "Row pointer should start with base";
+
+        for ( COLTYPE i = 0; i < mat.rows; i++ )
+        {
+            ASSERT_LE( ai[i], ai[i + 1] ) << "Row pointers must be non-decreasing";
+
+            // Check column indices are sorted
+            for ( ROWTYPE j = ai[i] - base; j < ai[i + 1] - base - 1; j++ )
+            {
+                ASSERT_LT( aj[j], aj[j + 1] ) << "Column indices must be sorted and unique";
+            }
+        }
+    }
+
+    // Helper function to compute C = alpha*A + beta*B naively
+    template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> computeSpAddNaive(
+        const COLTYPE A_rows, const COLTYPE A_cols,
+        const ROWTYPE* A_ai, const COLTYPE* A_aj, const VALTYPE* A_av, const VALTYPE alpha,
+        const COLTYPE B_rows, const COLTYPE B_cols,
+        const ROWTYPE* B_ai, const COLTYPE* B_aj, const VALTYPE* B_av, const VALTYPE beta )
+    {
+        EXPECT_EQ( A_rows, B_rows );
+        EXPECT_EQ( A_cols, B_cols );
+
+        const ROWTYPE A_base = A_ai[0];
+        const ROWTYPE B_base = B_ai[0];
+
+        CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> result;
+        result.rows = A_rows;
+        result.cols = A_cols;
+        result.ai.resize( A_rows + 1 );
+        result.ai[0] = A_base;
+
+        // Use map for each row
+        std::map<COLTYPE, VALTYPE> row_map;
+
+        for ( COLTYPE i = 0; i < A_rows; i++ )
+        {
+            row_map.clear();
+
+            // Add entries from A
+            for ( ROWTYPE ja = A_ai[i] - A_base; ja < A_ai[i + 1] - A_base; ja++ )
+            {
+                const COLTYPE col = A_aj[ja];
+                row_map[col] += alpha * A_av[ja];
+            }
+
+            // Add entries from B
+            for ( ROWTYPE jb = B_ai[i] - B_base; jb < B_ai[i + 1] - B_base; jb++ )
+            {
+                const COLTYPE col = B_aj[jb];
+                row_map[col] += beta * B_av[jb];
+            }
+
+            // Write to result
+            for ( const auto& [col, val] : row_map )
+            {
+                // Don't skip near-zero entries to match SpADD behavior
+                result.aj.push_back( col );
+                result.av.push_back( val );
+            }
+
+            result.ai[i + 1] = result.ai[0] + static_cast<ROWTYPE>( result.aj.size() );
+        }
+
+        return result;
+    }
+
+    // Compare two CSR matrices
+    template <typename CSRMatrixType>
+    void compareCsrMatrices( const CSRMatrixType& expected, const CSRMatrixType& actual, const std::string& test_name )
+    {
+        using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+        using COLTYPE = typename CSRMatrixType::COLTYPE;
+        using VALTYPE = typename CSRMatrixType::VALTYPE;
+
+        ASSERT_EQ( expected.rows, actual.rows ) << test_name << ": Row count mismatch";
+        ASSERT_EQ( expected.cols, actual.cols ) << test_name << ": Column count mismatch";
+
+        const ROWTYPE* exp_ai = expected.AI();
+        const COLTYPE* exp_aj = expected.AJ();
+        const VALTYPE* exp_av = expected.AV();
+
+        const ROWTYPE* act_ai = actual.AI();
+        const COLTYPE* act_aj = actual.AJ();
+        const VALTYPE* act_av = actual.AV();
+
+        const ROWTYPE base = exp_ai[0];
+        ASSERT_EQ( base, act_ai[0] ) << test_name << ": Base mismatch";
+
+        for ( COLTYPE i = 0; i <= expected.rows; i++ )
+        {
+            ASSERT_EQ( exp_ai[i], act_ai[i] ) << test_name << ": Row pointer mismatch at row " << i;
+        }
+
+        const ROWTYPE nnz = exp_ai[expected.rows] - base;
+        for ( ROWTYPE j = 0; j < nnz; j++ )
+        {
+            ASSERT_EQ( exp_aj[j], act_aj[j] ) << test_name << ": Column index mismatch at position " << j;
+            EXPECT_NEAR( exp_av[j], act_av[j], _tol ) << test_name << ": Value mismatch at position " << j;
+        }
+    }
+};
+
+// Test basic addition with small matrices
+TEST_F( SpADDTest, SmallMatrix_ZeroBased )
+{
+    // 3x3 matrices:
+    // A = [1 2 0]    B = [0 1 0]
+    //     [0 3 4]        [2 0 0]
+    //     [0 0 5]        [0 3 1]
+    const int32_t rows = 3, cols = 3;
+    const int32_t base = 0;
+
+    std::vector<int32_t> A_ai = { 0, 2, 4, 5 };
+    std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2 };
+    std::vector<double> A_av = { 1, 2, 3, 4, 5 };
+
+    std::vector<int32_t> B_ai = { 0, 1, 2, 4 };
+    std::vector<int32_t> B_aj = { 1, 0, 1, 2 };
+    std::vector<double> B_av = { 1, 2, 3, 1 };
+
+    const double alpha = 1.0, beta = 1.0;
+
+    // Compute expected result
+    auto expected = computeSpAddNaive( rows, cols,
+                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols,
+                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+
+    // Test with SpADD
+    SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
+    CSRMatrixVec<int32_t, int32_t, double> C;
+
+    // Analysis phase
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C );
+
+    verifyCsrMatrix( C );
+
+    // Numerical phase
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+    verifyCsrMatrix( C );
+    compareCsrMatrices( expected, C, "SmallMatrix_ZeroBased" );
+}
+
+// Test with 1-based indexing
+TEST_F( SpADDTest, SmallMatrix_OneBased )
+{
+    const int32_t rows = 3, cols = 3;
+    const int32_t base = 1;
+
+    std::vector<int32_t> A_ai = { 1, 3, 5, 6 };
+    std::vector<int32_t> A_aj = { 1, 2, 2, 3, 3 };
+    std::vector<double> A_av = { 1, 2, 3, 4, 5 };
+
+    std::vector<int32_t> B_ai = { 1, 2, 3, 5 };
+    std::vector<int32_t> B_aj = { 2, 1, 2, 3 };
+    std::vector<double> B_av = { 1, 2, 3, 1 };
+
+    const double alpha = 1.0, beta = 1.0;
+
+    auto expected = computeSpAddNaive( rows, cols,
+                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols,
+                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+
+    SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
+    CSRMatrixVec<int32_t, int32_t, double> C;
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+    verifyCsrMatrix( C );
+    compareCsrMatrices( expected, C, "SmallMatrix_OneBased" );
+}
+
+// Test with different alpha and beta scalars
+TEST_F( SpADDTest, DifferentScalars )
+{
+    const int32_t rows = 2, cols = 2;
+    std::vector<int32_t> A_ai = { 0, 2, 3 };
+    std::vector<int32_t> A_aj = { 0, 1, 1 };
+    std::vector<double> A_av = { 2, 3, 4 };
+
+    std::vector<int32_t> B_ai = { 0, 1, 3 };
+    std::vector<int32_t> B_aj = { 0, 0, 1 };
+    std::vector<double> B_av = { 5, 6, 7 };
+
+    const double alpha = 2.0, beta = -1.0;
+
+    auto expected = computeSpAddNaive( rows, cols,
+                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols,
+                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+
+    SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
+    CSRMatrixVec<int32_t, int32_t, double> C;
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+    verifyCsrMatrix( C );
+    compareCsrMatrices( expected, C, "DifferentScalars" );
+}
+
+// Test with disjoint sparsity patterns
+TEST_F( SpADDTest, DisjointPatterns )
+{
+    const int32_t rows = 3, cols = 3;
+    
+    // A has entries in upper triangle
+    std::vector<int32_t> A_ai = { 0, 2, 3, 3 };
+    std::vector<int32_t> A_aj = { 0, 1, 2 };
+    std::vector<double> A_av = { 1, 2, 3 };
+
+    // B has entries in lower triangle
+    std::vector<int32_t> B_ai = { 0, 0, 1, 2 };
+    std::vector<int32_t> B_aj = { 0, 1 };
+    std::vector<double> B_av = { 4, 5 };
+
+    const double alpha = 1.0, beta = 1.0;
+
+    auto expected = computeSpAddNaive( rows, cols,
+                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols,
+                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+
+    SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
+    CSRMatrixVec<int32_t, int32_t, double> C;
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+    verifyCsrMatrix( C );
+    compareCsrMatrices( expected, C, "DisjointPatterns" );
+}
+
+// Test with identical sparsity patterns
+TEST_F( SpADDTest, IdenticalPatterns )
+{
+    const int32_t rows = 3, cols = 3;
+    
+    std::vector<int32_t> A_ai = { 0, 2, 4, 5 };
+    std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2 };
+    std::vector<double> A_av = { 1, 2, 3, 4, 5 };
+
+    std::vector<int32_t> B_ai = { 0, 2, 4, 5 };
+    std::vector<int32_t> B_aj = { 0, 1, 1, 2, 2 };
+    std::vector<double> B_av = { 2, 3, 4, 5, 6 };
+
+    const double alpha = 1.0, beta = 1.0;
+
+    auto expected = computeSpAddNaive( rows, cols,
+                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols,
+                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+
+    SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
+    CSRMatrixVec<int32_t, int32_t, double> C;
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+    verifyCsrMatrix( C );
+    compareCsrMatrices( expected, C, "IdenticalPatterns" );
+}
+
+// Test with empty matrices
+TEST_F( SpADDTest, EmptyMatrices )
+{
+    const int32_t rows = 3, cols = 3;
+    
+    std::vector<int32_t> A_ai = { 0, 0, 0, 0 };
+    std::vector<int32_t> A_aj = {};
+    std::vector<double> A_av = {};
+
+    std::vector<int32_t> B_ai = { 0, 0, 0, 0 };
+    std::vector<int32_t> B_aj = {};
+    std::vector<double> B_av = {};
+
+    const double alpha = 1.0, beta = 1.0;
+
+    SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
+    CSRMatrixVec<int32_t, int32_t, double> C;
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+    verifyCsrMatrix( C );
+    EXPECT_EQ( C.NNZ(), 0 );
+}
+
+// Test with one empty matrix
+TEST_F( SpADDTest, OneEmptyMatrix )
+{
+    const int32_t rows = 2, cols = 2;
+    
+    std::vector<int32_t> A_ai = { 0, 0, 0 };
+    std::vector<int32_t> A_aj = {};
+    std::vector<double> A_av = {};
+
+    std::vector<int32_t> B_ai = { 0, 1, 3 };
+    std::vector<int32_t> B_aj = { 0, 0, 1 };
+    std::vector<double> B_av = { 1, 2, 3 };
+
+    const double alpha = 1.0, beta = 2.0;
+
+    auto expected = computeSpAddNaive( rows, cols,
+                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols,
+                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+
+    SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
+    CSRMatrixVec<int32_t, int32_t, double> C;
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+    verifyCsrMatrix( C );
+    compareCsrMatrices( expected, C, "OneEmptyMatrix" );
+}
+
+// Test with different thread counts
+TEST_F( SpADDTest, MultipleThreads )
+{
+    const int32_t rows = 4, cols = 4;
+    
+    std::vector<int32_t> A_ai = { 0, 2, 4, 6, 7 };
+    std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2, 3, 3 };
+    std::vector<double> A_av = { 1, 2, 3, 4, 5, 6, 7 };
+
+    std::vector<int32_t> B_ai = { 0, 1, 2, 4, 6 };
+    std::vector<int32_t> B_aj = { 0, 1, 0, 2, 1, 3 };
+    std::vector<double> B_av = { 8, 9, 10, 11, 12, 13 };
+
+    const double alpha = 1.5, beta = -0.5;
+
+    auto expected = computeSpAddNaive( rows, cols,
+                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols,
+                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+
+    for ( int nthreads : { 1, 2, 4, 8 } )
+    {
+        SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( nthreads );
+        CSRMatrixVec<int32_t, int32_t, double> C;
+
+        spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                        rows, cols, B_ai.data(), B_aj.data(), C );
+        spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+               rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+        verifyCsrMatrix( C );
+        compareCsrMatrices( expected, C, "MultipleThreads_" + std::to_string( nthreads ) );
+    }
+}
+
+// Test setNumThreads
+TEST_F( SpADDTest, SetNumThreads )
+{
+    const int32_t rows = 3, cols = 3;
+    
+    std::vector<int32_t> A_ai = { 0, 2, 4, 5 };
+    std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2 };
+    std::vector<double> A_av = { 1, 2, 3, 4, 5 };
+
+    std::vector<int32_t> B_ai = { 0, 1, 2, 4 };
+    std::vector<int32_t> B_aj = { 1, 0, 1, 2 };
+    std::vector<double> B_av = { 1, 2, 3, 1 };
+
+    const double alpha = 1.0, beta = 1.0;
+
+    SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 2 );
+    CSRMatrixVec<int32_t, int32_t, double> C1, C2;
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C1 );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C1 );
+
+    // Change thread count
+    spadd.setNumThreads( 4 );
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C2 );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C2 );
+
+    verifyCsrMatrix( C1 );
+    verifyCsrMatrix( C2 );
+    compareCsrMatrices( C1, C2, "SetNumThreads" );
+}
+
+// Test with int64_t types
+TEST_F( SpADDTest, Int64Types )
+{
+    const int64_t rows = 3, cols = 3;
+    
+    std::vector<int64_t> A_ai = { 0, 2, 4, 5 };
+    std::vector<int64_t> A_aj = { 0, 1, 1, 2, 2 };
+    std::vector<double> A_av = { 1, 2, 3, 4, 5 };
+
+    std::vector<int64_t> B_ai = { 0, 1, 2, 4 };
+    std::vector<int64_t> B_aj = { 1, 0, 1, 2 };
+    std::vector<double> B_av = { 1, 2, 3, 1 };
+
+    const double alpha = 1.0, beta = 1.0;
+
+    auto expected = computeSpAddNaive( rows, cols,
+                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols,
+                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+
+    SpADD<CSRMatrixVec<int64_t, int64_t, double>> spadd( 1 );
+    CSRMatrixVec<int64_t, int64_t, double> C;
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+    verifyCsrMatrix( C );
+    compareCsrMatrices( expected, C, "Int64Types" );
+}
+
+// Test with float types
+TEST_F( SpADDTest, FloatTypes )
+{
+    const int32_t rows = 2, cols = 2;
+    
+    std::vector<int32_t> A_ai = { 0, 2, 3 };
+    std::vector<int32_t> A_aj = { 0, 1, 1 };
+    std::vector<float> A_av = { 1.5f, 2.5f, 3.5f };
+
+    std::vector<int32_t> B_ai = { 0, 1, 3 };
+    std::vector<int32_t> B_aj = { 0, 0, 1 };
+    std::vector<float> B_av = { 4.5f, 5.5f, 6.5f };
+
+    const float alpha = 2.0f, beta = -1.0f;
+
+    auto expected = computeSpAddNaive( rows, cols,
+                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols,
+                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+
+    SpADD<CSRMatrixVec<int32_t, int32_t, float>> spadd( 1 );
+    CSRMatrixVec<int32_t, int32_t, float> C;
+
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                    rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+
+    verifyCsrMatrix( C );
+    compareCsrMatrices( expected, C, "FloatTypes" );
+}
+
+// Test with larger matrices from file
+TEST_F( SpADDTest, LargerMatrices )
+{
+    std::vector<std::string> matrix_names = { "ex5", "bcsstk17", "s3rmt3m3" };
+
+    for ( const auto& name : matrix_names )
+    {
+        std::string filepath = "data/" + name + ".mtx";
+        std::ifstream f( filepath );
+        if ( !f.good() )
+        {
+            std::cout << "Skipping matrix " << name << " (file not found)" << std::endl;
+            continue;
+        }
+
+        std::vector<int32_t> A_ai, A_aj;
+        std::vector<double> A_av;
+        utils::read_matrix_market_csr( f, A_ai, A_aj, A_av );
+        f.close();
+
+        if ( A_ai.size() == 0 )
+        {
+            std::cout << "Skipping matrix " << name << " (could not read)" << std::endl;
+            continue;
+        }
+
+        const int32_t rows = A_ai.size() - 1;
+        const int32_t cols = rows; // Assume square
+
+        // Use same matrix for A and B with different scalars
+        const double alpha = 1.5, beta = -0.5;
+
+        std::cout << "\nTesting SpADD with matrix: " << name
+                  << " (size=" << rows << ", nnz=" << A_ai[rows] - A_ai[0] << ")" << std::endl;
+
+        // Compute expected result
+        auto expected = computeSpAddNaive( rows, cols,
+                                           A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                           rows, cols,
+                                           A_ai.data(), A_aj.data(), A_av.data(), beta );
+
+        // Test with different thread counts
+        for ( int nthreads : { 1, 2, 4, 8 } )
+        {
+            std::cout << "  Testing with " << nthreads << " thread(s)..." << std::endl;
+
+            SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( nthreads );
+            CSRMatrixVec<int32_t, int32_t, double> C;
+
+            spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
+                            rows, cols, A_ai.data(), A_aj.data(), C );
+            spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                   rows, cols, A_ai.data(), A_aj.data(), A_av.data(), beta, C );
+
+            verifyCsrMatrix( C );
+            compareCsrMatrices( expected, C, name + "_" + std::to_string( nthreads ) + "threads" );
+
+            std::cout << "    Result nnz=" << C.NNZ() << ", passed" << std::endl;
+        }
+    }
+}
+
+// Test correctness with various patterns
+TEST_F( SpADDTest, CorrectnessCheck_Various )
+{
+    struct TestCase
+    {
+        std::string name;
+        std::vector<int32_t> A_ai, A_aj, B_ai, B_aj;
+        std::vector<double> A_av, B_av;
+        int32_t rows, cols;
+        double alpha, beta;
+    };
+
+    std::vector<TestCase> cases = {
+        {
+            "Dense_2x2",
+            { 0, 2, 4 }, { 0, 1, 0, 1 }, { 0, 2, 4 }, { 0, 1, 0, 1 },
+            { 1, 2, 3, 4 }, { 5, 6, 7, 8 },
+            2, 2, 1.0, 1.0
+        },
+        {
+            "Diagonal",
+            { 0, 1, 2, 3 }, { 0, 1, 2 }, { 0, 1, 2, 3 }, { 0, 1, 2 },
+            { 1, 2, 3 }, { 4, 5, 6 },
+            3, 3, 2.0, -1.0
+        },
+        {
+            "UpperLower",
+            { 0, 2, 3, 3 }, { 0, 1, 2 }, { 0, 0, 1, 2 }, { 0, 1 },
+            { 1, 2, 3 }, { 4, 5 },
+            3, 3, 1.0, 1.0
+        },
+        {
+            "Cancellation",
+            { 0, 1, 2 }, { 0, 1 }, { 0, 1, 2 }, { 0, 1 },
+            { 5, 10 }, { 5, 10 },
+            2, 2, 1.0, -1.0
+        }
+    };
+
+    for ( const auto& tc : cases )
+    {
+        auto expected = computeSpAddNaive( tc.rows, tc.cols,
+                                           tc.A_ai.data(), tc.A_aj.data(), tc.A_av.data(), tc.alpha,
+                                           tc.rows, tc.cols,
+                                           tc.B_ai.data(), tc.B_aj.data(), tc.B_av.data(), tc.beta );
+
+        SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
+        CSRMatrixVec<int32_t, int32_t, double> C;
+
+        spadd.analysis( tc.rows, tc.cols, tc.A_ai.data(), tc.A_aj.data(),
+                        tc.rows, tc.cols, tc.B_ai.data(), tc.B_aj.data(), C );
+        spadd( tc.rows, tc.cols, tc.A_ai.data(), tc.A_aj.data(), tc.A_av.data(), tc.alpha,
+               tc.rows, tc.cols, tc.B_ai.data(), tc.B_aj.data(), tc.B_av.data(), tc.beta, C );
+
+        verifyCsrMatrix( C );
+        compareCsrMatrices( expected, C, tc.name );
+    }
+}
+
+// Jaccard Similarity Tests
+class JaccardSimilarityTest : public testing::Test
+{
+protected:
+    const double _tol = 1e-10;
+};
+
+// Test identical matrices (should give 1.0)
+TEST_F( JaccardSimilarityTest, IdenticalMatrices )
+{
+    const int32_t rows = 3, cols = 3;
+    
+    std::vector<int32_t> ai = { 0, 2, 4, 5 };
+    std::vector<int32_t> aj = { 0, 1, 1, 2, 2 };
+
+    double similarity = jaccardSimilarity( rows, cols, ai.data(), aj.data(),
+                                           rows, cols, ai.data(), aj.data(), 1 );
+
+    EXPECT_NEAR( similarity, 1.0, _tol ) << "Identical matrices should have Jaccard similarity of 1.0";
+}
+
+// Test completely disjoint matrices (should give 0.0)
+TEST_F( JaccardSimilarityTest, DisjointMatrices )
+{
+    const int32_t rows = 3, cols = 3;
+    
+    // A has entries in upper triangle
+    std::vector<int32_t> A_ai = { 0, 2, 3, 3 };
+    std::vector<int32_t> A_aj = { 0, 1, 2 };
+
+    // B has entries in lower triangle
+    std::vector<int32_t> B_ai = { 0, 0, 1, 2 };
+    std::vector<int32_t> B_aj = { 0, 1 };
+
+    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+
+    EXPECT_NEAR( similarity, 0.0, _tol ) << "Disjoint matrices should have Jaccard similarity of 0.0";
+}
+
+// Test partial overlap
+TEST_F( JaccardSimilarityTest, PartialOverlap )
+{
+    const int32_t rows = 3, cols = 3;
+    
+    // A = [1 1 0]
+    //     [0 1 1]
+    //     [0 0 1]
+    std::vector<int32_t> A_ai = { 0, 2, 4, 5 };
+    std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2 };
+
+    // B = [0 1 0]
+    //     [1 0 0]
+    //     [0 1 1]
+    std::vector<int32_t> B_ai = { 0, 1, 2, 4 };
+    std::vector<int32_t> B_aj = { 1, 0, 1, 2 };
+
+    // Intersection: {(0,1), (2,2)} = 2 entries
+    // Union: {(0,0), (0,1), (1,0), (1,1), (1,2), (2,1), (2,2)} = 7 entries
+    // Jaccard = 2/7
+    double expected = 2.0 / 7.0;
+
+    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+
+    EXPECT_NEAR( similarity, expected, _tol ) << "Partial overlap should give correct Jaccard similarity";
+}
+
+// Test with one empty matrix
+TEST_F( JaccardSimilarityTest, OneEmptyMatrix )
+{
+    const int32_t rows = 2, cols = 2;
+    
+    std::vector<int32_t> A_ai = { 0, 0, 0 };
+    std::vector<int32_t> A_aj = {};
+
+    std::vector<int32_t> B_ai = { 0, 1, 3 };
+    std::vector<int32_t> B_aj = { 0, 0, 1 };
+
+    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+
+    EXPECT_NEAR( similarity, 0.0, _tol ) << "One empty matrix should give Jaccard similarity of 0.0";
+}
+
+// Test with both empty matrices
+TEST_F( JaccardSimilarityTest, BothEmptyMatrices )
+{
+    const int32_t rows = 2, cols = 2;
+    
+    std::vector<int32_t> A_ai = { 0, 0, 0 };
+    std::vector<int32_t> A_aj = {};
+
+    std::vector<int32_t> B_ai = { 0, 0, 0 };
+    std::vector<int32_t> B_aj = {};
+
+    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+
+    EXPECT_NEAR( similarity, 1.0, _tol ) << "Both empty matrices should give Jaccard similarity of 1.0";
+}
+
+// Test with 1-based indexing
+TEST_F( JaccardSimilarityTest, OneBasedIndexing )
+{
+    const int32_t rows = 3, cols = 3;
+    
+    std::vector<int32_t> A_ai = { 1, 3, 5, 6 };
+    std::vector<int32_t> A_aj = { 1, 2, 2, 3, 3 };
+
+    std::vector<int32_t> B_ai = { 1, 2, 3, 5 };
+    std::vector<int32_t> B_aj = { 2, 1, 2, 3 };
+
+    // Intersection: {(0,1), (2,2)} = 2 entries
+    // Union: {(0,0), (0,1), (1,0), (1,1), (1,2), (2,1), (2,2)} = 7 entries
+    // Jaccard = 2/7
+    double expected = 2.0 / 7.0;
+
+    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+
+    EXPECT_NEAR( similarity, expected, _tol ) << "One-based indexing should work correctly";
+}
+
+// Test with int64_t types
+TEST_F( JaccardSimilarityTest, Int64Types )
+{
+    const int64_t rows = 2, cols = 2;
+    
+    std::vector<int64_t> A_ai = { 0, 2, 3 };
+    std::vector<int64_t> A_aj = { 0, 1, 1 };
+
+    std::vector<int64_t> B_ai = { 0, 1, 3 };
+    std::vector<int64_t> B_aj = { 0, 0, 1 };
+
+    // Intersection: {(0,0), (1,1)} = 2 entries
+    // Union: {(0,0), (0,1), (1,0), (1,1)} = 4 entries
+    // Jaccard = 2/4 = 0.5
+    double expected = 0.5;
+
+    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+
+    EXPECT_NEAR( similarity, expected, _tol ) << "int64_t types should work correctly";
+}
+
+// Test with multiple threads
+TEST_F( JaccardSimilarityTest, MultipleThreads )
+{
+    const int32_t rows = 4, cols = 4;
+    
+    std::vector<int32_t> A_ai = { 0, 2, 4, 6, 7 };
+    std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2, 3, 3 };
+
+    std::vector<int32_t> B_ai = { 0, 1, 2, 4, 6 };
+    std::vector<int32_t> B_aj = { 0, 1, 0, 2, 1, 3 };
+
+    // Compute with 1 thread as reference
+    double ref_similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+                                               rows, cols, B_ai.data(), B_aj.data(), 1 );
+
+    // Test with different thread counts
+    for ( int nthreads : { 2, 4, 8 } )
+    {
+        double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+                                               rows, cols, B_ai.data(), B_aj.data(), nthreads );
+
+        EXPECT_NEAR( similarity, ref_similarity, _tol ) 
+            << "Results should be consistent with " << nthreads << " threads";
+    }
+}
+
+// Test with subset relationship
+TEST_F( JaccardSimilarityTest, SubsetRelationship )
+{
+    const int32_t rows = 3, cols = 3;
+    
+    // A is subset of B
+    std::vector<int32_t> A_ai = { 0, 1, 2, 3 };
+    std::vector<int32_t> A_aj = { 0, 1, 2 };
+
+    std::vector<int32_t> B_ai = { 0, 2, 4, 6 };
+    std::vector<int32_t> B_aj = { 0, 1, 0, 1, 1, 2 };
+
+    // Intersection: all 3 entries of A
+    // Union: all 6 entries of B
+    // Jaccard = 3/6 = 0.5
+    double expected = 0.5;
+
+    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+
+    EXPECT_NEAR( similarity, expected, _tol ) << "Subset relationship should give correct Jaccard similarity";
 }
 
 int main( int argc, char** argv )
