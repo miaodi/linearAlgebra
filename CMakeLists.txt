@@ -49,11 +49,8 @@ option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 
 option(BUILD_DATA "Build data subdirectory" OFF)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
-
-# Include the init module
-include(MorseInit)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 include(FetchContent)
 
