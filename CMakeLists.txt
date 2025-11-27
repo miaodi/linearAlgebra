@@ -145,6 +145,11 @@ endif()
 
 if(USE_METIS_LIB)
   find_package(METIS REQUIRED)
+  # Define USE_MTMETIS if mt-metis is detected
+  if(METIS_IS_MTMETIS)
+    add_compile_definitions(USE_MTMETIS)
+    message(STATUS "Using mt-metis (multithreaded METIS)")
+  endif()
 endif()
 
 if(USE_BOOST_LIB)

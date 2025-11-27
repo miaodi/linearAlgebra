@@ -6,7 +6,7 @@ set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp permutatio
 set(DEPENDENCIES utils OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_market::fast_matrix_market)
 
 if(USE_METIS_LIB)
-  set(DEPENDENCIES ${DEPENDENCIES} MORSE::METIS)
+  set(DEPENDENCIES ${DEPENDENCIES} METIS::METIS)
 endif()
 
 add_library(${PROJECT_NAME} STATIC ${SPARSE_MAT_OP_SRC})
