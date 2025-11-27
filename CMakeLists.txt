@@ -47,9 +47,7 @@ option(USE_CUDSS "Use cudss library for direct solver. Note that USE_CUDA must b
 
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/morse_cmake/modules")
-# Include the init module
-include(MorseInit)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 include(FetchContent)
 

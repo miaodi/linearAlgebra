@@ -1,3 +1,0 @@
-[submodule "cmake/morse_cmake"]
-	path = cmake/morse_cmake
-	url = git@github.com:miaodi/morse_cmake.git
