@@ -10,7 +10,12 @@ if(USE_CUDA)
     set(CUDA_DEPENDENCIES CUDA::cusparse CUDA::cublas CUDA::cudart MKL::MKL)
 endif()
 
-set(DEPENDENCIES Utils OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_market::fast_matrix_market ${CUDA_DEPENDENCIES})
+
+set(DEPENDENCIES utils OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_market::fast_matrix_market ${CUDA_DEPENDENCIES})
+
+if(USE_METIS_LIB)
+  set(DEPENDENCIES ${DEPENDENCIES} METIS::METIS)
+endif()
 
 add_library(${PROJECT_NAME} STATIC ${SPARSE_MAT_OP_SRC})
 
