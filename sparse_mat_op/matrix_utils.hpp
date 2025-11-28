@@ -1263,4 +1263,53 @@ void EmbedCSR(const COLTYPE rows,
               ROWTYPE const *ai_target, COLTYPE const *aj_target, VALTYPE *av_target,
               const int num_threads);
 
+/// @brief Convert CSR matrix to METIS adjacency graph format (zero-based, no self-loops)
+/// @tparam ROWTYPE Type for row pointers (e.g., int, int64_t)
+/// @tparam COLTYPE Type for column indices (e.g., int, int64_t)
+/// @param nrows Number of rows in the matrix
+/// @param ai Row pointers of CSR matrix (can be zero or one-based)
+/// @param aj Column indices of CSR matrix (can be zero or one-based)
+/// @param xadj Output: METIS xadj array (zero-based, size = nrows + 1), must be pre-allocated
+/// @param adjncy Output: METIS adjncy array (zero-based, excludes diagonal), must be pre-allocated with size >= nnz - ndiag
+/// @return Number of edges (non-diagonal entries) in the graph
+/// @details Converts a CSR matrix to METIS graph format by:
+///          - Removing diagonal entries (self-loops)
+///          - Converting to zero-based indexing
+///          - Producing xadj and adjncy arrays for METIS routines
+///          Caller must allocate xadj[nrows+1] and adjncy with sufficient space.
+/// @param nthreads Number of threads to use for parallel processing
+/// @return true if all rows have diagonal entries, false otherwise
+template <typename ROWTYPE, typename COLTYPE>
+bool CSRToMetisGraph(const COLTYPE nrows,
+                     ROWTYPE const *ai, COLTYPE const *aj,
+                     ROWTYPE *xadj, COLTYPE *adjncy,
+                     const int nthreads = 1);
+
+/// @brief Shift the base/indexing of a CSR structure (ai, aj) to a new base.
+/// @param rows number of rows (ai must have rows+1 entries)
+/// @param new_base desired base (0 for zero-based, 1 for one-based)
+/// @param ai row pointer array (will be modified in place)
+/// @param aj column index array (will be modified in place)
+template <typename ROWTYPE, typename COLTYPE>
+void ShiftCSRBase(const COLTYPE rows, const ROWTYPE new_base, ROWTYPE* ai, COLTYPE* aj)
+{
+  if (!ai) return;
+  const ROWTYPE old_base = ai[0];
+  if (old_base == new_base) return;
+
+  const ROWTYPE nnz = ai[rows] - old_base;
+  const ROWTYPE delta = new_base - old_base;
+
+  // Shift ai
+  for (COLTYPE i = 0; i <= rows; i++) {
+    ai[i] += delta;
+  }
+
+  // Shift aj
+  if (aj) {
+    for (ROWTYPE k = 0; k < nnz; k++) {
+      aj[k] += delta;
+    }
+  }
+}
 } // namespace matrix_utils

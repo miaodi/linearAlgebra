@@ -26,12 +26,12 @@ int main() {
   out0.close();
   int size = csr_matrix.rows;
   std::vector<int> ai_AAT(size + 1);
-  matrix_utils::AATSymbolic(size, csr_matrix.AI(), csr_matrix.AJ(),
+  matrix_utils::APlusATPrefix(size, csr_matrix.AI(), csr_matrix.AJ(),
                             ai_AAT.data());
 
   std::vector<int> aj_AAT(ai_AAT.back());
   std::vector<double> av_AAT(ai_AAT.back(), 1.);
-  matrix_utils::AATNumeric(size, csr_matrix.AI(), csr_matrix.AJ(),
+  matrix_utils::APlusATFill(size, csr_matrix.AI(), csr_matrix.AJ(),
                            ai_AAT.data(), aj_AAT.data());
   std::ofstream out1("mat_AAT.mtx");
   matrix_utils::writeMatrixMarket(size, size, ai_AAT.data(), aj_AAT.data(),

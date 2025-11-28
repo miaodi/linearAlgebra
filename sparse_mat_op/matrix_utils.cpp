@@ -331,6 +331,55 @@ template void TriangularToFull<TriangularMatrix::U, int, int, double,
 INSTANTIATE_SPLIT_LU(std::int32_t, std::int32_t, double)
 INSTANTIATE_SPLIT_LU(int, int, float)
 
+template <typename ROWTYPE, typename COLTYPE>
+bool CSRToMetisGraph(const COLTYPE nrows,
+                     ROWTYPE const *ai, COLTYPE const *aj,
+                     ROWTYPE *xadj, COLTYPE *adjncy,
+                     const int nthreads) {
+  // Detect base indexing from ai[0]
+  const ROWTYPE base = ai[0];
+
+  // Compute xadj and fill adjncy with zero-based column indices (excluding diagonal)
+  xadj[0] = 0;
+  bool all_diag_found = true;
+  
+#pragma omp parallel for num_threads(nthreads) shared(all_diag_found)
+  for (COLTYPE i = 0; i < nrows; ++i) {
+    // Compute xadj: xadj[i+1] = ai[i+1] - (i + 1) - base (removes diagonal entries)
+    xadj[i + 1] = ai[i + 1] - (i + 1) - base;
+    
+    // Skip filling adjncy if already found missing diagonal
+    if (!all_diag_found) continue;
+    
+    const ROWTYPE row_start = ai[i] - base;
+    const ROWTYPE row_end = ai[i + 1] - base;
+    const COLTYPE diag_col = i + base;
+    
+    // Binary search for diagonal element
+    const auto *diag_it = std::lower_bound(aj + row_start, aj + row_end, diag_col);
+    
+    // Check if diagonal element exists
+    if (diag_it == aj + row_end || *diag_it != diag_col) {
+      all_diag_found = false;
+      continue;
+    }
+    
+    const ROWTYPE diag_pos = diag_it - aj;
+    ROWTYPE pos = xadj[i];
+    
+    // Copy and transform elements before diagonal to zero-based
+    std::transform(aj + row_start, aj + diag_pos, adjncy + pos, 
+                   [base](COLTYPE col) { return col - base; });
+    pos += diag_pos - row_start;
+    
+    // Copy and transform elements after diagonal
+    std::transform(aj + diag_pos + 1, aj + row_end, adjncy + pos,
+                   [base](COLTYPE col) { return col - base; });
+  }
+  
+  return all_diag_found;
+}
+
 #define INSTANTIATE_MATRIX_OPS(ROWTYPE, COLTYPE, VALTYPE)                     \
   template ROWTYPE Prune<ROWTYPE, COLTYPE, VALTYPE>(                          \
       const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av,              \
@@ -347,5 +396,19 @@ INSTANTIATE_SPLIT_LU(int, int, float)
 INSTANTIATE_MATRIX_OPS(int, int, double)
 INSTANTIATE_MATRIX_OPS(int, int, float)
 INSTANTIATE_MATRIX_OPS(std::int64_t, std::int64_t, double)
+
+// Explicit instantiations for CSRToMetisGraph
+template bool CSRToMetisGraph<int, int>(const int nrows,
+                                        int const *ai, int const *aj,
+                                        int *xadj, int *adjncy,
+                                        const int nthreads);
+template bool CSRToMetisGraph<int64_t, int64_t>(const int64_t nrows,
+                                                 int64_t const *ai, int64_t const *aj,
+                                                 int64_t *xadj, int64_t *adjncy,
+                                                 const int nthreads);
+template bool CSRToMetisGraph<int64_t, int>(const int nrows,
+                                             int64_t const *ai, int const *aj,
+                                             int64_t *xadj, int *adjncy,
+                                             const int nthreads);
 
 } // namespace matrix_utils

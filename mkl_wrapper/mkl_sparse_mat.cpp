@@ -200,37 +200,17 @@ std::shared_ptr<double[]> mkl_sparse_mat::get_diag() const {
 void mkl_sparse_mat::get_adjacency_graph(std::vector<MKL_INT> &xadj,
                                          std::vector<MKL_INT> &adjncy) const {
   xadj.resize(rows() + 1);
-  const MKL_INT base = mkl_base();
-  xadj[0] = base;
   // Assume all diagonals are occupied
   adjncy.resize(nnz() - rows());
-
-#pragma omp parallel
-  {
-    const int tid = omp_get_thread_num();
-    const int nthreads = omp_get_num_threads();
-    auto [start, end] = utils::LoadBalancedPartition(
-        _ai.get(), _ai.get() + rows(), tid, nthreads);
-
-    for (auto it = start; it != end; it++) {
-      const MKL_INT index = it - _ai.get();
-      xadj[index + 1] = _ai[index + 1] - index - 1;
-    }
-#pragma omp barrier
-    auto [start1, end1] = utils::LoadPrefixBalancedPartition(
-        _ai.get(), _ai.get() + rows(), tid, nthreads);
-
-    for (auto it = start1; it != end1; it++) {
-      const MKL_INT rowIdx = it - _ai.get() + base;
-      MKL_INT pos = xadj[rowIdx - base] - base;
-      for (MKL_INT j = *it - base; j != *(it + 1) - base; j++) {
-        if (_aj[j] == rowIdx)
-          continue;
-        adjncy[pos++] = _aj[j];
-      }
-    }
+  
+  const int nthreads = omp_get_max_threads();
+  bool has_diag = matrix_utils::CSRToMetisGraph(
+      rows(), _ai.get(), _aj.get(), xadj.data(), adjncy.data(), nthreads);
+  
+  if (!has_diag) {
+    std::cerr << "Warning: get_adjacency_graph found rows without diagonal entries" << std::endl;
   }
-} // namespace mkl_wrapper
+}
 
 void mkl_sparse_mat::to_one_based() {
   if (_mkl_base == SPARSE_INDEX_BASE_ZERO) {
