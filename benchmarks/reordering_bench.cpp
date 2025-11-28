@@ -61,7 +61,7 @@ public:
 
 #ifdef USE_METIS_LIB
       std::vector<MKL_INT> inv_perm1, perm1;
-      reordering::Metis(mat.get(), inv_perm1, perm1);
+      reordering::MetisND(mat.get(), inv_perm1, perm1);
       auto [ai1, aj1, av1] =
           matrix_utils::AllocateCSRData(mat->rows(), mat->nnz());
       matrix_utils::permute(mat->rows(), (int)mat->mkl_base(),

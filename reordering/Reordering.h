@@ -1,13 +1,9 @@
 #pragma once
-#include "../config.h"
+#include "config.h"
 #include "BFS.h"
-#include "circularbuffer.hpp"
 #include "mkl_sparse_mat.h"
 #include <algorithm>
-#include <functional>
-#include <iostream>
 #include <limits>
-#include <memory>
 #include <mkl_types.h>
 #include <omp.h>
 #include <ranges>
@@ -140,10 +136,6 @@ void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
               std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm);
 
 #ifdef USE_METIS_LIB
-// nested dissection from metis
-void Metis(mkl_wrapper::mkl_sparse_mat const *const mat,
-           std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm);
-
 /// @brief Configuration options for METIS nested dissection
 struct MetisNDOptions {
   /// @brief Number of different separators to try (1-10+, default: 1)
@@ -182,20 +174,25 @@ struct MetisNDOptions {
   int dbglvl = 0;
 };
 
+// nested dissection from metis
+void MetisND(mkl_wrapper::mkl_sparse_mat const *const mat,
+             std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm,
+             const MetisNDOptions& opts = MetisNDOptions());
+
 /// @brief METIS nested dissection reordering for general CSR matrices
-/// @tparam ROWTYPE Type for row pointers (ai array) - supports int32_t or int64_t
-/// @tparam COLTYPE Type for column indices (aj array) - supports int32_t or int64_t
+/// @tparam ROWTYPE Type for row pointers (xadj array) - supports int32_t or int64_t
+/// @tparam COLTYPE Type for column indices (adjncy array) - supports int32_t or int64_t
 /// @param nrows Number of rows in the matrix
 /// @param ncols Number of columns in the matrix (must equal nrows for square matrix)
-/// @param ai Row pointer array of size (nrows + 1) - base is derived from ai[0]
-/// @param aj Column index array
+/// @param xadj Row pointer array of size (nrows + 1), zero-based, with diagonals removed
+/// @param adjncy Column index array, zero-based, with diagonals removed
 /// @param iperm Inverse permutation array: iperm[i] = k means new row i comes from old row k
 /// @param perm Permutation array: perm[i] = k means old row i goes to new row k
 /// @param opts METIS options (optional, uses defaults if not provided)
 /// @return 0 on success, non-zero on failure
 template <typename ROWTYPE, typename COLTYPE>
 int MetisND(const COLTYPE nrows, const COLTYPE ncols,
-            const ROWTYPE* ai, const COLTYPE* aj,
+            const ROWTYPE* xadj, const COLTYPE* adjncy,
             COLTYPE* iperm, COLTYPE* perm,
             const MetisNDOptions& opts = MetisNDOptions());
 #endif

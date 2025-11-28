@@ -1,12 +1,16 @@
 #include "io.hpp"
 #include "iterative_solver.hpp"
 #include "matrix_utils.hpp"
+#include "permutation.hpp"
 #include "precond.hpp"
 #include "sp_ops.hpp"
 #include "spadd.hpp"
 #include "sparse_mat_traits.hpp"
 #include "spmv.hpp"
 #include "triangle_solve.hpp"
+#ifdef USE_METIS_LIB
+#include "Reordering.h"
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -52,6 +56,11 @@ iterative_solver::State solveWithPreconditioner(const Options& opts,
                                                 const matrix_utils::CSRMatrix<int, int, double>& pruned);
 
 void precondExplore(const Options& opts, const matrix_utils::CSRMatrix<int, int, double>& pruned);
+
+#ifdef USE_METIS_LIB
+matrix_utils::CSRMatrix<int, int, double> permuteMatrixWithMetisND(
+    const matrix_utils::CSRMatrix<int, int, double>& matrix);
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -214,6 +223,34 @@ int main(int argc, char* argv[])
     out.close();
 
     std::cout << "SVG written to: " << opts.output_file << std::endl;
+
+#ifdef USE_METIS_LIB
+    // Permute original matrix with MetisND
+    auto permuted_original = permuteMatrixWithMetisND(csr_matrix);
+    std::ofstream out_perm_orig("permuted_original_matrix.svg");
+    if (out_perm_orig.is_open())
+    {
+        std::cout << "\nWriting permuted original matrix to SVG..." << std::endl;
+        matrix_utils::writeSVG(permuted_original.rows, permuted_original.cols, 
+                              permuted_original.AI(), permuted_original.AJ(), 
+                              out_perm_orig, opts.max_display_size);
+        out_perm_orig.close();
+        std::cout << "Permuted original matrix written to permuted_original_matrix.svg" << std::endl;
+    }
+
+    // Permute pruned matrix with MetisND
+    auto permuted_pruned = permuteMatrixWithMetisND(pruned);
+    std::ofstream out_perm_pruned("permuted_pruned_matrix.svg");
+    if (out_perm_pruned.is_open())
+    {
+        std::cout << "\nWriting permuted pruned matrix to SVG..." << std::endl;
+        matrix_utils::writeSVG(permuted_pruned.rows, permuted_pruned.cols, 
+                              permuted_pruned.AI(), permuted_pruned.AJ(), 
+                              out_perm_pruned, opts.max_display_size);
+        out_perm_pruned.close();
+        std::cout << "Permuted pruned matrix written to permuted_pruned_matrix.svg" << std::endl;
+    }
+#endif
 
     precondExplore(opts, pruned);
 
@@ -485,5 +522,87 @@ void precondExplore(const Options& opts, const matrix_utils::CSRMatrix<int, int,
     matrix_utils::writeSVG(LplusU.rows, LplusU.cols, LplusU.AI(), LplusU.AJ(), out_lpu, opts.max_display_size);
     out_lpu.close();
     std::cout << "L+U sparsity pattern written to L_plus_U_pattern.svg" << std::endl;
-
 }
+
+#ifdef USE_METIS_LIB
+matrix_utils::CSRMatrix<int, int, double> permuteMatrixWithMetisND(
+    const matrix_utils::CSRMatrix<int, int, double>& matrix)
+{
+    std::cout << "\n=== Permuting matrix with MetisND ===" << std::endl;
+    
+    // Compute symmetric adjacency graph using A+A^T (without diagonal)
+    // This is more efficient than CSRToMetisGraph and naturally handles symmetrization
+    std::vector<int> xadj(matrix.rows + 1);
+    matrix_utils::APlusATPrefix<int, int, false>(
+        matrix.rows, matrix.AI(), matrix.AJ(), xadj.data());
+    
+    // Allocate and fill adjacency list
+    int actual_edges = xadj[matrix.rows] - xadj[0];
+    std::vector<int> adjncy(actual_edges);
+    matrix_utils::APlusATFill<int, int, false>(
+        matrix.rows, matrix.AI(), matrix.AJ(), xadj.data(), adjncy.data());
+    
+    std::cout << "Adjacency graph created (A+A^T without diagonal): " 
+              << matrix.rows << " vertices, " << actual_edges << " edges" << std::endl;
+    
+    // Compute METIS nested dissection ordering
+    std::vector<int> iperm(matrix.rows);
+    std::vector<int> perm(matrix.rows);
+    
+    reordering::MetisNDOptions opts;
+    opts.seed = 42;  // For reproducibility
+    
+    std::cout << "Computing MetisND ordering..." << std::endl;
+    auto metis_start = std::chrono::high_resolution_clock::now();
+    int result = reordering::MetisND(matrix.rows, matrix.cols,
+                                     xadj.data(), adjncy.data(),
+                                     iperm.data(), perm.data(), opts);
+    auto metis_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> metis_time = metis_end - metis_start;
+    std::cout << "MetisND ordering time: " << metis_time.count() << " s" << std::endl;
+
+    // Print first 10 entries of iperm and perm for inspection
+    std::cout << "\nFirst 10 entries of permutation vectors:" << std::endl;
+    std::cout << "iperm: ";
+    for (int i = 0; i < std::min(10, static_cast<int>(iperm.size())); ++i)
+    {
+        std::cout << iperm[i] << " ";
+    }
+    std::cout << std::endl;
+    std::cout << "perm:  ";
+    for (int i = 0; i < std::min(10, static_cast<int>(perm.size())); ++i)
+    {
+        std::cout << perm[i] << " ";
+    }
+    std::cout << std::endl;
+
+    if (result != 0) {
+        std::cerr << "MetisND failed with error code: " << result << std::endl;
+        return matrix;  // Return original matrix on failure
+    }
+    
+    std::cout << "MetisND ordering computed successfully" << std::endl;
+    
+    // Allocate permuted matrix
+    matrix_utils::CSRMatrix<int, int, double> permuted;
+    permuted.rows = matrix.rows;
+    permuted.cols = matrix.cols;
+    permuted.ResizeAI(matrix.rows + 1);
+    permuted.ResizeAJ(matrix.NNZ());
+    permuted.ResizeAV(matrix.NNZ());
+    
+    // Permute the matrix: permuted = P * matrix * P^T (symmetric permutation)
+    std::cout << "Permuting matrix structure and values..." << std::endl;
+    matrix_utils::permuteMat(matrix.rows, matrix.cols,
+                            perm.data(), iperm.data(),  // Use same perm for rows and cols (symmetric)
+                            matrix.AI(), matrix.AJ(), matrix.AV(),
+                            permuted.AI(), permuted.AJ(), permuted.AV());
+    
+    std::cout << "Matrix permuted successfully" << std::endl;
+    std::cout << "Permuted matrix: " << permuted.rows << " x " << permuted.cols 
+              << ", NNZ: " << permuted.NNZ() << std::endl;
+    
+    return permuted;
+}
+#endif
+
