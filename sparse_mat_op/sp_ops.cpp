@@ -10,7 +10,7 @@ namespace matrix_utils
 {
 
 template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG>
-void AATSymbolic( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* ai_AAT )
+void APlusATPrefix( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* ai_AAT )
 {
     const int base = ai[0];
     ai_AAT[0] = base;
@@ -25,16 +25,17 @@ void AATSymbolic( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWT
         for ( j = ai[i] - base; j < ai[i + 1] - base; j++ )
         {
             COLTYPE col = aj[j] - base;
-            if ( col > i )
-            {
-                break; // skip upper triangle
-            }
-            else if ( col == i )
+            if ( col == i )
             {
                 if constexpr ( KEEPDIAG )
                     ai_AAT[i + 1]++;
                 j++;
                 break;
+            }
+            
+            if ( col > i )
+            {
+                break; // skip upper triangle
             }
 
             ai_AAT[col + 1]++; // increment the row size for AAT[col, i]
@@ -47,7 +48,7 @@ void AATSymbolic( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWT
                     k++;
                     break;
                 }
-                else if ( col2 > i )
+                if ( col2 > i )
                 {
                     break;
                 }
@@ -60,66 +61,18 @@ void AATSymbolic( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWT
     }
     for ( COLTYPE i = 0; i < size; i++ )
     {
+        ai_AAT[i + 1] += (ai[i + 1] - base) - start_pos[i]; // increment the row size for AAT[i, col]
         for ( ROWTYPE j = start_pos[i]; j < ai[i + 1] - base; j++ )
         {
-            COLTYPE col = aj[j] - base;
+            const COLTYPE col = aj[j] - base;
             ai_AAT[col + 1]++; // increment the row size for AAT[col, i]
-            ai_AAT[i + 1]++;   // increment the row size for AAT[i, col]
         }
     }
-
-    // Convert counts to CSR row pointers using parallel prefix sum
-    // Single parallel region with 3 phases to minimize OpenMP overhead
-    const int num_threads = omp_get_max_threads();
-    std::vector<ROWTYPE> thread_sums( num_threads + 1, 0 );
-
-#pragma omp parallel
-    {
-        const int tid = omp_get_thread_num();
-        const int nthreads = omp_get_num_threads();
-        const COLTYPE chunk_size = ( size + nthreads ) / nthreads;
-        const COLTYPE start = tid * chunk_size + 1;
-        const COLTYPE end =
-            std::min( start + chunk_size, static_cast<COLTYPE>( size + 1 ) );
-
-        // Phase 1: Parallel local prefix sums per thread
-        if ( start < end )
-        {
-            for ( COLTYPE i = start; i < end; i++ )
-            {
-                ai_AAT[i] += ai_AAT[i - 1];
-            }
-            // Store the last value for global adjustment
-            thread_sums[tid + 1] = ai_AAT[end - 1];
-        }
-
-// Barrier: Wait for all threads to finish Phase 1
-#pragma omp barrier
-
-// Phase 2: Sequential scan of thread sums (done by thread 0 only)
-#pragma omp single
-        {
-            for ( int i = 1; i <= nthreads; i++ )
-            {
-                thread_sums[i] += thread_sums[i - 1];
-            }
-        }
-        // Implicit barrier at end of single
-
-        // Phase 3: Parallel adjustment of each chunk
-        if ( tid > 0 && start < end )
-        {
-            const ROWTYPE offset = thread_sums[tid];
-            for ( COLTYPE i = start; i < end; i++ )
-            {
-                ai_AAT[i] += offset;
-            }
-        }
-    }
+    std::inclusive_scan(ai_AAT, ai_AAT + size + 1, ai_AAT);
 }
 
 template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG>
-void AATNumeric( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE const* ai_AAT, COLTYPE* aj_AAT )
+void APlusATFill( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE const* ai_AAT, COLTYPE* aj_AAT )
 {
     const ROWTYPE base = ai[0];
 
@@ -137,7 +90,7 @@ void AATNumeric( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTY
             {
                 break; // skip upper triangle
             }
-            else if ( col == i )
+            if ( col == i )
             {
                 if constexpr ( KEEPDIAG )
                 {
@@ -156,7 +109,7 @@ void AATNumeric( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTY
                     k++;
                     break;
                 }
-                else if ( col2 > i )
+                if ( col2 > i )
                 {
                     break;
                 }
@@ -178,6 +131,17 @@ void AATNumeric( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTY
         std::sort( aj_AAT + ai_AAT[i] - base,
                    aj_AAT + ai_AAT[i + 1] - base ); // sort the row
     }
+}
+
+template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG>
+void APlusATSerial( const COLTYPE size,
+                    ROWTYPE const* ai,
+                    COLTYPE const* aj,
+                    ROWTYPE* ai_out,
+                    COLTYPE* aj_out )
+{
+    APlusATPrefix<ROWTYPE, COLTYPE, KEEPDIAG>( size, ai, aj, ai_out );
+    APlusATFill<ROWTYPE, COLTYPE, KEEPDIAG>( size, ai, aj, ai_out, aj_out );
 }
 
 // Implementation of APlusATStruct struct methods
@@ -411,6 +375,29 @@ void APlusATStruct<ROWTYPE, COLTYPE, KEEPDIAG>::fillAndCompact( const COLTYPE si
                          count * sizeof( COLTYPE ) );
         }
     }
+}
+
+template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG>
+void APlusATStruct<ROWTYPE, COLTYPE, KEEPDIAG>::prefixOnly( const COLTYPE size,
+                                                            ROWTYPE const* ai,
+                                                            COLTYPE const* aj,
+                                                            ROWTYPE* ai_APlusAT )
+{
+    prefix( size, ai, aj );
+    if ( ai_APlusAT )
+    {
+        std::memcpy( ai_APlusAT, _APAT.ai.data(), ( size + 1 ) * sizeof( ROWTYPE ) );
+    }
+}
+
+template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG>
+void APlusATStruct<ROWTYPE, COLTYPE, KEEPDIAG>::fillAndCompactOnly( const COLTYPE size,
+                                                                    ROWTYPE const* ai,
+                                                                    COLTYPE const* aj,
+                                                                    ROWTYPE* ai_APlusAT,
+                                                                    COLTYPE* aj_APlusAT )
+{
+    fillAndCompact( size, ai, aj, ai_APlusAT, aj_APlusAT );
 }
 
 template <ResizableCSRMatrixType CSRMatrixType>
@@ -890,10 +877,12 @@ void partitionCSR2x2(const typename CSRMatrixType::COLTYPE rows,
 
 // Macro for instantiation to reduce boilerplate
 #define INSTANTIATE_SPARSE_OPS(ROWTYPE, COLTYPE) \
-    template void AATSymbolic<ROWTYPE, COLTYPE, true>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE*); \
-    template void AATSymbolic<ROWTYPE, COLTYPE, false>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE*); \
-    template void AATNumeric<ROWTYPE, COLTYPE, true>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE const*, COLTYPE*); \
-    template void AATNumeric<ROWTYPE, COLTYPE, false>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE const*, COLTYPE*); \
+    template void APlusATPrefix<ROWTYPE, COLTYPE, true>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE*); \
+    template void APlusATPrefix<ROWTYPE, COLTYPE, false>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE*); \
+    template void APlusATFill<ROWTYPE, COLTYPE, true>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE const*, COLTYPE*); \
+    template void APlusATFill<ROWTYPE, COLTYPE, false>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE const*, COLTYPE*); \
+    template void APlusATSerial<ROWTYPE, COLTYPE, true>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE*, COLTYPE*); \
+    template void APlusATSerial<ROWTYPE, COLTYPE, false>(const COLTYPE, ROWTYPE const*, COLTYPE const*, ROWTYPE*, COLTYPE*); \
     template struct APlusATStruct<ROWTYPE, COLTYPE, true>; \
     template struct APlusATStruct<ROWTYPE, COLTYPE, false>; \
     template void partitionCSR1x2<CSRMatrixVec<ROWTYPE, COLTYPE, double>>( \

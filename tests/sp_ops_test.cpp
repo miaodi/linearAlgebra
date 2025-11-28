@@ -790,6 +790,103 @@ TEST_F( SymmetricOpsTest, CorrectnessCheck_Various )
     }
 }
 
+// Validate APlusATPrefix matches A+A^T row pointers
+TEST_F( SymmetricOpsTest, APlusATPrefix_AsAPlusATPrefix )
+{
+    const int32_t size = 3;
+    const int32_t base = 0;
+    // row0: 0,2 ; row1: 1 ; row2: 0,2 (not strictly triangular, exercising A+A^T view)
+    std::vector<int32_t> ai = { 0, 2, 3, 5 };
+    std::vector<int32_t> aj = { 0, 2, 1, 0, 2 };
+
+    auto expected_keep = computeAPlusATNaive<int32_t, int32_t, true>(
+        size, ai.data(), aj.data() );
+    auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>(
+        size, ai.data(), aj.data() );
+
+    std::vector<int32_t> ai_AAT( size + 1 );
+
+    APlusATPrefix<int32_t, int32_t, true>( size, ai.data(), aj.data(),
+                                           ai_AAT.data() );
+    ASSERT_EQ( ai_AAT, expected_keep.ai );
+
+    APlusATPrefix<int32_t, int32_t, false>( size, ai.data(), aj.data(),
+                                            ai_AAT.data() );
+    ASSERT_EQ( ai_AAT, expected_nodiag.ai );
+}
+
+// Validate APlusATFill builds column indices for A+A^T
+TEST_F( SymmetricOpsTest, APlusATFill_AsAPlusATColumns )
+{
+    const int32_t size = 3;
+    const int32_t base = 0;
+    std::vector<int32_t> ai = { 0, 2, 3, 5 };
+    std::vector<int32_t> aj = { 0, 2, 1, 0, 2 };
+
+    auto expected_keep = computeAPlusATNaive<int32_t, int32_t, true>(
+        size, ai.data(), aj.data() );
+    auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>(
+        size, ai.data(), aj.data() );
+
+    // KEEPDIAG = true
+    std::vector<int32_t> ai_AAT( size + 1 );
+    APlusATPrefix<int32_t, int32_t, true>( size, ai.data(), aj.data(),
+                                           ai_AAT.data() );
+    ASSERT_EQ( ai_AAT, expected_keep.ai );
+
+    std::vector<int32_t> aj_AAT( expected_keep.aj.size() );
+    APlusATFill<int32_t, int32_t, true>( size, ai.data(), aj.data(),
+                                         ai_AAT.data(), aj_AAT.data() );
+    verifyCsrStructure( size, ai_AAT.data(), aj_AAT.data(), base );
+    compareCsrStructures( size, expected_keep.ai.data(), expected_keep.aj.data(),
+                          ai_AAT.data(), aj_AAT.data(),
+                          "APlusATFill_KeepDiag" );
+
+    // KEEPDIAG = false
+    APlusATPrefix<int32_t, int32_t, false>( size, ai.data(), aj.data(),
+                                            ai_AAT.data() );
+    ASSERT_EQ( ai_AAT, expected_nodiag.ai );
+
+    aj_AAT.assign( expected_nodiag.aj.size(), 0 );
+    APlusATFill<int32_t, int32_t, false>( size, ai.data(), aj.data(),
+                                          ai_AAT.data(), aj_AAT.data() );
+    verifyCsrStructure( size, ai_AAT.data(), aj_AAT.data(), base );
+    compareCsrStructures( size, expected_nodiag.ai.data(), expected_nodiag.aj.data(),
+                          ai_AAT.data(), aj_AAT.data(),
+                          "APlusATFill_NoDiag" );
+}
+
+// Validate combined APlusATSerial helper produces A+A^T structure
+TEST_F( SymmetricOpsTest, APlusATSerial_AsAPlusAT )
+{
+    const int32_t size = 3;
+    const int32_t base = 0;
+    std::vector<int32_t> ai = { 0, 2, 3, 5 };
+    std::vector<int32_t> aj = { 0, 2, 1, 0, 2 };
+
+    // KEEPDIAG = true
+    auto expected_keep = computeAPlusATNaive<int32_t, int32_t, true>(
+        size, ai.data(), aj.data() );
+    std::vector<int32_t> ai_out( size + 1 );
+    std::vector<int32_t> aj_out( expected_keep.aj.size() );
+
+    APlusATSerial<int32_t, int32_t, true>( size, ai.data(), aj.data(),
+                                           ai_out.data(), aj_out.data() );
+    compareCsrStructures( size, expected_keep.ai.data(), expected_keep.aj.data(),
+                          ai_out.data(), aj_out.data(), "APlusATSerial_KeepDiag" );
+
+    // KEEPDIAG = false
+    auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>(
+        size, ai.data(), aj.data() );
+    ai_out.assign( size + 1, 0 );
+    aj_out.assign( expected_nodiag.aj.size(), 0 );
+
+    APlusATSerial<int32_t, int32_t, false>( size, ai.data(), aj.data(),
+                                            ai_out.data(), aj_out.data() );
+    compareCsrStructures( size, expected_nodiag.ai.data(), expected_nodiag.aj.data(),
+                          ai_out.data(), aj_out.data(), "APlusATSerial_NoDiag" );
+}
+
 // Test all matrices from CMakeLists.txt with different thread counts
 TEST_F( SymmetricOpsTest, AllCMakeMatrices )
 {
@@ -831,65 +928,102 @@ TEST_F( SymmetricOpsTest, AllCMakeMatrices )
         std::cout << "Matrix " << name << ": size=" << size << ", nnz=" << nnz
                   << ", base=" << base << std::endl;
 
-        // Compute expected result once (using naive method)
-        auto expected_keepdiag = computeAPlusATNaive<int32_t, int32_t, true>(
-            size, ai.data(), aj.data() );
-        auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>(
-            size, ai.data(), aj.data() );
+        auto run_all_checks = [&]( std::vector<int32_t>& ai_cur,
+                                   std::vector<int32_t>& aj_cur,
+                                   const std::string& suffix ) {
+            const int32_t cur_base = ai_cur[0];
 
-        // Test with different thread counts
-        for ( int nthreads : thread_counts )
-        {
-            std::cout << "\n  Testing with " << nthreads << " thread(s):" << std::endl;
+            // Compute expected result once (using naive method)
+            auto expected_keepdiag = computeAPlusATNaive<int32_t, int32_t, true>(
+                size, ai_cur.data(), aj_cur.data() );
+            auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>(
+                size, ai_cur.data(), aj_cur.data() );
 
-            // Test with KEEPDIAG=true
+            // Also validate the serial helper once per matrix
             {
-                APlusATStruct<int32_t, int32_t, true> aplusatOp( nthreads );
-
-                // Allocate result with 2x original NNZ as upper bound
-                std::vector<int32_t> result_ai( size + 1 );
-                std::vector<int32_t> result_aj( 2 * nnz );
-
-                aplusatOp( size, ai.data(), aj.data(), result_ai.data(), result_aj.data() );
-
-                // Verify CSR structure is valid
-                verifyCsrStructure( size, result_ai.data(), result_aj.data() );
-
-                // Verify against expected computation
+                std::vector<int32_t> ai_serial( size + 1 );
+                std::vector<int32_t> aj_serial( expected_keepdiag.aj.size() );
+                APlusATSerial<int32_t, int32_t, true>( size, ai_cur.data(), aj_cur.data(),
+                                                       ai_serial.data(), aj_serial.data() );
                 compareCsrStructures( size, expected_keepdiag.ai.data(),
-                                      expected_keepdiag.aj.data(), result_ai.data(),
-                                      result_aj.data(),
-                                      name + "_KeepDiag_" + std::to_string( nthreads ) + "threads" );
+                                      expected_keepdiag.aj.data(), ai_serial.data(),
+                                      aj_serial.data(), name + "_Serial_KeepDiag" + suffix );
 
-                std::cout << "    KEEPDIAG=true: result nnz="
-                          << ( result_ai[size] - result_ai[0] )
-                          << ", symmetric=true, matches expected=true" << std::endl;
-            }
-
-            // Test with KEEPDIAG=false
-            {
-                APlusATStruct<int32_t, int32_t, false> aplusatOp( nthreads );
-
-                // Allocate result with 2x original NNZ as upper bound
-                std::vector<int32_t> result_ai( size + 1 );
-                std::vector<int32_t> result_aj( 2 * nnz );
-
-                aplusatOp( size, ai.data(), aj.data(), result_ai.data(), result_aj.data() );
-
-                // Verify CSR structure is valid
-                verifyCsrStructure( size, result_ai.data(), result_aj.data() );
-
-                // Verify against expected computation
+                ai_serial.assign( size + 1, 0 );
+                aj_serial.assign( expected_nodiag.aj.size(), 0 );
+                APlusATSerial<int32_t, int32_t, false>( size, ai_cur.data(), aj_cur.data(),
+                                                        ai_serial.data(), aj_serial.data() );
                 compareCsrStructures( size, expected_nodiag.ai.data(),
-                                      expected_nodiag.aj.data(), result_ai.data(),
-                                      result_aj.data(),
-                                      name + "_NoDiag_" + std::to_string( nthreads ) + "threads" );
-
-                std::cout << "    KEEPDIAG=false: result nnz="
-                          << ( result_ai[size] - result_ai[0] )
-                          << ", symmetric=true, matches expected=true" << std::endl;
+                                      expected_nodiag.aj.data(), ai_serial.data(),
+                                      aj_serial.data(), name + "_Serial_NoDiag" + suffix );
             }
-        }
+
+            // Test with different thread counts
+            for ( int nthreads : thread_counts )
+            {
+                std::cout << "\n  Testing with " << nthreads << " thread(s):" << suffix << std::endl;
+
+                // Test with KEEPDIAG=true
+                {
+                    APlusATStruct<int32_t, int32_t, true> aplusatOp( nthreads );
+
+                    // Allocate result with 2x original NNZ as upper bound
+                    std::vector<int32_t> result_ai( size + 1 );
+                    std::vector<int32_t> result_aj( 2 * ( ai_cur[size] - cur_base ) );
+
+                    aplusatOp( size, ai_cur.data(), aj_cur.data(), result_ai.data(), result_aj.data() );
+
+                    // Verify CSR structure is valid
+                    verifyCsrStructure( size, result_ai.data(), result_aj.data(),
+                                        cur_base );
+
+                    // Verify against expected computation
+                    compareCsrStructures( size, expected_keepdiag.ai.data(),
+                                          expected_keepdiag.aj.data(), result_ai.data(),
+                                          result_aj.data(),
+                                          name + "_KeepDiag_" + std::to_string( nthreads ) + "threads" + suffix );
+
+                    std::cout << "    KEEPDIAG=true: result nnz="
+                              << ( result_ai[size] - result_ai[0] )
+                              << ", symmetric=true, matches expected=true" << std::endl;
+                }
+
+                // Test with KEEPDIAG=false
+                {
+                    APlusATStruct<int32_t, int32_t, false> aplusatOp( nthreads );
+
+                    // Allocate result with 2x original NNZ as upper bound
+                    std::vector<int32_t> result_ai( size + 1 );
+                    std::vector<int32_t> result_aj( 2 * ( ai_cur[size] - cur_base ) );
+
+                    aplusatOp( size, ai_cur.data(), aj_cur.data(), result_ai.data(), result_aj.data() );
+
+                    // Verify CSR structure is valid
+                    verifyCsrStructure( size, result_ai.data(), result_aj.data(),
+                                        cur_base );
+
+                    // Verify against expected computation
+                    compareCsrStructures( size, expected_nodiag.ai.data(),
+                                          expected_nodiag.aj.data(), result_ai.data(),
+                                          result_aj.data(),
+                                          name + "_NoDiag_" + std::to_string( nthreads ) + "threads" + suffix );
+
+                    std::cout << "    KEEPDIAG=false: result nnz="
+                              << ( result_ai[size] - result_ai[0] )
+                              << ", symmetric=true, matches expected=true" << std::endl;
+                }
+            }
+        };
+
+        // Run on original base
+        run_all_checks( ai, aj, "_base" + std::to_string( base ) );
+
+        // Shift base and rerun
+        std::vector<int32_t> ai_shift = ai;
+        std::vector<int32_t> aj_shift = aj;
+        const int32_t new_base = ( base == 0 ) ? 1 : 0;
+        matrix_utils::ShiftCSRBase<int32_t, int32_t>( size, new_base, ai_shift.data(), aj_shift.data() );
+        run_all_checks( ai_shift, aj_shift, "_base" + std::to_string( new_base ) );
     }
 }
 

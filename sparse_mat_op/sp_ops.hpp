@@ -10,12 +10,16 @@
 namespace matrix_utils {
 
 template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG = true>
-void AATSymbolic(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
-                 ROWTYPE *ai_AAT);
+void APlusATPrefix(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                   ROWTYPE *ai_AAT);
 
 template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG = true>
-void AATNumeric(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
-                ROWTYPE const *ai_AAT, COLTYPE *aj_AAT);
+void APlusATFill(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
+                 ROWTYPE const *ai_AAT, COLTYPE *aj_AAT);
+
+template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG = true>
+void APlusATSerial(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj,
+                   ROWTYPE* ai_out, COLTYPE* aj_out);
 
 /// @brief Functor for computing A+A^T with memory reuse
 /// @details Encapsulates both symbolic and numeric phases of A+A^T computation.
@@ -40,6 +44,14 @@ struct APlusATStruct
         _nthreads = num_threads;
         _thread_sums.resize(_nthreads + 1, 0);
     }
+
+    // Expose phases individually for benchmarking
+    void prefixOnly(COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* ai_APlusAT);
+    void fillAndCompactOnly(COLTYPE size,
+                             ROWTYPE const* ai,
+                             COLTYPE const* aj,
+                             ROWTYPE* ai_APlusAT,
+                             COLTYPE* aj_APlusAT);
 
 private:
     void prefix(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj);
