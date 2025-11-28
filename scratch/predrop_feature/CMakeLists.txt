@@ -22,4 +22,5 @@ target_include_directories(drop_global_precond PRIVATE
     ${PROJECT_SOURCE_DIR}/factorization
     ${PROJECT_SOURCE_DIR}/reordering
     ${PROJECT_SOURCE_DIR}/utils
+    ${PROJECT_BINARY_DIR}  # For config.h
 )

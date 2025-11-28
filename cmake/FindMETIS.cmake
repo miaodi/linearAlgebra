@@ -69,6 +69,27 @@ find_library(METIS_LIBRARY
         lib32
 )
 
+# Find GKlib (dependency of standard METIS)
+find_library(GKLIB_LIBRARY
+    NAMES GKlib
+    HINTS
+        ${METIS_ROOT}
+        ${METIS_DIR}
+        $ENV{METIS_ROOT}
+        $ENV{METIS_DIR}
+        ${GKLIB_ROOT}
+        ${GKLIB_DIR}
+        $ENV{GKLIB_ROOT}
+        $ENV{GKLIB_DIR}
+        ${PC_METIS_LIBRARY_DIRS}
+    PATH_SUFFIXES
+        lib
+        lib64
+        lib32
+        GKlib/lib
+        gklib/lib
+)
+
 # Extract version from header if possible
 if(METIS_INCLUDE_DIR AND EXISTS "${METIS_INCLUDE_DIR}/${METIS_HEADER_FILE}")
     if(METIS_IS_MTMETIS)
@@ -99,12 +120,23 @@ if(METIS_INCLUDE_DIR AND EXISTS "${METIS_INCLUDE_DIR}/${METIS_HEADER_FILE}")
 endif()
 
 # Test if METIS actually works by compiling a minimal example
-# Note: For mt-metis, we skip the compile test as it requires complex OpenMP setup
-# The presence of the library and header is sufficient
-if(METIS_LIBRARY AND METIS_INCLUDE_DIR AND NOT METIS_IS_MTMETIS)
+if(METIS_LIBRARY AND METIS_INCLUDE_DIR)
+    # Enable C language for the compile test
+    enable_language(C)
+    
     include(CheckCSourceCompiles)
     set(CMAKE_REQUIRED_INCLUDES ${METIS_INCLUDE_DIR})
-    set(CMAKE_REQUIRED_LIBRARIES ${METIS_LIBRARY})
+    set(CMAKE_REQUIRED_LIBRARIES "")
+    set(CMAKE_REQUIRED_LINK_OPTIONS "")
+    
+    # Important: Link order matters for static libraries!
+    # METIS must come before GKlib since METIS depends on GKlib
+    list(APPEND CMAKE_REQUIRED_LIBRARIES ${METIS_LIBRARY})
+    
+    # Add GKlib if found (required for standard METIS)
+    if(GKLIB_LIBRARY AND NOT METIS_IS_MTMETIS)
+        list(APPEND CMAKE_REQUIRED_LIBRARIES ${GKLIB_LIBRARY})
+    endif()
     
     # Add math library if found
     find_library(M_LIBRARY m)
@@ -112,22 +144,77 @@ if(METIS_LIBRARY AND METIS_INCLUDE_DIR AND NOT METIS_IS_MTMETIS)
         list(APPEND CMAKE_REQUIRED_LIBRARIES ${M_LIBRARY})
     endif()
     
-    # Test standard METIS with METIS_PartGraphKway
-    check_c_source_compiles("
-        #include <metis.h>
-        int main() {
-            idx_t nvtxs = 6;
-            idx_t ncon = 1;
-            idx_t xadj[] = {0, 2, 5, 8, 11, 13, 15};
-            idx_t adjncy[] = {1, 3, 0, 2, 4, 1, 3, 5, 0, 2, 4, 1, 5, 2, 4};
-            idx_t nparts = 2;
-            idx_t objval;
-            idx_t part[6];
-            METIS_PartGraphKway(&nvtxs, &ncon, xadj, adjncy, NULL, NULL, NULL,
-                                &nparts, NULL, NULL, NULL, &objval, part);
-            return 0;
-        }
-    " METIS_COMPILES)
+    # For mt-metis, add OpenMP and pthread dependencies for the compile test
+    if(METIS_IS_MTMETIS)
+        find_package(Threads QUIET)
+        if(Threads_FOUND)
+            list(APPEND CMAKE_REQUIRED_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
+        endif()
+        
+        # mt-metis needs OpenMP - prefer C, but CXX works too
+        set(OPENMP_FOUND FALSE)
+        if(DEFINED OpenMP_C_FOUND AND OpenMP_C_FOUND)
+            if(DEFINED OpenMP_C_FLAGS)
+                list(APPEND CMAKE_REQUIRED_LINK_OPTIONS ${OpenMP_C_FLAGS})
+                set(OPENMP_FOUND TRUE)
+            endif()
+        elseif(DEFINED OpenMP_CXX_FOUND AND OpenMP_CXX_FOUND)
+            # Fall back to CXX if C not available (same -fopenmp flag typically)
+            if(DEFINED OpenMP_CXX_FLAGS)
+                list(APPEND CMAKE_REQUIRED_LINK_OPTIONS ${OpenMP_CXX_FLAGS})
+                set(OPENMP_FOUND TRUE)
+            endif()
+        endif()
+        
+        # If OpenMP wasn't found in parent scope, try to find it ourselves
+        if(NOT OPENMP_FOUND)
+            find_package(OpenMP QUIET COMPONENTS C)
+            if(OpenMP_C_FOUND AND DEFINED OpenMP_C_FLAGS)
+                list(APPEND CMAKE_REQUIRED_LINK_OPTIONS ${OpenMP_C_FLAGS})
+                set(OPENMP_FOUND TRUE)
+            else()
+                # Try CXX as fallback
+                find_package(OpenMP QUIET COMPONENTS CXX)
+                if(OpenMP_CXX_FOUND AND DEFINED OpenMP_CXX_FLAGS)
+                    list(APPEND CMAKE_REQUIRED_LINK_OPTIONS ${OpenMP_CXX_FLAGS})
+                endif()
+            endif()
+        endif()
+    endif()
+    
+    if(METIS_IS_MTMETIS)
+        # Test mt-metis with MTMETIS_NodeND
+        check_c_source_compiles("
+            #include <mtmetis.h>
+            int main() {
+                mtmetis_vtx_type nvtxs = 6;
+                mtmetis_adj_type xadj[] = {0, 2, 5, 8, 11, 13, 15};
+                mtmetis_vtx_type adjncy[] = {1, 3, 0, 2, 4, 1, 3, 5, 0, 2, 4, 1, 5, 2, 4};
+                mtmetis_pid_type iperm[6];
+                mtmetis_pid_type perm[6];
+                double options[MTMETIS_NOPTIONS];
+                MTMETIS_NodeND(&nvtxs, xadj, adjncy, NULL, options, perm, iperm);
+                return 0;
+            }
+        " METIS_COMPILES)
+    else()
+        # Test standard METIS with METIS_NodeND
+        check_c_source_compiles("
+            #include <stddef.h>
+            #include <metis.h>
+            int main() {
+                idx_t nvtxs = 6;
+                idx_t xadj[] = {0, 2, 5, 8, 11, 13, 15};
+                idx_t adjncy[] = {1, 3, 0, 2, 4, 1, 3, 5, 0, 2, 4, 1, 5, 2, 4};
+                idx_t iperm[6];
+                idx_t perm[6];
+                idx_t options[METIS_NOPTIONS];
+                METIS_SetDefaultOptions(options);
+                METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options, perm, iperm);
+                return 0;
+            }
+        " METIS_COMPILES)
+    endif()
     
     if(NOT METIS_COMPILES)
         set(METIS_LIBRARY METIS_LIBRARY-NOTFOUND)
@@ -146,6 +233,11 @@ find_package_handle_standard_args(METIS
 if(METIS_FOUND)
     set(METIS_INCLUDE_DIRS ${METIS_INCLUDE_DIR})
     set(METIS_LIBRARIES ${METIS_LIBRARY})
+    
+    # Add GKlib for standard METIS
+    if(GKLIB_LIBRARY AND NOT METIS_IS_MTMETIS)
+        list(APPEND METIS_LIBRARIES ${GKLIB_LIBRARY})
+    endif()
     
     # Add thread library for mt-metis
     if(METIS_IS_MTMETIS)
@@ -177,6 +269,11 @@ if(METIS_FOUND)
         endif()
         
         set(METIS_LINK_LIBRARIES "")
+        
+        # METIS needs GKlib
+        if(GKLIB_LIBRARY AND NOT METIS_IS_MTMETIS)
+            list(APPEND METIS_LINK_LIBRARIES ${GKLIB_LIBRARY})
+        endif()
         
         # METIS may depend on math library
         find_library(M_LIBRARY m)

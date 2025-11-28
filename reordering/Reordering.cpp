@@ -140,8 +140,9 @@ void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
 }
 
 #ifdef USE_METIS_LIB
-void Metis(mkl_wrapper::mkl_sparse_mat const *const mat,
-           std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm) {
+void MetisND(mkl_wrapper::mkl_sparse_mat const *const mat,
+             std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm,
+             const MetisNDOptions& opts) {
 
   iperm.resize(mat->cols());
   perm.resize(mat->cols());
@@ -149,44 +150,19 @@ void Metis(mkl_wrapper::mkl_sparse_mat const *const mat,
   std::vector<MKL_INT> adjncy;
   mat->get_adjacency_graph(xadj, adjncy);
 
-#ifdef USE_MTMETIS
-  using metis_idx_t = mtmetis_vtx_type;
-  using metis_adj_t = mtmetis_adj_type;
-  using metis_pid_t = mtmetis_pid_type;
-#else
-  using metis_idx_t = idx_t;
-  using metis_adj_t = idx_t;
-  using metis_pid_t = idx_t;
-#endif
-
-  // Convert to METIS types
-  std::vector<metis_adj_t> xadj_metis(xadj.begin(), xadj.end());
-  std::vector<metis_idx_t> adjncy_metis(adjncy.begin(), adjncy.end());
-  std::vector<metis_pid_t> iperm_metis(mat->cols());
-  std::vector<metis_pid_t> perm_metis(mat->cols());
+  // Call the raw pointer version
+  int result = MetisND(mat->rows(), mat->cols(),
+                       xadj.data(), adjncy.data(),
+                       iperm.data(), perm.data(), opts);
   
-  metis_idx_t nvtxs = mat->rows();
-  
-#ifdef USE_MTMETIS
-  double options[MTMETIS_NOPTIONS];
-  MTMETIS_NodeND(&nvtxs, xadj_metis.data(), adjncy_metis.data(), NULL, options, 
-                 iperm_metis.data(), perm_metis.data());
-#else
-  std::vector<idx_t> options(METIS_NOPTIONS);
-  METIS_SetDefaultOptions(options.data());
-  options[METIS_OPTION_NUMBERING] = static_cast<MKL_INT>(mat->mkl_base());
-  METIS_NodeND(&nvtxs, xadj_metis.data(), adjncy_metis.data(), NULL, options.data(),
-               iperm_metis.data(), perm_metis.data());
-#endif
-  
-  // Convert back to MKL_INT
-  std::copy(iperm_metis.begin(), iperm_metis.end(), iperm.begin());
-  std::copy(perm_metis.begin(), perm_metis.end(), perm.begin());
+  if (result != 0) {
+    std::cerr << "MetisND failed with error code: " << result << std::endl;
+  }
 }
 
 template <typename ROWTYPE, typename COLTYPE>
 int MetisND(const COLTYPE nrows, const COLTYPE ncols,
-            const ROWTYPE* ai, const COLTYPE* aj,
+            const ROWTYPE* xadj, const COLTYPE* adjncy,
             COLTYPE* iperm, COLTYPE* perm, const MetisNDOptions& opts) {
   
   // METIS requires square matrix
@@ -206,35 +182,10 @@ int MetisND(const COLTYPE nrows, const COLTYPE ncols,
   constexpr int SUCCESS_CODE = METIS_OK;
 #endif
   
-  // Build adjacency list without self-loops
-  const ROWTYPE base = ai[0];
-  
-  std::vector<metis_adj_t> xadj(nrows + 1);
-  xadj[0] = base;
-  
-  // Count non-diagonal entries per row directly into xadj
-  for (COLTYPE i = 0; i < nrows; ++i) {
-    metis_adj_t count = 0;
-    for (ROWTYPE j = ai[i]; j < ai[i + 1]; ++j) {
-      if (aj[j - base] != i + base) {  // Skip diagonal
-        count++;
-      }
-    }
-    xadj[i + 1] = xadj[i] + count;
-  }
-  
-  // Fill adjncy without diagonal entries
-  const metis_adj_t nnz = xadj[nrows] - xadj[0];
-  std::vector<metis_idx_t> adjncy(nnz);
-  metis_adj_t pos = 0;
-  for (COLTYPE i = 0; i < nrows; ++i) {
-    for (ROWTYPE j = ai[i]; j < ai[i + 1]; ++j) {
-      COLTYPE col = aj[j - base];
-      if (col != i + base) {  // Skip diagonal
-        adjncy[pos++] = static_cast<metis_idx_t>(col);
-      }
-    }
-  }
+  // Copy xadj and adjncy to METIS types (assuming input is already zero-based with diagonals removed)
+  const metis_adj_t nnz = xadj[nrows];
+  std::vector<metis_adj_t> xadj_metis(xadj, xadj + nrows + 1);
+  std::vector<metis_idx_t> adjncy_metis(adjncy, adjncy + nnz);
   
   // Prepare output arrays
   std::vector<metis_pid_t> iperm_metis(nrows);
@@ -245,12 +196,12 @@ int MetisND(const COLTYPE nrows, const COLTYPE ncols,
   
 #ifdef USE_MTMETIS
   double options[MTMETIS_NOPTIONS];
-  result = MTMETIS_NodeND(&nvtxs, xadj.data(), adjncy.data(), NULL,
+  result = MTMETIS_NodeND(&nvtxs, xadj_metis.data(), adjncy_metis.data(), NULL,
                           options, perm_metis.data(), iperm_metis.data());
 #else
   std::vector<idx_t> options(METIS_NOPTIONS);
   METIS_SetDefaultOptions(options.data());
-  options[METIS_OPTION_NUMBERING] = base;
+  options[METIS_OPTION_NUMBERING] = 0;  // Zero-based indexing
   options[METIS_OPTION_NSEPS] = opts.nseps;
   options[METIS_OPTION_NITER] = opts.niter;
   options[METIS_OPTION_SEED] = opts.seed;
@@ -260,7 +211,7 @@ int MetisND(const COLTYPE nrows, const COLTYPE ncols,
   options[METIS_OPTION_RTYPE] = opts.rtype;
   options[METIS_OPTION_DBGLVL] = opts.dbglvl;
   
-  result = METIS_NodeND(&nvtxs, xadj.data(), adjncy.data(), NULL, 
+  result = METIS_NodeND(&nvtxs, xadj_metis.data(), adjncy_metis.data(), NULL, 
                         options.data(), perm_metis.data(), iperm_metis.data());
 #endif
   

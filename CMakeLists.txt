@@ -9,7 +9,7 @@ if(DEFINED ENV{CXX})
   set(CMAKE_CXX_COMPILER $ENV{CXX})
 endif()
 
-project(Linear_Algebra CXX Fortran)
+project(Linear_Algebra CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

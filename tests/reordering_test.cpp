@@ -319,7 +319,7 @@ TEST(Reordering, SerialCM) {
 
 #ifdef USE_METIS_LIB
     std::vector<MKL_INT> nd_inv_perm, nd_perm;
-    reordering::Metis(&mat, nd_inv_perm, nd_perm);
+    reordering::MetisND(&mat, nd_inv_perm, nd_perm);
     EXPECT_EQ( matrix_utils::isPermutation(
                    mat.rows(), static_cast<int>( mat.mkl_base() ), nd_inv_perm.data() ),
                true );
