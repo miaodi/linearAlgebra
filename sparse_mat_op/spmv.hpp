@@ -13,9 +13,9 @@ struct SerialSPMV {
   SerialSPMV() = default;
 
   template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-  void operator()(const COLTYPE size, const int base, ROWTYPE const *ai,
-                  COLTYPE const *aj, VALTYPE const *av, VALTYPE const *const b,
-                  VALTYPE *const x, const VALTYPE alpha,
+  void operator()(const COLTYPE size, const int base, ROWTYPE const * __restrict ai,
+                  COLTYPE const * __restrict aj, VALTYPE const * __restrict av, VALTYPE const * __restrict const b,
+                  VALTYPE * __restrict const x, const VALTYPE alpha,
                   const VALTYPE beta) const {
     for (COLTYPE i = 0; i < size; i++) {
       VALTYPE val = 0;
@@ -32,9 +32,9 @@ struct ParallelSPMV {
   ParallelSPMV() = default;
 
   template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-  void operator()(const COLTYPE size, const int base, ROWTYPE const *ai,
-                  COLTYPE const *aj, VALTYPE const *av, VALTYPE const *const b,
-                  VALTYPE *const x, const VALTYPE alpha,
+  void operator()(const COLTYPE size, const int base, ROWTYPE const * __restrict ai,
+                  COLTYPE const * __restrict aj, VALTYPE const * __restrict av, VALTYPE const * __restrict const b,
+                  VALTYPE * __restrict const x, const VALTYPE alpha,
                   const VALTYPE beta) const {
 #pragma omp parallel
     {
@@ -65,8 +65,8 @@ public:
 
   void setNumThreads(const int num_threads) { _nthreads = num_threads; }
 
-  void preprocess(const COLTYPE size, const int base, ROWTYPE const *ai,
-                  COLTYPE const *aj, VALTYPE const *av) {
+  void preprocess(const COLTYPE size, const int base, ROWTYPE const * __restrict ai,
+                  COLTYPE const * __restrict aj, VALTYPE const * __restrict av) {
     _threadBv.resize(_nthreads + 1);
     _threadProduct.resize(_nthreads + 1);
     _threadProduct[0] = 0;
@@ -76,9 +76,9 @@ public:
     _product.resize(nnz);
   }
 
-  void operator()(const COLTYPE size, const int base, ROWTYPE const *ai,
-                  COLTYPE const *aj, VALTYPE const *av, const VALTYPE *const b,
-                  VALTYPE *const x, const VALTYPE alpha,
+  void operator()(const COLTYPE size, const int base, ROWTYPE const * __restrict ai,
+                  COLTYPE const * __restrict aj, VALTYPE const * __restrict av, const VALTYPE * __restrict const b,
+                  VALTYPE * __restrict const x, const VALTYPE alpha,
                   const VALTYPE beta) const {
     const ROWTYPE nnz = ai[size] - base;
     _bv.clearAll();
@@ -183,6 +183,7 @@ private:
   mutable utils::BitVector<int> _threadBv;
   mutable std::vector<VALTYPE> _threadProduct;
 };
+
 template <typename ROWTYPE = int, typename COLTYPE = int,
           typename VALTYPE = double>
 class ALBUSSPMV {
@@ -192,8 +193,8 @@ public:
 
   void setNumThreads(const int num_threads) { _nthreads = num_threads; }
 
-  void preprocess(const COLTYPE size, const int base, ROWTYPE const *ai,
-                  COLTYPE const *aj, VALTYPE const *av) {
+  void preprocess(const COLTYPE size, const int base, ROWTYPE const * __restrict ai,
+                  COLTYPE const * __restrict aj, VALTYPE const * __restrict av) {
 
     const ROWTYPE nnz = ai[size] - base;
     _threadBlockSizePrefix.resize(_nthreads + 1);
@@ -215,27 +216,18 @@ public:
                                          _threadBlockSizePrefix[i] + base)) -
           1;
     }
-    // for (int i = 0; i <= size; i++)
-    //   std::cout << ai[i] - base << " ";
-    // std::cout << std::endl;
-    // for (auto i : _threadBlockSizePrefix)
-    //   std::cout << i << " ";
-    // std::cout << std::endl;
-    // for (auto i : _threadStartRow)
-    //   std::cout << i << " ";
-    // std::cout << std::endl;
-    _threadBoundaryValue.resize(2 * _nthreads);
+
+    _threadBoundaryValue.assign(2 * _nthreads, static_cast<VALTYPE>(0));
   }
 
-  void operator()(const COLTYPE size, const int base, ROWTYPE const *ai,
-                  COLTYPE const *aj, VALTYPE const *av, const VALTYPE *const b,
-                  VALTYPE *const x, const VALTYPE alpha,
+  void operator()(const COLTYPE size, const int base, ROWTYPE const * __restrict ai,
+                  COLTYPE const * __restrict aj, VALTYPE const * __restrict av, const VALTYPE * __restrict const b,
+                  VALTYPE * __restrict const x, const VALTYPE alpha,
                   const VALTYPE beta) const {
 
 #pragma omp parallel num_threads(_nthreads)
     {
       const int tid = omp_get_thread_num();
-      const int nthreads = omp_get_num_threads();
       COLTYPE start = _threadStartRow[tid], end = _threadStartRow[tid + 1];
       VALTYPE val;
       if (start < end) {
@@ -272,12 +264,19 @@ public:
         _threadBoundaryValue[2 * tid + 1] = 0;
       }
     }
-    COLTYPE idx = -1;
+    // Combine boundary contributions from all threads
+    // Need to track which rows have been scaled by beta to avoid double-scaling
+    COLTYPE idx = std::numeric_limits<COLTYPE>::max();
+    bool scaled = false;
 #pragma unroll
     for (int tid = 0; tid < _nthreads; tid++) {
       if (_threadStartRow[tid] != idx) {
         idx = _threadStartRow[tid];
+        scaled = false;
+      }
+      if (!scaled) {
         x[idx] *= beta;
+        scaled = true;
       }
       x[idx] += _threadBoundaryValue[2 * tid];
       // std::cout << "tid: " << 2 * tid << "idx: " << idx << std::endl;
@@ -285,7 +284,11 @@ public:
         break;
       if (_threadStartRow[tid + 1] != idx) {
         idx = _threadStartRow[tid + 1];
+        scaled = false;
+      }
+      if (!scaled) {
         x[idx] *= beta;
+        scaled = true;
       }
       x[idx] += _threadBoundaryValue[2 * tid + 1];
       // std::cout << "tid: " << 2 * tid + 1 << "idx: " << idx << std::endl;
@@ -301,9 +304,9 @@ private:
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename T>
 constexpr bool spmv_has_preprocess = requires(const COLTYPE size,
-                                              const int base, ROWTYPE const *ai,
-                                              COLTYPE const *aj,
-                                              VALTYPE const *av, T &t) {
+                                              const int base, ROWTYPE const * __restrict ai,
+                                              COLTYPE const * __restrict aj,
+                                              VALTYPE const * __restrict av, T &t) {
   t.preprocess(size, base, ai, aj, av);
 };
 
@@ -339,7 +342,7 @@ template <typename CSRMatrixType, typename SPMVType> struct SPMV {
     }
   }
   
-  void operator()(const VALTYPE *const b, VALTYPE *const x,
+  void operator()(const VALTYPE * __restrict const b, VALTYPE * __restrict const x,
                   const VALTYPE alpha = 1., const VALTYPE beta = 0.) const {
     _spmv(_matrix->rows, _matrix->Base(), _matrix->AI(), _matrix->AJ(),
           _matrix->AV(), b, x, alpha, beta);

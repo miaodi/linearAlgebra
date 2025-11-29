@@ -3,6 +3,7 @@
 #include "matrix_utils.hpp"
 #include "permutation.hpp"
 #include "precond.hpp"
+#include "ruiz_scale.hpp"
 #include "sp_ops.hpp"
 #include "spadd.hpp"
 #include "sparse_mat_traits.hpp"
@@ -184,6 +185,15 @@ int main(int argc, char* argv[])
 
     std::cout << "Matrix: " << csr_matrix.rows << " x " << csr_matrix.cols
               << ", NNZ: " << csr_matrix.NNZ() << std::endl;
+
+    // Apply Ruiz scaling to the matrix
+    std::cout << "\nApplying Ruiz scaling..." << std::endl;
+    std::vector<double> dr(csr_matrix.rows);
+    std::vector<double> dc(csr_matrix.cols);
+    scaling::RuizScaleSerial<int, int, double, scaling::RuizScalingNormType::MaxNorm>(
+        csr_matrix.rows, csr_matrix.cols, csr_matrix.AI(), csr_matrix.AJ(),
+        csr_matrix.AV(), dr.data(), dc.data(), 20, 1e-2);
+    std::cout << "Ruiz scaling completed" << std::endl;
 
     // Deep copy matrix for pruning
     matrix_utils::CSRMatrix<int, int, double> pruned;
