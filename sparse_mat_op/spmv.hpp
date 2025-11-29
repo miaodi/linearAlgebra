@@ -26,9 +26,9 @@ inline VALTYPE apply_beta(const VALTYPE ax, const VALTYPE beta,
 }
 
 // Kernel-selectable dot product over CSR value/index slices [start, end)
-template <RowDotKernel Kernel, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+template <RowDotKernel Kernel, int Base = 0, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 inline VALTYPE DotRangeSIMD(const ROWTYPE start, const ROWTYPE end,
-                            const int base, COLTYPE const *__restrict aj,
+                            COLTYPE const *__restrict aj,
                             VALTYPE const *__restrict av,
                             VALTYPE const *__restrict b) {
 #if defined(AVX2_SUPPORTED) || defined(__AVX2__)
@@ -41,20 +41,30 @@ inline VALTYPE DotRangeSIMD(const ROWTYPE start, const ROWTYPE end,
     if constexpr (is_double) {
       const ROWTYPE simd_end = start + ((end - start) & (~ROWTYPE(3)));
       __m256d vacc = _mm256_setzero_pd();
+#pragma unroll(4)
       for (ROWTYPE idx = start; idx < simd_end; idx += 4) {
         if constexpr (std::is_same_v<COLTYPE, int>) {
           __m128i j_idx =
               _mm_loadu_si128(reinterpret_cast<const __m128i *>(aj + idx));
-          j_idx = _mm_sub_epi32(j_idx, _mm_set1_epi32(base));
+          if constexpr (Base != 0) {
+            j_idx = _mm_sub_epi32(j_idx, _mm_set1_epi32(Base));
+          }
           __m256d vb = _mm256_i32gather_pd(b, j_idx, 8);
           __m256d va = _mm256_loadu_pd(av + idx);
           vacc = _mm256_fmadd_pd(va, vb, vacc);
         } else {
           int indices[4];
-          indices[0] = static_cast<int>(aj[idx] - base);
-          indices[1] = static_cast<int>(aj[idx + 1] - base);
-          indices[2] = static_cast<int>(aj[idx + 2] - base);
-          indices[3] = static_cast<int>(aj[idx + 3] - base);
+          if constexpr (Base != 0) {
+            indices[0] = static_cast<int>(aj[idx] - Base);
+            indices[1] = static_cast<int>(aj[idx + 1] - Base);
+            indices[2] = static_cast<int>(aj[idx + 2] - Base);
+            indices[3] = static_cast<int>(aj[idx + 3] - Base);
+          } else {
+            indices[0] = static_cast<int>(aj[idx]);
+            indices[1] = static_cast<int>(aj[idx + 1]);
+            indices[2] = static_cast<int>(aj[idx + 2]);
+            indices[3] = static_cast<int>(aj[idx + 3]);
+          }
           __m128i j_idx =
               _mm_loadu_si128(reinterpret_cast<const __m128i *>(indices));
           __m256d vb = _mm256_i32gather_pd(b, j_idx, 8);
@@ -65,8 +75,14 @@ inline VALTYPE DotRangeSIMD(const ROWTYPE start, const ROWTYPE end,
       alignas(32) double tmp[4];
       _mm256_store_pd(tmp, vacc);
       VALTYPE sum = tmp[0] + tmp[1] + tmp[2] + tmp[3];
-      for (ROWTYPE idx = simd_end; idx < end; ++idx) {
-        sum += av[idx] * b[aj[idx] - base];
+      if constexpr (Base != 0) {
+        for (ROWTYPE idx = simd_end; idx < end; ++idx) {
+          sum += av[idx] * b[aj[idx] - Base];
+        }
+      } else {
+        for (ROWTYPE idx = simd_end; idx < end; ++idx) {
+          sum += av[idx] * b[aj[idx]];
+        }
       }
       return sum;
     } else if constexpr (is_float) {
@@ -77,17 +93,30 @@ inline VALTYPE DotRangeSIMD(const ROWTYPE start, const ROWTYPE end,
         if constexpr (std::is_same_v<COLTYPE, int>) {
           j_idx = _mm256_loadu_si256(
               reinterpret_cast<const __m256i *>(aj + idx));
-          j_idx = _mm256_sub_epi32(j_idx, _mm256_set1_epi32(base));
+          if constexpr (Base != 0) {
+            j_idx = _mm256_sub_epi32(j_idx, _mm256_set1_epi32(Base));
+          }
         } else {
           alignas(32) int indices[8];
-          indices[0] = static_cast<int>(aj[idx] - base);
-          indices[1] = static_cast<int>(aj[idx + 1] - base);
-          indices[2] = static_cast<int>(aj[idx + 2] - base);
-          indices[3] = static_cast<int>(aj[idx + 3] - base);
-          indices[4] = static_cast<int>(aj[idx + 4] - base);
-          indices[5] = static_cast<int>(aj[idx + 5] - base);
-          indices[6] = static_cast<int>(aj[idx + 6] - base);
-          indices[7] = static_cast<int>(aj[idx + 7] - base);
+          if constexpr (Base != 0) {
+            indices[0] = static_cast<int>(aj[idx] - Base);
+            indices[1] = static_cast<int>(aj[idx + 1] - Base);
+            indices[2] = static_cast<int>(aj[idx + 2] - Base);
+            indices[3] = static_cast<int>(aj[idx + 3] - Base);
+            indices[4] = static_cast<int>(aj[idx + 4] - Base);
+            indices[5] = static_cast<int>(aj[idx + 5] - Base);
+            indices[6] = static_cast<int>(aj[idx + 6] - Base);
+            indices[7] = static_cast<int>(aj[idx + 7] - Base);
+          } else {
+            indices[0] = static_cast<int>(aj[idx]);
+            indices[1] = static_cast<int>(aj[idx + 1]);
+            indices[2] = static_cast<int>(aj[idx + 2]);
+            indices[3] = static_cast<int>(aj[idx + 3]);
+            indices[4] = static_cast<int>(aj[idx + 4]);
+            indices[5] = static_cast<int>(aj[idx + 5]);
+            indices[6] = static_cast<int>(aj[idx + 6]);
+            indices[7] = static_cast<int>(aj[idx + 7]);
+          }
           j_idx = _mm256_load_si256(reinterpret_cast<const __m256i *>(indices));
         }
         __m256 vb = _mm256_i32gather_ps(b, j_idx, 4);
@@ -98,18 +127,44 @@ inline VALTYPE DotRangeSIMD(const ROWTYPE start, const ROWTYPE end,
       _mm256_store_ps(tmp, vacc);
       VALTYPE sum = static_cast<VALTYPE>(tmp[0] + tmp[1] + tmp[2] + tmp[3] +
                                          tmp[4] + tmp[5] + tmp[6] + tmp[7]);
-      for (ROWTYPE idx = simd_end; idx < end; ++idx) {
-        sum += av[idx] * b[aj[idx] - base];
+      if constexpr (Base != 0) {
+        for (ROWTYPE idx = simd_end; idx < end; ++idx) {
+          sum += av[idx] * b[aj[idx] - Base];
+        }
+      } else {
+        for (ROWTYPE idx = simd_end; idx < end; ++idx) {
+          sum += av[idx] * b[aj[idx]];
+        }
       }
       return sum;
     }
 #endif
   }
   VALTYPE sum = 0;
-  for (ROWTYPE idx = start; idx < end; ++idx) {
-    sum += av[idx] * b[aj[idx] - base];
+#pragma unroll(8)
+  if constexpr (Base != 0) {
+    for (ROWTYPE idx = start; idx < end; ++idx) {
+      sum += av[idx] * b[aj[idx] - Base];
+    }
+  } else {
+    for (ROWTYPE idx = start; idx < end; ++idx) {
+      sum += av[idx] * b[aj[idx]];
+    }
   }
   return sum;
+}
+
+// Runtime dispatcher for DotRangeSIMD based on base value
+template <RowDotKernel Kernel, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+inline VALTYPE DotRangeSIMD_dispatch(const ROWTYPE start, const ROWTYPE end,
+                                     const int base, COLTYPE const *__restrict aj,
+                                     VALTYPE const *__restrict av,
+                                     VALTYPE const *__restrict b) {
+  if (base == 0) {
+    return DotRangeSIMD<Kernel, 0>(start, end, aj, av, b);
+  } else {
+    return DotRangeSIMD<Kernel, 1>(start, end, aj, av, b);
+  }
 }
 
 // compute x = alpha * A * b + beta * x
@@ -154,8 +209,8 @@ struct SerialSPMV {
   }
 };
 
-template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double,
-          RowDotKernel Kernel = RowDotKernel::Scalar>
+// Plain OpenMP parallel SPMV (simple row distribution)
+template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
 struct ParallelSPMV {
   ParallelSPMV(const int num_threads = omp_get_max_threads())
       : _nthreads{num_threads} {}
@@ -169,20 +224,14 @@ struct ParallelSPMV {
                VALTYPE const *__restrict const b,
                VALTYPE *__restrict const x, const VALTYPE alpha,
                const VALTYPE beta) const {
-#pragma omp parallel num_threads(_nthreads)
-    {
-      const int tid = omp_get_thread_num();
-      const int nthreads = omp_get_num_threads();
-
-      auto [start, end] =
-          utils::LoadPrefixBalancedPartitionPos(ai, ai + size, tid, nthreads);
-
-      for (COLTYPE i = start; i < end; i++) {
-        VALTYPE val = DotRangeSIMD<Kernel>(ai[i] - base, ai[i + 1] - base, base,
-                                           aj, av, b);
-        const VALTYPE ax = alpha * val;
-        x[i] = apply_beta<Mode>(ax, beta, x[i]);
+#pragma omp parallel for num_threads(_nthreads)
+    for (COLTYPE i = 0; i < size; i++) {
+      VALTYPE val = 0;
+      for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+        val += av[j] * b[aj[j] - base];
       }
+      const VALTYPE ax = alpha * val;
+      x[i] = apply_beta<Mode>(ax, beta, x[i]);
     }
   }
 
@@ -199,6 +248,68 @@ struct ParallelSPMV {
       compute<BetaMode::One>(size, base, ai, aj, av, b, x, alpha, beta);
     } else {
       compute<BetaMode::Generic>(size, base, ai, aj, av, b, x, alpha, beta);
+    }
+  }
+
+private:
+  int _nthreads;
+};
+
+template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double,
+          RowDotKernel Kernel = RowDotKernel::Scalar>
+struct RowBalancedParallelSPMV {
+  RowBalancedParallelSPMV(const int num_threads = omp_get_max_threads())
+      : _nthreads{num_threads} {}
+
+  void setNumThreads(const int num_threads) { _nthreads = num_threads; }
+
+  template <BetaMode Mode, int Base>
+  void compute(const COLTYPE size,
+               ROWTYPE const *__restrict ai, COLTYPE const *__restrict aj,
+               VALTYPE const *__restrict av,
+               VALTYPE const *__restrict const b,
+               VALTYPE *__restrict const x, const VALTYPE alpha,
+               const VALTYPE beta) const {
+#pragma omp parallel num_threads(_nthreads)
+    {
+      const int tid = omp_get_thread_num();
+      const int nthreads = omp_get_num_threads();
+
+      auto [start, end] =
+          utils::LoadPrefixBalancedPartitionPos(ai, ai + size, tid, nthreads);
+
+      for (COLTYPE i = start; i < end; i++) {
+        VALTYPE val = DotRangeSIMD<Kernel, Base>(ai[i] - Base, ai[i + 1] - Base,
+                                                  aj, av, b);
+        const VALTYPE ax = alpha * val;
+        x[i] = apply_beta<Mode>(ax, beta, x[i]);
+      }
+    }
+  }
+
+  void operator()(const COLTYPE size, const int base,
+                  ROWTYPE const *__restrict ai,
+                  COLTYPE const *__restrict aj,
+                  VALTYPE const *__restrict av,
+                  VALTYPE const *__restrict const b,
+                  VALTYPE *__restrict const x, const VALTYPE alpha,
+                  const VALTYPE beta) const {
+    if (base == 0) {
+      if (beta == static_cast<VALTYPE>(0)) {
+        compute<BetaMode::Zero, 0>(size, ai, aj, av, b, x, alpha, beta);
+      } else if (beta == static_cast<VALTYPE>(1)) {
+        compute<BetaMode::One, 0>(size, ai, aj, av, b, x, alpha, beta);
+      } else {
+        compute<BetaMode::Generic, 0>(size, ai, aj, av, b, x, alpha, beta);
+      }
+    } else {
+      if (beta == static_cast<VALTYPE>(0)) {
+        compute<BetaMode::Zero, 1>(size, ai, aj, av, b, x, alpha, beta);
+      } else if (beta == static_cast<VALTYPE>(1)) {
+        compute<BetaMode::One, 1>(size, ai, aj, av, b, x, alpha, beta);
+      } else {
+        compute<BetaMode::Generic, 1>(size, ai, aj, av, b, x, alpha, beta);
+      }
     }
   }
 
@@ -263,27 +374,45 @@ public:
                     const VALTYPE alpha, const VALTYPE beta) const
     {
         const int base = static_cast<int>(ai ? ai[0] : 0);
-        if (beta == static_cast<VALTYPE>(0))
+        if (base == 0)
         {
-            compute<BetaMode::Zero>(size, base, ai, aj, av, b, x, alpha, beta);
-        }
-        else if (beta == static_cast<VALTYPE>(1))
-        {
-            compute<BetaMode::One>(size, base, ai, aj, av, b, x, alpha, beta);
+            if (beta == static_cast<VALTYPE>(0))
+            {
+                compute<BetaMode::Zero, 0>(size, ai, aj, av, b, x, alpha, beta);
+            }
+            else if (beta == static_cast<VALTYPE>(1))
+            {
+                compute<BetaMode::One, 0>(size, ai, aj, av, b, x, alpha, beta);
+            }
+            else
+            {
+                compute<BetaMode::Generic, 0>(size, ai, aj, av, b, x, alpha, beta);
+            }
         }
         else
         {
-            compute<BetaMode::Generic>(size, base, ai, aj, av, b, x, alpha, beta);
+            if (beta == static_cast<VALTYPE>(0))
+            {
+                compute<BetaMode::Zero, 1>(size, ai, aj, av, b, x, alpha, beta);
+            }
+            else if (beta == static_cast<VALTYPE>(1))
+            {
+                compute<BetaMode::One, 1>(size, ai, aj, av, b, x, alpha, beta);
+            }
+            else
+            {
+                compute<BetaMode::Generic, 1>(size, ai, aj, av, b, x, alpha, beta);
+            }
         }
     }
 
 private:
-    template <BetaMode Mode>
-    void compute(const COLTYPE size, const int base, ROWTYPE const* __restrict ai,
+    template <BetaMode Mode, int Base>
+    void compute(const COLTYPE size, ROWTYPE const* __restrict ai,
                  COLTYPE const* __restrict aj, VALTYPE const* __restrict av, const VALTYPE* __restrict const b,
                  VALTYPE* __restrict const x, const VALTYPE alpha, const VALTYPE beta) const
     {
-        const ROWTYPE nnz = ai[size] - base;
+        const ROWTYPE nnz = ai[size] - Base;
         if (nnz == 0)
         {
             if constexpr (Mode == BetaMode::Zero)
@@ -324,23 +453,23 @@ private:
             if (startRow < endRow)
             {
                 COLTYPE row = startRow;
-                val = DotRangeSIMD<Kernel>(nzStart, ai[startRow + 1] - base, base, aj, av, b);
+                val = DotRangeSIMD<Kernel, Base>(nzStart, ai[startRow + 1] - Base, aj, av, b);
                 _threadBoundaryValue[tidBegin] = alpha * val;
 
 #pragma unroll(32)
                 for (row = startRow + 1; row < endRow; row++)
                 {
-                    val = DotRangeSIMD<Kernel>(ai[row] - base, ai[row + 1] - base, base, aj, av, b);
+                    val = DotRangeSIMD<Kernel, Base>(ai[row] - Base, ai[row + 1] - Base, aj, av, b);
                     const VALTYPE ax = alpha * val;
                     x[row] = apply_beta<Mode>(ax, beta, x[row]);
                 }
 
-                val = DotRangeSIMD<Kernel>(ai[endRow] - base, nzEnd, base, aj, av, b);
+                val = DotRangeSIMD<Kernel, Base>(ai[endRow] - Base, nzEnd, aj, av, b);
                 _threadBoundaryValue[tidEnd] = alpha * val;
             }
             else
             {
-                val = DotRangeSIMD<Kernel>(nzStart, nzEnd, base, aj, av, b);
+                val = DotRangeSIMD<Kernel, Base>(nzStart, nzEnd, aj, av, b);
                 _threadBoundaryValue[tidBegin] = alpha * val;
             }
         }
