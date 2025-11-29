@@ -7,7 +7,7 @@
 
 namespace matrix_utils {
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
                       const fast_matrix_market::read_options &options) {
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;

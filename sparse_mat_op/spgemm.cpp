@@ -8,7 +8,7 @@
 namespace matrix_utils
 {
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void SpGEMM<CSRMatrixType>::analysis( const COLTYPE A_rows,
                                        const COLTYPE A_cols,
                                        const ROWTYPE* A_ai,
@@ -88,7 +88,7 @@ void SpGEMM<CSRMatrixType>::analysis( const COLTYPE A_rows,
     }
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void SpGEMM<CSRMatrixType>::operator()( const COLTYPE A_rows,
                                          const COLTYPE A_cols,
                                          const ROWTYPE* A_ai,

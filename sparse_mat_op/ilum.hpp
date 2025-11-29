@@ -5,7 +5,7 @@
 
 namespace preconditioner
 {
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 struct ILUMLevel
 {
     using ROWTYPE = typename CSRMatrixType::ROWTYPE;

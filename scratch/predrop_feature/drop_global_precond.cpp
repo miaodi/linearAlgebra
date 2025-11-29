@@ -49,7 +49,7 @@ struct Options
 // Forward declarations
 void printOptions(const Options& opts, const std::string& factorization_str, const std::string& precond_str);
 
-template <matrix_utils::ResizableDiagonalType CSRMatrixType>
+template <matrix_utils::ResizableDiagonal CSRMatrixType>
 class ILUPrec;
 
 iterative_solver::State solveWithPreconditioner(const Options& opts,
@@ -303,7 +303,7 @@ void printOptions(const Options& opts, const std::string& factorization_str, con
     std::cout << "  solve: " << (opts.solve ? "true" : "false") << std::endl;
 }
 
-template <matrix_utils::ResizableDiagonalType CSRMatrixType>
+template <matrix_utils::ResizableDiagonal CSRMatrixType>
 class ILUPrec
 {
 public:

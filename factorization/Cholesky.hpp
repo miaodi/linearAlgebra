@@ -84,7 +84,7 @@ void NNZCount(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
               const COLTYPE *parent, ROWTYPE *row_count, ROWTYPE *col_count,
               COLTYPE *mark);
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 class SkeletonGraph {
 public:
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -105,7 +105,7 @@ private:
   std::vector<COLTYPE> _subtree_size;
 };
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 class SymbolicCholesky {
 public:
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -126,7 +126,7 @@ private:
   std::vector<std::vector<COLTYPE>> _ajs;
 };
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 class SymbolicCholeskyCol {
 public:
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;

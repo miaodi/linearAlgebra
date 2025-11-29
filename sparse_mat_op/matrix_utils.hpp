@@ -19,8 +19,6 @@
 #include <type_traits>
 
 namespace matrix_utils {
-template <class Array>
-using array_value_type = std::decay_t<decltype(std::declval<Array &>()[0])>;
 
 template <typename T> auto find_address_of(T &&p) { return p.get(); }
 
@@ -700,7 +698,7 @@ bool Diagonal(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
 /// allowed
 /// @param U strictly upper triangular matrix
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
-          ResizableCSRMatrixType CSRMatrixType>
+          ResizableCSR CSRMatrixType>
 void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
               COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &L,
               std::vector<VALTYPE> &D, CSRMatrixType &U) {
@@ -783,7 +781,7 @@ void SplitLDU(const COLTYPE rows, const int base, ROWTYPE const *ai,
 
 // Split a matrix into strictly lower triangular matrix L (assuming that the
 // diagonal are 1s) and upper triangular matrix U (including the diagonal)
-template <ResizableCSRMatrixType CSRMatrixType> struct SplitLU {
+template <ResizableCSR CSRMatrixType> struct SplitLU {
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;
   using COLTYPE = typename CSRMatrixType::COLTYPE;
   using VALTYPE = typename CSRMatrixType::VALTYPE;
@@ -812,7 +810,7 @@ template <ResizableCSRMatrixType CSRMatrixType> struct SplitLU {
 };
 
 template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
-          typename VALTYPE, ResizableCSRMatrixType CSRMatrixType>
+          typename VALTYPE, ResizableCSR CSRMatrixType>
 void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
                    COLTYPE const *aj, VALTYPE const *av,
                    CSRMatrixType &tri_mat) {
@@ -886,7 +884,7 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
 }
 
 template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
-          typename VALTYPE, ResizableCSRMatrixType CSRMatrixType>
+          typename VALTYPE, ResizableCSR CSRMatrixType>
 void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
                       COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &F) {
   static_assert(TS == TriangularMatrix::U);
@@ -1164,7 +1162,7 @@ void RandomCSR( const COLTYPE rows,
     }
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void RandomL(const typename CSRMatrixType::COLTYPE rows,
              const typename CSRMatrixType::COLTYPE base,
              const typename CSRMatrixType::COLTYPE nnz_per_row,
@@ -1189,7 +1187,7 @@ void RandomL(const typename CSRMatrixType::COLTYPE rows,
   }
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void RandomU(const typename CSRMatrixType::COLTYPE rows,
              const typename CSRMatrixType::COLTYPE base,
              const typename CSRMatrixType::COLTYPE nnz_per_row,
