@@ -50,6 +50,7 @@ option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 include(FetchContent)
+include(cmake/SimdOptions.cmake)
 
 FetchContent_Declare(
   fast_matrix_market
