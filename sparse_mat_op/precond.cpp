@@ -91,7 +91,7 @@ void ICCFirstMerge( OutVec& out_vec, In1PosIter in1p_begin, In1PosIter in1p_end,
 }
 
 // NOTE: for level 0 ICC with Symmetric matrix input
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void ICCLevel0SymSymbolic( const typename CSRMatrixType::COLTYPE size, 
                            typename CSRMatrixType::ROWTYPE const* ai, 
                            typename CSRMatrixType::COLTYPE const* aj, 
@@ -247,7 +247,7 @@ void ICCLevelSymbolic0( const typename CSRMatrixType::COLTYPE size,
     icc.ResizeAV( icc.ai[size] - base );
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void ICCLevelSymbolic1( const typename CSRMatrixType::COLTYPE size, 
                         typename CSRMatrixType::ROWTYPE const* ai, 
                         typename CSRMatrixType::COLTYPE const* aj, 
@@ -372,7 +372,7 @@ void ICCLevelSymbolic1( const typename CSRMatrixType::COLTYPE size,
     icc.ResizeAV( icc.ai[size] - base );
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void ICCLevelSymbolic2( const typename CSRMatrixType::COLTYPE size, 
                         typename CSRMatrixType::ROWTYPE const* ai, 
                         typename CSRMatrixType::COLTYPE const* aj, 
@@ -503,7 +503,7 @@ void ICCLevelSymbolic2( const typename CSRMatrixType::COLTYPE size,
     icc.ResizeAV( icc.ai[size] - base );
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void ICCLevelSymbolic3( const typename CSRMatrixType::COLTYPE size, 
                         typename CSRMatrixType::ROWTYPE const* ai, 
                         typename CSRMatrixType::COLTYPE const* aj, 
@@ -757,7 +757,7 @@ bool ICCLevelNumeric( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, 
     return true;
 }
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonal CSRMatrixType>
 bool ILULevel0Symbolic( const typename CSRMatrixType::COLTYPE size, typename CSRMatrixType::ROWTYPE const* ai,
                         typename CSRMatrixType::COLTYPE const* aj, CSRMatrixType& ilu )
 {
@@ -801,7 +801,7 @@ bool ILULevel0Symbolic( const typename CSRMatrixType::COLTYPE size, typename CSR
     return success;
 }
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonal CSRMatrixType>
 bool ILULevelSymbolic<CSRMatrixType>::operator()( const typename CSRMatrixType::COLTYPE size,
                                                   typename CSRMatrixType::ROWTYPE const* ai,
                                                   typename CSRMatrixType::COLTYPE const* aj,
@@ -945,7 +945,7 @@ bool ILULevelSymbolic<CSRMatrixType>::operator()( const typename CSRMatrixType::
     return true;
 }
 
-template <ResizableDiagonalType CSRMatrixType, bool keepdiag>
+template <ResizableDiagonal CSRMatrixType, bool keepdiag>
 bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYPE size, ROWTYPE const* ai,
                                                          COLTYPE const* aj, const int lvl, CSRMatrixType& U)
 {
@@ -1155,7 +1155,7 @@ struct ILURowEliminator
     }
 };
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonal CSRMatrixType>
 bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
                       typename CSRMatrixType::ROWTYPE const* ai,
                       typename CSRMatrixType::COLTYPE const* aj,
@@ -1206,7 +1206,7 @@ bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
     return true;
 }
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonal CSRMatrixType>
 bool ICCLevelSymbolicParallel<CSRMatrixType>::operator()( const COLTYPE size,
                                                           ROWTYPE const* ai,
                                                           COLTYPE const* aj,
@@ -1331,7 +1331,7 @@ bool ICCLevelSymbolicParallel<CSRMatrixType>::operator()( const COLTYPE size,
     return true;
 }
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonal CSRMatrixType>
 bool ICCLevelNumericFixedPoint<CSRMatrixType>::operator()( const COLTYPE size,
                                                            ROWTYPE const* ai,
                                                            COLTYPE const* aj,
@@ -1454,7 +1454,7 @@ bool ICCLevelNumericFixedPoint<CSRMatrixType>::operator()( const COLTYPE size,
     return success;
 }
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonal CSRMatrixType>
 bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
                   typename CSRMatrixType::ROWTYPE const* ai,
                   typename CSRMatrixType::COLTYPE const* aj,

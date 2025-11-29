@@ -8,7 +8,7 @@
 namespace matrix_utils
 {
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void SpADD<CSRMatrixType>::analysis( const COLTYPE A_rows,
                                       const COLTYPE A_cols,
                                       const ROWTYPE* A_ai,
@@ -189,7 +189,7 @@ void SpADD<CSRMatrixType>::analysis( const COLTYPE A_rows,
     }
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void SpADD<CSRMatrixType>::operator()( const COLTYPE A_rows,
                                         const COLTYPE A_cols,
                                         const ROWTYPE* A_ai,

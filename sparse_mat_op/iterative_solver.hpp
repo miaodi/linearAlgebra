@@ -109,7 +109,7 @@ public:
         _prec_type = prec_type;
     }
 
-    template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
+    template <matrix_utils::SpmvOp Op, matrix_utils::PrecOp PrecOp>
     State operator()( Op const* const op, PrecOp const* const prec, VALTYPE const* b, VALTYPE* x )
     {
         static_assert( std::is_same_v<typename Op::VALTYPE, VALTYPE>,
@@ -172,28 +172,30 @@ private:
         _s.resize( _restart );
     }
 
-    template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
+    template <matrix_utils::SpmvOp Op, matrix_utils::PrecOp PrecOp>
     VALTYPE compute_residual( Op const* op, PrecOp const* prec, VALTYPE const* b, VALTYPE const* x, size_t size )
     {
         vec_ops::copy_vec( size, b, _tmp.data() );
         // Compute residual r = b - Ax
         ( *op )( x, _tmp.data(), (VALTYPE)( -1 ), (VALTYPE)( 1 ) );
-
-        // Apply preconditioner to residual for left preconditioning only
-        // For right preconditioning, the preconditioner is applied to the solution update,
-        // not to the residual computation, so we just copy the residual as-is
-        if ( _prec_type == PreconditionerType::LEFT )
-        {
-            ( *prec )( _tmp.data(), _Q.col( 0 ).data() );
-        }
-        else
-        {
-            vec_ops::copy_vec( size, _tmp.data(), _Q.col( 0 ).data() );
-        }
+        apply_preconditioner( prec, _tmp.data(), size, _Q.col( 0 ).data() );
         return _Q.col( 0 ).norm();
     }
 
-    template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
+    template <matrix_utils::PrecOp PrecOp>
+    void apply_preconditioner( PrecOp const* prec, VALTYPE const* input, size_t size, VALTYPE* output )
+    {
+        if ( _prec_type == PreconditionerType::LEFT )
+        {
+            ( *prec )( input, output );
+        }
+        else
+        {
+            vec_ops::copy_vec( size, input, output );
+        }
+    }
+
+    template <matrix_utils::SpmvOp Op, matrix_utils::PrecOp PrecOp>
     void apply_operator_with_preconditioning( Op const* op,
                                               PrecOp const* prec,
                                               VALTYPE const* input,
@@ -215,7 +217,7 @@ private:
         }
     }
 
-    template <matrix_utils::SpmvOpType Op, matrix_utils::PrecOpType PrecOp>
+    template <matrix_utils::SpmvOp Op, matrix_utils::PrecOp PrecOp>
     State perform_restart_cycle( Op const* op,
                                  PrecOp const* prec,
                                  VALTYPE init_resid,
@@ -282,7 +284,7 @@ private:
         }
     }
 
-    template <matrix_utils::PrecOpType PrecOp>
+    template <matrix_utils::PrecOp PrecOp>
     void update_solution( PrecOp const* prec,
                           size_t j,
                           Eigen::Map<Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1>>& x_vec )

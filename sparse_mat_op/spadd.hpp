@@ -13,9 +13,9 @@ namespace matrix_utils
  * 1. Analysis phase: Determines sparsity pattern of C and allocates memory
  * 2. Numerical phase: Computes actual values
  * 
- * @tparam CSRMatrixType Type satisfying ResizableCSRMatrixType concept
+ * @tparam CSRMatrixType Type satisfying ResizableCSR concept
  */
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 struct SpADD
 {
     using ROWTYPE = typename CSRMatrixType::ROWTYPE;

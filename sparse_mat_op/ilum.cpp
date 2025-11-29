@@ -36,7 +36,7 @@ static void computeEDinv(const VALTYPE* D_diag, const COLTYPE E_rows, const ROWT
     }
 }
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 void ILUMLevel<CSRMatrixType>::operator()(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj,
                                           VALTYPE const* av)
 {
@@ -60,7 +60,7 @@ void ILUMLevel<CSRMatrixType>::operator()(const COLTYPE size, ROWTYPE const* ai,
     }
 }
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 void ILUMLevel<CSRMatrixType>::reordering(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj,
                                           VALTYPE const* av)
 {
@@ -94,7 +94,7 @@ void ILUMLevel<CSRMatrixType>::reordering(const COLTYPE size, ROWTYPE const* ai,
                              _PAPT.AJ(), _PAPT.AV());
 }
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 void ILUMLevel<CSRMatrixType>::split()
 {
     // Split the permuted matrix PAPT into 4 blocks:
@@ -114,7 +114,7 @@ void ILUMLevel<CSRMatrixType>::split()
     preconditioner::computeEDinv(_D.AV(), _EDinv.rows, _EDinv.AI(), _EDinv.AJ(), _EDinv.AV(), _nthreads);
 }
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 void ILUMLevel<CSRMatrixType>::computeSchurComplement()
 {
     // Compute ANext = C - EDinv * F
@@ -146,7 +146,7 @@ void ILUMLevel<CSRMatrixType>::computeSchurComplement()
           _ANext);
 }
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 void ILUMLevel<CSRMatrixType>::dropSmallEntries()
 {
     // Drop entries in ANext whose absolute value is less than row_max * tau

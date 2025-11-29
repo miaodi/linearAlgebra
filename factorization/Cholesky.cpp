@@ -184,7 +184,7 @@ void NNZCount(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
   }
 }
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 void SkeletonGraph<CSRMatrixType>::operator()(const COLTYPE nnodes,
                                               const ROWTYPE *ai,
                                               const COLTYPE *aj,
@@ -239,7 +239,7 @@ void SkeletonGraph<CSRMatrixType>::operator()(const COLTYPE nnodes,
   }
 }
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 void SymbolicCholesky<CSRMatrixType>::operator()(
     const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
     const COLTYPE *parent, const COLTYPE *XLEAF, const COLTYPE *LEAF,
@@ -296,7 +296,7 @@ void SymbolicCholesky<CSRMatrixType>::operator()(
   L.ResizeAV(_ais_prefix.back());
 }
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 void SymbolicCholeskyCol<CSRMatrixType>::operator()(const COLTYPE nnodes,
                                                     const ROWTYPE *ai,
                                                     const COLTYPE *aj,
@@ -425,7 +425,7 @@ void kway_merge_spans(const std::vector<std::span<const T>> &runs,
   }
 }
 
-template <matrix_utils::ResizableCSRMatrixType CSRMatrixType>
+template <matrix_utils::ResizableCSR CSRMatrixType>
 void SymbolicCholeskyCol<CSRMatrixType>::Task(const COLTYPE nnodes,
                                               const ROWTYPE *ai,
                                               const COLTYPE *aj,

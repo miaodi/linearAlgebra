@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-template <matrix_utils::ResizableDiagonalType CSRMatrixType>
+template <matrix_utils::ResizableDiagonal CSRMatrixType>
 class ILUPrec
 {
 public:

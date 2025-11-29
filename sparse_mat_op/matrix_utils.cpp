@@ -58,7 +58,7 @@ template void SplitLDU(const int rows, const int base, int const *ai,
                        CSRMatrix<int, int, double> &L, std::vector<double> &D,
                        CSRMatrix<int, int, double> &U);
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void SplitLU<CSRMatrixType>::operator()(const COLTYPE rows, ROWTYPE const *ai,
                                         ROWTYPE const *diag, COLTYPE const *aj,
                                         VALTYPE const *av, CSRMatrixType &L,

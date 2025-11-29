@@ -400,7 +400,7 @@ void APlusATStruct<ROWTYPE, COLTYPE, KEEPDIAG>::fillAndCompactOnly( const COLTYP
     fillAndCompact( size, ai, aj, ai_APlusAT, aj_APlusAT );
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void Block( const typename CSRMatrixType::COLTYPE rows,
             const typename CSRMatrixType::ROWTYPE base,
             typename CSRMatrixType::ROWTYPE const* ai,
@@ -472,7 +472,7 @@ void Block( const typename CSRMatrixType::COLTYPE rows,
     }
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
                      const typename CSRMatrixType::COLTYPE cols,
                      typename CSRMatrixType::ROWTYPE const* ai,
@@ -493,7 +493,7 @@ void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
     A2.rows = rows;
     A2.cols = cols - col_split;
 
-    // Resize row pointers using ResizableCSRMatrixType interface
+    // Resize row pointers using ResizableCSR interface
     ROWTYPE* ai1 = A1.ResizeAI(rows + 1);
     ROWTYPE* ai2 = A2.ResizeAI(rows + 1);
     
@@ -558,7 +558,7 @@ void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
                 thread_sums2[i] += thread_sums2[i - 1];
             }
             
-            // Allocate column and value arrays using ResizableCSRMatrixType interface
+            // Allocate column and value arrays using ResizableCSR interface
             aj1 = A1.ResizeAJ(thread_sums1[nthreads] - base);
             aj2 = A2.ResizeAJ(thread_sums2[nthreads] - base);
             av1 = A1.ResizeAV(thread_sums1[nthreads] - base);
@@ -607,7 +607,7 @@ void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
     }
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void partitionCSR1xN( const typename CSRMatrixType::COLTYPE rows,
                       const typename CSRMatrixType::COLTYPE cols,
                       typename CSRMatrixType::ROWTYPE const* ai,
@@ -789,7 +789,7 @@ void partitionCSR1xN( const typename CSRMatrixType::COLTYPE rows,
     }
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void partitionCSRMxN( const typename CSRMatrixType::COLTYPE rows,
                       const typename CSRMatrixType::COLTYPE cols,
                       typename CSRMatrixType::ROWTYPE const* ai,
@@ -849,7 +849,7 @@ void partitionCSRMxN( const typename CSRMatrixType::COLTYPE rows,
     }
 }
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void partitionCSR2x2(const typename CSRMatrixType::COLTYPE rows,
                      const typename CSRMatrixType::COLTYPE cols,
                      typename CSRMatrixType::ROWTYPE const* ai,

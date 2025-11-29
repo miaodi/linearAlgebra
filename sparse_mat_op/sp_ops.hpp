@@ -66,7 +66,7 @@ private:
     CSRStructVec<ROWTYPE, COLTYPE> _APAT;
 };
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void Block(const typename CSRMatrixType::COLTYPE rows,
            const typename CSRMatrixType::ROWTYPE base,
            typename CSRMatrixType::ROWTYPE const* ai,
@@ -79,7 +79,7 @@ void Block(const typename CSRMatrixType::COLTYPE rows,
            CSRMatrixType& subMat);
 
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
                      const typename CSRMatrixType::COLTYPE cols,
                      typename CSRMatrixType::ROWTYPE const* ai,
@@ -91,7 +91,7 @@ void partitionCSR1x2(const typename CSRMatrixType::COLTYPE rows,
                      CSRMatrixType& A2,
                      const int nthreads = omp_get_max_threads());
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void partitionCSR2x2(const typename CSRMatrixType::COLTYPE rows,
                      const typename CSRMatrixType::COLTYPE cols,
                      typename CSRMatrixType::ROWTYPE const* ai,
@@ -105,7 +105,7 @@ void partitionCSR2x2(const typename CSRMatrixType::COLTYPE rows,
                      CSRMatrixType& A22,
                      const int nthreads = omp_get_max_threads());
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void partitionCSR1xN(const typename CSRMatrixType::COLTYPE rows,
                      const typename CSRMatrixType::COLTYPE cols,
                      typename CSRMatrixType::ROWTYPE const* ai,
@@ -117,7 +117,7 @@ void partitionCSR1xN(const typename CSRMatrixType::COLTYPE rows,
                      CSRMatrixType* blocks,
                      const int nthreads = omp_get_max_threads());
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void partitionCSRMxN(const typename CSRMatrixType::COLTYPE rows,
                      const typename CSRMatrixType::COLTYPE cols,
                      typename CSRMatrixType::ROWTYPE const* ai,

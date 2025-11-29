@@ -17,7 +17,7 @@
 namespace matrix_utils {
 
 // ICC helper declarations (definitions in precond.cpp)
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void ICCLevel0SymSymbolic(const typename CSRMatrixType::COLTYPE size, 
                           typename CSRMatrixType::ROWTYPE const* ai, 
                           typename CSRMatrixType::COLTYPE const* aj, 
@@ -31,7 +31,7 @@ void ICCLevelSymbolic0(const typename CSRMatrixType::COLTYPE size,
                        const int lvl, 
                        CSRMatrixType& icc);
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void ICCLevelSymbolic1(const typename CSRMatrixType::COLTYPE size, 
                        typename CSRMatrixType::ROWTYPE const* ai, 
                        typename CSRMatrixType::COLTYPE const* aj, 
@@ -39,7 +39,7 @@ void ICCLevelSymbolic1(const typename CSRMatrixType::COLTYPE size,
                        const int lvl, 
                        CSRMatrixType& icc);
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void ICCLevelSymbolic2(const typename CSRMatrixType::COLTYPE size, 
                        typename CSRMatrixType::ROWTYPE const* ai, 
                        typename CSRMatrixType::COLTYPE const* aj, 
@@ -47,7 +47,7 @@ void ICCLevelSymbolic2(const typename CSRMatrixType::COLTYPE size,
                        const int lvl, 
                        CSRMatrixType& icc);
 
-template <ResizableCSRMatrixType CSRMatrixType>
+template <ResizableCSR CSRMatrixType>
 void ICCLevelSymbolic3(const typename CSRMatrixType::COLTYPE size, 
                        typename CSRMatrixType::ROWTYPE const* ai, 
                        typename CSRMatrixType::COLTYPE const* aj, 
@@ -67,7 +67,7 @@ bool ICCLevelNumeric(const COLTYPE size,
                      COLTYPE const* icc_aj, 
                      VALTYPE* icc_av);
 
-template <ResizableDiagonalType CSRMatrixType> class ICCLevelSymbolicParallel {
+template <ResizableDiagonal CSRMatrixType> class ICCLevelSymbolicParallel {
 public:
   using COLTYPE = typename CSRMatrixType::COLTYPE;
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -89,7 +89,7 @@ private:
   std::vector<std::unordered_map<COLTYPE, COLTYPE>> _Q_next;
 };
 
-template <ResizableDiagonalType CSRMatrixType> class ICCLevelNumericFixedPoint {
+template <ResizableDiagonal CSRMatrixType> class ICCLevelNumericFixedPoint {
 public:
   using COLTYPE = typename CSRMatrixType::COLTYPE;
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -110,13 +110,13 @@ private:
   std::vector<VALTYPE> _L_av_next; // next iteration's L's av after a sweep
 };
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonal CSRMatrixType>
 bool ILULevel0Symbolic(const typename CSRMatrixType::COLTYPE size,
                        typename CSRMatrixType::ROWTYPE const *ai,
                        typename CSRMatrixType::COLTYPE const *aj,
                        CSRMatrixType &ilu);
 
-template <ResizableDiagonalType CSRMatrixType> class ILULevelSymbolic {
+template <ResizableDiagonal CSRMatrixType> class ILULevelSymbolic {
 public:
   ILULevelSymbolic() = default;
   bool operator()(const typename CSRMatrixType::COLTYPE size,
@@ -138,7 +138,7 @@ private:
   std::deque<typename CSRMatrixType::COLTYPE> _q; // queue of pivot candidates < i
 };
 
-template <ResizableDiagonalType CSRMatrixType, bool keepdiag = false>
+template <ResizableDiagonal CSRMatrixType, bool keepdiag = false>
 class ILULevelSymbolicParallelU
 {
 public:
@@ -160,7 +160,7 @@ private:
     std::vector<std::vector<COLTYPE>> _Ui;
 };
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonal CSRMatrixType>
 bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
                       typename CSRMatrixType::ROWTYPE const* ai,
                       typename CSRMatrixType::COLTYPE const* aj,
@@ -168,7 +168,7 @@ bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
                       const int lvl,
                       CSRMatrixType& ilu );
 
-template <ResizableDiagonalType CSRMatrixType>
+template <ResizableDiagonal CSRMatrixType>
 bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
                   typename CSRMatrixType::ROWTYPE const* ai,
                   typename CSRMatrixType::COLTYPE const* aj,
