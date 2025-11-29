@@ -22,6 +22,8 @@ add_library(${PROJECT_NAME} STATIC ${SPARSE_MAT_OP_SRC})
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(${PROJECT_NAME} PUBLIC ${DEPENDENCIES})
 
+target_enable_simd(${PROJECT_NAME})
+
 # Set CUDA properties if CUDA is enabled
 if(USE_CUDA)
     set_target_properties(${PROJECT_NAME} PROPERTIES
