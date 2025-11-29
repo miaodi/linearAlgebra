@@ -134,7 +134,7 @@ int main(int argc, char **argv) {
       "n,nt", "Number of threads", cxxopts::value<int>()->default_value("1"))(
       "i,it", "Number of iterations",
       cxxopts::value<int>()->default_value("100"))(
-      "m,matrix", "Matrix location",
+      "f,file", "Matrix location",
       cxxopts::value<std::string>()->default_value("data/thermal2.mtx"))(
       "h,help", "Print usage");
 
@@ -148,7 +148,7 @@ int main(int argc, char **argv) {
   }
   num_threads = result["n"].as<int>();
   iterations = result["i"].as<int>();
-  std::string file = result["m"].as<std::string>();
+  std::string file = result["f"].as<std::string>();
   
   // Read matrix as double
   {
