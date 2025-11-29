@@ -34,8 +34,8 @@ auto Serial = [](benchmark::State &state, const auto &mat, const int threads,
 };
 
 template <typename VALTYPE>
-auto RowBalancedPar = [](benchmark::State &state, const auto &mat,
-                         const int threads, const int it) {
+auto Parallel = [](benchmark::State &state, const auto &mat,
+                   const int threads, const int it) {
   std::vector<VALTYPE> x(mat.rows, 0.0);
   std::vector<VALTYPE> b(mat.rows, 1.0);
 
@@ -56,15 +56,37 @@ auto RowBalancedPar = [](benchmark::State &state, const auto &mat,
 };
 
 template <typename VALTYPE>
-auto RowBalancedParSimd = [](benchmark::State &state, const auto &mat,
-                             const int threads, const int it) {
+auto RowBalanced = [](benchmark::State &state, const auto &mat,
+                      const int threads, const int it) {
   std::vector<VALTYPE> x(mat.rows, 0.0);
   std::vector<VALTYPE> b(mat.rows, 1.0);
 
   matrix_utils::SPMV<
       std::remove_cvref_t<decltype(mat)>,
-      matrix_utils::ParallelSPMV<int, int, VALTYPE,
-                                 matrix_utils::RowDotKernel::Simd>>
+      matrix_utils::RowBalancedParallelSPMV<int, int, VALTYPE>>
+      spmv;
+  spmv.setMatrix(&mat);
+  spmv._spmv.setNumThreads(threads);
+  spmv.preprocess();
+  for (auto _ : state) {
+    for (int i = 0; i < it; i++) {
+      spmv(b.data(), x.data());
+    }
+  }
+  state.SetBytesProcessed(2 * sizeof(VALTYPE) * int64_t(state.iterations()) *
+                          int64_t(it) * int64_t(mat.NNZ()));
+};
+
+template <typename VALTYPE>
+auto RowBalancedSimd = [](benchmark::State &state, const auto &mat,
+                          const int threads, const int it) {
+  std::vector<VALTYPE> x(mat.rows, 0.0);
+  std::vector<VALTYPE> b(mat.rows, 1.0);
+
+  matrix_utils::SPMV<
+      std::remove_cvref_t<decltype(mat)>,
+      matrix_utils::RowBalancedParallelSPMV<int, int, VALTYPE,
+                                            matrix_utils::RowDotKernel::Simd>>
       spmv;
   spmv.setMatrix(&mat);
   spmv._spmv.setNumThreads(threads);
@@ -171,9 +193,11 @@ int main(int argc, char **argv) {
 
   // Double precision benchmarks
   benchmark::RegisterBenchmark("Serial_double", Serial<double>, mat_double, num_threads, iterations);
-  benchmark::RegisterBenchmark("RowBalancedPar_double", RowBalancedPar<double>, mat_double,
+  benchmark::RegisterBenchmark("Parallel_double", Parallel<double>, mat_double,
                                num_threads, iterations);
-  benchmark::RegisterBenchmark("RowBalancedParSimd_double", RowBalancedParSimd<double>, mat_double,
+  benchmark::RegisterBenchmark("RowBalanced_double", RowBalanced<double>, mat_double,
+                               num_threads, iterations);
+  benchmark::RegisterBenchmark("RowBalancedSimd_double", RowBalancedSimd<double>, mat_double,
                                num_threads, iterations);
   benchmark::RegisterBenchmark("ALBUSSum_double", ALBUSSum<double>, mat_double, num_threads,
                                iterations);
@@ -182,9 +206,11 @@ int main(int argc, char **argv) {
   
   // Float precision benchmarks
   benchmark::RegisterBenchmark("Serial_float", Serial<float>, mat_float, num_threads, iterations);
-  benchmark::RegisterBenchmark("RowBalancedPar_float", RowBalancedPar<float>, mat_float,
+  benchmark::RegisterBenchmark("Parallel_float", Parallel<float>, mat_float,
                                num_threads, iterations);
-  benchmark::RegisterBenchmark("RowBalancedParSimd_float", RowBalancedParSimd<float>, mat_float,
+  benchmark::RegisterBenchmark("RowBalanced_float", RowBalanced<float>, mat_float,
+                               num_threads, iterations);
+  benchmark::RegisterBenchmark("RowBalancedSimd_float", RowBalancedSimd<float>, mat_float,
                                num_threads, iterations);
   benchmark::RegisterBenchmark("ALBUSSum_float", ALBUSSum<float>, mat_float, num_threads,
                                iterations);

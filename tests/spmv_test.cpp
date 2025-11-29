@@ -92,8 +92,8 @@ int main(int argc, char **argv) {
   return RUN_ALL_TESTS();
 }
 
-// Test ParallelSPMV with both Scalar and SIMD kernels, 1-8 threads
-TEST_F(spmv_Test, parallel_spmv) {
+// Test RowBalancedParallelSPMV with both Scalar and SIMD kernels, 1-8 threads
+TEST_F(spmv_Test, row_balanced_parallel_spmv) {
   for (int nthreads = 1; nthreads <= 8; nthreads++) {
     for (auto &mat : _mats) {
       std::vector<double> b(mat.rows, 1.0);
@@ -106,12 +106,12 @@ TEST_F(spmv_Test, parallel_spmv) {
            x_serial.data(), 1., 0.);
 
       // Test Scalar kernel
-      ParallelSPMV<int, int, double, RowDotKernel::Scalar> p_spmv_scalar(nthreads);
+      RowBalancedParallelSPMV<int, int, double, RowDotKernel::Scalar> p_spmv_scalar(nthreads);
       p_spmv_scalar(mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), b.data(),
                     x_scalar.data(), 1., 0.);
       
       // Test SIMD kernel
-      ParallelSPMV<int, int, double, RowDotKernel::Simd> p_spmv_simd(nthreads);
+      RowBalancedParallelSPMV<int, int, double, RowDotKernel::Simd> p_spmv_simd(nthreads);
       p_spmv_simd(mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), b.data(),
                   x_simd.data(), 1., 0.);
 
