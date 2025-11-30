@@ -127,7 +127,7 @@ public:
         
         // Apply inverse of column transformations in reverse order: Q_c^3^{-1}, S_c^2^{-1}, S_c^1^{-1}
         for (auto it = _col_transforms.rbegin(); it != _col_transforms.rend(); ++it) {
-            (*it)->applyInverse(result.data(), temp.data());
+            (*it)->applyInverseToX(result.data(), temp.data());
             result = std::move(temp);
             temp.resize(result.size());
         }
@@ -144,7 +144,7 @@ public:
         
         // Apply column transformations in order: S_c^1, S_c^2, Q_c^3
         for (const auto& transform : _col_transforms) {
-            transform->apply(result.data(), temp.data());
+            transform->applyToX(result.data(), temp.data());
             result = std::move(temp);
             temp.resize(result.size());
         }
