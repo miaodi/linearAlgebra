@@ -337,7 +337,7 @@ void SymbolicCholeskyCol<CSRMatrixType>::operator()(const COLTYPE nnodes,
 
   for (int i = 0; i < nnodes; i++) {
     if (_degrees[i] == 0) {
-      _queue.autoResizePush(i);
+      _queue.push_back(i);
     }
   }
 
@@ -461,7 +461,7 @@ void SymbolicCholeskyCol<CSRMatrixType>::Task(const COLTYPE nnodes,
       if (_finished == nnodes) {
         break;
       }
-      task = _queue.shift();
+      task = _queue.pop_front();
     }
 
     // process the task
@@ -478,7 +478,7 @@ void SymbolicCholeskyCol<CSRMatrixType>::Task(const COLTYPE nnodes,
       if (deg == 1) {
         {
           std::unique_lock<std::mutex> lock(_mutex);
-          _queue.autoResizePush(parent_task);
+          _queue.push_back(parent_task);
         }
         _cv.notify_one();
       }
