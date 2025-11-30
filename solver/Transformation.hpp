@@ -4,7 +4,9 @@
 #include <vector>
 #include <concepts>
 #include <span>
-#include "../sparse_mat_op/sparse_mat_traits.hpp"
+#include "sparse_mat_traits.hpp"
+#include "scaling.hpp"
+#include "permutation.hpp"
 
 namespace solver {
 
@@ -12,9 +14,14 @@ namespace solver {
 using matrix_utils::VectorLike;
 using matrix_utils::SwappableResizableCSR;
 
+// Helper concept for valid vector type for a given matrix type
+template <typename VecType, typename MatType>
+concept VectorForMatrix = SwappableResizableCSR<MatType> && 
+    VectorLike<VecType, typename MatType::VALTYPE>;
+
 // Concept for transformation types
-template <typename T, typename VALTYPE, typename VecType, typename MatType>
-concept Transformation = VectorLike<VecType, VALTYPE> && SwappableResizableCSR<MatType> &&
+template <typename T, typename MatType, typename VecType>
+concept Transformation = VectorForMatrix<VecType, MatType> &&
     requires(T t, VecType& vec, MatType& mat) {
     { t.applyToOperator(mat, mat) } -> std::same_as<void>;
     { t.applyToRHS(vec, vec) } -> std::same_as<void>;
@@ -23,21 +30,19 @@ concept Transformation = VectorLike<VecType, VALTYPE> && SwappableResizableCSR<M
 };
 
 // Base interface for transformations
-template <typename VALTYPE, typename VecType = std::vector<VALTYPE>>
-    requires VectorLike<VecType, VALTYPE>
+template <SwappableResizableCSR MatType, typename VecType = std::vector<typename MatType::VALTYPE>>
+    requires VectorForMatrix<VecType, MatType>
 class TransformationBase {
 public:
+    using VALTYPE = typename MatType::VALTYPE;
+    using ROWTYPE = typename MatType::ROWTYPE;
+    using COLTYPE = typename MatType::COLTYPE;
+    
     virtual ~TransformationBase() = default;
     
-    // Apply transformation to operator (matrix): out = T * A * T^{-1} (for row/col transforms)
-    // MatType must satisfy SwappableResizableCSR concept
-    // Note: This is a template method that acts like a virtual function - derived classes should override it
-    template<SwappableResizableCSR Mat>
-    void applyToOperator(Mat& in, Mat& out) const {
-        // Empty default - derived classes should provide their own implementation
-        // Most transformations will just swap for identity or implement specific logic
-    }
-    
+    // Apply transformation to operator (matrix): out = Tr * A * Tc^{-1} (for row/col transforms)
+    virtual void applyToOperator(MatType& in, MatType& out) const = 0;
+
     // Apply transformation to RHS: out = T * in
     virtual void applyToRHS(VecType& in, VecType& out) const = 0;
     
@@ -47,37 +52,45 @@ public:
     // Apply inverse transformation to solution: out = T^{-1} * in
     virtual void applyInverseToX(VecType& in, VecType& out) const = 0;
     
-    // Get dimension
-    virtual size_t dimension() const = 0;
+    // Set number of threads for parallel operations
+    void setNumThreads(int nthreads) { _nthreads = nthreads; }
     
-    // Get base (0 or 1)
-    virtual int base() const = 0;
+    // Get number of threads
+    [[nodiscard]] int numThreads() const { return _nthreads; }
+
+protected:
+    int _nthreads = 1;
 };
 
+// ============================================================================
+// Permutation Transformations
+// ============================================================================
+
 // Row permutation transformation: P_r
-template <typename VALTYPE, typename VecType = std::vector<VALTYPE>, typename INDEXTYPE = int>
-    requires VectorLike<VecType, VALTYPE>
-class RowPermutation : public TransformationBase<VALTYPE, VecType> {
+template <SwappableResizableCSR MatType, typename VecType = std::vector<typename MatType::VALTYPE>>
+    requires VectorForMatrix<VecType, MatType>
+class RowPermutation : public TransformationBase<MatType, VecType> {
 public:
-    explicit RowPermutation(const INDEXTYPE* perm, size_t size, int base = 0) 
+    using VALTYPE = typename MatType::VALTYPE;
+    using ROWTYPE = typename MatType::ROWTYPE;
+    using COLTYPE = typename MatType::COLTYPE;
+    
+    explicit RowPermutation(const COLTYPE* perm, size_t size, int base = 0) 
         : _perm(perm, size), _base(base) {}
     
-    explicit RowPermutation(std::span<const INDEXTYPE> perm, int base = 0)
+    explicit RowPermutation(std::span<const COLTYPE> perm, int base = 0)
         : RowPermutation(perm.data(), perm.size(), base) {}
     
-    template<SwappableResizableCSR Mat>
-    void applyToOperator(Mat& in, Mat& out) const {
+    void applyToOperator(MatType& in, MatType& out) const {
         // For row permutation: out = P * A (permute rows of matrix)
         // This is matrix-specific and should be handled by LinearSolverSystem
-        std::swap(in, out);
+        matrix_utils::permuteMat(in.rows, in.cols, _perm.data(), static_cast<const COLTYPE*>(nullptr),
+                                 in.AI(), in.AJ(), in.AV(), out.AI(), out.AJ(), out.AV());
     }
     
     void applyToRHS(VecType& in, VecType& out) const override {
         // out = P * in
-        for (size_t i = 0; i < _perm.size(); ++i) {
-            out[i] = in[_perm[i] - _base];
-        }
-        std::swap(in, out);
+        matrix_utils::permVec(_perm.size(), _base, in.data(), _perm.data(), out.data());
     }
     
     void applyToX(VecType& in, VecType& out) const override {
@@ -90,193 +103,129 @@ public:
         std::swap(in, out);
     }
     
-    size_t dimension() const override { return _perm.size(); }
-    int base() const override { return _base; }
-    
-    std::span<const INDEXTYPE> permutation() const { return _perm; }
-    std::span<const INDEXTYPE> inversePermutation() const { 
-        ensureInverseComputed();
-        return _inv_perm; 
-    }
-    
 private:
-    void ensureInverseComputed() const {
-        if (_inv_perm_data.empty()) {
-            _inv_perm_data.resize(_perm.size());
-            _inv_perm = std::span<INDEXTYPE>(_inv_perm_data);
-            // Compute inverse permutation
-            for (size_t i = 0; i < _perm.size(); ++i) {
-                _inv_perm[_perm[i] - _base] = static_cast<INDEXTYPE>(i + _base);
-            }
-        }
-    }
-    
-    std::span<const INDEXTYPE> _perm;
-    mutable std::vector<INDEXTYPE> _inv_perm_data;
-    mutable std::span<INDEXTYPE> _inv_perm;
+    std::span<const COLTYPE> _perm;
     int _base;
 };
 
 // Column permutation transformation: Q_c
-template <typename VALTYPE, typename VecType = std::vector<VALTYPE>, typename INDEXTYPE = int>
-    requires VectorLike<VecType, VALTYPE>
-class ColumnPermutation : public TransformationBase<VALTYPE, VecType> {
+template <SwappableResizableCSR MatType, typename VecType = std::vector<typename MatType::VALTYPE>>
+    requires VectorForMatrix<VecType, MatType>
+class ColumnPermutation : public TransformationBase<MatType, VecType> {
 public:
-    explicit ColumnPermutation(const INDEXTYPE* perm, size_t size, int base = 0)
+    using VALTYPE = typename MatType::VALTYPE;
+    using ROWTYPE = typename MatType::ROWTYPE;
+    using COLTYPE = typename MatType::COLTYPE;
+    
+    explicit ColumnPermutation(const COLTYPE* perm, size_t size, int base = 0)
         : _perm(perm, size), _base(base) {}
     
-    explicit ColumnPermutation(std::span<const INDEXTYPE> perm, int base = 0)
+    explicit ColumnPermutation(std::span<const COLTYPE> perm, int base = 0)
         : ColumnPermutation(perm.data(), perm.size(), base) {}
     
-    template<SwappableResizableCSR Mat>
-    void applyToOperator(Mat& in, Mat& out) const {
+    void applyToOperator(MatType& in, MatType& out) const {
         // For column permutation: out = A * Q (permute columns of matrix)
         // This is matrix-specific and should be handled by LinearSolverSystem
-        std::swap(in, out);
+        matrix_utils::permuteMat(in.rows, in.cols, static_cast<const COLTYPE*>(nullptr), _perm.data(),
+                                 in.AI(), in.AJ(), in.AV(), out.AI(), out.AJ(), out.AV());
     }
     
     void applyToRHS(VecType& in, VecType& out) const override {
         // Column permutation doesn't affect RHS
         std::swap(in, out);
     }
-    
-    void applyToX(VecType& in, VecType& out) const override {
-        // out = Q * in (apply column permutation to solution)
-        ensureInverseComputed();
-        for (size_t i = 0; i < _inv_perm.size(); ++i) {
-            out[i] = in[_inv_perm[i] - _base];
-        }
-        std::swap(in, out);
+
+    void applyToX(VecType& in, VecType& out) const override
+    {
+        // out = Q * in (apply column permutation to solution)k
+        matrix_utils::invPermVec(_perm.size(), _base, in.data(), _perm.data(), out.data());
     }
-    
-    void applyInverseToX(VecType& in, VecType& out) const override {
+
+    void applyInverseToX(VecType& in, VecType& out) const override
+    {
         // out = Q^{-1} * in
-        for (size_t i = 0; i < _perm.size(); ++i) {
-            out[i] = in[_perm[i] - _base];
-        }
-        std::swap(in, out);
+        matrix_utils::permVec(_perm.size(), _base, in.data(), _perm.data(), out.data());
     }
-    
-    size_t dimension() const override { return _perm.size(); }
-    int base() const override { return _base; }
-    
-    std::span<const INDEXTYPE> permutation() const { return _perm; }
-    std::span<const INDEXTYPE> inversePermutation() const { 
-        ensureInverseComputed();
-        return _inv_perm; 
-    }
-    
+
 private:
-    void ensureInverseComputed() const {
-        if (_inv_perm_data.empty()) {
-            _inv_perm_data.resize(_perm.size());
-            _inv_perm = std::span<INDEXTYPE>(_inv_perm_data);
-            // Compute inverse permutation
-            for (size_t i = 0; i < _perm.size(); ++i) {
-                _inv_perm[_perm[i] - _base] = static_cast<INDEXTYPE>(i + _base);
-            }
-        }
-    }
-    
-    std::span<const INDEXTYPE> _perm;
-    mutable std::vector<INDEXTYPE> _inv_perm_data;
-    mutable std::span<INDEXTYPE> _inv_perm;
+    std::span<const COLTYPE> _perm;
     int _base;
 };
 
-// Diagonal scaling transformation: S_r or S_c
-template <typename VALTYPE, typename VecType = std::vector<VALTYPE>>
-    requires VectorLike<VecType, VALTYPE>
-class DiagonalScaling : public TransformationBase<VALTYPE, VecType> {
+// Row and column permutation transformation: P_r * A * Q_c^T
+template <SwappableResizableCSR MatType, typename VecType = std::vector<typename MatType::VALTYPE>>
+    requires VectorForMatrix<VecType, MatType>
+class RowColPermutation : public TransformationBase<MatType, VecType> {
 public:
-    explicit DiagonalScaling(const VALTYPE* scales, size_t size, int base = 0)
-        : _scales(scales, size), _base(base) {}
+    using VALTYPE = typename MatType::VALTYPE;
+    using ROWTYPE = typename MatType::ROWTYPE;
+    using COLTYPE = typename MatType::COLTYPE;
     
-    explicit DiagonalScaling(std::span<const VALTYPE> scales, int base = 0)
-        : DiagonalScaling(scales.data(), scales.size(), base) {}
+    explicit RowColPermutation(const COLTYPE* row_perm, const COLTYPE* col_perm, size_t size, int base = 0)
+        : _row_perm(row_perm, size), _col_perm(col_perm, size), _base(base) {}
     
-    template<SwappableResizableCSR Mat>
-    void applyToOperator(Mat& in, Mat& out) const {
-        // For diagonal scaling: handled by LinearSolverSystem for matrix operations
-        std::swap(in, out);
+    explicit RowColPermutation(std::span<const COLTYPE> row_perm, std::span<const COLTYPE> col_perm, int base = 0)
+        : RowColPermutation(row_perm.data(), col_perm.data(), row_perm.size(), base) {}
+    
+    void applyToOperator(MatType& in, MatType& out) const {
+        // For row and column permutation: out = P_r * A * Q_c^T
+        matrix_utils::permuteMat(in.rows, in.cols, _row_perm.data(), _col_perm.data(),
+                                 in.AI(), in.AJ(), in.AV(), out.AI(), out.AJ(), out.AV());
     }
     
     void applyToRHS(VecType& in, VecType& out) const override {
-        // out = S * in (scale RHS)
-        for (size_t i = 0; i < _scales.size(); ++i) {
-            out[i] = _scales[i] * in[i];
-        }
-        std::swap(in, out);
+        // out = P_r * in (apply row permutation to RHS)
+        matrix_utils::permVec(_row_perm.size(), _base, in.data(), _row_perm.data(), out.data());
     }
     
     void applyToX(VecType& in, VecType& out) const override {
-        // out = S * in (scale solution)
-        for (size_t i = 0; i < _scales.size(); ++i) {
-            out[i] = _scales[i] * in[i];
-        }
-        std::swap(in, out);
+        // out = Q_c * in (apply column permutation to solution)
+        matrix_utils::invPermVec(_col_perm.size(), _base, in.data(), _col_perm.data(), out.data());
     }
     
     void applyInverseToX(VecType& in, VecType& out) const override {
-        // out = S^{-1} * in
-        ensureInverseComputed();
-        for (size_t i = 0; i < _inv_scales.size(); ++i) {
-            out[i] = _inv_scales[i] * in[i];
-        }
-        std::swap(in, out);
-    }
-    
-    size_t dimension() const override { return _scales.size(); }
-    int base() const override { return _base; }
-    
-    std::span<const VALTYPE> scales() const { return _scales; }
-    std::span<const VALTYPE> inverseScales() const { 
-        ensureInverseComputed();
-        return _inv_scales; 
+        // out = Q_c^{-1} * in (apply inverse column permutation)
+        matrix_utils::permVec(_col_perm.size(), _base, in.data(), _col_perm.data(), out.data());
     }
     
 private:
-    void ensureInverseComputed() const {
-        if (_inv_scales_data.empty()) {
-            _inv_scales_data.resize(_scales.size());
-            _inv_scales = std::span<VALTYPE>(_inv_scales_data);
-            // Compute inverse scales
-            for (size_t i = 0; i < _scales.size(); ++i) {
-                _inv_scales[i] = static_cast<VALTYPE>(1) / _scales[i];
-            }
-        }
-    }
-    
-    std::span<const VALTYPE> _scales;
-    mutable std::vector<VALTYPE> _inv_scales_data;
-    mutable std::span<VALTYPE> _inv_scales;
+    std::span<const COLTYPE> _row_perm;
+    std::span<const COLTYPE> _col_perm;
     int _base;
 };
 
+// ============================================================================
+// Scaling Transformations
+// ============================================================================
+
 // Row scaling transformation: S_r (scales rows of matrix, scales RHS)
-template <typename VALTYPE, typename VecType = std::vector<VALTYPE>>
-    requires VectorLike<VecType, VALTYPE>
-class RowScaling : public TransformationBase<VALTYPE, VecType> {
+template <SwappableResizableCSR MatType, typename VecType = std::vector<typename MatType::VALTYPE>>
+    requires VectorForMatrix<VecType, MatType>
+class RowScaling : public TransformationBase<MatType, VecType> {
 public:
+    using VALTYPE = typename MatType::VALTYPE;
+    using ROWTYPE = typename MatType::ROWTYPE;
+    using COLTYPE = typename MatType::COLTYPE;
+    
     explicit RowScaling(const VALTYPE* scales, size_t size, int base = 0)
-        : _scales(scales, size), _base(base) {}
+        : _scales(scales, size) {}
     
     explicit RowScaling(std::span<const VALTYPE> scales, int base = 0)
         : RowScaling(scales.data(), scales.size(), base) {}
-    
-    template<SwappableResizableCSR Mat>
-    void applyToOperator(Mat& in, Mat& out) const {
+
+    void applyToOperator(MatType& in, MatType& out) const
+    {
         // For row scaling: out = S_r * A (scale rows of matrix)
         // This is matrix-specific and should be handled by LinearSolverSystem
         std::swap(in, out);
+        matrix_utils::ScaleMat(out.rows, out.AI(), out.AJ(), out.AV(), _scales.data(),
+                               static_cast<VALTYPE*>(nullptr), this->_nthreads);
     }
-    
+
     void applyToRHS(VecType& in, VecType& out) const override {
         // out = S_r * in (scale RHS by row scales)
-        for (size_t i = 0; i < _scales.size(); ++i) {
-            out[i] = _scales[i] * in[i];
-        }
         std::swap(in, out);
+        matrix_utils::ScaleVec(_scales.size(), out.data(), _scales.data(), this->_nthreads);
     }
     
     void applyToX(VecType& in, VecType& out) const override {
@@ -289,49 +238,31 @@ public:
         std::swap(in, out);
     }
     
-    size_t dimension() const override { return _scales.size(); }
-    int base() const override { return _base; }
-    
-    std::span<const VALTYPE> scales() const { return _scales; }
-    std::span<const VALTYPE> inverseScales() const { 
-        ensureInverseComputed();
-        return _inv_scales; 
-    }
-    
 private:
-    void ensureInverseComputed() const {
-        if (_inv_scales_data.empty()) {
-            _inv_scales_data.resize(_scales.size());
-            _inv_scales = std::span<VALTYPE>(_inv_scales_data);
-            // Compute inverse scales
-            for (size_t i = 0; i < _scales.size(); ++i) {
-                _inv_scales[i] = static_cast<VALTYPE>(1) / _scales[i];
-            }
-        }
-    }
-    
     std::span<const VALTYPE> _scales;
-    mutable std::vector<VALTYPE> _inv_scales_data;
-    mutable std::span<VALTYPE> _inv_scales;
-    int _base;
 };
 
 // Column scaling transformation: S_c (scales columns of matrix, scales solution)
-template <typename VALTYPE, typename VecType = std::vector<VALTYPE>>
-    requires VectorLike<VecType, VALTYPE>
-class ColumnScaling : public TransformationBase<VALTYPE, VecType> {
+template <SwappableResizableCSR MatType, typename VecType = std::vector<typename MatType::VALTYPE>>
+    requires VectorForMatrix<VecType, MatType>
+class ColumnScaling : public TransformationBase<MatType, VecType> {
 public:
+    using VALTYPE = typename MatType::VALTYPE;
+    using ROWTYPE = typename MatType::ROWTYPE;
+    using COLTYPE = typename MatType::COLTYPE;
+    
     explicit ColumnScaling(const VALTYPE* scales, size_t size, int base = 0)
-        : _scales(scales, size), _base(base) {}
+        : _scales(scales, size) {}
     
     explicit ColumnScaling(std::span<const VALTYPE> scales, int base = 0)
         : ColumnScaling(scales.data(), scales.size(), base) {}
     
-    template<SwappableResizableCSR Mat>
-    void applyToOperator(Mat& in, Mat& out) const {
+    void applyToOperator(MatType& in, MatType& out) const {
         // For column scaling: out = A * S_c (scale columns of matrix)
         // This is matrix-specific and should be handled by LinearSolverSystem
         std::swap(in, out);
+        matrix_utils::ScaleMat(out.rows, out.AI(), out.AJ(), out.AV(),
+                               static_cast<VALTYPE*>(nullptr), _scales.data(), this->_nthreads);
     }
     
     void applyToRHS(VecType& in, VecType& out) const override {
@@ -341,57 +272,83 @@ public:
     
     void applyToX(VecType& in, VecType& out) const override {
         // out = S_c * in (scale solution by column scales)
-        for (size_t i = 0; i < _scales.size(); ++i) {
-            out[i] = _scales[i] * in[i];
-        }
         std::swap(in, out);
+        matrix_utils::ScaleVec(_scales.size(), out.data(), _scales.data(), this->_nthreads);
     }
     
     void applyInverseToX(VecType& in, VecType& out) const override {
         // out = S_c^{-1} * in
-        ensureInverseComputed();
-        for (size_t i = 0; i < _inv_scales.size(); ++i) {
-            out[i] = _inv_scales[i] * in[i];
-        }
         std::swap(in, out);
-    }
-    
-    size_t dimension() const override { return _scales.size(); }
-    int base() const override { return _base; }
-    
-    std::span<const VALTYPE> scales() const { return _scales; }
-    std::span<const VALTYPE> inverseScales() const { 
-        ensureInverseComputed();
-        return _inv_scales; 
+        matrix_utils::InvScaleVec(_scales.size(), out.data(), _scales.data(), this->_nthreads);
     }
     
 private:
-    void ensureInverseComputed() const {
-        if (_inv_scales_data.empty()) {
-            _inv_scales_data.resize(_scales.size());
-            _inv_scales = std::span<VALTYPE>(_inv_scales_data);
-            // Compute inverse scales
-            for (size_t i = 0; i < _scales.size(); ++i) {
-                _inv_scales[i] = static_cast<VALTYPE>(1) / _scales[i];
-            }
-        }
-    }
-    
     std::span<const VALTYPE> _scales;
-    mutable std::vector<VALTYPE> _inv_scales_data;
-    mutable std::span<VALTYPE> _inv_scales;
-    int _base;
 };
 
-// Identity transformation (no-op)
-template <typename VALTYPE, typename VecType = std::vector<VALTYPE>>
-    requires VectorLike<VecType, VALTYPE>
-class IdentityTransformation : public TransformationBase<VALTYPE, VecType> {
+// Row and column scaling transformation: S_r * A * S_c (scales both rows and columns)
+template <SwappableResizableCSR MatType, typename VecType = std::vector<typename MatType::VALTYPE>>
+    requires VectorForMatrix<VecType, MatType>
+class RowColScaling : public TransformationBase<MatType, VecType> {
 public:
-    explicit IdentityTransformation(size_t dim, int base = 0) : _dim(dim), _base(base) {}
+    using VALTYPE = typename MatType::VALTYPE;
+    using ROWTYPE = typename MatType::ROWTYPE;
+    using COLTYPE = typename MatType::COLTYPE;
     
-    template<SwappableResizableCSR Mat>
-    void applyToOperator(Mat& in, Mat& out) const {
+    explicit RowColScaling(const VALTYPE* row_scales, const VALTYPE* col_scales, 
+                           size_t size, int base = 0)
+        : _row_scales(row_scales, size), _col_scales(col_scales, size) {}
+    
+    explicit RowColScaling(std::span<const VALTYPE> row_scales, std::span<const VALTYPE> col_scales,
+                           int base = 0)
+        : RowColScaling(row_scales.data(), col_scales.data(), row_scales.size(), base) {}
+    
+    void applyToOperator(MatType& in, MatType& out) const {
+        // out = S_r * A * S_c (scale both rows and columns)
+        std::swap(in, out);
+        matrix_utils::ScaleMat(out.rows, out.AI(), out.AJ(), out.AV(),
+                               _row_scales.data(), _col_scales.data(), this->_nthreads);
+    }
+    
+    void applyToRHS(VecType& in, VecType& out) const override {
+        // out = S_r * in (scale RHS by row scales)
+        std::swap(in, out);
+        matrix_utils::ScaleVec(_row_scales.size(), out.data(), _row_scales.data(), this->_nthreads);
+    }
+    
+    void applyToX(VecType& in, VecType& out) const override {
+        // out = S_c * in (scale solution by column scales)
+        std::swap(in, out);
+        matrix_utils::ScaleVec(_col_scales.size(), out.data(), _col_scales.data(), this->_nthreads);
+    }
+    
+    void applyInverseToX(VecType& in, VecType& out) const override {
+        // out = S_c^{-1} * in (apply inverse column scaling)
+        std::swap(in, out);
+        matrix_utils::InvScaleVec(_col_scales.size(), out.data(), _col_scales.data(), this->_nthreads);
+    }
+    
+private:
+    std::span<const VALTYPE> _row_scales;
+    std::span<const VALTYPE> _col_scales;
+};
+
+// ============================================================================
+// Identity Transformation
+// ============================================================================
+
+// Identity transformation (no-op)
+template <SwappableResizableCSR MatType, typename VecType = std::vector<typename MatType::VALTYPE>>
+    requires VectorForMatrix<VecType, MatType>
+class IdentityTransformation : public TransformationBase<MatType, VecType> {
+public:
+    using VALTYPE = typename MatType::VALTYPE;
+    using ROWTYPE = typename MatType::ROWTYPE;
+    using COLTYPE = typename MatType::COLTYPE;
+    
+    explicit IdentityTransformation() = default;
+    
+    void applyToOperator(MatType& in, MatType& out) const {
         std::swap(in, out);
     }
     
@@ -406,13 +363,6 @@ public:
     void applyInverseToX(VecType& in, VecType& out) const override {
         std::swap(in, out);
     }
-    
-    size_t dimension() const override { return _dim; }
-    int base() const override { return _base; }
-    
-private:
-    size_t _dim;
-    int _base;
 };
 
-}
+} // namespace solver

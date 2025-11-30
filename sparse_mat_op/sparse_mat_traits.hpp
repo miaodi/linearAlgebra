@@ -136,6 +136,9 @@ concept VectorLike = requires(T& v, const T& cv, std::size_t i) {
   requires std::same_as<typename T::value_type, VALTYPE>;
   { v[i] } -> std::convertible_to<VALTYPE&>;
   { cv.size() } -> std::convertible_to<std::size_t>;
+  { cv.data() } -> std::convertible_to<const VALTYPE*>;
+  { v.data() } -> std::convertible_to<VALTYPE*>;
+  { v.resize(i) } -> std::same_as<void>;
   { std::swap(v, v) } -> std::same_as<void>;
 };
 
