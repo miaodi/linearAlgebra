@@ -107,9 +107,13 @@ bool ScaleMat(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE*
 // Explicit template instantiations for common types
 template void ScaleVec<int, double>(const int, double*, double const*, int);
 template void ScaleVec<int, float>(const int, float*, float const*, int);
+template void ScaleVec<size_t, double>(const size_t, double*, double const*, int);
+template void ScaleVec<size_t, float>(const size_t, float*, float const*, int);
 
 template void InvScaleVec<int, double>(const int, double*, double const*, int);
 template void InvScaleVec<int, float>(const int, float*, float const*, int);
+template void InvScaleVec<size_t, double>(const size_t, double*, double const*, int);
+template void InvScaleVec<size_t, float>(const size_t, float*, float const*, int);
 
 template bool ScaleMat<int, int, double>(const int, int const*, int const*, double*,
                                          double const*, double const*, int);
