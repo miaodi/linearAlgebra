@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(graph CXX)
 
-set(GRAPH_SRC graph_algs.cpp)
+set(GRAPH_SRC graph_algs.cpp bfs.cpp)
 
 set(DEPENDENCIES enums utils sparse_mat_op OpenMP::OpenMP_CXX)
 
