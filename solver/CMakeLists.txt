@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(solver CXX)
 
-set(SOLVER_SRC LinearSolverSystem.cpp)
+set(SOLVER_SRC 
+    LinearSolverSystem.cpp
+    Transformation.cpp
+    TransformSeq.cpp
+)
 
 set(DEPENDENCIES utils sparse_mat_op reordering)
 

@@ -129,13 +129,14 @@ public:
     void applyToX(VecType& in, VecType& out, int nthreads = 1) const override
     {
         // out = Q * in (apply column permutation to solution)k
-        matrix_utils::invPermVec(static_cast<COLTYPE>(_perm.size()), _base, in.data(), _perm.data(), out.data(), nthreads);
+        matrix_utils::permVec(static_cast<COLTYPE>(_perm.size()), _base, in.data(), _perm.data(), out.data(), nthreads);
     }
 
     void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override
     {
         // out = Q^{-1} * in
-        matrix_utils::permVec(static_cast<COLTYPE>(_perm.size()), _base, in.data(), _perm.data(), out.data(), nthreads);
+        matrix_utils::invPermVec(static_cast<COLTYPE>(_perm.size()), _base, in.data(), _perm.data(),
+                                 out.data(), nthreads);
     }
 
 private:
@@ -171,12 +172,12 @@ public:
     
     void applyToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = Q_c * in (apply column permutation to solution)
-        matrix_utils::invPermVec(static_cast<COLTYPE>(_col_perm.size()), _base, in.data(), _col_perm.data(), out.data(), nthreads);
+        matrix_utils::permVec(static_cast<COLTYPE>(_col_perm.size()), _base, in.data(), _col_perm.data(), out.data(), nthreads);
     }
     
     void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = Q_c^{-1} * in (apply inverse column permutation)
-        matrix_utils::permVec(static_cast<COLTYPE>(_col_perm.size()), _base, in.data(), _col_perm.data(), out.data(), nthreads);
+        matrix_utils::invPermVec(static_cast<COLTYPE>(_col_perm.size()), _base, in.data(), _col_perm.data(), out.data(), nthreads);
     }
     
 private:
