@@ -17,7 +17,19 @@ namespace matrix_utils
 /// @param s Scaling factors (size: size)
 /// @param nthreads Number of OpenMP threads (default: 1 for serial execution)
 template <typename COLTYPE, typename VALTYPE>
-void ScaleVector(const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads = 1);
+void ScaleVec(const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads = 1);
+
+/// @brief Scale a vector by element-wise division (inverse scaling) with optional parallelization
+/// @details Computes x[i] = x[i] / s[i] for all i in parallel using OpenMP.
+///          Use nthreads > 1 for large vectors to leverage multi-core performance.
+/// @tparam COLTYPE Index type (e.g., int, int64_t)
+/// @tparam VALTYPE Value type (e.g., float, double)
+/// @param size Vector size
+/// @param x Vector to scale (modified in-place)
+/// @param s Scaling factors (size: size)
+/// @param nthreads Number of OpenMP threads (default: 1 for serial execution)
+template <typename COLTYPE, typename VALTYPE>
+void InvScaleVec(const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads = 1);
 
 /// @brief Apply row and/or column scaling to a CSR matrix with optional parallelization
 /// @details Flexible scaling function supporting three modes based on nullptr arguments:
