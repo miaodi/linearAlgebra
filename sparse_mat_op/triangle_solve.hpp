@@ -82,7 +82,7 @@ struct LevelScheduleTriangularSubstitution
     std::vector<COLTYPE> _iperm;
     std::vector<COLTYPE> _levelPrefix;
     COLTYPE _levels;
-    TopologicalSort2<ROWTYPE, COLTYPE, TM> _topSort;
+    graph::TopologicalSort2<ROWTYPE, COLTYPE, TM> _topSort;
 
     ROWTYPE const* _ai;
     COLTYPE const* _aj;
@@ -166,9 +166,9 @@ private:
 
     COLTYPE _totalTasks;
 
-    TopologicalSort2<ROWTYPE, COLTYPE, TM> _topSort;
-    ProjectGraphToTaskGraph<ROWTYPE, COLTYPE> _graphProjector; // Reusable graph projection instance
-    TransitiveReduction<ROWTYPE, COLTYPE> _transitiveReducer; // Reusable transitive reduction instance
+    graph::TopologicalSort2<ROWTYPE, COLTYPE, TM> _topSort;
+    graph::ProjectGraphToTaskGraph<ROWTYPE, COLTYPE> _graphProjector; // Reusable graph projection instance
+    graph::TransitiveReduction<ROWTYPE, COLTYPE> _transitiveReducer; // Reusable transitive reduction instance
 
 private:
     std::vector<std::vector<COLTYPE>> _taskScratch; // temporary workspace (zero-based neighbors per task)

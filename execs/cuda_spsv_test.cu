@@ -162,7 +162,7 @@ public:
         std::vector<int> ipermL( h_L.rows );
         std::vector<int> prefixL( h_L.rows + 1 );
 
-        matrix_utils::TopologicalSort2<int, int> kahnL;
+        graph::TopologicalSort2<int, int> kahnL;
         auto levelL = kahnL( matrix_utils::TriangularMatrix::L, h_L.rows,
                              h_L.AI(), h_L.AJ(), ipermL.data(), prefixL.data() );
         int maxL = 0;
@@ -172,7 +172,7 @@ public:
 
         std::vector<int> ipermU( h_U.rows );
         std::vector<int> prefixU( h_U.rows + 1 );
-        matrix_utils::TopologicalSort2<int, int> kahnU;
+        graph::TopologicalSort2<int, int> kahnU;
         auto levelU = kahnU( matrix_utils::TriangularMatrix::U, h_U.rows,
                              h_U.AI(), h_U.AJ(), ipermU.data(), prefixU.data() );
         int maxU = 0;

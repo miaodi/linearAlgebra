@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(sparse_mat_op CXX)
 
-set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp permutation.cpp io.cpp graph_algs.cpp sp_ops.cpp spgemm.cpp spadd.cpp ilum.cpp ruiz_scale.cpp scaling.cpp)
+set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp permutation.cpp io.cpp sp_ops.cpp spgemm.cpp spadd.cpp ilum.cpp ruiz_scale.cpp scaling.cpp)
 
 # Add CUDA sources if CUDA is enabled
 if(USE_CUDA)
@@ -11,7 +11,7 @@ if(USE_CUDA)
 endif()
 
 
-set(DEPENDENCIES utils OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_market::fast_matrix_market ${CUDA_DEPENDENCIES})
+set(DEPENDENCIES enums utils graph OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_market::fast_matrix_market ${CUDA_DEPENDENCIES})
 
 if(USE_METIS_LIB)
   set(DEPENDENCIES ${DEPENDENCIES} METIS::METIS)

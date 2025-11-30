@@ -15,8 +15,9 @@
 #include <stdexcept>
 #include "matrix_utils.hpp"
 
-namespace matrix_utils
+namespace graph
 {
+using enums::matrix_utils::TriangularMatrix;
 
 template <typename ROWTYPE, typename COLTYPE>
 void ElimTree( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parent )
@@ -594,7 +595,7 @@ COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
     COLTYPE level = 0;
 
     // reverse graph to get out edges
-    ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr,
+    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr,
                         _t_ai.data(), _t_aj.data(), (double*)nullptr );
 
     prefix[0] = base;
@@ -681,7 +682,7 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
     COLTYPE level = 0;
 
     // reverse graph
-    ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr,
+    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr,
                         _t_ai.data(), _t_aj.data(), (double*)nullptr );
 
     prefix[0] = base;
@@ -923,8 +924,8 @@ double jaccardSimilarity( const COLTYPE A_rows,
     std::vector<int8_t> B_av( B_nnz, 1 );
 
     // Use SpADD to compute union: C = 1*A + 1*B
-    SpADD<CSRMatrixVec<ROWTYPE, COLTYPE, int8_t>> spadd( num_threads );
-    CSRMatrixVec<ROWTYPE, COLTYPE, int8_t> C;
+    matrix_utils::SpADD<matrix_utils::CSRMatrixVec<ROWTYPE, COLTYPE, int8_t>> spadd( num_threads );
+    matrix_utils::CSRMatrixVec<ROWTYPE, COLTYPE, int8_t> C;
 
     // Analysis phase
     spadd.analysis( A_rows, A_cols, A_ai, A_aj,
@@ -964,4 +965,4 @@ template double jaccardSimilarity<int64_t, int64_t>( const int64_t, const int64_
                                                       const int64_t, const int64_t,
                                                       const int64_t*, const int64_t*, int );
 
-} // namespace matrix_utils
+} // namespace graph

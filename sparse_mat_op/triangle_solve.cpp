@@ -1164,7 +1164,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::analysis(
   _reorderedMat.av.resize(nnz);
   _reorderedMat.ai[0] = base;
   _reorderedMat.rows = rows;
-  matrix_utils::TopologicalSort2<int, int, TS> topSort;
+  graph::TopologicalSort2<int, int, TS> topSort;
   _iperm.resize(rows);
   _levelPrefix.resize(rows + 1);
   _levels = topSort( rows, ai, aj, _iperm.data(), _levelPrefix.data() );

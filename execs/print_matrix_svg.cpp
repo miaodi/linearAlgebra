@@ -113,7 +113,7 @@ int main( int argc, char* argv[] )
         std::vector<int> scc_to_node( rows );
         std::vector<int> node_to_scc( rows );
         
-        int num_sccs = matrix_utils::FindStronglyConnectedComponents(
+        int num_sccs = graph::FindStronglyConnectedComponents(
             rows,
             csr_matrix.AI(),
             csr_matrix.AJ(),
@@ -189,7 +189,7 @@ int main( int argc, char* argv[] )
         // Project the original graph to SCC graph using ProjectGraphToTaskGraph
         std::cout << "\nProjecting graph to SCC graph..." << std::endl;
 
-        matrix_utils::ProjectGraphToTaskGraph<int, int, true> projector( 8 ); // Single-threaded for now
+        graph::ProjectGraphToTaskGraph<int, int, true> projector( 8 ); // Single-threaded for now
 
         // Allocate arrays for the projected SCC graph
         std::vector<int> scc_ai( num_sccs + 1 );
@@ -257,7 +257,7 @@ int main( int argc, char* argv[] )
 
         if ( is_lower_triangular )
         {
-            matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topo;
+            graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topo;
             scc_levels = topo( num_sccs, scc_ai.data(), scc_aj.data(),
                                scc_perm.data(), scc_level_prefix.data(), true );
 
@@ -268,7 +268,7 @@ int main( int argc, char* argv[] )
         else
         {
             std::cout << "SCC graph not lower triangular; falling back to Kahn topological order." << std::endl;
-            matrix_utils::KahnParallel<int, int> kahn_parallel( omp_get_max_threads() );
+            graph::KahnParallel<int, int> kahn_parallel( omp_get_max_threads() );
             scc_levels = kahn_parallel( num_sccs, scc_ai.data(), scc_aj.data(),
                                         scc_perm.data(), scc_level_prefix.data(), true );
         }
@@ -288,7 +288,7 @@ int main( int argc, char* argv[] )
 
         std::vector<int> node_perm( rows );
         std::vector<int> node_iperm( rows );
-        matrix_utils::BuildPermutationFromSccLevels(
+        graph::BuildPermutationFromSccLevels(
             num_sccs,
             scc_prefix.data(),
             scc_to_node.data(),

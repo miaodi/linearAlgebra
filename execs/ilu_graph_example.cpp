@@ -120,7 +120,7 @@ int main(int argc, char **argv) {
   // 4. Check if L is a DAG (should be true for lower triangular matrix)
   std::cout << "4. Checking if L is a Directed Acyclic Graph (DAG)..." << std::endl;
   
-  bool is_dag = matrix_utils::IsDAG<int, int>(L.rows, L.AI(), L.AJ());
+  bool is_dag = graph::IsDAG<int, int>(L.rows, L.AI(), L.AJ());
   std::cout << "   L is a DAG: " << (is_dag ? "YES" : "NO") << std::endl;
   
   if (!is_dag) {
@@ -151,7 +151,7 @@ int main(int argc, char **argv) {
   // 6. Check if L^T is also a DAG
   std::cout << "6. Checking if L^T is a DAG..." << std::endl;
   
-  bool Lt_is_dag = matrix_utils::IsDAG<int, int>(L.rows, Lt_ai, Lt_aj);
+  bool Lt_is_dag = graph::IsDAG<int, int>(L.rows, Lt_ai, Lt_aj);
   std::cout << "   L^T is a DAG: " << (Lt_is_dag ? "YES" : "NO") << std::endl << std::endl;
 
   // 7. Compute transitive reduction of L^T (if it's a DAG)
@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
     auto tr_aj = std::get<1>(tr_csr).get();
     
     // Compute transitive reduction
-    matrix_utils::TransitiveReduction<int, int> tr_solver;
+    graph::TransitiveReduction<int, int> tr_solver;
     tr_solver(L.rows, Lt_ai, Lt_aj, tr_ai, tr_aj, false); // Assume no self-loops
     
     // Count non-zeros in result

@@ -80,7 +80,7 @@ void ILUMLevel<CSRMatrixType>::reordering(const COLTYPE size, ROWTYPE const* ai,
     aplusatOp(size, ai, aj, _APlusAT.AI(), _APlusAT.AJ());
 
     // Perform MIS-based permutation on symmetric structure
-    _split_row = matrix_utils::MISPerm(size, _APlusAT.AI(), _APlusAT.AJ(), _perm.data(), _iperm.data());
+    _split_row = graph::MISPerm(size, _APlusAT.AI(), _APlusAT.AJ(), _perm.data(), _iperm.data());
 
     // Set dimensions and resize arrays for permuted matrix
     const ROWTYPE nnz = ai[size] - base;

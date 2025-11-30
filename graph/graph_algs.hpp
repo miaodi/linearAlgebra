@@ -6,8 +6,9 @@
 #include <vector>
 #include <memory>
 
-namespace matrix_utils
+namespace graph
 {
+using enums::matrix_utils::TriangularMatrix;
 
 /// @brief Compute the elimination tree of a sparse matrix
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
@@ -298,4 +299,4 @@ double jaccardSimilarity( const COLTYPE A_rows,
                           const COLTYPE* B_aj,
                           int num_threads = omp_get_max_threads() );
 
-} // namespace matrix_utils
+} // namespace graph
