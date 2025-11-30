@@ -23,7 +23,14 @@ constexpr CircularBuffer<T>::CircularBuffer(const size_t S)
 {
 }
 
-template <typename T> bool CircularBuffer<T>::push_front(const T &value) {
+template <typename T> void CircularBuffer<T>::push_front(const T &value) {
+  if (!available()) {
+    resize(_buffer.size() == 0 ? 1 : (_buffer.size() * 2));
+  }
+  push_front_overwrite(value);
+}
+
+template <typename T> bool CircularBuffer<T>::push_front_overwrite(const T &value) {
   if (_head == _buffer.begin()) {
     _head = _buffer.end();
   }
@@ -42,7 +49,14 @@ template <typename T> bool CircularBuffer<T>::push_front(const T &value) {
   }
 }
 
-template <typename T> bool CircularBuffer<T>::push_front(T &&value) {
+template <typename T> void CircularBuffer<T>::push_front(T &&value) {
+  if (!available()) {
+    resize(_buffer.size() == 0 ? 1 : (_buffer.size() * 2));
+  }
+  push_front_overwrite(std::move(value));
+}
+
+template <typename T> bool CircularBuffer<T>::push_front_overwrite(T &&value) {
   if (_head == _buffer.begin()) {
     _head = _buffer.end();
   }
@@ -61,7 +75,14 @@ template <typename T> bool CircularBuffer<T>::push_front(T &&value) {
   }
 }
 
-template <typename T> bool CircularBuffer<T>::push_back(const T &value) {
+template <typename T> void CircularBuffer<T>::push_back(const T &value) {
+  if (!available()) {
+    resize(_buffer.size() == 0 ? 1 : (_buffer.size() * 2));
+  }
+  push_back_overwrite(value);
+}
+
+template <typename T> bool CircularBuffer<T>::push_back_overwrite(const T &value) {
   if (++_tail == _buffer.end()) {
     _tail = _buffer.begin();
   }
@@ -79,7 +100,14 @@ template <typename T> bool CircularBuffer<T>::push_back(const T &value) {
   }
 }
 
-template <typename T> bool CircularBuffer<T>::push_back(T &&value) {
+template <typename T> void CircularBuffer<T>::push_back(T &&value) {
+  if (!available()) {
+    resize(_buffer.size() == 0 ? 1 : (_buffer.size() * 2));
+  }
+  push_back_overwrite(std::move(value));
+}
+
+template <typename T> bool CircularBuffer<T>::push_back_overwrite(T &&value) {
   if (++_tail == _buffer.end()) {
     _tail = _buffer.begin();
   }
@@ -95,20 +123,6 @@ template <typename T> bool CircularBuffer<T>::push_back(T &&value) {
     }
     return true;
   }
-}
-
-template <typename T> void CircularBuffer<T>::autoResizePush(const T &value) {
-  if (!available()) {
-    resizePreserve(_buffer.size() == 0 ? 1 : (_buffer.size() * 2));
-  }
-  push_back(value);
-}
-
-template <typename T> void CircularBuffer<T>::nonOverwritePush(const T &value) {
-  if (!available()) {
-    resizePreserve(_buffer.size() == 0 ? 1 : (_buffer.size() * 2));
-  }
-  push_back(value);
 }
 
 template <typename T> const T &CircularBuffer<T>::pop_front() {
@@ -210,7 +224,7 @@ bool CircularBuffer<T>::copyToVector(std::vector<T> &dest) const {
 // }
 
 template <typename T>
-bool CircularBuffer<T>::resizePreserve(const size_t size) {
+bool CircularBuffer<T>::resize(const size_t size) {
   if (size < _count || size == 0)
     return false;
   std::vector<T> tmp(size);
@@ -221,11 +235,30 @@ bool CircularBuffer<T>::resizePreserve(const size_t size) {
   return true;
 }
 
-template <typename T> bool CircularBuffer<T>::resize(const size_t size) {
-  _buffer.resize(size);
+template <typename T>
+void CircularBuffer<T>::reserve(const size_t capacity) {
+  if (capacity <= _buffer.size())
+    return;
+  // Linearize the buffer if it's wrapped
+  if (_head > _tail && _count > 0) {
+    std::vector<T> tmp(capacity);
+    copyToVector(tmp);
+    std::swap(_buffer, tmp);
+  } else {
+    _buffer.resize(capacity);
+  }
   _head = _buffer.begin();
-  _tail = _buffer.begin();
-  _count = 0;
-  return true;
+  _tail = _count > 0 ? _buffer.begin() + _count - 1 : _buffer.begin();
+}
+
+template <typename T>
+void CircularBuffer<T>::shrink_to_fit() {
+  if (_count == _buffer.size())
+    return;
+  std::vector<T> tmp(_count);
+  copyToVector(tmp);
+  std::swap(_buffer, tmp);
+  _head = _buffer.begin();
+  _tail = _count > 0 ? _buffer.begin() + _count - 1 : _buffer.begin();
 }
 } // namespace utils

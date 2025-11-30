@@ -58,27 +58,34 @@ public:
   CircularBuffer &operator=(CircularBuffer &&) = delete;
 
   /**
+   * @brief Adds an element to the beginning of buffer with auto-resize.
+   * Buffer will be resized automatically if necessary.
+   */
+  void push_front(const T &value);
+  void push_front(T &&value);
+
+  /**
    * @brief Adds an element to the beginning of buffer.
    *
    * @return `false` iff the addition caused overwriting to an existing element.
    */
-  bool push_front(const T &value);
-  bool push_front(T &&value);
+  bool push_front_overwrite(const T &value);
+  bool push_front_overwrite(T &&value);
+
+  /**
+   * @brief Adds an element to the end of buffer with auto-resize.
+   * Buffer will be resized automatically if necessary.
+   */
+  void push_back(const T &value);
+  void push_back(T &&value);
 
   /**
    * @brief Adds an element to the end of buffer.
    *
-   * @return `false` iff the addition caused overwriting to an existing
- element.
+   * @return `false` iff the addition caused overwriting to an existing element.
    */
-  bool push_back(const T &value);
-  bool push_back(T &&value);  /**
-   * @brief Adds an element to the end of buffer.
-   * buffer will be resized automatically if necessary.
-   */
-  void autoResizePush(const T &value);
-
-  void nonOverwritePush(const T &value);
+  bool push_back_overwrite(const T &value);
+  bool push_back_overwrite(T &&value);
 
   /**
    * @brief Removes an element from the beginning of the buffer.
@@ -192,9 +199,29 @@ public:
   // template <typename R>
   // void copyToArray( R* dest, R ( &convertFn )( const T& ) ) const;
 
-  bool resizePreserve(const size_t size);
-
+  /**
+   * @brief Resizes the buffer while preserving existing elements.
+   * Similar to std::vector::resize().
+   *
+   * @param size The new size for the buffer.
+   * @return false if size < current element count or size == 0.
+   */
   bool resize(const size_t size);
+
+  /**
+   * @brief Increases the capacity of the buffer without affecting content.
+   * Similar to std::vector::reserve(). If new_cap is greater than current
+   * capacity, new storage is allocated. Otherwise does nothing.
+   *
+   * @param capacity The new capacity for the buffer.
+   */
+  void reserve(const size_t capacity);
+
+  /**
+   * @brief Reduces the buffer capacity to match the number of elements.
+   * Similar to std::vector::shrink_to_fit().
+   */
+  void shrink_to_fit();
 
 private:
   std::vector<T> _buffer;
