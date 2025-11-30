@@ -19,9 +19,11 @@
 namespace utils {
 template <typename T>
 constexpr CircularBuffer<T>::CircularBuffer(const size_t S)
-    : _buffer(S), _head(_buffer.begin()), _tail(_buffer.begin()), _count(0) {}
+    : _buffer(S), _head(_buffer.begin()), _tail(_buffer.begin()), _count(0)
+{
+}
 
-template <typename T> bool CircularBuffer<T>::unshift(const T &value) {
+template <typename T> bool CircularBuffer<T>::push_front(const T &value) {
   if (_head == _buffer.begin()) {
     _head = _buffer.end();
   }
@@ -40,7 +42,26 @@ template <typename T> bool CircularBuffer<T>::unshift(const T &value) {
   }
 }
 
-template <typename T> bool CircularBuffer<T>::push(const T &value) {
+template <typename T> bool CircularBuffer<T>::push_front(T &&value) {
+  if (_head == _buffer.begin()) {
+    _head = _buffer.end();
+  }
+  *--_head = std::move(value);
+  if (_count == _buffer.size()) {
+    if (_tail == _buffer.begin()) {
+      _tail = _buffer.end();
+    }
+    _tail--;
+    return false;
+  } else {
+    if (_count++ == 0) {
+      _tail = _head;
+    }
+    return true;
+  }
+}
+
+template <typename T> bool CircularBuffer<T>::push_back(const T &value) {
   if (++_tail == _buffer.end()) {
     _tail = _buffer.begin();
   }
@@ -58,21 +79,39 @@ template <typename T> bool CircularBuffer<T>::push(const T &value) {
   }
 }
 
+template <typename T> bool CircularBuffer<T>::push_back(T &&value) {
+  if (++_tail == _buffer.end()) {
+    _tail = _buffer.begin();
+  }
+  *_tail = std::move(value);
+  if (_count == _buffer.size()) {
+    if (++_head == _buffer.end()) {
+      _head = _buffer.begin();
+    }
+    return false;
+  } else {
+    if (_count++ == 0) {
+      _head = _tail;
+    }
+    return true;
+  }
+}
+
 template <typename T> void CircularBuffer<T>::autoResizePush(const T &value) {
   if (!available()) {
     resizePreserve(_buffer.size() == 0 ? 1 : (_buffer.size() * 2));
   }
-  push(value);
+  push_back(value);
 }
 
 template <typename T> void CircularBuffer<T>::nonOverwritePush(const T &value) {
   if (!available()) {
-    resizePreserve(_buffer.size() * 2);
+    resizePreserve(_buffer.size() == 0 ? 1 : (_buffer.size() * 2));
   }
-  push(value);
+  push_back(value);
 }
 
-template <typename T> const T &CircularBuffer<T>::shift() {
+template <typename T> const T &CircularBuffer<T>::pop_front() {
   if (_count == 0)
     return *_head;
   const T &result = *_head++;
@@ -83,11 +122,11 @@ template <typename T> const T &CircularBuffer<T>::shift() {
   return result;
 }
 
-template <typename T> const T &CircularBuffer<T>::pop() {
+template <typename T> const T &CircularBuffer<T>::pop_back() {
   if (_count == 0)
     return *_tail;
   const T &result = *_tail;
-  if (_tail == _buffer) {
+  if (_tail == _buffer.begin()) {
     _tail = _buffer.end();
   }
   _tail--;
@@ -107,8 +146,10 @@ template <typename T>
 const T &CircularBuffer<T>::operator[](size_t index) const {
   if (index >= _count)
     return *_tail;
-  return *(_buffer.begin() +
-           ((_head - _buffer.begin() + index) % _buffer.size()));
+  auto pos = _head - _buffer.begin() + index;
+  if (pos >= static_cast<typename std::vector<T>::difference_type>(_buffer.size()))
+    pos -= _buffer.size();
+  return *(_buffer.begin() + pos);
 }
 
 template <typename T> T &CircularBuffer<T>::operator[](size_t index) {
@@ -141,15 +182,13 @@ bool CircularBuffer<T>::copyToVector(std::vector<T> &dest) const {
     return false;
 
   if (_head <= _tail) {
-    std::copy(_head, _head + _count, dest.begin());
+    auto head_idx = _head - _buffer.begin();
+    std::copy(_buffer.begin() + head_idx, _buffer.begin() + head_idx + _count, dest.begin());
   } else {
-    auto it = std::copy(
-        static_cast<typename std::vector<T>::const_iterator>(_head),
-        static_cast<typename std::vector<T>::const_iterator>(_buffer.end()),
-        dest.begin());
-    std::copy(
-        static_cast<typename std::vector<T>::const_iterator>(_buffer.begin()),
-        static_cast<typename std::vector<T>::const_iterator>(_tail + 1), it);
+    auto head_idx = _head - _buffer.begin();
+    auto tail_idx = _tail - _buffer.begin();
+    auto it = std::copy(_buffer.begin() + head_idx, _buffer.end(), dest.begin());
+    std::copy(_buffer.begin(), _buffer.begin() + tail_idx + 1, it);
   }
   return true;
 }
@@ -172,13 +211,13 @@ bool CircularBuffer<T>::copyToVector(std::vector<T> &dest) const {
 
 template <typename T>
 bool CircularBuffer<T>::resizePreserve(const size_t size) {
-  if (size < _buffer.size() || size == 0)
+  if (size < _count || size == 0)
     return false;
   std::vector<T> tmp(size);
   copyToVector(tmp);
   std::swap(_buffer, tmp);
   _head = _buffer.begin();
-  _tail = _buffer.begin() + _count - 1;
+  _tail = _count > 0 ? _buffer.begin() + _count - 1 : _buffer.begin();
   return true;
 }
 

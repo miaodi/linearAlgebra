@@ -62,17 +62,17 @@ public:
    *
    * @return `false` iff the addition caused overwriting to an existing element.
    */
-  bool unshift(const T &value);
+  bool push_front(const T &value);
+  bool push_front(T &&value);
 
   /**
    * @brief Adds an element to the end of buffer.
    *
    * @return `false` iff the addition caused overwriting to an existing
-   element.
+ element.
    */
-  bool push(const T &value);
-
-  /**
+  bool push_back(const T &value);
+  bool push_back(T &&value);  /**
    * @brief Adds an element to the end of buffer.
    * buffer will be resized automatically if necessary.
    */
@@ -86,7 +86,7 @@ public:
    * @warning Calling this operation on an empty buffer has an unpredictable
    behaviour.
    */
-  const T &shift();
+  const T &pop_front();
 
   /**
    * @brief Removes an element from the end of the buffer.
@@ -94,7 +94,7 @@ public:
    * @warning Calling this operation on an empty buffer has an unpredictable
    behaviour.
    */
-  const T &pop();
+  const T &pop_back();
 
   /**
    * @brief Returns the element at the beginning of the buffer.

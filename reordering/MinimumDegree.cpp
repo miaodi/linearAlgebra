@@ -47,7 +47,7 @@ void QuotientGraph<COLTYPE, MD>::initialize(const COLTYPE nnodes,
 
     auto it = _degree_to_principle.try_emplace(_nodes[i].degree,
                                                std::move(_cb_pool.acquire()));
-    it.first->second->nonOverwritePush(i);
+    it.first->second->push_back(i);
     // _degree_to_principle[_nodes[i].degree].insert(i);
   }
 }
@@ -70,7 +70,7 @@ void QuotientGraph<COLTYPE, MD>::operator()(const COLTYPE nnodes,
     found = false;
     while (!it->second->isEmpty()) {
       idx = it->second->first();
-      it->second->shift();
+      it->second->pop_front();
       if (_union_find.Find(idx) == idx && _nodes[idx].degree == it->first) {
         found = true;
         break; // found a valid principle
@@ -221,7 +221,7 @@ auto QuotientGraph<COLTYPE, MD>::massElimination(const COLTYPE p) {
     _nodes[i].degree = getDegree(i);
     auto it = _degree_to_principle.try_emplace(_nodes[i].degree,
                                                std::move(_cb_pool.acquire()));
-    it.first->second->nonOverwritePush(i); // update node i's degree
+    it.first->second->push_back(i); // update node i's degree
   }
   return std::move(Lp);
 }
@@ -259,7 +259,7 @@ void QuotientGraph<COLTYPE, MD>::supervariableMerge(
         // std::cout << "Node: " << node << " update degree " << _nodes[node].degree << " original degree " << degree << std::endl;
         auto it2 = _degree_to_principle.try_emplace(
             _nodes[node].degree, std::move(_cb_pool.acquire()));
-        it2.first->second->nonOverwritePush(node);
+        it2.first->second->push_back(node);
       }
     }
   }

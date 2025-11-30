@@ -21,14 +21,14 @@ bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
 
   utils::CircularBuffer<MKL_INT> cb(
       std::max(1, static_cast<MKL_INT>(mat->rows() * .2)));
-  cb.push(source - base);
+  cb.push_back(source - base);
   levels[source - base] = 0;
   if constexpr (LASTLEVEL)
     lastLevel.push_back(source);
   int widthCounter = 1;
   while (!cb.isEmpty()) {
     auto u = cb.first();
-    cb.shift();
+    cb.pop_front();
     for (MKL_INT i = ai[u] - base; i < ai[u + 1] - base; i++) {
       auto v = aj[i] - base;
       if (levels[v] == -1) {
@@ -45,7 +45,7 @@ bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
           lastLevel.push_back(v + base);
         if (!cb.available())
           cb.resizePreserve(cb.size() * 2);
-        cb.push(v);
+        cb.push_back(v);
         if (++widthCounter >= shortCutWidth)
           return false;
         ;
