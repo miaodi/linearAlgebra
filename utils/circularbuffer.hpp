@@ -31,9 +31,6 @@ namespace utils {
  * @brief Implements a circular buffer that supports LIFO and FIFO operations.
  *
  * @tparam T The type of the data to store in the buffer.
- * @tparam S The maximum number of elements that can be stored in the buffer.
- * @tparam size_t The data type of the index. Typically should be left as
- * default.
  */
 template <typename T> class CircularBuffer {
 public:
@@ -241,19 +238,13 @@ private:
    */
   void copy_to_array(T *dest) const;
 
-  static constexpr std::size_t kAlignment = 64;
-  struct AlignedDeleter {
-    void operator()(T *ptr) const noexcept {
-      ::operator delete[](ptr, std::align_val_t{kAlignment});
-    }
-  };
-
-  using buffer_ptr = std::unique_ptr<T[], AlignedDeleter>;
+  // Plain allocation without alignment for better performance
+  using buffer_ptr = std::unique_ptr<T[]>;
 
   static buffer_ptr make_buffer(std::size_t capacity) {
     if (capacity == 0)
       return buffer_ptr{nullptr};
-    return buffer_ptr{new (std::align_val_t{kAlignment}) T[capacity]};
+    return buffer_ptr{new T[capacity]};
   }
 
   buffer_ptr _buffer;
