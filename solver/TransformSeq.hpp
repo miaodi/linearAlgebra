@@ -63,12 +63,13 @@ public:
 
     /**
      * Apply all transformations to X: x_out = T_1 * T_2 * ... * T_n * x_in
+     * used to convert solution of transformed system back to original system
      */
     void applyToX(VecType& in, VecType& out, int nthreads = 1) const override
     {
-        for (const auto& transform : _transforms)
+        for (auto it = _transforms.rbegin(); it != _transforms.rend(); ++it)
         {
-            transform->applyToX(in, out, nthreads);
+            (*it)->applyToX(in, out, nthreads);
             std::swap(in, out);
         }
         std::swap(in, out);
@@ -76,13 +77,14 @@ public:
 
     /**
      * Apply inverse transformations to X: x_out = T_n^{-1} * ... * T_2^{-1} * T_1^{-1} * x_in
+     * used to convert initial guess to the transformed system back to the original system
      */
     void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override
     {
         // Apply in reverse order
-        for (auto it = _transforms.rbegin(); it != _transforms.rend(); ++it)
+        for (const auto& transform : _transforms)
         {
-            (*it)->applyInverseToX(in, out, nthreads);
+            transform->applyInverseToX(in, out, nthreads);
             std::swap(in, out);
         }
         std::swap(in, out);
