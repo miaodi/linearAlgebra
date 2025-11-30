@@ -456,7 +456,7 @@ void SymbolicCholeskyCol<CSRMatrixType>::Task(const COLTYPE nnodes,
     {
       std::unique_lock<std::mutex> lock(_mutex);
       _cv.wait(lock, [this, nnodes] {
-        return !_queue.isEmpty() || _finished == nnodes;
+        return !_queue.empty() || _finished == nnodes;
       });
       if (_finished == nnodes) {
         break;

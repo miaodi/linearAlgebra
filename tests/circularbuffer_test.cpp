@@ -88,10 +88,10 @@ TEST(circular_buffer, copy) {
   cb.push_back_overwrite(7);
   cb.push_back_overwrite(8);
   std::vector<int> cp(5);
-  cb.copyToVector(cp);
+  cb.dump_to_vector(cp);
   ASSERT_THAT(cp, testing::ElementsAre(4, 5, 6, 7, 8));
   cb.push_front_overwrite(2);
-  cb.copyToVector(cp);
+  cb.dump_to_vector(cp);
   ASSERT_THAT(cp, testing::ElementsAre(2, 4, 5, 6, 7));
 }
 
@@ -105,11 +105,11 @@ TEST(circular_buffer, resize) {
   cb.push_back_overwrite(8);
   cb.resize(6);
   std::vector<int> cp(6, -1);
-  cb.copyToVector(cp);
+  cb.dump_to_vector(cp);
   // std::copy(cp.begin(), cp.end(), std::ostream_iterator<int>(std::cout, "
   // "));
   ASSERT_THAT(cp, testing::ElementsAre(4, 5, 6, 7, 8, -1));
   // cb.unshift(2);
-  // cb.copyToVector(cp);
+  // cb.dump_to_vector(cp);
   // ASSERT_THAT(cp, testing::ElementsAre(2, 4, 5, 6, 7));
 }
