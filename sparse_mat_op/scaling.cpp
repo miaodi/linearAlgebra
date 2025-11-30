@@ -6,12 +6,22 @@
 namespace matrix_utils
 {
 template <typename COLTYPE, typename VALTYPE>
-void ScaleVector(const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads)
+void ScaleVec(const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads)
 {
     #pragma omp parallel for num_threads(nthreads) schedule(static)
     for (COLTYPE i = 0; i < size; ++i)
     {
         x[i] *= s[i];
+    }
+}
+
+template <typename COLTYPE, typename VALTYPE>
+void InvScaleVec(const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads)
+{
+    #pragma omp parallel for num_threads(nthreads) schedule(static)
+    for (COLTYPE i = 0; i < size; ++i)
+    {
+        x[i] /= s[i];
     }
 }
 
@@ -95,8 +105,11 @@ bool ScaleMat(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE*
 }
 
 // Explicit template instantiations for common types
-template void ScaleVector<int, double>(const int, double*, double const*, int);
-template void ScaleVector<int, float>(const int, float*, float const*, int);
+template void ScaleVec<int, double>(const int, double*, double const*, int);
+template void ScaleVec<int, float>(const int, float*, float const*, int);
+
+template void InvScaleVec<int, double>(const int, double*, double const*, int);
+template void InvScaleVec<int, float>(const int, float*, float const*, int);
 
 template bool ScaleMat<int, int, double>(const int, int const*, int const*, double*,
                                          double const*, double const*, int);
