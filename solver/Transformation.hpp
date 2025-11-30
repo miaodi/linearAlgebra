@@ -22,11 +22,11 @@ concept VectorForMatrix = SwappableResizableCSR<MatType> &&
 // Concept for transformation types
 template <typename T, typename MatType, typename VecType>
 concept Transformation = VectorForMatrix<VecType, MatType> &&
-    requires(T t, VecType& vec, MatType& mat) {
-    { t.applyToOperator(mat, mat) } -> std::same_as<void>;
-    { t.applyToRHS(vec, vec) } -> std::same_as<void>;
-    { t.applyToX(vec, vec) } -> std::same_as<void>;
-    { t.applyInverseToX(vec, vec) } -> std::same_as<void>;
+    requires(T t, VecType& vec, MatType& mat, int nthreads) {
+    { t.applyToOperator(mat, mat, nthreads) } -> std::same_as<void>;
+    { t.applyToRHS(vec, vec, nthreads) } -> std::same_as<void>;
+    { t.applyToX(vec, vec, nthreads) } -> std::same_as<void>;
+    { t.applyInverseToX(vec, vec, nthreads) } -> std::same_as<void>;
 };
 
 // Base interface for transformations
@@ -41,25 +41,16 @@ public:
     virtual ~TransformationBase() = default;
     
     // Apply transformation to operator (matrix): out = Tr * A * Tc^{-1} (for row/col transforms)
-    virtual void applyToOperator(MatType& in, MatType& out) const = 0;
+    virtual void applyToOperator(MatType& in, MatType& out, int nthreads = 1) const = 0;
 
     // Apply transformation to RHS: out = T * in
-    virtual void applyToRHS(VecType& in, VecType& out) const = 0;
+    virtual void applyToRHS(VecType& in, VecType& out, int nthreads = 1) const = 0;
     
     // Apply transformation to solution: out = T * in
-    virtual void applyToX(VecType& in, VecType& out) const = 0;
+    virtual void applyToX(VecType& in, VecType& out, int nthreads = 1) const = 0;
     
     // Apply inverse transformation to solution: out = T^{-1} * in
-    virtual void applyInverseToX(VecType& in, VecType& out) const = 0;
-    
-    // Set number of threads for parallel operations
-    void setNumThreads(int nthreads) { _nthreads = nthreads; }
-    
-    // Get number of threads
-    [[nodiscard]] int numThreads() const { return _nthreads; }
-
-protected:
-    int _nthreads = 1;
+    virtual void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const = 0;
 };
 
 // ============================================================================
@@ -81,24 +72,24 @@ public:
     explicit RowPermutation(std::span<const COLTYPE> perm, int base = 0)
         : RowPermutation(perm.data(), perm.size(), base) {}
     
-    void applyToOperator(MatType& in, MatType& out) const {
+    void applyToOperator(MatType& in, MatType& out, int nthreads = 1) const override {
         // For row permutation: out = P * A (permute rows of matrix)
         // This is matrix-specific and should be handled by LinearSolverSystem
         matrix_utils::permuteMat(in.rows, in.cols, _perm.data(), static_cast<const COLTYPE*>(nullptr),
-                                 in.AI(), in.AJ(), in.AV(), out.AI(), out.AJ(), out.AV());
+                                 in.AI(), in.AJ(), in.AV(), out.AI(), out.AJ(), out.AV(), nthreads);
     }
     
-    void applyToRHS(VecType& in, VecType& out) const override {
+    void applyToRHS(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = P * in
-        matrix_utils::permVec(_perm.size(), _base, in.data(), _perm.data(), out.data());
+        matrix_utils::permVec(_perm.size(), _base, in.data(), _perm.data(), out.data(), nthreads);
     }
     
-    void applyToX(VecType& in, VecType& out) const override {
+    void applyToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // For row permutation applied to x: x is not affected
         std::swap(in, out);
     }
     
-    void applyInverseToX(VecType& in, VecType& out) const override {
+    void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // For row permutation: x is not affected by inverse either
         std::swap(in, out);
     }
@@ -123,28 +114,28 @@ public:
     explicit ColumnPermutation(std::span<const COLTYPE> perm, int base = 0)
         : ColumnPermutation(perm.data(), perm.size(), base) {}
     
-    void applyToOperator(MatType& in, MatType& out) const {
+    void applyToOperator(MatType& in, MatType& out, int nthreads = 1) const override {
         // For column permutation: out = A * Q (permute columns of matrix)
         // This is matrix-specific and should be handled by LinearSolverSystem
         matrix_utils::permuteMat(in.rows, in.cols, static_cast<const COLTYPE*>(nullptr), _perm.data(),
-                                 in.AI(), in.AJ(), in.AV(), out.AI(), out.AJ(), out.AV());
+                                 in.AI(), in.AJ(), in.AV(), out.AI(), out.AJ(), out.AV(), nthreads);
     }
     
-    void applyToRHS(VecType& in, VecType& out) const override {
+    void applyToRHS(VecType& in, VecType& out, int nthreads = 1) const override {
         // Column permutation doesn't affect RHS
         std::swap(in, out);
     }
 
-    void applyToX(VecType& in, VecType& out) const override
+    void applyToX(VecType& in, VecType& out, int nthreads = 1) const override
     {
         // out = Q * in (apply column permutation to solution)k
-        matrix_utils::invPermVec(_perm.size(), _base, in.data(), _perm.data(), out.data());
+        matrix_utils::invPermVec(_perm.size(), _base, in.data(), _perm.data(), out.data(), nthreads);
     }
 
-    void applyInverseToX(VecType& in, VecType& out) const override
+    void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override
     {
         // out = Q^{-1} * in
-        matrix_utils::permVec(_perm.size(), _base, in.data(), _perm.data(), out.data());
+        matrix_utils::permVec(_perm.size(), _base, in.data(), _perm.data(), out.data(), nthreads);
     }
 
 private:
@@ -167,25 +158,25 @@ public:
     explicit RowColPermutation(std::span<const COLTYPE> row_perm, std::span<const COLTYPE> col_perm, int base = 0)
         : RowColPermutation(row_perm.data(), col_perm.data(), row_perm.size(), base) {}
     
-    void applyToOperator(MatType& in, MatType& out) const {
+    void applyToOperator(MatType& in, MatType& out, int nthreads = 1) const override {
         // For row and column permutation: out = P_r * A * Q_c^T
         matrix_utils::permuteMat(in.rows, in.cols, _row_perm.data(), _col_perm.data(),
-                                 in.AI(), in.AJ(), in.AV(), out.AI(), out.AJ(), out.AV());
+                                 in.AI(), in.AJ(), in.AV(), out.AI(), out.AJ(), out.AV(), nthreads);
     }
     
-    void applyToRHS(VecType& in, VecType& out) const override {
+    void applyToRHS(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = P_r * in (apply row permutation to RHS)
-        matrix_utils::permVec(_row_perm.size(), _base, in.data(), _row_perm.data(), out.data());
+        matrix_utils::permVec(_row_perm.size(), _base, in.data(), _row_perm.data(), out.data(), nthreads);
     }
     
-    void applyToX(VecType& in, VecType& out) const override {
+    void applyToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = Q_c * in (apply column permutation to solution)
-        matrix_utils::invPermVec(_col_perm.size(), _base, in.data(), _col_perm.data(), out.data());
+        matrix_utils::invPermVec(_col_perm.size(), _base, in.data(), _col_perm.data(), out.data(), nthreads);
     }
     
-    void applyInverseToX(VecType& in, VecType& out) const override {
+    void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = Q_c^{-1} * in (apply inverse column permutation)
-        matrix_utils::permVec(_col_perm.size(), _base, in.data(), _col_perm.data(), out.data());
+        matrix_utils::permVec(_col_perm.size(), _base, in.data(), _col_perm.data(), out.data(), nthreads);
     }
     
 private:
@@ -213,27 +204,27 @@ public:
     explicit RowScaling(std::span<const VALTYPE> scales, int base = 0)
         : RowScaling(scales.data(), scales.size(), base) {}
 
-    void applyToOperator(MatType& in, MatType& out) const
+    void applyToOperator(MatType& in, MatType& out, int nthreads = 1) const override
     {
         // For row scaling: out = S_r * A (scale rows of matrix)
         // This is matrix-specific and should be handled by LinearSolverSystem
         std::swap(in, out);
         matrix_utils::ScaleMat(out.rows, out.AI(), out.AJ(), out.AV(), _scales.data(),
-                               static_cast<VALTYPE*>(nullptr), this->_nthreads);
+                               static_cast<VALTYPE*>(nullptr), nthreads);
     }
 
-    void applyToRHS(VecType& in, VecType& out) const override {
+    void applyToRHS(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = S_r * in (scale RHS by row scales)
         std::swap(in, out);
-        matrix_utils::ScaleVec(_scales.size(), out.data(), _scales.data(), this->_nthreads);
+        matrix_utils::ScaleVec(_scales.size(), out.data(), _scales.data(), nthreads);
     }
     
-    void applyToX(VecType& in, VecType& out) const override {
+    void applyToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // Row scaling doesn't affect solution x
         std::swap(in, out);
     }
     
-    void applyInverseToX(VecType& in, VecType& out) const override {
+    void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // Row scaling doesn't affect solution x
         std::swap(in, out);
     }
@@ -257,29 +248,29 @@ public:
     explicit ColumnScaling(std::span<const VALTYPE> scales, int base = 0)
         : ColumnScaling(scales.data(), scales.size(), base) {}
     
-    void applyToOperator(MatType& in, MatType& out) const {
+    void applyToOperator(MatType& in, MatType& out, int nthreads = 1) const override {
         // For column scaling: out = A * S_c (scale columns of matrix)
         // This is matrix-specific and should be handled by LinearSolverSystem
         std::swap(in, out);
         matrix_utils::ScaleMat(out.rows, out.AI(), out.AJ(), out.AV(),
-                               static_cast<VALTYPE*>(nullptr), _scales.data(), this->_nthreads);
+                               static_cast<VALTYPE*>(nullptr), _scales.data(), nthreads);
     }
     
-    void applyToRHS(VecType& in, VecType& out) const override {
+    void applyToRHS(VecType& in, VecType& out, int nthreads = 1) const override {
         // Column scaling doesn't affect RHS
         std::swap(in, out);
     }
     
-    void applyToX(VecType& in, VecType& out) const override {
+    void applyToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = S_c * in (scale solution by column scales)
         std::swap(in, out);
-        matrix_utils::ScaleVec(_scales.size(), out.data(), _scales.data(), this->_nthreads);
+        matrix_utils::ScaleVec(_scales.size(), out.data(), _scales.data(), nthreads);
     }
     
-    void applyInverseToX(VecType& in, VecType& out) const override {
+    void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = S_c^{-1} * in
         std::swap(in, out);
-        matrix_utils::InvScaleVec(_scales.size(), out.data(), _scales.data(), this->_nthreads);
+        matrix_utils::InvScaleVec(_scales.size(), out.data(), _scales.data(), nthreads);
     }
     
 private:
@@ -303,29 +294,29 @@ public:
                            int base = 0)
         : RowColScaling(row_scales.data(), col_scales.data(), row_scales.size(), base) {}
     
-    void applyToOperator(MatType& in, MatType& out) const {
+    void applyToOperator(MatType& in, MatType& out, int nthreads = 1) const override {
         // out = S_r * A * S_c (scale both rows and columns)
         std::swap(in, out);
         matrix_utils::ScaleMat(out.rows, out.AI(), out.AJ(), out.AV(),
-                               _row_scales.data(), _col_scales.data(), this->_nthreads);
+                               _row_scales.data(), _col_scales.data(), nthreads);
     }
     
-    void applyToRHS(VecType& in, VecType& out) const override {
+    void applyToRHS(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = S_r * in (scale RHS by row scales)
         std::swap(in, out);
-        matrix_utils::ScaleVec(_row_scales.size(), out.data(), _row_scales.data(), this->_nthreads);
+        matrix_utils::ScaleVec(_row_scales.size(), out.data(), _row_scales.data(), nthreads);
     }
     
-    void applyToX(VecType& in, VecType& out) const override {
+    void applyToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = S_c * in (scale solution by column scales)
         std::swap(in, out);
-        matrix_utils::ScaleVec(_col_scales.size(), out.data(), _col_scales.data(), this->_nthreads);
+        matrix_utils::ScaleVec(_col_scales.size(), out.data(), _col_scales.data(), nthreads);
     }
     
-    void applyInverseToX(VecType& in, VecType& out) const override {
+    void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override {
         // out = S_c^{-1} * in (apply inverse column scaling)
         std::swap(in, out);
-        matrix_utils::InvScaleVec(_col_scales.size(), out.data(), _col_scales.data(), this->_nthreads);
+        matrix_utils::InvScaleVec(_col_scales.size(), out.data(), _col_scales.data(), nthreads);
     }
     
 private:
@@ -348,19 +339,19 @@ public:
     
     explicit IdentityTransformation() = default;
     
-    void applyToOperator(MatType& in, MatType& out) const {
+    void applyToOperator(MatType& in, MatType& out, int nthreads = 1) const override {
         std::swap(in, out);
     }
     
-    void applyToRHS(VecType& in, VecType& out) const override {
+    void applyToRHS(VecType& in, VecType& out, int nthreads = 1) const override {
         std::swap(in, out);
     }
     
-    void applyToX(VecType& in, VecType& out) const override {
+    void applyToX(VecType& in, VecType& out, int nthreads = 1) const override {
         std::swap(in, out);
     }
     
-    void applyInverseToX(VecType& in, VecType& out) const override {
+    void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override {
         std::swap(in, out);
     }
 };

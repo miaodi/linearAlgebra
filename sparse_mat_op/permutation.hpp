@@ -13,13 +13,14 @@ namespace matrix_utils {
  *  @param v Input vector to be permuted
  *  @param perm Permutation vector, where perm[i] = j means P(i, j) = 1
  *  @param v_perm Output vector after permutation
+ *  @param nthreads Number of OpenMP threads (default: 1 for serial execution)
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  *  @tparam VALTYPE Type of the values in the vector (e.g., float, double)
  *  v_perm = P * v
  */
 template <typename COLTYPE, typename VALTYPE>
 void permVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
-             COLTYPE const *const perm, VALTYPE *const v_perm);
+             COLTYPE const *const perm, VALTYPE *const v_perm, int nthreads = 1);
 
 /** @brief Inverse permute a vector based on a permutation vector
  *  @param rows Number of rows in the vector
@@ -27,13 +28,14 @@ void permVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
  *  @param v Input vector to be inverse permuted
  *  @param perm Permutation vector, where perm[i] = j means P(i, j) = 1
  *  @param v_iperm Output vector after inverse permutation
+ *  @param nthreads Number of OpenMP threads (default: 1 for serial execution)
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  *  @tparam VALTYPE Type of the values in the vector (e.g., float, double)
  *  v_iperm = P^T * v
  */
 template <typename COLTYPE, typename VALTYPE>
 void invPermVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
-                COLTYPE const *const perm, VALTYPE *const v_iperm);
+                COLTYPE const *const perm, VALTYPE *const v_iperm, int nthreads = 1);
 
 /** @brief Inverse permutation of a permutation vector iperm = P^{-1} * perm
  *  @param rows Number of rows in the permutation vector
@@ -41,22 +43,24 @@ void invPermVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
  *  @param perm Permutation vector, where perm[i] = j means P(i, j) = 1
  *  @param iperm Output inverse permutation vector, where iperm[j] = i means
  *  perm[i] = j
+ *  @param nthreads Number of OpenMP threads (default: 1 for serial execution)
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
 template <typename COLTYPE>
 void invPerm(const COLTYPE rows, const COLTYPE base, COLTYPE const *const perm,
-             COLTYPE *const iperm);
+             COLTYPE *const iperm, int nthreads = 1);
 
 /** @brief Check if a given vector is a valid permutation
  *  @param rows Number of rows in the permutation vector
  *  @param base Base index of the matrix (0 or 1)
  *  @param perm Permutation vector to be checked
+ *  @param nthreads Number of OpenMP threads (default: 1 for serial execution)
  *  @return true if the vector is a valid permutation, false otherwise
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
 template <typename COLTYPE>
 bool isPermutation(const COLTYPE rows, const COLTYPE base,
-                   COLTYPE const *const perm);
+                   COLTYPE const *const perm, int nthreads = 1);
 
 template <typename COLTYPE>
 bool isPermutationSerial(const COLTYPE rows, const COLTYPE base,
@@ -86,12 +90,13 @@ void randPerm(const COLTYPE rows, const COLTYPE base, COLTYPE *const perm);
  *  @param perm Permutation vector, where perm[i] = j means P(i, j) = 1
  *  @param permed_ai Output row pointer after permutation, where size of
  * permed_ai[i] = size of ai[perm[i]]
+ *  @param nthreads Number of OpenMP threads (default: 1 for serial execution)
  *  @tparam ROWTYPE Type of the row indices (e.g., int, long)
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
 template <typename ROWTYPE, typename COLTYPE>
 void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
-                ROWTYPE *perm_ai);
+                ROWTYPE *perm_ai, int nthreads = 1);
 
 /** @brief Permute the matrix structure only: pA = P * A * Q^T (structure only)
  *  @param rows Number of rows in the matrix
@@ -102,6 +107,7 @@ void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
  *  @param aj Column indices of the input matrix
  *  @param perm_ai Output row pointer after permutation
  *  @param perm_aj Output column indices after permutation
+ *  @param nthreads Number of OpenMP threads (default: 1 for serial execution)
  *  @tparam ROWTYPE Type of the row indices (e.g., int, long)
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
@@ -109,7 +115,7 @@ template <typename ROWTYPE, typename COLTYPE>
 void permuteMat(const COLTYPE rows, const COLTYPE cols,
                 COLTYPE const *const permP, COLTYPE const *const ipermQ,
                 ROWTYPE const *const ai, COLTYPE const *const aj,
-                ROWTYPE *const perm_ai, COLTYPE *const perm_aj);
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, int nthreads = 1);
 
 /** @brief Permute the matrix with values: pA = P * A * Q^T (structure + values)
  *  @param rows Number of rows in the matrix
@@ -122,6 +128,7 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
  *  @param perm_ai Output row pointer after permutation
  *  @param perm_aj Output column indices after permutation
  *  @param perm_av Output values after permutation
+ *  @param nthreads Number of OpenMP threads (default: 1 for serial execution)
  *  @tparam ROWTYPE Type of the row indices (e.g., int, long)
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  *  @tparam VALTYPE Type of the matrix values (e.g., float, double)
@@ -130,6 +137,6 @@ template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void permuteMat(const COLTYPE rows, const COLTYPE cols,
                 COLTYPE const *const permP, COLTYPE const *const ipermQ,
                 ROWTYPE const *const ai, COLTYPE const *const aj, VALTYPE const *const av,
-                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, VALTYPE *const perm_av);
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, VALTYPE *const perm_av, int nthreads = 1);
 
 } // namespace matrix_utils

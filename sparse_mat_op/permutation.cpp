@@ -9,14 +9,14 @@
 namespace matrix_utils {
 template <typename COLTYPE, typename VALTYPE>
 void permVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
-             COLTYPE const *const perm, VALTYPE *const v_perm) {
+             COLTYPE const *const perm, VALTYPE *const v_perm, int nthreads) {
   if (perm) {
-#pragma omp parallel for
+#pragma omp parallel for num_threads(nthreads)
     for (COLTYPE i = 0; i < rows; i++) {
       v_perm[i] = v[perm[i] - base];
     }
   } else {
-#pragma omp parallel for
+#pragma omp parallel for num_threads(nthreads)
     for (COLTYPE i = 0; i < rows; i++) {
       v_perm[i] = v[i];
     }
@@ -25,14 +25,14 @@ void permVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
 
 template <typename COLTYPE, typename VALTYPE>
 void invPermVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
-                COLTYPE const *const perm, VALTYPE *const v_iperm) {
+                COLTYPE const *const perm, VALTYPE *const v_iperm, int nthreads) {
   if (perm) {
-#pragma omp parallel for
+#pragma omp parallel for num_threads(nthreads)
     for (COLTYPE i = 0; i < rows; i++) {
       v_iperm[perm[i] - base] = v[i];
     }
   } else {
-#pragma omp parallel for
+#pragma omp parallel for num_threads(nthreads)
     for (COLTYPE i = 0; i < rows; i++) {
       v_iperm[i] = v[i];
     }
@@ -41,9 +41,9 @@ void invPermVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
 
 template <typename COLTYPE>
 void invPerm(const COLTYPE rows, const COLTYPE base, COLTYPE const *const perm,
-             COLTYPE *const iperm) {
+             COLTYPE *const iperm, int nthreads) {
   assert(perm != nullptr && iperm != nullptr);
-#pragma omp parallel for
+#pragma omp parallel for num_threads(nthreads)
   for (COLTYPE i = 0; i < rows; i++) {
     iperm[perm[i] - base] = i + base;
   }
@@ -51,7 +51,7 @@ void invPerm(const COLTYPE rows, const COLTYPE base, COLTYPE const *const perm,
 
 template <typename COLTYPE>
 bool isPermutation(const COLTYPE rows, const COLTYPE base,
-                   COLTYPE const *const perm) {
+                   COLTYPE const *const perm, int nthreads) {
   std::vector<std::atomic<int>> seen(rows);
   for (COLTYPE i = 0; i < rows; ++i) {
     seen[i] = 0;
@@ -73,7 +73,7 @@ bool isPermutation(const COLTYPE rows, const COLTYPE base,
   //       is_perm = false; // duplicate value found
   //     }
   //   }
-#pragma omp parallel for shared(seen, is_perm)
+#pragma omp parallel for shared(seen, is_perm) num_threads(nthreads)
   for (COLTYPE i = 0; i < rows; ++i) {
     if (!is_perm)
       continue; //  if we already found an error, skip further checks
@@ -117,22 +117,22 @@ void randPerm(const COLTYPE rows, const COLTYPE base, COLTYPE *const perm) {
 
 template <typename ROWTYPE, typename COLTYPE>
 void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
-                ROWTYPE *perm_ai) {
+                ROWTYPE *perm_ai, int nthreads) {
   assert(ai != nullptr && perm_ai != nullptr);
   if (perm == nullptr) {
-#pragma omp parallel for
+#pragma omp parallel for num_threads(nthreads)
     for (COLTYPE i = 0; i < rows + 1; i++) {
       perm_ai[i] = ai[i];
     }
   } else {
     const COLTYPE base = ai[0];
-    std::vector<COLTYPE> localNNZ(omp_get_max_threads() + 1, 0);
+    std::vector<COLTYPE> localNNZ(nthreads + 1, 0);
     perm_ai[0] = base;
-#pragma omp parallel
+#pragma omp parallel num_threads(nthreads)
     {
       const int tid = omp_get_thread_num();
-      const int nthreads = omp_get_num_threads();
-      auto [start, end] = utils::LoadBalancedPartitionPos(rows, tid, nthreads);
+      const int num_threads = omp_get_num_threads();
+      auto [start, end] = utils::LoadBalancedPartitionPos(rows, tid, num_threads);
       ROWTYPE nnz = 0;
       for (auto i = start; i < end; i++) {
         COLTYPE k = perm[i] - base;
@@ -160,17 +160,18 @@ static void permuteMatImpl(const COLTYPE rows, const COLTYPE cols,
                           COLTYPE const *const permP, COLTYPE const *const ipermQ,
                           ROWTYPE const *const ai, COLTYPE const *const aj,
                           ROWTYPE *const perm_ai, COLTYPE *const perm_aj,
-                          VALTYPE const *const av = nullptr, VALTYPE *const perm_av = nullptr) {
-  permRowPtr(rows, ai, permP, perm_ai);
+                          VALTYPE const *const av = nullptr, VALTYPE *const perm_av = nullptr,
+                          int nthreads = 1) {
+  permRowPtr(rows, ai, permP, perm_ai, nthreads);
   const auto base = ai[0];
   const auto nnz = ai[rows] - base;
 
-#pragma omp parallel
+#pragma omp parallel num_threads(nthreads)
   {
     const int tid = omp_get_thread_num();
-    const int nthreads = omp_get_num_threads();
+    const int num_threads = omp_get_num_threads();
     auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
-        perm_ai, perm_ai + rows, tid, nthreads);
+        perm_ai, perm_ai + rows, tid, num_threads);
 
     for (auto perm_i = start; perm_i < end; perm_i++) {
       // moving pinv_i'th row to i'th row
@@ -206,8 +207,8 @@ template <typename ROWTYPE, typename COLTYPE>
 void permuteMat(const COLTYPE rows, const COLTYPE cols,
                 COLTYPE const *const permP, COLTYPE const *const ipermQ,
                 ROWTYPE const *const ai, COLTYPE const *const aj,
-                ROWTYPE *const perm_ai, COLTYPE *const perm_aj) {
-  permuteMatImpl<ROWTYPE, COLTYPE, int>(rows, cols, permP, ipermQ, ai, aj, perm_ai, perm_aj);
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, int nthreads) {
+  permuteMatImpl<ROWTYPE, COLTYPE, int>(rows, cols, permP, ipermQ, ai, aj, perm_ai, perm_aj, nullptr, nullptr, nthreads);
 }
 
 // Structure + values permutation
@@ -215,25 +216,25 @@ template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void permuteMat(const COLTYPE rows, const COLTYPE cols,
                 COLTYPE const *const permP, COLTYPE const *const ipermQ,
                 ROWTYPE const *const ai, COLTYPE const *const aj, VALTYPE const *const av,
-                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, VALTYPE *const perm_av) {
-  permuteMatImpl<ROWTYPE, COLTYPE, VALTYPE>(rows, cols, permP, ipermQ, ai, aj, perm_ai, perm_aj, av, perm_av);
+                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, VALTYPE *const perm_av, int nthreads) {
+  permuteMatImpl<ROWTYPE, COLTYPE, VALTYPE>(rows, cols, permP, ipermQ, ai, aj, perm_ai, perm_aj, av, perm_av, nthreads);
 }
 
 #define INSTANTIATE_PERM_FUNCS(COLTYPE, VALTYPE)                               \
   template void permVec<COLTYPE, VALTYPE>(                                     \
       const COLTYPE, const COLTYPE, VALTYPE const *const,                      \
-      COLTYPE const *const, VALTYPE *const);                                   \
+      COLTYPE const *const, VALTYPE *const, int);                              \
   template void invPermVec<COLTYPE, VALTYPE>(                                  \
       const COLTYPE, const COLTYPE, VALTYPE const *const,                      \
-      COLTYPE const *const, VALTYPE *const);
+      COLTYPE const *const, VALTYPE *const, int);
 
 #define INSTANTIATE_INVPERM_FUNC(COLTYPE)                                      \
   template void invPerm<COLTYPE>(const COLTYPE, const COLTYPE,                 \
-                                 COLTYPE const *const, COLTYPE *const);
+                                 COLTYPE const *const, COLTYPE *const, int);
 
 #define INSTANTIATE_ISPERM_FUNC(COLTYPE)                                       \
   template bool isPermutation<COLTYPE>(const COLTYPE, const COLTYPE,           \
-                                       COLTYPE const *const);
+                                       COLTYPE const *const, int);
 #define INSTANTIATE_ISPERM_SERIAL_FUNC(COLTYPE)                                \
   template bool isPermutationSerial<COLTYPE>(const COLTYPE, const COLTYPE,     \
                                              COLTYPE const *const);
@@ -243,19 +244,19 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
 
 #define INSTANTIATE_PERM_ROW_PTR_FUNC(COLTYPE)                                 \
   template void permRowPtr<COLTYPE>(const COLTYPE, COLTYPE const *const,       \
-                                    COLTYPE const *const, COLTYPE *const);
+                                    COLTYPE const *const, COLTYPE *const, int);
 
 #define INSTANTIATE_PERMUTE_MAT_STRUCT_FUNC(ROWTYPE, COLTYPE)                  \
   template void permuteMat<ROWTYPE, COLTYPE>(                                  \
       const COLTYPE, const COLTYPE, COLTYPE const *const,                      \
       COLTYPE const *const, ROWTYPE const *const, COLTYPE const *const,        \
-      ROWTYPE *const, COLTYPE *const);
+      ROWTYPE *const, COLTYPE *const, int);
 
 #define INSTANTIATE_PERMUTE_MAT_VALUES_FUNC(ROWTYPE, COLTYPE, VALTYPE)        \
   template void permuteMat<ROWTYPE, COLTYPE, VALTYPE>(                        \
       const COLTYPE, const COLTYPE, COLTYPE const *const,                      \
       COLTYPE const *const, ROWTYPE const *const, COLTYPE const *const,        \
-      VALTYPE const *const, ROWTYPE *const, COLTYPE *const, VALTYPE *const);
+      VALTYPE const *const, ROWTYPE *const, COLTYPE *const, VALTYPE *const, int);
 
 // Example instantiations:
 INSTANTIATE_PERM_FUNCS(int, double)
