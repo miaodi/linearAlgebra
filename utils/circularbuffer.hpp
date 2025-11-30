@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,7 @@ public:
    * `decltype(buffer)::index_t`.
    */
   using index_t = size_t;
+  using value_type = T;
 
   /**
    * @brief Create an empty circular buffer.
@@ -94,22 +96,21 @@ public:
   /**
    * @brief Removes an element from the beginning of the buffer.
    *
-   * @warning Calling this operation on an empty buffer has an unpredictable
-   behaviour.
+   * @throws std::out_of_range if the buffer is empty.
    */
   const T &pop_front();
 
   /**
    * @brief Removes an element from the end of the buffer.
    *
-   * @warning Calling this operation on an empty buffer has an unpredictable
-   behaviour.
+   * @throws std::out_of_range if the buffer is empty.
    */
   const T &pop_back();
 
   /**
    * @brief Returns the element at the beginning of the buffer.
    *
+   * @throws std::out_of_range if the buffer is empty.
    * @return The element at the beginning of the buffer.
    */
   const T &first() const;
@@ -117,6 +118,7 @@ public:
   /**
    * @brief Returns the element at the end of the buffer.
    *
+   * @throws std::out_of_range if the buffer is empty.
    * @return The element at the end of the buffer.
    */
   const T &last() const;
@@ -124,11 +126,7 @@ public:
   /**
    * @brief Array-like access to buffer.
    *
-   * Calling this operation using and index value greater than `size - 1`
-   returns the tail element.
-   *
-   * @warning Calling this operation on an empty buffer has an unpredictable
-   behaviour.
+   * @throws std::out_of_range if index >= size().
    */
   const T &operator[](size_t index) const;
   T &operator[](size_t index);
@@ -139,6 +137,13 @@ public:
    * @return The number of elements stored in the buffer.
    */
   size_t size() const;
+
+  /**
+   * @brief Returns the capacity of the buffer.
+   *
+   * @return The maximum number of elements the buffer can hold.
+   */
+  size_t capacity() const;
 
   /**
    * @brief Returns how many elements can be safely pushed into the buffer.

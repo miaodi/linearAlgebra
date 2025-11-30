@@ -144,7 +144,7 @@ template <typename T> bool CircularBuffer<T>::push_back_overwrite(T &&value) {
 
 template <typename T> const T &CircularBuffer<T>::pop_front() {
   if (_count == 0)
-    return *_head;
+    throw std::out_of_range("CircularBuffer is empty");
   auto begin = _buffer.get();
   auto end = begin + _capacity;
   const T &result = *_head++;
@@ -157,7 +157,7 @@ template <typename T> const T &CircularBuffer<T>::pop_front() {
 
 template <typename T> const T &CircularBuffer<T>::pop_back() {
   if (_count == 0)
-    return *_tail;
+    throw std::out_of_range("CircularBuffer is empty");
   auto begin = _buffer.get();
   auto end = begin + _capacity;
   const T &result = *_tail;
@@ -170,17 +170,21 @@ template <typename T> const T &CircularBuffer<T>::pop_back() {
 }
 
 template <typename T> const T &CircularBuffer<T>::first() const {
+  if (_count == 0)
+    throw std::out_of_range("CircularBuffer is empty");
   return *_head;
 }
 
 template <typename T> const T &CircularBuffer<T>::last() const {
+  if (_count == 0)
+    throw std::out_of_range("CircularBuffer is empty");
   return *_tail;
 }
 
 template <typename T>
 const T &CircularBuffer<T>::operator[](size_t index) const {
   if (index >= _count)
-    return *_tail;
+    throw std::out_of_range("CircularBuffer index out of range");
   auto begin = _buffer.get();
   auto pos = static_cast<size_t>(_head - begin) + index;
   if (pos >= _capacity)
@@ -194,6 +198,8 @@ template <typename T> T &CircularBuffer<T>::operator[](size_t index) {
 }
 
 template <typename T> size_t CircularBuffer<T>::size() const { return _count; }
+
+template <typename T> size_t CircularBuffer<T>::capacity() const { return _capacity; }
 
 template <typename T> size_t CircularBuffer<T>::available() const {
   return _capacity - _count;
@@ -256,7 +262,8 @@ void CircularBuffer<T>::reserve(const size_t capacity)
 {
     if (capacity <= _capacity)
         return;
-    _buffer.swap(make_buffer(capacity));
+    auto tmp = make_buffer(capacity);
+    std::swap(_buffer, tmp);
     _capacity = capacity;
     _head = _buffer.get();
     _tail = _head;
