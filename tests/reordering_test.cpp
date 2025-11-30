@@ -288,9 +288,9 @@ TEST(Reordering, SerialCM) {
               true);
 
     auto [ai, aj, av] = matrix_utils::AllocateCSRData(mat.rows(), mat.nnz());
-    matrix_utils::permute(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
-                          mat.get_aj().get(), mat.get_av().get(),
-                          inv_perm.data(), perm.data(), ai.get(), aj.get(),
+    matrix_utils::permuteMat(mat.rows(), mat.cols(), inv_perm.data(),
+                          perm.data(), mat.get_ai().get(),
+                          mat.get_aj().get(), mat.get_av().get(), ai.get(), aj.get(),
                           av.get());
     mkl_wrapper::mkl_sparse_mat perm_mat(mat.rows(), mat.cols(), ai, aj, av);
     std::cout << "bandwidth after rcm reordering: " << perm_mat.bandwidth()
@@ -324,9 +324,9 @@ TEST(Reordering, SerialCM) {
                    mat.rows(), static_cast<int>( mat.mkl_base() ), nd_inv_perm.data() ),
                true );
     auto [ai1, aj1, av1] = matrix_utils::AllocateCSRData(mat.rows(), mat.nnz());
-    matrix_utils::permute(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
-                          mat.get_aj().get(), mat.get_av().get(),
-                          nd_inv_perm.data(), nd_perm.data(), ai1.get(),
+    matrix_utils::permuteMat(mat.rows(), mat.cols(), nd_inv_perm.data(),
+                          nd_perm.data(), mat.get_ai().get(),
+                          mat.get_aj().get(), mat.get_av().get(), ai1.get(),
                           aj1.get(), av1.get());
     mkl_wrapper::mkl_sparse_mat perm_mat1(mat.rows(), mat.cols(), ai1, aj1, av1,
                                           SPARSE_INDEX_BASE_ONE);

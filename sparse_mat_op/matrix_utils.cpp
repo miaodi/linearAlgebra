@@ -23,28 +23,6 @@ template void ParallelTranspose2<int, int, double>(
     int const *aj, double const *av, int *ai_transpose, int *aj_transpose,
     double *av_transpose);
 
-template void permutedAI<int, int>(const int rows, const int base,
-                                   int const *ai, int const *iperm,
-                                   int *permed_ai);
-
-template void permute<int, int, double>(const int rows, const int base,
-                                        int const *ai, int const *aj,
-                                        double const *av, int const *iperm,
-                                        int const *perm, int *permed_ai,
-                                        int *permed_aj, double *permed_av);
-
-template void permuteRow<int, int, double>(const int rows, const int base,
-                                           int const *ai, int const *aj,
-                                           double const *av, int const *iperm,
-                                           int *permed_ai, int *permed_aj,
-                                           double *permed_av);
-
-template void symPermute<int, int, double>(const int rows, const int base,
-                                           int const *ai, int const *aj,
-                                           double const *av, int const *iperm,
-                                           int *permed_ai, int *permed_aj,
-                                           double *permed_av);
-
 template bool Diagonal<int, int, double>(const int rows, int const *ai,
                                          int const *aj, double const *av,
                                          int *diagpos, double *diag,

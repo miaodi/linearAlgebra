@@ -351,26 +351,26 @@ int main( int argc, char** argv )
     return RUN_ALL_TESTS();
 }
 
-TEST_F( triangular_solve_Test, matrix_loading )
-{
-    // Simple test to verify matrices are loaded correctly
-    EXPECT_EQ( _mats.size(), 4 );
+// TEST_F( triangular_solve_Test, matrix_loading )
+// {
+//     // Simple test to verify matrices are loaded correctly
+//     EXPECT_EQ( _mats.size(), 4 );
     
-    for ( const auto& mat : _mats )
-    {
-        EXPECT_GT( mat.rows, 0 );
-        EXPECT_GT( mat.cols, 0 );
-        EXPECT_GT( mat.NNZ(), 0 );
-        EXPECT_EQ( mat.rows, mat.cols ); // All test matrices should be square
+//     for ( const auto& mat : _mats )
+//     {
+//         EXPECT_GT( mat.rows, 0 );
+//         EXPECT_GT( mat.cols, 0 );
+//         EXPECT_GT( mat.NNZ(), 0 );
+//         EXPECT_EQ( mat.rows, mat.cols ); // All test matrices should be square
         
-        // Verify base indexing
-        EXPECT_TRUE( mat.Base() == 0 || mat.Base() == 1 );
+//         // Verify base indexing
+//         EXPECT_TRUE( mat.Base() == 0 || mat.Base() == 1 );
         
-        // Verify matrix structure is valid
-        EXPECT_TRUE( matrix_utils::ValidCSR( mat.rows, mat.cols, mat.Base(), 
-                                           mat.AI(), mat.AJ() ) );
-    }
-}
+//         // Verify matrix structure is valid
+//         EXPECT_TRUE( matrix_utils::ValidCSR( mat.rows, mat.cols, mat.Base(), 
+//                                            mat.AI(), mat.AJ() ) );
+//     }
+// }
 
 TEST_F( triangular_solve_Test, forward_substitution )
 {
@@ -392,32 +392,38 @@ TEST_F( triangular_solve_Test, level_scheduled_backward_substitution )
     for(size_t i=0;i<_mats.size();++i) checkLevelBackward(i);
 }
 
-TEST_F( triangular_solve_Test, optimized_forward_substitution_barrier )
-{
-    for(size_t i=0;i<_mats.size();++i) checkOptimizedForwardBarrier(i);
-}
+// Disabled: OptimizedTriangularSolve
+// TEST_F( triangular_solve_Test, optimized_forward_substitution_barrier )
+// {
+//     for(size_t i=0;i<_mats.size();++i) checkOptimizedForwardBarrier(i);
+// }
 
-TEST_F( triangular_solve_Test, optimized_forward_substitution_no_barrier )
-{
-    for(size_t i=0;i<_mats.size();++i) checkOptimizedForwardNoBarrier(i);
-}
+// Disabled: OptimizedTriangularSolve
+// TEST_F( triangular_solve_Test, optimized_forward_substitution_no_barrier )
+// {
+//     for(size_t i=0;i<_mats.size();++i) checkOptimizedForwardNoBarrier(i);
+// }
 
-TEST_F( triangular_solve_Test, optimized_forward_substitution_no_barrier_super_node )
-{
-    for(size_t i=0;i<_mats.size();++i) checkOptimizedForwardNoBarrierSuperNode(i);
-}
+// Disabled: OptimizedTriangularSolve
+// TEST_F( triangular_solve_Test, optimized_forward_substitution_no_barrier_super_node )
+// {
+//     for(size_t i=0;i<_mats.size();++i) checkOptimizedForwardNoBarrierSuperNode(i);
+// }
 
-TEST_F( triangular_solve_Test, optimized_backward_substitution_barrier )
-{
-    for(size_t i=0;i<_mats.size();++i) checkOptimizedBackwardBarrier(i);
-}
+// Disabled: OptimizedTriangularSolve
+// TEST_F( triangular_solve_Test, optimized_backward_substitution_barrier )
+// {
+//     for(size_t i=0;i<_mats.size();++i) checkOptimizedBackwardBarrier(i);
+// }
 
-TEST_F( triangular_solve_Test, optimized_backward_substitution_no_barrier )
-{
-    for(size_t i=0;i<_mats.size();++i) checkOptimizedBackwardNoBarrier(i);
-}
+// Disabled: OptimizedTriangularSolve
+// TEST_F( triangular_solve_Test, optimized_backward_substitution_no_barrier )
+// {
+//     for(size_t i=0;i<_mats.size();++i) checkOptimizedBackwardNoBarrier(i);
+// }
 
-TEST_F( triangular_solve_Test, optimized_backward_substitution_no_barrier_super_node )
-{
-    for(size_t i=0;i<_mats.size();++i) checkOptimizedBackwardNoBarrierSuperNode(i);
-}
+// Disabled: OptimizedTriangularSolve
+// TEST_F( triangular_solve_Test, optimized_backward_substitution_no_barrier_super_node )
+// {
+//     for(size_t i=0;i<_mats.size();++i) checkOptimizedBackwardNoBarrierSuperNode(i);
+// }

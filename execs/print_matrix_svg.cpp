@@ -308,12 +308,12 @@ int main( int argc, char* argv[] )
         permuted.ResizeAJ( pruned_nnz );
         permuted.ResizeAV( pruned_nnz );
 
-        matrix_utils::permute( rows, base,
+        matrix_utils::permuteMat( rows, csr_matrix.cols,
+                               node_perm.data(),   // iperm: new row -> old row
+                               node_iperm.data(),  // perm: old col -> new col
                                csr_matrix.AI(),
                                csr_matrix.AJ(),
                                csr_matrix.AV(),
-                               node_perm.data(),   // iperm: new row -> old row
-                               node_iperm.data(),  // perm: old col -> new col
                                permuted.AI(),
                                permuted.AJ(),
                                permuted.AV() );
