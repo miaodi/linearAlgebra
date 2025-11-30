@@ -38,11 +38,11 @@ public:
     /**
      * Apply all transformations to operator: A_out = T_n * ... * T_2 * T_1 * A_in
      */
-    void applyToOperator(MatType& in, MatType& out) const override
+    void applyToOperator(MatType& in, MatType& out, int nthreads = 1) const override
     {
         for (const auto& transform : _transforms)
         {
-            transform->applyToOperator(in, out);
+            transform->applyToOperator(in, out, nthreads);
             std::swap(in, out);
         }
         std::swap(in, out);
@@ -51,11 +51,11 @@ public:
     /**
      * Apply all transformations to RHS: b_out = T_n * ... * T_2 * T_1 * b_in
      */
-    void applyToRHS(VecType& in, VecType& out) const override
+    void applyToRHS(VecType& in, VecType& out, int nthreads = 1) const override
     {
         for (const auto& transform : _transforms)
         {
-            transform->applyToRHS(in, out);
+            transform->applyToRHS(in, out, nthreads);
             std::swap(in, out);
         }
         std::swap(in, out);
@@ -64,11 +64,11 @@ public:
     /**
      * Apply all transformations to X: x_out = T_1 * T_2 * ... * T_n * x_in
      */
-    void applyToX(VecType& in, VecType& out) const override
+    void applyToX(VecType& in, VecType& out, int nthreads = 1) const override
     {
         for (const auto& transform : _transforms)
         {
-            transform->applyToX(in, out);
+            transform->applyToX(in, out, nthreads);
             std::swap(in, out);
         }
         std::swap(in, out);
@@ -77,12 +77,12 @@ public:
     /**
      * Apply inverse transformations to X: x_out = T_n^{-1} * ... * T_2^{-1} * T_1^{-1} * x_in
      */
-    void applyInverseToX(VecType& in, VecType& out) const override
+    void applyInverseToX(VecType& in, VecType& out, int nthreads = 1) const override
     {
         // Apply in reverse order
         for (auto it = _transforms.rbegin(); it != _transforms.rend(); ++it)
         {
-            (*it)->applyInverseToX(in, out);
+            (*it)->applyInverseToX(in, out, nthreads);
             std::swap(in, out);
         }
         std::swap(in, out);
