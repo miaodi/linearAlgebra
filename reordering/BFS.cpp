@@ -26,7 +26,7 @@ bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
   if constexpr (LASTLEVEL)
     lastLevel.push_back(source);
   int widthCounter = 1;
-  while (!cb.isEmpty()) {
+  while (!cb.empty()) {
     auto u = cb.first();
     cb.pop_front();
     for (MKL_INT i = ai[u] - base; i < ai[u + 1] - base; i++) {

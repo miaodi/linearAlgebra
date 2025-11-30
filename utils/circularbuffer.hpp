@@ -19,6 +19,10 @@
 #define CIRCULAR_BUFFER_H_
 #include <stddef.h>
 #include <stdint.h>
+#include <algorithm>
+#include <memory>
+#include <new>
+#include <utility>
 #include <vector>
 
 namespace utils {
@@ -43,7 +47,7 @@ public:
   /**
    * @brief Create an empty circular buffer.
    */
-  constexpr CircularBuffer(const size_t S = 0);
+  CircularBuffer(const size_t S = 0);
 
   // disable the copy constructor
   /** @private */
@@ -149,7 +153,7 @@ public:
    *
    * @return `true` iff no elements can be removed from the buffer.
    */
-  bool isEmpty() const;
+  bool empty() const;
 
   /**
    * @brief Check if the buffer is full.
@@ -157,7 +161,7 @@ public:
    * @return `true` if no elements can be added to the buffer without
    overwriting existing elements.
    */
-  bool isFull() const;
+  bool full() const;
 
   /**
    * @brief Resets the buffer to a clean status, making all buffer positions
@@ -180,7 +184,7 @@ public:
    returns the elements in the buffer can be found starting at index 0 and up
    to the buffer size() at the moment of the copyToArray function call.
    */
-  bool copyToVector(std::vector<T> &dest) const;
+  bool dump_to_vector(std::vector<T> &dest) const;
 
   // /**
   //  * @brief Copies the buffer content into the provided array calling the
@@ -209,9 +213,9 @@ public:
   bool resize(const size_t size);
 
   /**
-   * @brief Increases the capacity of the buffer without affecting content.
-   * Similar to std::vector::reserve(). If new_cap is greater than current
-   * capacity, new storage is allocated. Otherwise does nothing.
+   * @brief Increase capacity. If `capacity` exceeds the current capacity,
+   * allocates new storage and clears the buffer (content becomes unavailable).
+   * Otherwise this is a no-op.
    *
    * @param capacity The new capacity for the buffer.
    */
@@ -224,9 +228,33 @@ public:
   void shrink_to_fit();
 
 private:
-  std::vector<T> _buffer;
-  typename std::vector<T>::iterator _head;
-  typename std::vector<T>::iterator _tail;
+  /**
+   * @brief Copies buffer contents to a contiguous array.
+   * Helper function to eliminate duplication in dump_to_vector, resize, etc.
+   *
+   * @param dest Pointer to destination array (must have space for at least _count elements)
+   */
+  void copy_to_array(T *dest) const;
+
+  static constexpr std::size_t kAlignment = 64;
+  struct AlignedDeleter {
+    void operator()(T *ptr) const noexcept {
+      ::operator delete[](ptr, std::align_val_t{kAlignment});
+    }
+  };
+
+  using buffer_ptr = std::unique_ptr<T[], AlignedDeleter>;
+
+  static buffer_ptr make_buffer(std::size_t capacity) {
+    if (capacity == 0)
+      return buffer_ptr{nullptr};
+    return buffer_ptr{new (std::align_val_t{kAlignment}) T[capacity]};
+  }
+
+  buffer_ptr _buffer;
+  size_t _capacity;
+  T *_head;
+  T *_tail;
   size_t _count;
 };
 } // namespace utils

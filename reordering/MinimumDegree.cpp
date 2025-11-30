@@ -68,7 +68,7 @@ void QuotientGraph<COLTYPE, MD>::operator()(const COLTYPE nnodes,
     //           << _pool.size() << std::endl;
     it = _degree_to_principle.begin();
     found = false;
-    while (!it->second->isEmpty()) {
+    while (!it->second->empty()) {
       idx = it->second->first();
       it->second->pop_front();
       if (_union_find.Find(idx) == idx && _nodes[idx].degree == it->first) {
