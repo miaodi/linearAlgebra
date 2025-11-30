@@ -44,7 +44,7 @@ bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
         if constexpr (LASTLEVEL)
           lastLevel.push_back(v + base);
         if (!cb.available())
-          cb.resizePreserve(cb.size() * 2);
+          cb.resize(cb.size() * 2);
         cb.push_back(v);
         if (++widthCounter >= shortCutWidth)
           return false;

@@ -9,7 +9,8 @@ static void BM_CircularBuffer_Push(benchmark::State &state) {
   for (auto _ : state) {
     utils::CircularBuffer<int> cb(state.range(0));
     for (int j = 0; j < state.range(0); j++) {
-      benchmark::DoNotOptimize(cb.push_back(j));
+      cb.push_back(j);
+      benchmark::DoNotOptimize(cb.size());
     }
   }
   state.SetBytesProcessed(int64_t(state.iterations()) *
