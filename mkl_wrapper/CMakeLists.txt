@@ -3,7 +3,7 @@ project(mkl_wrapper CXX)
 
 set(MKL_WRAPPER_SRC mkl_sparse_mat.cpp mkl_solver.cpp mkl_eigen.cpp mumps_solver.cpp arpack_wrapper.cpp incomplete_cholesky.cpp incomplete_lu.cpp amgcl_precond.cpp)
 
-set(DEPENDENCIES $<LINK_ONLY:MKL::MKL> utils sparse_mat_op TBB::tbb OpenMP::OpenMP_CXX)
+set(DEPENDENCIES $<LINK_ONLY:MKL::MKL> utils sparse_mat_op graph TBB::tbb OpenMP::OpenMP_CXX)
 
 if(USE_ARPACK_LIB)
   set(DEPENDENCIES ${DEPENDENCIES} ARPACK::ARPACK)

@@ -19,7 +19,9 @@
 #include <tuple>
 #include <type_traits>
 
-namespace matrix_utils {
+namespace matrix_utils
+{
+using enums::matrix_utils::TriangularMatrix;
 
 template <typename T> auto find_address_of(T &&p) { return p.get(); }
 
@@ -692,7 +694,7 @@ template <ResizableCSR CSRMatrixType> struct SplitLU {
   std::vector<ROWTYPE> prefixU;
 };
 
-template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
+template <TriangularMatrix TS = enums::matrix_utils::U, typename ROWTYPE, typename COLTYPE,
           typename VALTYPE, ResizableCSR CSRMatrixType>
 void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
                    COLTYPE const *aj, VALTYPE const *av,
@@ -766,7 +768,7 @@ void SplitTriangle(const COLTYPE rows, const int base, ROWTYPE const *ai,
   }
 }
 
-template <TriangularMatrix TS = U, typename ROWTYPE, typename COLTYPE,
+template <TriangularMatrix TS = enums::matrix_utils::U, typename ROWTYPE, typename COLTYPE,
           typename VALTYPE, ResizableCSR CSRMatrixType>
 void TriangularToFull(const COLTYPE rows, const int base, ROWTYPE const *ai,
                       COLTYPE const *aj, VALTYPE const *av, CSRMatrixType &F) {

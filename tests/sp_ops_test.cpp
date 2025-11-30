@@ -2322,7 +2322,7 @@ TEST_F( JaccardSimilarityTest, IdenticalMatrices )
     std::vector<int32_t> ai = { 0, 2, 4, 5 };
     std::vector<int32_t> aj = { 0, 1, 1, 2, 2 };
 
-    double similarity = jaccardSimilarity( rows, cols, ai.data(), aj.data(),
+    double similarity = graph::jaccardSimilarity( rows, cols, ai.data(), aj.data(),
                                            rows, cols, ai.data(), aj.data(), 1 );
 
     EXPECT_NEAR( similarity, 1.0, _tol ) << "Identical matrices should have Jaccard similarity of 1.0";
@@ -2341,7 +2341,7 @@ TEST_F( JaccardSimilarityTest, DisjointMatrices )
     std::vector<int32_t> B_ai = { 0, 0, 1, 2 };
     std::vector<int32_t> B_aj = { 0, 1 };
 
-    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
                                            rows, cols, B_ai.data(), B_aj.data(), 1 );
 
     EXPECT_NEAR( similarity, 0.0, _tol ) << "Disjoint matrices should have Jaccard similarity of 0.0";
@@ -2369,7 +2369,7 @@ TEST_F( JaccardSimilarityTest, PartialOverlap )
     // Jaccard = 2/7
     double expected = 2.0 / 7.0;
 
-    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
                                            rows, cols, B_ai.data(), B_aj.data(), 1 );
 
     EXPECT_NEAR( similarity, expected, _tol ) << "Partial overlap should give correct Jaccard similarity";
@@ -2386,7 +2386,7 @@ TEST_F( JaccardSimilarityTest, OneEmptyMatrix )
     std::vector<int32_t> B_ai = { 0, 1, 3 };
     std::vector<int32_t> B_aj = { 0, 0, 1 };
 
-    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
                                            rows, cols, B_ai.data(), B_aj.data(), 1 );
 
     EXPECT_NEAR( similarity, 0.0, _tol ) << "One empty matrix should give Jaccard similarity of 0.0";
@@ -2403,7 +2403,7 @@ TEST_F( JaccardSimilarityTest, BothEmptyMatrices )
     std::vector<int32_t> B_ai = { 0, 0, 0 };
     std::vector<int32_t> B_aj = {};
 
-    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
                                            rows, cols, B_ai.data(), B_aj.data(), 1 );
 
     EXPECT_NEAR( similarity, 1.0, _tol ) << "Both empty matrices should give Jaccard similarity of 1.0";
@@ -2425,7 +2425,7 @@ TEST_F( JaccardSimilarityTest, OneBasedIndexing )
     // Jaccard = 2/7
     double expected = 2.0 / 7.0;
 
-    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
                                            rows, cols, B_ai.data(), B_aj.data(), 1 );
 
     EXPECT_NEAR( similarity, expected, _tol ) << "One-based indexing should work correctly";
@@ -2447,7 +2447,7 @@ TEST_F( JaccardSimilarityTest, Int64Types )
     // Jaccard = 2/4 = 0.5
     double expected = 0.5;
 
-    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
                                            rows, cols, B_ai.data(), B_aj.data(), 1 );
 
     EXPECT_NEAR( similarity, expected, _tol ) << "int64_t types should work correctly";
@@ -2465,13 +2465,13 @@ TEST_F( JaccardSimilarityTest, MultipleThreads )
     std::vector<int32_t> B_aj = { 0, 1, 0, 2, 1, 3 };
 
     // Compute with 1 thread as reference
-    double ref_similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+    double ref_similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
                                                rows, cols, B_ai.data(), B_aj.data(), 1 );
 
     // Test with different thread counts
     for ( int nthreads : { 2, 4, 8 } )
     {
-        double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+        double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
                                                rows, cols, B_ai.data(), B_aj.data(), nthreads );
 
         EXPECT_NEAR( similarity, ref_similarity, _tol ) 
@@ -2496,7 +2496,7 @@ TEST_F( JaccardSimilarityTest, SubsetRelationship )
     // Jaccard = 3/6 = 0.5
     double expected = 0.5;
 
-    double similarity = jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
                                            rows, cols, B_ai.data(), B_aj.data(), 1 );
 
     EXPECT_NEAR( similarity, expected, _tol ) << "Subset relationship should give correct Jaccard similarity";

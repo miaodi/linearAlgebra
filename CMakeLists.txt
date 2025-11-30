@@ -202,8 +202,10 @@ configure_file(
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 include_directories(${CMAKE_BINARY_DIR})  
 
+add_subdirectory(enums)
 add_subdirectory(utils)
 add_subdirectory(sparse_mat_op)
+add_subdirectory(graph)
 add_subdirectory(mkl_wrapper)
 add_subdirectory(reordering)
 add_subdirectory(factorization)

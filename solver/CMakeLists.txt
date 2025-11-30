@@ -7,7 +7,7 @@ set(SOLVER_SRC
     TransformSeq.cpp
 )
 
-set(DEPENDENCIES utils sparse_mat_op reordering)
+set(DEPENDENCIES utils sparse_mat_op graph reordering)
 
 add_library(${PROJECT_NAME} STATIC ${SOLVER_SRC})
 

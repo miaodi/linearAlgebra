@@ -59,7 +59,7 @@ int num_threads = 1;
 auto KahnSerialBench = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> perm(mat.rows);
   std::vector<int> prefix(mat.rows + 1);
-  matrix_utils::KahnSerial<int, int> kahn;
+  graph::KahnSerial<int, int> kahn;
   for (auto _ : state) {
     kahn.operator()(
         mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
@@ -69,7 +69,7 @@ auto KahnSerialBench = [](benchmark::State &state, const CSRMatrixType &mat) {
 auto KahnParallelBench = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> perm(mat.rows);
   std::vector<int> prefix(mat.rows + 1);
-  matrix_utils::KahnParallel<int, int> kahn(num_threads);
+  graph::KahnParallel<int, int> kahn(num_threads);
   for (auto _ : state) {
     kahn.operator()(
         mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
@@ -79,7 +79,7 @@ auto KahnParallelBench = [](benchmark::State &state, const CSRMatrixType &mat) {
 auto TopologicalSort2Bench = [](benchmark::State &state, const CSRMatrixType &mat) {
   std::vector<int> perm(mat.rows);
   std::vector<int> prefix(mat.rows + 1);
-  matrix_utils::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topologicalSort;
+  graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topologicalSort;
   for (auto _ : state) {
     topologicalSort.operator()(
         mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
