@@ -1228,9 +1228,10 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::analysis(
   //                       _threadperm.data(), _reorderedMat.ai.data(),
   //                       _reorderedMat.aj.data(), _reorderedMat.av.data());
 
-  matrix_utils::permuteRow(rows, base, ai, aj, av, _threadiperm.data(),
-                           _reorderedMat.ai.data(), _reorderedMat.aj.data(),
-                           _reorderedMat.av.data());
+  matrix_utils::permuteMat(rows, rows, _threadiperm.data(),
+                           static_cast<COLTYPE const*>(nullptr),
+                           ai, aj, av, _reorderedMat.ai.data(),
+                           _reorderedMat.aj.data(), _reorderedMat.av.data());
 
   if constexpr (FBST == FBSubstitutionType::NoBarrierSuperNode) {
     build_task_graph();

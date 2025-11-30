@@ -318,17 +318,17 @@ TEST_F(sparse_matrix_Test, permute) {
                          inv_perm;
 
     auto [aiB, ajB, avB] = matrix_utils::AllocateCSRData(A.rows(), A.nnz());
-    matrix_utils::permute(A.rows(), (int)A.mkl_base(), A.get_ai().get(),
-                          A.get_aj().get(), A.get_av().get(), perm0.data(),
-                          perm0.data(), aiB.get(), ajB.get(), avB.get());
+    matrix_utils::permuteMat(A.rows(), A.cols(), perm0.data(),
+                          perm0.data(), A.get_ai().get(),
+                          A.get_aj().get(), A.get_av().get(), aiB.get(), ajB.get(), avB.get());
 
     mkl_wrapper::mkl_sparse_mat B(3, 3, aiB, ajB, avB);
 
     utils::inversePermute(inv_perm, perm0, (int)A.mkl_base());
     auto [aiC, ajC, avC] = matrix_utils::AllocateCSRData(B.rows(), B.nnz());
-    matrix_utils::permute(B.rows(), (int)B.mkl_base(), B.get_ai().get(),
-                          B.get_aj().get(), B.get_av().get(), inv_perm.data(),
-                          inv_perm.data(), aiC.get(), ajC.get(), avC.get());
+    matrix_utils::permuteMat(B.rows(), B.cols(), inv_perm.data(),
+                          inv_perm.data(), B.get_ai().get(),
+                          B.get_aj().get(), B.get_av().get(), aiC.get(), ajC.get(), avC.get());
     mkl_wrapper::mkl_sparse_mat C(3, 3, aiC, ajC, avC);
 
     for (size_t i = 0; i < 4; i++) {
@@ -345,17 +345,17 @@ TEST_F(sparse_matrix_Test, permute) {
                      [](MKL_INT ind) { return ind + 1; });
 
       auto [aiB, ajB, avB] = matrix_utils::AllocateCSRData(A1.rows(), A1.nnz());
-      matrix_utils::permute(A1.rows(), (int)A1.mkl_base(), A1.get_ai().get(),
-                            A1.get_aj().get(), A1.get_av().get(), perm1.data(),
-                            perm1.data(), aiB.get(), ajB.get(), avB.get());
+      matrix_utils::permuteMat(A1.rows(), A1.cols(), perm1.data(),
+                            perm1.data(), A1.get_ai().get(),
+                            A1.get_aj().get(), A1.get_av().get(), aiB.get(), ajB.get(), avB.get());
       mkl_wrapper::mkl_sparse_mat B(3, 3, aiB, ajB, avB, SPARSE_INDEX_BASE_ONE);
 
       utils::inversePermute(inv_perm, perm1, (int)A1.mkl_base());
 
       auto [aiC, ajC, avC] = matrix_utils::AllocateCSRData(A.rows(), A.nnz());
-      matrix_utils::permute(B.rows(), (int)B.mkl_base(), B.get_ai().get(),
-                            B.get_aj().get(), B.get_av().get(), inv_perm.data(),
-                            inv_perm.data(), aiC.get(), ajC.get(), avC.get());
+      matrix_utils::permuteMat(B.rows(), B.cols(), inv_perm.data(),
+                            inv_perm.data(), B.get_ai().get(),
+                            B.get_aj().get(), B.get_av().get(), aiC.get(), ajC.get(), avC.get());
       mkl_wrapper::mkl_sparse_mat C(3, 3, aiC, ajC, avC, SPARSE_INDEX_BASE_ONE);
 
       for (size_t i = 0; i < 4; i++) {
@@ -381,16 +381,16 @@ TEST_F(sparse_matrix_Test, permute2) {
     std::vector<MKL_INT> perm0 = utils::randomPermute(10000, (int)A.mkl_base()),
                          inv_perm;
     auto [aiB, ajB, avB] = matrix_utils::AllocateCSRData(A1.rows(), A1.nnz());
-    matrix_utils::permute(A.rows(), (int)A.mkl_base(), A.get_ai().get(),
-                          A.get_aj().get(), A.get_av().get(), perm0.data(),
-                          perm0.data(), aiB.get(), ajB.get(), avB.get());
+    matrix_utils::permuteMat(A.rows(), A.cols(), perm0.data(),
+                          perm0.data(), A.get_ai().get(),
+                          A.get_aj().get(), A.get_av().get(), aiB.get(), ajB.get(), avB.get());
     mkl_wrapper::mkl_sparse_mat B(10000, 10000, aiB, ajB, avB);
 
     utils::inversePermute(inv_perm, perm0, (int)A.mkl_base());
     auto [aiC, ajC, avC] = matrix_utils::AllocateCSRData(B.rows(), B.nnz());
-    matrix_utils::permute(B.rows(), (int)B.mkl_base(), B.get_ai().get(),
-                          B.get_aj().get(), B.get_av().get(), inv_perm.data(),
-                          inv_perm.data(), aiC.get(), ajC.get(), avC.get());
+    matrix_utils::permuteMat(B.rows(), B.cols(), inv_perm.data(),
+                          inv_perm.data(), B.get_ai().get(),
+                          B.get_aj().get(), B.get_av().get(), aiC.get(), ajC.get(), avC.get());
     mkl_wrapper::mkl_sparse_mat C(10000, 10000, aiC, ajC, avC);
 
     for (MKL_INT i = 0; i <= A.rows(); i++) {
@@ -407,18 +407,18 @@ TEST_F(sparse_matrix_Test, permute2) {
                      [](MKL_INT ind) { return ind + 1; });
 
       auto [aiB, ajB, avB] = matrix_utils::AllocateCSRData(A1.rows(), A1.nnz());
-      matrix_utils::permute(A1.rows(), (int)A1.mkl_base(), A1.get_ai().get(),
-                            A1.get_aj().get(), A1.get_av().get(), perm1.data(),
-                            perm1.data(), aiB.get(), ajB.get(), avB.get());
+      matrix_utils::permuteMat(A1.rows(), A1.cols(), perm1.data(),
+                            perm1.data(), A1.get_ai().get(),
+                            A1.get_aj().get(), A1.get_av().get(), aiB.get(), ajB.get(), avB.get());
       mkl_wrapper::mkl_sparse_mat B(10000, 10000, aiB, ajB, avB,
                                     SPARSE_INDEX_BASE_ONE);
 
       utils::inversePermute(inv_perm, perm1, (int)A1.mkl_base());
 
       auto [aiC, ajC, avC] = matrix_utils::AllocateCSRData(A.rows(), A.nnz());
-      matrix_utils::permute(B.rows(), (int)B.mkl_base(), B.get_ai().get(),
-                            B.get_aj().get(), B.get_av().get(), inv_perm.data(),
-                            inv_perm.data(), aiC.get(), ajC.get(), avC.get());
+      matrix_utils::permuteMat(B.rows(), B.cols(), inv_perm.data(),
+                            inv_perm.data(), B.get_ai().get(),
+                            B.get_aj().get(), B.get_av().get(), aiC.get(), ajC.get(), avC.get());
       mkl_wrapper::mkl_sparse_mat C(10000, 10000, aiC, ajC, avC,
                                     SPARSE_INDEX_BASE_ONE);
 

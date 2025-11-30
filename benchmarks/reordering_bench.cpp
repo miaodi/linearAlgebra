@@ -50,10 +50,10 @@ public:
       reordering::SerialCM(mat.get(), inv_perm, perm);
       auto [ai, aj, av] =
           matrix_utils::AllocateCSRData(mat->rows(), mat->nnz());
-      matrix_utils::permute(mat->rows(), (int)mat->mkl_base(),
+      matrix_utils::permuteMat(mat->rows(), mat->cols(),
+                            inv_perm.data(), perm.data(),
                             mat->get_ai().get(), mat->get_aj().get(),
-                            mat->get_av().get(), inv_perm.data(), perm.data(),
-                            ai.get(), aj.get(), av.get());
+                            mat->get_av().get(), ai.get(), aj.get(), av.get());
       perm_mat.reset(new mkl_wrapper::mkl_sparse_mat(mat->rows(), mat->cols(),
                                                      ai, aj, av));
       std::cout << "bandwidth after reordering: " << perm_mat->bandwidth()
@@ -64,10 +64,10 @@ public:
       reordering::MetisND(mat.get(), inv_perm1, perm1);
       auto [ai1, aj1, av1] =
           matrix_utils::AllocateCSRData(mat->rows(), mat->nnz());
-      matrix_utils::permute(mat->rows(), (int)mat->mkl_base(),
+      matrix_utils::permuteMat(mat->rows(), mat->cols(),
+                            inv_perm1.data(), perm1.data(),
                             mat->get_ai().get(), mat->get_aj().get(),
-                            mat->get_av().get(), inv_perm1.data(), perm1.data(),
-                            ai1.get(), aj1.get(), av1.get());
+                            mat->get_av().get(), ai1.get(), aj1.get(), av1.get());
       perm_mat1.reset(new mkl_wrapper::mkl_sparse_mat(mat->rows(), mat->cols(),
                                                       ai1, aj1, av1));
       std::cout << "bandwidth after reordering: " << perm_mat1->bandwidth()
@@ -76,9 +76,10 @@ public:
 
       auto [ai2, aj2, av2] =
           matrix_utils::AllocateCSRData(mat->rows(), mat->nnz());
-      matrix_utils::symPermute(mat->rows(), (int)mat->mkl_base(),
+      matrix_utils::permuteMat(mat->rows(), mat->rows(),
+                               inv_perm.data(), inv_perm.data(),
                                mat->get_ai().get(), mat->get_aj().get(),
-                               mat->get_av().get(), inv_perm.data(), ai2.get(),
+                               mat->get_av().get(), ai2.get(),
                                aj2.get(), av2.get());
       perm_mat_sym.reset(new mkl_wrapper::mkl_sparse_mat_sym(
           mat->rows(), mat->cols(), ai2, aj2, av2));

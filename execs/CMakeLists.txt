@@ -12,8 +12,9 @@ target_link_libraries(test_gmres PRIVATE ${libs})
 add_executable(test_unsymm unsymm.cpp)
 target_link_libraries(test_unsymm PRIVATE ${libs})
 
-add_executable(triangular_debug triangular_debug.cpp)
-target_link_libraries(triangular_debug PRIVATE ${libs} OpenMP::OpenMP_CXX)
+# Disabled: triangular_debug uses OptimizedTriangularSolve
+# add_executable(triangular_debug triangular_debug.cpp)
+# target_link_libraries(triangular_debug PRIVATE ${libs} OpenMP::OpenMP_CXX)
 
 add_executable(ilu_graph_example ilu_graph_example.cpp)
 target_link_libraries(ilu_graph_example PRIVATE ${libs})

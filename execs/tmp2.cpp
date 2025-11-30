@@ -198,9 +198,9 @@ int main(int argc, char **argv) {
                                             iperm.data()))
             << std::endl;
   auto [ai, aj, av] = matrix_utils::AllocateCSRData(mat.rows(), mat.nnz());
-  matrix_utils::permute(mat.rows(), (int)mat.mkl_base(), mat.get_ai().get(),
-                        mat.get_aj().get(), mat.get_av().get(), iperm.data(),
-                        perm.data(), ai.get(), aj.get(), av.get());
+  matrix_utils::permuteMat(mat.rows(), mat.cols(), iperm.data(),
+                        perm.data(), mat.get_ai().get(),
+                        mat.get_aj().get(), mat.get_av().get(), ai.get(), aj.get(), av.get());
   mkl_wrapper::mkl_sparse_mat perm_mat(mat.rows(), mat.cols(), ai, aj, av,
                                        SPARSE_INDEX_BASE_ONE);
   std::cout << "bandwidth after rcm reordering: " << perm_mat.bandwidth()

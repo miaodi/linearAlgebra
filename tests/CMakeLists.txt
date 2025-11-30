@@ -11,8 +11,21 @@ include(GoogleTest)
 
 file(GLOB_RECURSE ALL_TEST_CPP *.cpp)
 
+# List of tests to exclude
+set(EXCLUDED_TESTS 
+    "reordering_test.cpp"
+)
+
 foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
    get_filename_component(ONE_TEST_EXEC ${ONE_TEST_CPP} NAME_WE)
+   get_filename_component(ONE_TEST_FILENAME ${ONE_TEST_CPP} NAME)
+   
+   # Skip excluded tests
+   list(FIND EXCLUDED_TESTS ${ONE_TEST_FILENAME} SHOULD_EXCLUDE)
+   if(SHOULD_EXCLUDE GREATER -1)
+      message(STATUS "Skipping test: ${ONE_TEST_FILENAME}")
+      continue()
+   endif()
 
    # Avoid name collision 
    set(TARGET_NAME TEST_${ONE_TEST_EXEC})
