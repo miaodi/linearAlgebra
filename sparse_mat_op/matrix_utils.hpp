@@ -46,6 +46,8 @@ template <typename R, typename C, typename V> struct CSRMatrixRawPtr {
   using COLTYPE = C;
   using VALTYPE = V;
 
+  static constexpr bool owns_data = false;
+
   COLTYPE rows;
   COLTYPE cols;
   ROWTYPE const *ai;
@@ -63,13 +65,28 @@ template <typename R, typename C, typename V> struct CSRMatrixRawPtr {
   COLTYPE *AJ() { return aj; }
   VALTYPE *AV() { return av; }
 
+  void swap(CSRMatrixRawPtr& other) noexcept {
+    std::swap(rows, other.rows);
+    std::swap(cols, other.cols);
+    std::swap(ai, other.ai);
+    std::swap(aj, other.aj);
+    std::swap(av, other.av);
+  }
+
   CSRMatrixRawPtr() = default;
 };
+
+template <typename R, typename C, typename V>
+void swap(CSRMatrixRawPtr<R, C, V>& lhs, CSRMatrixRawPtr<R, C, V>& rhs) noexcept {
+  lhs.swap(rhs);
+}
 
 template <typename R, typename C, typename V> struct CSRMatrix {
   using ROWTYPE = R;
   using COLTYPE = C;
   using VALTYPE = V;
+
+  static constexpr bool owns_data = true;
 
   COLTYPE rows;
   COLTYPE cols;
@@ -146,13 +163,33 @@ template <typename R, typename C, typename V> struct CSRMatrix {
     return diagonal.get();
   }
 
+  void swap(CSRMatrix& other) noexcept {
+    std::swap(rows, other.rows);
+    std::swap(cols, other.cols);
+    std::swap(ai_size, other.ai_size);
+    std::swap(aj_size, other.aj_size);
+    std::swap(av_size, other.av_size);
+    std::swap(diagonal_size, other.diagonal_size);
+    std::swap(ai, other.ai);
+    std::swap(aj, other.aj);
+    std::swap(av, other.av);
+    std::swap(diagonal, other.diagonal);
+  }
+
   CSRMatrix() = default;
 };
+
+template <typename R, typename C, typename V>
+void swap(CSRMatrix<R, C, V>& lhs, CSRMatrix<R, C, V>& rhs) noexcept {
+  lhs.swap(rhs);
+}
 
 template <typename R, typename C, typename V> struct CSRMatrixVec {
   using ROWTYPE = R;
   using COLTYPE = C;
   using VALTYPE = V;
+
+  static constexpr bool owns_data = true;
 
   COLTYPE rows{0};
   COLTYPE cols{0};
@@ -195,12 +232,27 @@ template <typename R, typename C, typename V> struct CSRMatrixVec {
     return av.data();
   }
 
+  void swap(CSRMatrixVec& other) noexcept {
+    std::swap(rows, other.rows);
+    std::swap(cols, other.cols);
+    ai.swap(other.ai);
+    aj.swap(other.aj);
+    av.swap(other.av);
+  }
+
   template <class Archive> void serialize(Archive &ar) { ar(ai, aj, av); }
 };
+
+template <typename R, typename C, typename V>
+void swap(CSRMatrixVec<R, C, V>& lhs, CSRMatrixVec<R, C, V>& rhs) noexcept
+{
+    lhs.swap(rhs);
+}
 
 template <typename ROWTYPE, typename COLTYPE> struct CSRStructVec {
   using ROW = ROWTYPE;
   using COL = COLTYPE;
+  static constexpr bool owns_data = true;
 
   COLTYPE rows{};
   COLTYPE cols{};
