@@ -60,6 +60,25 @@
             }
         },
         {
+            "name": "clangd",
+            "displayName": "clangd (Debug, GCC)",
+            "description": "Dedicated build directory for clangd indexing (uses GCC for OpenMP support)",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/build/clangd",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "FETCHCONTENT_SOURCE_DIR_FAST_MATRIX_MARKET": "${sourceDir}/release/_deps/fast_matrix_market-src",
+                "FETCHCONTENT_SOURCE_DIR_SPECTRA": "${sourceDir}/release/_deps/spectra-src",
+                "FETCHCONTENT_SOURCE_DIR_CXXOPTS": "${sourceDir}/release/_deps/cxxopts-src",
+                "FETCHCONTENT_UPDATES_DISCONNECTED": "ON",
+                "ENABLE_TESTS": "OFF",
+                "ENABLE_DATA_DOWNLOADS": "OFF",
+                "CMAKE_PREFIX_PATH": "/opt/intel/oneapi/mkl/latest/lib/cmake/mkl;/opt/intel/oneapi/tbb/latest/lib/cmake/tbb"
+            }
+        },
+        {
             "name": "debug-intel",
             "displayName": "Debug (Intel)",
             "description": "Debug build using Intel compilers",
@@ -128,6 +147,10 @@
         {
             "name": "release-clang",
             "configurePreset": "release-clang"
+        },
+        {
+            "name": "clangd",
+            "configurePreset": "clangd"
         },
         {
             "name": "debug-intel",
