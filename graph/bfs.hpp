@@ -85,7 +85,6 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
 /// @tparam COLTYPE Column index type (typically int or int64_t)
 /// @tparam LASTLEVEL If true, records nodes in the last level
-/// @tparam RECORDLEVEL If true, records the BFS level for each node
 /// @tparam SHORTCUT If true, enables early termination based on width threshold
 /// @param rows Number of rows in the graph
 /// @param ai Row pointers array (ai[0] contains the base indexing)
@@ -96,12 +95,12 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// @param width Output: maximum width across all levels
 /// @param levels Output: BFS level for each node (-1 if not visited)
 /// @param lastLevel Output: nodes in the last level (if LASTLEVEL=true)
+/// @param nthreads Number of threads to use (default = 1)
 /// @return true if successful, false if shortcut width exceeded (only when SHORTCUT=true)
-template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL = false,
-          bool RECORDLEVEL = true, bool SHORTCUT = true>
+template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL = false, bool SHORTCUT = true>
 bool PBFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
               COLTYPE source, COLTYPE shortCutWidth, COLTYPE& height,
               COLTYPE& width, std::vector<COLTYPE>& levels,
-              std::vector<COLTYPE>& lastLevel);
+              std::vector<COLTYPE>& lastLevel, int nthreads = 1);
 
 } // namespace graph
