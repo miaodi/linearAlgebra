@@ -15,12 +15,22 @@ target_link_libraries(drop_global_precond PRIVATE
     cxxopts
 )
 
-# Include directories
 target_include_directories(drop_global_precond PRIVATE
-    ${PROJECT_SOURCE_DIR}/sparse_mat_op
-    ${PROJECT_SOURCE_DIR}/mkl_wrapper
-    ${PROJECT_SOURCE_DIR}/factorization
-    ${PROJECT_SOURCE_DIR}/reordering
-    ${PROJECT_SOURCE_DIR}/utils
-    ${PROJECT_BINARY_DIR}  # For config.h
+    ${PROJECT_BINARY_DIR}
+)
+
+# Create jaccard_compare executable
+add_executable(jaccard_compare jaccard_compare.cpp)
+target_link_libraries(jaccard_compare PRIVATE
+    utils
+    fast_matrix_market::fast_matrix_market
+    Eigen3::Eigen
+    mkl_wrapper
+    reordering
+    sparse_mat_op
+    factorization
+    cxxopts
+)
+target_include_directories(jaccard_compare PRIVATE
+    ${PROJECT_BINARY_DIR}
 )
