@@ -1,5 +1,4 @@
 #pragma once
-#include "circularbuffer.hpp"
 #include <functional>
 #include <limits>
 #include <memory>
