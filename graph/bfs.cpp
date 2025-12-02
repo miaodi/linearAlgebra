@@ -4,6 +4,7 @@
 #include <execution>
 #include <iostream>
 #include <omp.h>
+#include "circularbuffer.hpp"
 
 namespace graph {
 
@@ -26,40 +27,47 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
     if constexpr (LASTLEVEL)
         lastLevel.push_back(source);
 
+    COLTYPE nodes_left_in_level = cb.size();
     COLTYPE widthCounter = 1;
-    while (!cb.empty())
+    while (nodes_left_in_level)
     {
-        auto u = cb.first();
-        cb.pop_front();
+        const auto u = cb.pop_front();
         for (ROWTYPE i = ai[u] - base; i < ai[u + 1] - base; i++)
         {
             auto v = aj[i] - base;
             if (levels[v] == INVALID)
             {
-                if (height < levels[u] + 1)
-                {
-                    height = levels[u] + 1;
-                    width = std::max(width, widthCounter);
-                    widthCounter = 0;
-                    if constexpr (LASTLEVEL)
-                    {
-                        lastLevel.resize(0);
-                    }
-                }
-                levels[v] = height;
+                levels[v] = height + 1;
                 if constexpr (LASTLEVEL)
                     lastLevel.push_back(v + base);
                 cb.push_back(v);
-                if constexpr (SHORTCUT) {
+                if constexpr (SHORTCUT)
+                {
                     if (++widthCounter >= shortCutWidth)
                         return false;
-                } else {
+                }
+                else
+                {
                     ++widthCounter;
                 }
             }
         }
+        if (--nodes_left_in_level == 0)
+        {
+            height++;
+            width = std::max(width, widthCounter);
+            widthCounter = 0;
+            if constexpr (LASTLEVEL)
+            {
+                lastLevel.clear();
+            }
+            nodes_left_in_level = cb.size();
+            if (nodes_left_in_level == 0)
+            {
+                break;
+            }
+        }
     }
-    height++;
     return true;
 }
 

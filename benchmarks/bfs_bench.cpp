@@ -4,30 +4,31 @@
 #include "utils.h"
 #include <benchmark/benchmark.h>
 #include <memory>
+#include <mutex>
 #include <omp.h>
 
 static std::unique_ptr<mkl_wrapper::mkl_sparse_mat> ptr{nullptr};
+static std::once_flag bfs_load_flag;
+
+static void load_bfs_matrix_once() {
+  if (ptr) return; // already loaded
+  std::ifstream f("data/nv2.mtx");
+  if (!f) {
+    throw std::runtime_error("Failed to open data/nv2.mtx for BFS benchmark");
+  }
+  std::vector<MKL_INT> csr_rows, csr_cols;
+  std::vector<double> csr_vals;
+  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+  ptr.reset(new mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
+                                            csr_rows.size() - 1, csr_rows,
+                                            csr_cols, csr_vals));
+}
 class MyFixture : public benchmark::Fixture {
 
 public:
   // add members as needed
 
-  MyFixture() {
-    if (ptr == nullptr) {
-      std::ifstream f("data/nv2.mtx");
-      f.clear();
-      f.seekg(0, std::ios::beg);
-      std::vector<MKL_INT> csr_rows, csr_cols;
-      std::vector<double> csr_vals;
-      utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
-
-      ptr.reset(new mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
-                                                csr_rows.size() - 1, csr_rows,
-                                                csr_cols, csr_vals));
-      std::cout << "rows: " << ptr->rows() << ", nnz: " << ptr->nnz()
-                << std::endl;
-    }
-  }
+  MyFixture() { std::call_once(bfs_load_flag, load_bfs_matrix_once); }
 };
 
 BENCHMARK_F(MyFixture, BM_BFS)(benchmark::State &state) {
@@ -78,4 +79,12 @@ BENCHMARK_REGISTER_F(MyFixture, BM_PNodeDegree)
     ->RangeMultiplier(2)
     ->Range(1, 1 << 5);
 
-BENCHMARK_MAIN();
+int main(int argc, char** argv) {
+  ::benchmark::Initialize(&argc, argv);
+  std::call_once(bfs_load_flag, load_bfs_matrix_once);
+  if (ptr) {
+    std::cout << "rows: " << ptr->rows() << ", nnz: " << ptr->nnz() << std::endl;
+  }
+  ::benchmark::RunSpecifiedBenchmarks();
+  return 0;
+}
