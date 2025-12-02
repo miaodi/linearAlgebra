@@ -4,7 +4,6 @@
 #include <execution>
 #include <iostream>
 #include <omp.h>
-#include "circularbuffer.hpp"
 
 namespace graph {
 
@@ -18,56 +17,59 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
     const COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
     std::fill_n(levels.begin(), levels.size(), INVALID);
     const COLTYPE base = ai[0]; // Get base indexing from first element
-    const int capacity = 256;
-    utils::CircularBuffer<COLTYPE> cb(capacity);
-    lastLevel.reserve(capacity);
+    
+    // Use lastLevel as one frontier, and a local vector as the other
+    std::vector<COLTYPE> next_frontier;
+    next_frontier.reserve(256);
+    
     lastLevel.clear();
-    cb.push_back(source - base);
+    lastLevel.reserve(256);
+    lastLevel.push_back(source - base);
     levels[source - base] = 0;
-    if constexpr (LASTLEVEL)
-        lastLevel.push_back(source);
 
-    COLTYPE nodes_left_in_level = cb.size();
     COLTYPE widthCounter = 1;
-    while (nodes_left_in_level)
+    while (!lastLevel.empty())
     {
-        const auto u = cb.pop_front();
-        for (ROWTYPE i = ai[u] - base; i < ai[u + 1] - base; i++)
+        width = std::max(width, static_cast<COLTYPE>(lastLevel.size()));
+        
+        // Process current level
+        for (const auto u : lastLevel)
         {
-            auto v = aj[i] - base;
-            if (levels[v] == INVALID)
+            for (ROWTYPE i = ai[u] - base; i < ai[u + 1] - base; i++)
             {
-                levels[v] = height + 1;
-                if constexpr (LASTLEVEL)
-                    lastLevel.push_back(v + base);
-                cb.push_back(v);
-                if constexpr (SHORTCUT)
+                auto v = aj[i] - base;
+                if (levels[v] == INVALID)
                 {
-                    if (++widthCounter >= shortCutWidth)
-                        return false;
-                }
-                else
-                {
-                    ++widthCounter;
+                    levels[v] = height + 1;
+                    next_frontier.push_back(v);
+                    if constexpr (SHORTCUT)
+                    {
+                        if (++widthCounter >= shortCutWidth)
+                            return false;
+                    }
+                    else
+                    {
+                        ++widthCounter;
+                    }
                 }
             }
         }
-        if (--nodes_left_in_level == 0)
-        {
-            height++;
-            width = std::max(width, widthCounter);
-            widthCounter = 0;
-            if constexpr (LASTLEVEL)
-            {
-                lastLevel.clear();
-            }
-            nodes_left_in_level = cb.size();
-            if (nodes_left_in_level == 0)
-            {
-                break;
-            }
+        
+        // Move to next level
+        height++;
+        
+        // Swap frontiers
+        lastLevel.clear();
+        std::swap(lastLevel, next_frontier);
+    }
+    
+    // Add base offset back to lastLevel if needed
+    if constexpr (LASTLEVEL) {
+        for (auto& v : lastLevel) {
+            v += base;
         }
     }
+    
     return true;
 }
 
