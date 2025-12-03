@@ -15,28 +15,27 @@
 
 namespace reordering {
 
-// void NodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
-//                 std::vector<MKL_INT> &degrees) {
-//   degrees.resize(mat->rows());
-//   const MKL_INT base = mat->mkl_base();
-//   auto ai = mat->get_ai();
+// Template implementation
+template <typename ROWTYPE, typename COLTYPE>
+void NodeDegree(COLTYPE rows, const ROWTYPE* ai, COLTYPE* degrees, int numthreads)
+{
+    if (numthreads <= 0)
+    {
+        numthreads = omp_get_max_threads();
+    }
 
-//   for (MKL_INT i = 0; i < mat->rows(); i++) {
-//     degrees[i] = ai[i + 1] - ai[i];
-//   }
-// }
+// Parallel version with SIMD vectorization
+#pragma omp parallel for simd num_threads(numthreads)
+    for (COLTYPE i = 0; i < rows; i++)
+    {
+        degrees[i] = ai[i + 1] - ai[i];
+    }
+}
 
-// void PNodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
-//                  std::vector<MKL_INT> &degrees) {
-//   degrees.resize(mat->rows());
-//   const MKL_INT base = mat->mkl_base();
-//   auto ai = mat->get_ai();
-
-// #pragma omp parallel for
-//   for (MKL_INT i = 0; i < mat->rows(); i++) {
-//     degrees[i] = ai[i + 1] - ai[i];
-//   }
-// }
+// Explicit instantiations
+template void NodeDegree<int, int>(int rows, const int* ai, int* degrees, int numthreads);
+template void NodeDegree<long, int>(int rows, const long* ai, int* degrees, int numthreads);
+template void NodeDegree<long, long>(long rows, const long* ai, long* degrees, int numthreads);
 
 // void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
 //               std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm) {
@@ -140,26 +139,6 @@ namespace reordering {
 // }
 
 #ifdef USE_METIS_LIB
-void MetisND(mkl_wrapper::mkl_sparse_mat const *const mat,
-             std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm,
-             const MetisNDOptions& opts) {
-
-  iperm.resize(mat->cols());
-  perm.resize(mat->cols());
-  std::vector<MKL_INT> xadj;
-  std::vector<MKL_INT> adjncy;
-  mat->get_adjacency_graph(xadj, adjncy);
-
-  // Call the raw pointer version
-  int result = MetisND(mat->rows(), mat->cols(),
-                       xadj.data(), adjncy.data(),
-                       iperm.data(), perm.data(), opts);
-  
-  if (result != 0) {
-    std::cerr << "MetisND failed with error code: " << result << std::endl;
-  }
-}
-
 template <typename ROWTYPE, typename COLTYPE>
 int MetisND(const COLTYPE nrows, const COLTYPE ncols,
             const ROWTYPE* xadj, const COLTYPE* adjncy,
