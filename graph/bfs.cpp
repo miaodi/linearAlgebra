@@ -82,7 +82,7 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
 template<typename T>
 T atomic_fetch_set(T* base, std::size_t i, T new_val) {
   std::atomic_ref<T> ref(base[i]);
-  return ref.exchange(new_val, std::memory_order_acq_rel);
+  return ref.exchange(new_val, std::memory_order_relaxed);
 }
 
 template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL, bool TRACK>

@@ -8,6 +8,8 @@
 #include <mutex>
 #include <omp.h>
 
+constexpr int MAX_THREADS = 8;
+
 static std::unique_ptr<mkl_wrapper::mkl_sparse_mat> ptr{nullptr};
 static std::once_flag bfs_load_flag;
 
@@ -47,7 +49,7 @@ BENCHMARK_DEFINE_F(MyFixture, BM_PBFS)(benchmark::State &state) {
     bfs(ptr.get(), 0);
   }
 }
-BENCHMARK_REGISTER_F(MyFixture, BM_PBFS)->RangeMultiplier(2)->Range(1, 1 << 5);
+BENCHMARK_REGISTER_F(MyFixture, BM_PBFS)->RangeMultiplier(2)->Range(1, MAX_THREADS);
 
 BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_NOLEVELS)(benchmark::State &state) {
   omp_set_num_threads(state.range(0));
@@ -59,7 +61,7 @@ BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_NOLEVELS)(benchmark::State &state) {
 
 BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_NOLEVELS)
     ->RangeMultiplier(2)
-    ->Range(1, 1 << 5);
+    ->Range(1, MAX_THREADS);
 
 // Direct benchmark using graph::BFSFunc (serial)
 BENCHMARK_F(MyFixture, BM_BFS_DIRECT)(benchmark::State &state) {
@@ -101,7 +103,7 @@ BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_DIRECT_TRACK_ON)(benchmark::State &state) 
     benchmark::DoNotOptimize(width);
   }
 }
-BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_DIRECT_TRACK_ON)->RangeMultiplier(2)->Range(1, 1 << 5);
+BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_DIRECT_TRACK_ON)->RangeMultiplier(2)->Range(1, MAX_THREADS);
 
 // Direct benchmark using graph::PBFSFunc with TRACK=false
 BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_DIRECT_TRACK_OFF)(benchmark::State &state) {
@@ -123,7 +125,7 @@ BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_DIRECT_TRACK_OFF)(benchmark::State &state)
     benchmark::DoNotOptimize(width);
   }
 }
-BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_DIRECT_TRACK_OFF)->RangeMultiplier(2)->Range(1, 1 << 5);
+BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_DIRECT_TRACK_OFF)->RangeMultiplier(2)->Range(1, MAX_THREADS);
 
 BENCHMARK_F(MyFixture, BM_NodeDegree)(benchmark::State &state) {
   for (auto _ : state) {
@@ -134,7 +136,7 @@ BENCHMARK_F(MyFixture, BM_NodeDegree)(benchmark::State &state) {
 
 BENCHMARK_REGISTER_F(MyFixture, BM_NodeDegree)
     ->RangeMultiplier(2)
-    ->Range(1, 1 << 5);
+    ->Range(1, MAX_THREADS);
 
 BENCHMARK_DEFINE_F(MyFixture, BM_PNodeDegree)(benchmark::State &state) {
   omp_set_num_threads(state.range(0));
@@ -146,7 +148,7 @@ BENCHMARK_DEFINE_F(MyFixture, BM_PNodeDegree)(benchmark::State &state) {
 
 BENCHMARK_REGISTER_F(MyFixture, BM_PNodeDegree)
     ->RangeMultiplier(2)
-    ->Range(1, 1 << 5);
+    ->Range(1, MAX_THREADS);
 
 int main(int argc, char** argv) {
   ::benchmark::Initialize(&argc, argv);
