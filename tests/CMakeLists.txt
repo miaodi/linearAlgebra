@@ -13,7 +13,7 @@ file(GLOB_RECURSE ALL_TEST_CPP *.cpp)
 
 # List of tests to exclude
 set(EXCLUDED_TESTS 
-    "reordering_test.cpp"
+   #  "reordering_test.cpp"
 )
 
 foreach(ONE_TEST_CPP ${ALL_TEST_CPP})

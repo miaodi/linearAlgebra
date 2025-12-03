@@ -77,38 +77,32 @@ template <typename T, bool Rank> void UnionFind<T, Rank>::reset(const T size) {
 template class UnionFind<int, false>;
 template class UnionFind<int, true>;
 
-std::vector<MKL_INT>
-UnionFindRank(mkl_wrapper::mkl_sparse_mat const *const mat) {
-  const MKL_INT base = mat->mkl_base();
-  std::vector<MKL_INT> parents(mat->rows());
-  std::vector<MKL_INT> ranks(mat->rows());
-  std::iota(parents.begin(), parents.end(), 0);
+template <typename ROWTYPE, typename COLTYPE>
+void UnionFindRank(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents) {
+  const COLTYPE base = ai[0];
+  std::vector<COLTYPE> ranks(rows);
+  std::iota(parents, parents + rows, 0);
   std::fill(ranks.begin(), ranks.end(), 0);
-  auto ai = mat->get_ai();
-  auto aj = mat->get_aj();
-  for (MKL_INT i = 0; i < mat->rows(); i++) {
-    for (MKL_INT j = ai[i] - base; j < ai[i + 1] - base; j++) {
-
-      UniteByRank(ranks.data(), parents.data(), i, aj[j] - base);
+  for (COLTYPE i = 0; i < rows; i++) {
+    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
+      UniteByRank(ranks.data(), parents, i, aj[j] - base);
     }
   }
-  return parents;
 }
 
-std::vector<MKL_INT>
-UnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat) {
-  const MKL_INT base = mat->mkl_base();
-  std::vector<MKL_INT> parents(mat->rows());
-  std::iota(parents.begin(), parents.end(), 0);
+template <typename ROWTYPE, typename COLTYPE>
+void UnionFindRem(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents) {
+  const COLTYPE base = ai[0];
+  std::iota(parents, parents + rows, 0);
 
-  auto unite = [&parents](MKL_INT x, MKL_INT y) {
+  auto unite = [parents](COLTYPE x, COLTYPE y) {
     while (parents[x] != parents[y]) {
       if (parents[x] < parents[y]) {
         if (x == parents[x]) {
           parents[x] = parents[y];
           break;
         }
-        MKL_INT tmp = parents[x];
+        COLTYPE tmp = parents[x];
         parents[x] = parents[y];
         x = tmp;
       } else {
@@ -116,34 +110,30 @@ UnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat) {
           parents[y] = parents[x];
           break;
         }
-        MKL_INT tmp = parents[y];
+        COLTYPE tmp = parents[y];
         parents[y] = parents[x];
         y = tmp;
       }
     }
   };
-  auto ai = mat->get_ai();
-  auto aj = mat->get_aj();
-  for (MKL_INT i = 0; i < mat->rows(); i++) {
-    for (MKL_INT j = ai[i] - base; j < ai[i + 1] - base; j++) {
+  for (COLTYPE i = 0; i < rows; i++) {
+    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
       unite(i, aj[j] - base);
     }
   }
-  return parents;
 }
 
 // Multi-core Spanning Forest Algorithms using the Disjoint-set Data Structure
-std::vector<MKL_INT>
-ParUnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat) {
-  const MKL_INT base = mat->mkl_base();
-  const MKL_INT rows = mat->rows();
-  std::vector<MKL_INT> parents(mat->rows());
-  std::iota(parents.begin(), parents.end(), 0);
+template <typename ROWTYPE, typename COLTYPE>
+void ParUnionFindRem(COLTYPE rows, ROWTYPE const *const ai,
+                                COLTYPE const *const aj, COLTYPE* parents) {
+  const COLTYPE base = ai[0];
+  std::iota(parents, parents + rows, 0);
 
-  auto unite = [&parents](MKL_INT x, MKL_INT y) {
+  auto unite = [parents](COLTYPE x, COLTYPE y) {
     while (true) {
-      MKL_INT px = parents[x];
-      MKL_INT py = parents[y];
+      COLTYPE px = parents[x];
+      COLTYPE py = parents[y];
       if (px == py)
         break;
       if (py < px) {
@@ -156,34 +146,31 @@ ParUnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat) {
         x = px;
     }
   };
-  auto ai = mat->get_ai();
-  auto aj = mat->get_aj();
 
 #pragma omp parallel
   {
     const int tid = omp_get_thread_num();
     const int nthreads = omp_get_num_threads();
     auto [start, end] = utils::LoadPrefixBalancedPartition(
-        ai.get(), ai.get() + rows, tid, nthreads);
+        ai, ai + rows, tid, nthreads);
 
     for (auto it = start; it != end; it++) {
-      for (MKL_INT j = *it - base; j < *(it + 1) - base; j++) {
-        unite(it - ai.get(), aj[j] - base);
+      for (ROWTYPE j = *it - base; j < *(it + 1) - base; j++) {
+        unite(it - ai, aj[j] - base);
       }
     }
   }
   // #pragma omp parallel for
-  //   for (MKL_INT i = 0; i < mat->rows(); i++) {
-  //     for (MKL_INT j = ai[i] - base; j < ai[i + 1] - base; j++) {
+  //   for (COLTYPE i = 0; i < rows; i++) {
+  //     for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
 
   //       unite(i + base, aj[j]);
   //     }
   //   }
-  return parents;
 }
 
-DisjointSets::DisjointSets(mkl_wrapper::mkl_sparse_mat const *const mat)
-    : mData(mat->rows()), mMat(mat) {
+DisjointSets::DisjointSets(uint32_t rows)
+    : mData(rows) {
   for (uint32_t i = 0; i < mData.size(); ++i)
     mData[i] = (uint32_t)i;
 }
@@ -245,104 +232,157 @@ uint32_t DisjointSets::unite(uint32_t id1, uint32_t id2) {
   return id2;
 }
 
-void DisjointSets::execute() {
+template <typename ROWTYPE, typename COLTYPE>
+void DisjointSets::execute(COLTYPE rows, ROWTYPE const *const ai,
+                           COLTYPE const *const aj) {
 
-  const MKL_INT base = mMat->mkl_base();
-  auto ai = mMat->get_ai();
-  auto aj = mMat->get_aj();
+  const COLTYPE base = ai[0];
 #pragma omp parallel for
-  for (MKL_INT i = 0; i < mMat->rows(); i++) {
-    for (MKL_INT j = ai[i] - base; j < ai[i + 1] - base; j++) {
+  for (COLTYPE i = 0; i < rows; i++) {
+    for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
       unite(i, aj[j] - base);
     }
   }
 }
 
-int CountComponents(std::vector<MKL_INT> &parents) {
+template <typename T>
+int CountComponents(T* parents, T size) {
   int sum = 0;
 #pragma omp parallel for reduction(+ : sum)
-  for (MKL_INT i = 0; i < parents.size(); i++) {
-    if (Find(parents.data(), i) == i)
+  for (T i = 0; i < size; i++) {
+    if (Find(parents, i) == i)
       sum++;
   }
   return sum;
 }
 
-void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
-                    std::vector<MKL_INT> &compRoots,
-                    std::vector<MKL_INT> &sortedComp,
-                    std::vector<MKL_INT> &compPrefSum) {
-  sortedComp.resize(parents.size());
-  std::vector<std::vector<MKL_INT>> rootsOfThread(omp_get_max_threads());
-  std::unordered_map<MKL_INT, MKL_INT> rootToInd; // inverse map of compRoots
-  std::vector<MKL_INT> compSizePrefixSum;
-#pragma omp parallel
-  {
-    const int tid = omp_get_thread_num();
-    const int nthreads = omp_get_num_threads();
-    auto [start, end] = utils::LoadBalancedPartition(
-        parents.begin(), parents.end(), tid, nthreads);
+// Parallel algorithm to compute component statistics
+// Groups all nodes by their connected component and computes per-component metadata
+template <typename T>
+void ComponentsStat(const T* parents, T size, const T base, std::vector<T>& compRoots,
+                    std::vector<T>& sortedComp, std::vector<T>& compPrefSum, int numThreads)
+{
+    sortedComp.resize(size);
 
-    // find roots
-    for (auto it = start; it != end; it++) {
-      const MKL_INT index = it - parents.begin();
-      if (Find(parents.data(), index) == index)
-        rootsOfThread[tid].push_back(index);
-    }
-
-#pragma omp barrier
-#pragma omp master
+    // Ensure numThreads is valid (>= 1)
+    if (numThreads <= 0)
     {
-      // write all roots and inverse map
-      int roots = 0;
-      for (int i = 0; i < nthreads; i++) {
-        roots += rootsOfThread[i].size();
-      }
-      compRoots.reserve(roots);
-      compRoots.resize(0);
-      for (int i = 0; i < nthreads; i++) {
-        for (auto root : rootsOfThread[i]) {
-          rootToInd[root] = compRoots.size();
-          compRoots.push_back(root);
-        }
-      }
-
-      // prefix sum of each component on each thread
-      compSizePrefixSum =
-          std::vector<MKL_INT>(compRoots.size() * (nthreads + 1), 0);
-      compPrefSum = std::vector<MKL_INT>(compRoots.size() + 1, 0);
+        numThreads = omp_get_max_threads();
     }
 
-    // size of each component on each thread
-    // TODO: should optimize inner outer loop
-#pragma omp barrier
-    for (auto it = start; it != end; it++) {
-      const MKL_INT index = it - parents.begin();
-      compSizePrefixSum[(tid + 1) * compRoots.size() +
-                        rootToInd[Find(parents.data(), index)]]++;
-    }
+    // Per-thread storage for component roots discovered by each thread
+    std::vector<std::vector<T>> rootsPerThread(numThreads);
 
-    // prefix sum
-#pragma omp barrier
-#pragma omp master
+    // Map from root node ID to its index in compRoots array
+    std::unordered_map<T, T> rootToCompIndex;
+
+    // Per-thread, per-component prefix sums for parallel output assignment
+    // Layout: [thread][component] in row-major order
+    std::vector<T> threadCompOffsets;
+
+#pragma omp parallel num_threads(numThreads)
     {
-      for (size_t i = 0; i < compRoots.size(); i++) {
-        compSizePrefixSum[i] = compPrefSum[i];
-        for (int j = 0; j < nthreads; j++) {
-          compSizePrefixSum[(j + 1) * compRoots.size() + i] +=
-              compSizePrefixSum[j * compRoots.size() + i];
+        const int tid = omp_get_thread_num();
+        const int nthreads = omp_get_num_threads();
+
+        // Partition work across threads using load-balanced partitioning
+        auto [workStart, workEnd] = utils::LoadBalancedPartition(parents, parents + size, tid, nthreads);
+
+        // Phase 1: Each thread finds root nodes in its partition
+        for (auto it = workStart; it != workEnd; it++)
+        {
+            const T nodeIndex = it - parents;
+            if (Find(const_cast<T*>(parents), nodeIndex) == nodeIndex)
+            {
+                rootsPerThread[tid].push_back(nodeIndex);
+            }
         }
-        compPrefSum[i + 1] = compSizePrefixSum[nthreads * compRoots.size() + i];
-      }
-    }
 
 #pragma omp barrier
-    for (auto it = start; it != end; it++) {
-      const MKL_INT index = it - parents.begin();
-      sortedComp[compSizePrefixSum[tid * compRoots.size() +
-                                   rootToInd[Find(parents.data(), index)]]++] =
-          index + base;
+#pragma omp single
+        {
+            // Phase 2: Gather all roots from all threads and build index mapping
+            int totalRoots = 0;
+            for (int i = 0; i < nthreads; i++)
+            {
+                totalRoots += rootsPerThread[i].size();
+            }
+            compRoots.reserve(totalRoots);
+            compRoots.resize(0);
+
+            for (int i = 0; i < nthreads; i++)
+            {
+                for (auto root : rootsPerThread[i])
+                {
+                    rootToCompIndex[root] = compRoots.size();
+                    compRoots.push_back(root);
+                }
+            }
+
+            // Allocate storage for per-thread, per-component counters
+            // threadCompOffsets[t * numComponents + c] = count for thread t, component c
+            threadCompOffsets = std::vector<T>(compRoots.size() * (nthreads + 1), 0);
+            compPrefSum = std::vector<T>(compRoots.size() + 1, 0);
+        }
+
+        // Phase 3: Each thread counts nodes per component in its partition
+        for (auto it = workStart; it != workEnd; it++)
+        {
+            const T nodeIndex = it - parents;
+            const T rootNode = Find(const_cast<T*>(parents), nodeIndex);
+            const T compIndex = rootToCompIndex[rootNode];
+            threadCompOffsets[(tid + 1) * compRoots.size() + compIndex]++;
+        }
+
+#pragma omp barrier
+#pragma omp single
+        {
+            // Phase 4: Compute prefix sums to determine output positions
+            // First, compute per-component prefix sums across threads
+            for (size_t compIndex = 0; compIndex < compRoots.size(); compIndex++)
+            {
+                threadCompOffsets[compIndex] = compPrefSum[compIndex];
+                for (int threadId = 0; threadId < nthreads; threadId++)
+                {
+                    threadCompOffsets[(threadId + 1) * compRoots.size() + compIndex] +=
+                        threadCompOffsets[threadId * compRoots.size() + compIndex];
+                }
+                compPrefSum[compIndex + 1] = threadCompOffsets[nthreads * compRoots.size() + compIndex];
+            }
+        }
+        
+        // Phase 5: Write nodes to output in component-sorted order
+        // Each thread writes to its pre-computed position using prefix sums
+        for (auto it = workStart; it != workEnd; it++)
+        {
+            const T nodeIndex = it - parents;
+            const T rootNode = Find(const_cast<T*>(parents), nodeIndex);
+            const T compIndex = rootToCompIndex[rootNode];
+
+            // Get and increment the output position for this thread and component
+            T& outputPos = threadCompOffsets[tid * compRoots.size() + compIndex];
+            sortedComp[outputPos++] = nodeIndex + base;
+        }
     }
-  }
 }
+
+// Explicit template instantiations for common types
+template void UnionFindRank<int, int>(int rows, int const* ai, int const* aj, int* parents);
+template void UnionFindRank<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj, int64_t* parents);
+
+template void UnionFindRem<int, int>(int rows, int const* ai, int const* aj, int* parents);
+template void UnionFindRem<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj, int64_t* parents);
+
+template void ParUnionFindRem<int, int>(int rows, int const* ai, int const* aj, int* parents);
+template void ParUnionFindRem<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj, int64_t* parents);
+
+template void DisjointSets::execute<int, int>(int rows, int const* ai, int const* aj);
+template void DisjointSets::execute<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj);
+
+template int CountComponents<int>(int* parents, int size);
+template int CountComponents<int64_t>(int64_t* parents, int64_t size);
+
+template void ComponentsStat<int>(const int* parents, int size, const int base, std::vector<int> &compRoots, std::vector<int> &sortedComp, std::vector<int> &compPrefSum, int numThreads);
+template void ComponentsStat<int64_t>(const int64_t* parents, int64_t size, const int64_t base, std::vector<int64_t> &compRoots, std::vector<int64_t> &sortedComp, std::vector<int64_t> &compPrefSum, int numThreads);
+
 } // namespace reordering

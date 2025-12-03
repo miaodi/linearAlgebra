@@ -11,6 +11,7 @@ file(GLOB_RECURSE ALL_BENCH_CPP *.cpp)
 set(EXCLUDED_BENCHMARKS 
     "precond_bench.cpp"
     "reordering_bench.cpp"
+    "unionfind_bench.cpp"
 )
 
 foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})

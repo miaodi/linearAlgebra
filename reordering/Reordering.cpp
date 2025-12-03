@@ -15,129 +15,129 @@
 
 namespace reordering {
 
-void NodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
-                std::vector<MKL_INT> &degrees) {
-  degrees.resize(mat->rows());
-  const MKL_INT base = mat->mkl_base();
-  auto ai = mat->get_ai();
+// void NodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
+//                 std::vector<MKL_INT> &degrees) {
+//   degrees.resize(mat->rows());
+//   const MKL_INT base = mat->mkl_base();
+//   auto ai = mat->get_ai();
 
-  for (MKL_INT i = 0; i < mat->rows(); i++) {
-    degrees[i] = ai[i + 1] - ai[i];
-  }
-}
+//   for (MKL_INT i = 0; i < mat->rows(); i++) {
+//     degrees[i] = ai[i + 1] - ai[i];
+//   }
+// }
 
-void PNodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
-                 std::vector<MKL_INT> &degrees) {
-  degrees.resize(mat->rows());
-  const MKL_INT base = mat->mkl_base();
-  auto ai = mat->get_ai();
+// void PNodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
+//                  std::vector<MKL_INT> &degrees) {
+//   degrees.resize(mat->rows());
+//   const MKL_INT base = mat->mkl_base();
+//   auto ai = mat->get_ai();
 
-#pragma omp parallel for
-  for (MKL_INT i = 0; i < mat->rows(); i++) {
-    degrees[i] = ai[i + 1] - ai[i];
-  }
-}
+// #pragma omp parallel for
+//   for (MKL_INT i = 0; i < mat->rows(); i++) {
+//     degrees[i] = ai[i + 1] - ai[i];
+//   }
+// }
 
-void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
-              std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm) {
-  // TODO: need to assert rows=cols
-  std::vector<MKL_INT> degrees;
-  PNodeDegree(mat, degrees); // get degrees of all nodes
-  iperm.resize(mat->cols());
+// void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
+//               std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm) {
+//   // TODO: need to assert rows=cols
+//   std::vector<MKL_INT> degrees;
+//   PNodeDegree(mat, degrees); // get degrees of all nodes
+//   iperm.resize(mat->cols());
 
-  auto parents = reordering::ParUnionFindRem(mat);
+//   auto parents = reordering::ParUnionFindRem(mat);
 
-  std::vector<MKL_INT> compRoots;
-  std::vector<MKL_INT> sortedComp;
-  std::vector<MKL_INT> compPrefSum;
+//   std::vector<MKL_INT> compRoots;
+//   std::vector<MKL_INT> sortedComp;
+//   std::vector<MKL_INT> compPrefSum;
 
-  const MKL_INT base = mat->mkl_base();
-  const auto &ai = mat->get_ai();
-  const auto &aj = mat->get_aj();
+//   const MKL_INT base = mat->mkl_base();
+//   const auto &ai = mat->get_ai();
+//   const auto &aj = mat->get_aj();
 
-  reordering::ComponentsStat(parents, base, compRoots, sortedComp, compPrefSum);
-  MKL_INT offset;
-  MKL_INT source, target;
-  MKL_INT e;
-  std::vector<MKL_INT> prefix;
-  std::vector<MKL_INT> children;
+//   reordering::ComponentsStat(parents, base, compRoots, sortedComp, compPrefSum);
+//   MKL_INT offset;
+//   MKL_INT source, target;
+//   MKL_INT e;
+//   std::vector<MKL_INT> prefix;
+//   std::vector<MKL_INT> children;
 
-  for (int c = 0; c < compRoots.size(); c++) {
-    offset = compPrefSum[c];
-    // special treatment for components of size 1 and 2
-    if (compPrefSum[c + 1] - compPrefSum[c] == 1) {
-      iperm[offset] = sortedComp[offset];
-      continue;
-    } else if (compPrefSum[c + 1] - compPrefSum[c] == 2) {
-      iperm[offset] = sortedComp[offset];
-      iperm[offset + 1] = sortedComp[offset + 1];
-      continue;
-    }
+//   for (int c = 0; c < compRoots.size(); c++) {
+//     offset = compPrefSum[c];
+//     // special treatment for components of size 1 and 2
+//     if (compPrefSum[c + 1] - compPrefSum[c] == 1) {
+//       iperm[offset] = sortedComp[offset];
+//       continue;
+//     } else if (compPrefSum[c + 1] - compPrefSum[c] == 2) {
+//       iperm[offset] = sortedComp[offset];
+//       iperm[offset + 1] = sortedComp[offset + 1];
+//       continue;
+//     }
 
-    // select source node
-    // source = reordering::MinDegreeNode(
-    //              degrees, base,
-    //              std::span(sortedComp.cbegin() + compPrefSum[c],
-    //                        sortedComp.cbegin() + compPrefSum[c + 1]))
-    //              .first -
-    //          base;
-    reordering::PseudoDiameter(
-        mat, degrees,
-        std::span(sortedComp.cbegin() + compPrefSum[c],
-                  sortedComp.cbegin() + compPrefSum[c + 1]),
-        source, target);
-    e = offset;
-    iperm[e++] = source;
+//     // select source node
+//     // source = reordering::MinDegreeNode(
+//     //              degrees, base,
+//     //              std::span(sortedComp.cbegin() + compPrefSum[c],
+//     //                        sortedComp.cbegin() + compPrefSum[c + 1]))
+//     //              .first -
+//     //          base;
+//     reordering::PseudoDiameter(
+//         mat, degrees,
+//         std::span(sortedComp.cbegin() + compPrefSum[c],
+//                   sortedComp.cbegin() + compPrefSum[c + 1]),
+//         source, target);
+//     e = offset;
+//     iperm[e++] = source;
 
-    reordering::BFS bfs(reordering::BFS_Fn<false>);
-    bfs(mat, source);
-    auto &levels = bfs.getLevels();
-    const auto height = bfs.getHeight();
-    // std::cout << "height: " << height << std::endl;
+//     reordering::BFS bfs(reordering::BFS_Fn<false>);
+//     bfs(mat, source);
+//     auto &levels = bfs.getLevels();
+//     const auto height = bfs.getHeight();
+//     // std::cout << "height: " << height << std::endl;
 
-    prefix.resize(height + 1);
-    std::fill(prefix.begin(), prefix.end(), 0);
-    for (MKL_INT p = compPrefSum[c]; p != compPrefSum[c + 1]; p++) {
-      prefix[levels[sortedComp[p] - base] + 1]++;
-    }
-    for (MKL_INT l = 0; l < height; l++) {
-      prefix[l + 1] += prefix[l];
-    }
+//     prefix.resize(height + 1);
+//     std::fill(prefix.begin(), prefix.end(), 0);
+//     for (MKL_INT p = compPrefSum[c]; p != compPrefSum[c + 1]; p++) {
+//       prefix[levels[sortedComp[p] - base] + 1]++;
+//     }
+//     for (MKL_INT l = 0; l < height; l++) {
+//       prefix[l + 1] += prefix[l];
+//     }
 
-    children.reserve(bfs.getWidth());
-    for (MKL_INT l = 0; l < height; l++) {
-      for (MKL_INT r = prefix[l]; r != prefix[l + 1]; r++) {
-        children.resize(0);
-        MKL_INT u = iperm[r + offset] - base;
-        for (MKL_INT j = ai[u] - base; j != ai[u + 1] - base; j++) {
-          MKL_INT v = aj[j] - base;
-          if (levels[v] == l + 1) {
-            children.push_back(v);
-            levels[v] = -1; // TODO: optimization is needed
-          }
-        }
+//     children.reserve(bfs.getWidth());
+//     for (MKL_INT l = 0; l < height; l++) {
+//       for (MKL_INT r = prefix[l]; r != prefix[l + 1]; r++) {
+//         children.resize(0);
+//         MKL_INT u = iperm[r + offset] - base;
+//         for (MKL_INT j = ai[u] - base; j != ai[u + 1] - base; j++) {
+//           MKL_INT v = aj[j] - base;
+//           if (levels[v] == l + 1) {
+//             children.push_back(v);
+//             levels[v] = -1; // TODO: optimization is needed
+//           }
+//         }
 
-        // pick nodes with the smallest degree
-        std::sort(children.begin(), children.end(),
-                  [&degrees](const MKL_INT a, const MKL_INT b) {
-                    if (degrees[a] == degrees[b])
-                      return a < b;
-                    return degrees[a] < degrees[b];
-                  });
-#pragma ivdep
-#pragma vector always
-        for (size_t i = 0; i < children.size(); i++) {
-          iperm[e + i] = children[i] + base;
-        }
-        e += children.size();
-        // for (auto i : children)
-        //   iperm[e++] = i + base;
-      }
-    }
-  }
-  std::reverse(std::execution::par_unseq, iperm.begin(), iperm.end());
-  utils::inversePermute(perm, iperm, base);
-}
+//         // pick nodes with the smallest degree
+//         std::sort(children.begin(), children.end(),
+//                   [&degrees](const MKL_INT a, const MKL_INT b) {
+//                     if (degrees[a] == degrees[b])
+//                       return a < b;
+//                     return degrees[a] < degrees[b];
+//                   });
+// #pragma ivdep
+// #pragma vector always
+//         for (size_t i = 0; i < children.size(); i++) {
+//           iperm[e + i] = children[i] + base;
+//         }
+//         e += children.size();
+//         // for (auto i : children)
+//         //   iperm[e++] = i + base;
+//       }
+//     }
+//   }
+//   std::reverse(std::execution::par_unseq, iperm.begin(), iperm.end());
+//   utils::inversePermute(perm, iperm, base);
+// }
 
 #ifdef USE_METIS_LIB
 void MetisND(mkl_wrapper::mkl_sparse_mat const *const mat,

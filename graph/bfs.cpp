@@ -20,23 +20,27 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
     std::fill_n(levels.begin(), levels.size(), INVALID);
     const COLTYPE base = ai[0]; // Get base indexing from first element
     
-    // Use lastLevel as one frontier, and a local vector as the other
-    std::vector<COLTYPE> next_frontier;
-    next_frontier.reserve(256);
+    // Use two frontiers for alternating levels
+    std::vector<COLTYPE> frontier_a, frontier_b;
+    frontier_a.reserve(256);
+    frontier_b.reserve(256);
     
-    lastLevel.clear();
-    lastLevel.reserve(256);
-    lastLevel.push_back(source - base);
+    std::vector<COLTYPE>* current_frontier = &frontier_a;
+    std::vector<COLTYPE>* next_frontier = &frontier_b;
+    
+    current_frontier->clear();
+    current_frontier->push_back(source - base);
     levels[source - base] = 0;
 
     COLTYPE widthCounter = 1;
-    while (!lastLevel.empty())
+    while (!current_frontier->empty())
     {
+        next_frontier->clear();
         if constexpr (TRACK)
-            width = std::max(width, static_cast<COLTYPE>(lastLevel.size()));
+            width = std::max(width, static_cast<COLTYPE>(current_frontier->size()));
         
         // Process current level
-        for (const auto u : lastLevel)
+        for (const auto u : *current_frontier)
         {
             for (ROWTYPE i = ai[u] - base; i < ai[u + 1] - base; i++)
             {
@@ -44,7 +48,7 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
                 if (levels[v] == INVALID)
                 {
                     levels[v] = height + 1;
-                    next_frontier.push_back(v);
+                    next_frontier->push_back(v);
                     if constexpr (TRACK)
                     {
                         if (++widthCounter >= shortCutWidth)
@@ -61,16 +65,20 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
         // Move to next level
         height++;
         
-        // Swap frontiers
-        lastLevel.clear();
-        std::swap(lastLevel, next_frontier);
+        // Swap frontier pointers
+        std::swap(current_frontier, next_frontier);
     }
     
-    // Add base offset back to lastLevel if needed
+    // After loop exits, current_frontier is empty and next_frontier has the last level
+    // Copy last level if requested
     if constexpr (LASTLEVEL) {
-        for (auto& v : lastLevel) {
-            v += base;
+        lastLevel.clear();
+        lastLevel.reserve(next_frontier->size());
+        for (auto v : *next_frontier) {
+            lastLevel.push_back(v + base);
         }
+    } else {
+        lastLevel.clear();
     }
     
     // If not tracking, ensure width remains 0
@@ -106,7 +114,7 @@ bool PBFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source
 
     levels[source - base] = 0;
 
-    wavefront_next[0].push_back(source - base);
+    wavefront_cur[0].push_back(source - base);
 
 #pragma omp parallel num_threads(nthreads)
     {
@@ -114,18 +122,13 @@ bool PBFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source
 
         while (true)
         {
-#pragma omp barrier
-#pragma omp single
-            {
-                std::swap(wavefront_next, wavefront_cur);
-                height++;
-            }
             auto joined_local = wavefront_cur | std::views::join;
             const COLTYPE total_work = static_cast<COLTYPE>(std::ranges::distance(joined_local));
             if (total_work == 0)
             {
                 break;
             }
+            wavefront_next[tid].clear();
             if constexpr (TRACK)
             {
               if (shortCutWidth <= total_work)
@@ -147,25 +150,33 @@ bool PBFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source
                     auto v = aj[k] - base;
                     if constexpr (TRACK)
                     {
-                      auto old_val = atomic_fetch_set(levels.data(), v, height);
-                      if (old_val == INVALID)
-                      {
-                          wavefront_next[tid].push_back(v);
-                      }
+                        if (levels[v] == INVALID)
+                        {
+                            auto old_val = atomic_fetch_set(levels.data(), v, height + 1);
+                            if (old_val == INVALID)
+                            {
+                                wavefront_next[tid].push_back(v);
+                            }
+                        }
                     }
                     else
                     {
                         if (levels[v] == INVALID)
                         {
-                            levels[v] = height;
+                            levels[v] = height + 1;
                             wavefront_next[tid].push_back(v);
                         }
                     }
                 }
             }
+#pragma omp barrier
+#pragma omp single
+            {
+                std::swap(wavefront_next, wavefront_cur);
+                height++;
+            }
         }
     }
-    height--;
 
     if constexpr (TRACK)
     {
@@ -178,15 +189,24 @@ bool PBFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source
         lastLevel.clear();
         for (const auto& vec : wavefront_next)
         {
-            lastLevel.insert(lastLevel.end(), vec.begin(), vec.end());
+            for (auto v : vec)
+            {
+                lastLevel.push_back(v + base);
+            }
         }
         if constexpr (!TRACK)
         {
             std::sort(lastLevel.begin(), lastLevel.end());
             lastLevel.erase(std::unique(lastLevel.begin(), lastLevel.end()), lastLevel.end());
         }
+    } else {
+        lastLevel.clear();
     }
-    // width remains 0 in no-track path
+    
+    // If not tracking, ensure width remains 0
+    if constexpr (!TRACK) {
+        width = 0;
+    }
     return true;
 }
 
