@@ -127,28 +127,28 @@ BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_DIRECT_TRACK_OFF)(benchmark::State &state)
 }
 BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_DIRECT_TRACK_OFF)->RangeMultiplier(2)->Range(1, MAX_THREADS);
 
-BENCHMARK_F(MyFixture, BM_NodeDegree)(benchmark::State &state) {
-  for (auto _ : state) {
-    std::vector<MKL_INT> degrees;
-    reordering::NodeDegree(ptr.get(), degrees);
-  }
-}
+// BENCHMARK_F(MyFixture, BM_NodeDegree)(benchmark::State &state) {
+//   for (auto _ : state) {
+//     std::vector<MKL_INT> degrees;
+//     reordering::NodeDegree(ptr.get(), degrees);
+//   }
+// }
 
-BENCHMARK_REGISTER_F(MyFixture, BM_NodeDegree)
-    ->RangeMultiplier(2)
-    ->Range(1, MAX_THREADS);
+// BENCHMARK_REGISTER_F(MyFixture, BM_NodeDegree)
+//     ->RangeMultiplier(2)
+//     ->Range(1, MAX_THREADS);
 
-BENCHMARK_DEFINE_F(MyFixture, BM_PNodeDegree)(benchmark::State &state) {
-  omp_set_num_threads(state.range(0));
-  for (auto _ : state) {
-    std::vector<MKL_INT> degrees;
-    reordering::PNodeDegree(ptr.get(), degrees);
-  }
-}
+// BENCHMARK_DEFINE_F(MyFixture, BM_PNodeDegree)(benchmark::State &state) {
+//   omp_set_num_threads(state.range(0));
+//   for (auto _ : state) {
+//     std::vector<MKL_INT> degrees;
+//     reordering::PNodeDegree(ptr.get(), degrees);
+//   }
+// }
 
-BENCHMARK_REGISTER_F(MyFixture, BM_PNodeDegree)
-    ->RangeMultiplier(2)
-    ->Range(1, MAX_THREADS);
+// BENCHMARK_REGISTER_F(MyFixture, BM_PNodeDegree)
+//     ->RangeMultiplier(2)
+//     ->Range(1, MAX_THREADS);
 
 int main(int argc, char** argv) {
   ::benchmark::Initialize(&argc, argv);

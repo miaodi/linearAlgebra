@@ -1184,15 +1184,11 @@ void ShiftCSRBase(const COLTYPE rows, const ROWTYPE new_base, ROWTYPE* ai, COLTY
   const ROWTYPE delta = new_base - old_base;
 
   // Shift ai
-  for (COLTYPE i = 0; i <= rows; i++) {
-    ai[i] += delta;
-  }
+  std::for_each(ai, ai + rows + 1, [delta](ROWTYPE& v) { v += delta; });
 
   // Shift aj
   if (aj) {
-    for (ROWTYPE k = 0; k < nnz; k++) {
-      aj[k] += delta;
-    }
+    std::for_each(aj, aj + nnz, [delta](COLTYPE& v) { v += delta; });
   }
 }
 } // namespace matrix_utils

@@ -6,33 +6,48 @@
 
 namespace graph {
 
+/// @brief Helper to extract ROWTYPE and COLTYPE from BFS function pointer
+template <typename Func>
+struct BFSFuncTraits;
+
+// Specialization for BFSFunc without nthreads parameter
+template <typename R, typename C>
+struct BFSFuncTraits<bool (*)(C, R const*, C const*, C, C, C&, C&, std::vector<C>&, std::vector<C>&)> {
+  using ROWTYPE = R;
+  using COLTYPE = C;
+};
+
+// Specialization for PBFSFunc with nthreads parameter
+template <typename R, typename C>
+struct BFSFuncTraits<bool (*)(C, R const*, C const*, C, C, C&, C&, std::vector<C>&, std::vector<C>&, int)> {
+  using ROWTYPE = R;
+  using COLTYPE = C;
+};
+
 /// @brief Breadth-First Search (BFS) class for graph traversal
 /// @details Provides both serial and parallel BFS implementations for graphs
 /// represented in CSR (Compressed Sparse Row) format
-template <typename ROWTYPE, typename COLTYPE>
+/// @tparam BFSFuncType BFS function pointer (e.g., BFSFunc or PBFSFunc)
+template <auto BFSFuncType>
 class BFS {
 public:
-  /// @brief Function signature for BFS implementations
-  using FN = std::function<bool(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-                                 COLTYPE source, COLTYPE shortCut, COLTYPE& height,
-                                 COLTYPE& width, std::vector<COLTYPE>& levels,
-                                 std::vector<COLTYPE>& lastLevel)>;
+  using ROWTYPE = typename BFSFuncTraits<decltype(BFSFuncType)>::ROWTYPE;
+  using COLTYPE = typename BFSFuncTraits<decltype(BFSFuncType)>::COLTYPE;
 
   /// @brief Constructor
-  /// @param fn BFS function to use (serial or parallel)
-  BFS(FN fn) : _fn{fn} {}
+  BFS() = default;
 
   /// @brief Perform BFS traversal
-  /// @tparam LASTLEVEL If true, records the nodes in the last level
   /// @param rows Number of rows in the graph
   /// @param ai Row pointers array (ai[0] contains the base indexing)
   /// @param aj Column indices array
   /// @param source Source node for BFS (in original indexing)
+  /// @param args Additional arguments to pass to the BFS function (e.g., nthreads for PBFSFunc)
   /// @return true if successful, false if shortcut width exceeded
-  template <bool LASTLEVEL = false>
+  template <typename... Args>
   bool operator()(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-                  const COLTYPE source) {
-    return _fn(rows, ai, aj, source, _shortCut, _height, _width, _levels, _lastLevel);
+                  const COLTYPE source, Args&&... args) {
+    return BFSFuncType(rows, ai, aj, source, _shortCut, _height, _width, _levels, _lastLevel, std::forward<Args>(args)...);
   }
 
   /// @brief Get the BFS levels for each node
@@ -52,7 +67,6 @@ public:
   const std::vector<COLTYPE>& getLastLevel() const { return _lastLevel; }
 
 private:
-  FN _fn;
   std::vector<COLTYPE> _lastLevel;
   std::vector<COLTYPE> _levels;
   COLTYPE _height;

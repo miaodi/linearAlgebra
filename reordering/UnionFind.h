@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <mkl_types.h>
 #include <utility>
 #include <vector>
 #include <type_traits>
@@ -44,33 +43,24 @@ private:
   std::conditional_t<Rank, std::vector<T>, std::monostate> _ranks;
 };
 
-// template <typename T> T Find(std::vector<std::atomic<T>> &parents, T x) {
-//   while (x != parents[x]) {
-//     T px = parents[x];
-//     if (px != x)
-//       parents[x].compare_exchange_weak(px, parents[px]);
-//     x = parents[x];
-//   }
-//   return x;
-// };
-
-// NOTE: no matter the base of mat, the output parents vector is always 0
+// NOTE: no matter the base of ai, the output parents vector is always 0
 // based
 
-std::vector<MKL_INT>
-UnionFindRank(mkl_wrapper::mkl_sparse_mat const *const mat);
+template <typename ROWTYPE, typename COLTYPE>
+void UnionFindRank(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents);
 
-std::vector<MKL_INT> UnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat);
+template <typename ROWTYPE, typename COLTYPE>
+void UnionFindRem(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents);
 
 // Multi-core Spanning Forest Algorithms using the Disjoint-set Data Structure
-std::vector<MKL_INT>
-ParUnionFindRem(mkl_wrapper::mkl_sparse_mat const *const mat);
+template <typename ROWTYPE, typename COLTYPE>
+void ParUnionFindRem(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents);
 
 // Wait-free parallel algorithms for the union-find problem
 // https://github.com/wjakob/dset
 class DisjointSets {
 public:
-  DisjointSets(mkl_wrapper::mkl_sparse_mat const *const mat);
+  DisjointSets(uint32_t rows);
 
   uint32_t find(uint32_t id) const;
 
@@ -83,18 +73,28 @@ public:
     return ((uint32_t)(mData[id] >> 32)) & 0x7FFFFFFFu;
   }
 
-  void execute();
+  template <typename ROWTYPE, typename COLTYPE>
+  void execute(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj);
 
   uint32_t parent(uint32_t id) const { return (uint32_t)mData[id]; }
   mutable std::vector<std::atomic<uint64_t>> mData;
-  mkl_wrapper::mkl_sparse_mat const *const mMat;
 };
 
-int CountComponents(std::vector<MKL_INT> &parents);
+template <typename T>
+int CountComponents(T* parents, T size);
 
-void ComponentsStat(std::vector<MKL_INT> &parents, const MKL_INT base,
-                    std::vector<MKL_INT> &compRoots,
-                    std::vector<MKL_INT> &sortedComp,
-                    std::vector<MKL_INT> &compPrefSum);
+// Compute statistics about connected components in a union-find structure
+// Input:
+//   parents: union-find parent array (size elements)
+//   size: number of elements in the union-find structure
+//   base: base index (0 or 1) for output indexing
+//   numThreads: number of threads to use (if <= 0, uses current OMP setting)
+// Output:
+//   compRoots: vector of root nodes for each component
+//   sortedComp: nodes sorted by component (grouped by root)
+//   compPrefSum: prefix sum of component sizes (compPrefSum[i+1] - compPrefSum[i] = size of component i)
+template <typename T>
+void ComponentsStat(const T* parents, T size, const T base, std::vector<T>& compRoots,
+                    std::vector<T>& sortedComp, std::vector<T>& compPrefSum, int numThreads = 1);
 
 } // namespace reordering
