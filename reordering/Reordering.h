@@ -1,38 +1,32 @@
 #pragma once
 #include "config.h"
 #include "BFS.h"
-#include "mkl_sparse_mat.h"
 #include <algorithm>
 #include <limits>
-#include <mkl_types.h>
 #include <omp.h>
 #include <ranges>
 #include <utility>
 #include <vector>
 
-namespace mkl_wrapper {
-class mkl_sparse_mat;
-}
-
 namespace reordering {
 
-// void NodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
-//                 std::vector<MKL_INT> &degrees);
-
-// void PNodeDegree(mkl_wrapper::mkl_sparse_mat const *const mat,
-//                  std::vector<MKL_INT> &degrees);
-// // returns node index and degree
+// Modern interface with raw CSR pointers
+template <typename ROWTYPE, typename COLTYPE>
+void NodeDegree(COLTYPE rows, const ROWTYPE* ai, COLTYPE* degrees, int numthreads = 1);
+// returns node index and degree
 // template <typename View>
-// std::pair<MKL_INT, MKL_INT> MinDegreeNode(const std::vector<MKL_INT> &degrees,
-//                                           const MKL_INT base, View &&view) {
-//   std::pair<MKL_INT, MKL_INT> res(-1, std::numeric_limits<MKL_INT>::max());
-//   for (const auto i : view) {
-//     if (degrees[i - base] < res.second) {
-//       res.first = i;
-//       res.second = degrees[i - base];
+// std::pair<MKL_INT, MKL_INT> MinDegreeNode(const std::vector<MKL_INT>& degrees, const MKL_INT base, View&& view)
+// {
+//     std::pair<MKL_INT, MKL_INT> res(-1, std::numeric_limits<MKL_INT>::max());
+//     for (const auto i : view)
+//     {
+//         if (degrees[i - base] < res.second)
+//         {
+//             res.first = i;
+//             res.second = degrees[i - base];
+//         }
 //     }
-//   }
-//   return res;
+//     return res;
 // }
 
 // template <typename T>
@@ -173,11 +167,6 @@ struct MetisNDOptions {
   /// Higher values produce more diagnostic output
   int dbglvl = 0;
 };
-
-// nested dissection from metis
-void MetisND(mkl_wrapper::mkl_sparse_mat const *const mat,
-             std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm,
-             const MetisNDOptions& opts = MetisNDOptions());
 
 /// @brief METIS nested dissection reordering for general CSR matrices
 /// @tparam ROWTYPE Type for row pointers (xadj array) - supports int32_t or int64_t
