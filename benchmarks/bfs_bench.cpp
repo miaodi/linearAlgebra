@@ -2,6 +2,7 @@
 #include "Reordering.h"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
+#include "bfs.hpp"
 #include <benchmark/benchmark.h>
 #include <memory>
 #include <mutex>
@@ -60,12 +61,80 @@ BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_NOLEVELS)
     ->RangeMultiplier(2)
     ->Range(1, 1 << 5);
 
+// Direct benchmark using graph::BFSFunc (serial)
+BENCHMARK_F(MyFixture, BM_BFS_DIRECT)(benchmark::State &state) {
+  using ROW = MKL_INT;
+  using COL = MKL_INT;
+  for (auto _ : state) {
+    COL rows = static_cast<COL>(ptr->rows());
+    ROW const* ai = ptr->get_ai().get();
+    COL const* aj = ptr->get_aj().get();
+    COL source = 0;
+    COL shortCutWidth = std::numeric_limits<COL>::max();
+    COL height = 0;
+    COL width = 0;
+    std::vector<COL> levels;
+    std::vector<COL> lastLevel;
+    graph::BFSFunc<ROW, COL, false, false>(rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel);
+    benchmark::DoNotOptimize(height);
+    benchmark::DoNotOptimize(width);
+  }
+}
+
+// Direct benchmark using graph::PBFSFunc with TRACK=true
+BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_DIRECT_TRACK_ON)(benchmark::State &state) {
+  using ROW = MKL_INT;
+  using COL = MKL_INT;
+  omp_set_num_threads(state.range(0));
+  for (auto _ : state) {
+    COL rows = static_cast<COL>(ptr->rows());
+    ROW const* ai = ptr->get_ai().get();
+    COL const* aj = ptr->get_aj().get();
+    COL source = 0;
+    COL shortCutWidth = std::numeric_limits<COL>::max();
+    COL height = 0;
+    COL width = 0;
+    std::vector<COL> levels;
+    std::vector<COL> lastLevel;
+    graph::PBFSFunc<ROW, COL, false, true>(rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel, state.range(0));
+    benchmark::DoNotOptimize(height);
+    benchmark::DoNotOptimize(width);
+  }
+}
+BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_DIRECT_TRACK_ON)->RangeMultiplier(2)->Range(1, 1 << 5);
+
+// Direct benchmark using graph::PBFSFunc with TRACK=false
+BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_DIRECT_TRACK_OFF)(benchmark::State &state) {
+  using ROW = MKL_INT;
+  using COL = MKL_INT;
+  omp_set_num_threads(state.range(0));
+  for (auto _ : state) {
+    COL rows = static_cast<COL>(ptr->rows());
+    ROW const* ai = ptr->get_ai().get();
+    COL const* aj = ptr->get_aj().get();
+    COL source = 0;
+    COL shortCutWidth = std::numeric_limits<COL>::max();
+    COL height = 0;
+    COL width = 0;
+    std::vector<COL> levels;
+    std::vector<COL> lastLevel;
+    graph::PBFSFunc<ROW, COL, false, false>(rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel, state.range(0));
+    benchmark::DoNotOptimize(height);
+    benchmark::DoNotOptimize(width);
+  }
+}
+BENCHMARK_REGISTER_F(MyFixture, BM_PBFS_DIRECT_TRACK_OFF)->RangeMultiplier(2)->Range(1, 1 << 5);
+
 BENCHMARK_F(MyFixture, BM_NodeDegree)(benchmark::State &state) {
   for (auto _ : state) {
     std::vector<MKL_INT> degrees;
     reordering::NodeDegree(ptr.get(), degrees);
   }
 }
+
+BENCHMARK_REGISTER_F(MyFixture, BM_NodeDegree)
+    ->RangeMultiplier(2)
+    ->Range(1, 1 << 5);
 
 BENCHMARK_DEFINE_F(MyFixture, BM_PNodeDegree)(benchmark::State &state) {
   omp_set_num_threads(state.range(0));
