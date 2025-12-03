@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <execution>
 #include <iostream>
+#include <ranges>
 #include <omp.h>
+#include "utils.h"
 
 namespace graph {
 
-template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL, bool SHORTCUT>
+template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL, bool TRACK>
 bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source, COLTYPE shortCutWidth,
              COLTYPE& height, COLTYPE& width, std::vector<COLTYPE>& levels, std::vector<COLTYPE>& lastLevel)
 {
@@ -30,7 +32,8 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
     COLTYPE widthCounter = 1;
     while (!lastLevel.empty())
     {
-        width = std::max(width, static_cast<COLTYPE>(lastLevel.size()));
+        if constexpr (TRACK)
+            width = std::max(width, static_cast<COLTYPE>(lastLevel.size()));
         
         // Process current level
         for (const auto u : lastLevel)
@@ -42,7 +45,7 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
                 {
                     levels[v] = height + 1;
                     next_frontier.push_back(v);
-                    if constexpr (SHORTCUT)
+                    if constexpr (TRACK)
                     {
                         if (++widthCounter >= shortCutWidth)
                             return false;
@@ -70,161 +73,143 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
         }
     }
     
+    // If not tracking, ensure width remains 0
+    if constexpr (!TRACK) {
+        width = 0;
+    }
     return true;
 }
+template<typename T>
+T atomic_fetch_set(T* base, std::size_t i, T new_val) {
+  std::atomic_ref<T> ref(base[i]);
+  return ref.exchange(new_val, std::memory_order_acq_rel);
+}
 
-template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL, bool SHORTCUT>
+template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL, bool TRACK>
 bool PBFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
               COLTYPE shortCutWidth, COLTYPE& height, COLTYPE& width, std::vector<COLTYPE>& levels,
               std::vector<COLTYPE>& lastLevel, int nthreads)
 {
     levels.resize(rows);
     const COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
-    std::fill_n(std::execution::par_unseq, levels.begin(), levels.size(), INVALID);
+    std::fill(levels.begin(), levels.end(), INVALID);
 
-    const COLTYPE base = ai[0]; // Get base indexing from first element
+    const COLTYPE base = ai[0];
     bool stat = true;
 
     std::vector<std::vector<COLTYPE>> wavefront_cur;
     std::vector<std::vector<COLTYPE>> wavefront_next;
     wavefront_cur.resize(nthreads);
     wavefront_next.resize(nthreads);
-
-    utils::BitVector visited(rows);
-    std::vector<COLTYPE> count_per_thread(nthreads + 1, 0);
-    std::vector<COLTYPE> count_per_thread_prev(nthreads + 1, 0);
-
     height = 0;
     width = 0;
 
     levels[source - base] = 0;
 
     wavefront_next[0].push_back(source - base);
-    visited.set(source - base);
-    count_per_thread[1] = 1;
 
-    COLTYPE total_work;
-    COLTYPE total_work_prev;
-    std::vector<std::pair<int, int>> chunk_pos_pairs(nthreads + 1);
-    chunk_pos_pairs[0] = std::make_pair(0, 0);
-
-#pragma omp parallel num_threads(nthreads) shared(total_work)
+#pragma omp parallel num_threads(nthreads)
     {
         const int tid = omp_get_thread_num();
 
         while (true)
         {
 #pragma omp barrier
-#pragma omp master
+#pragma omp single
             {
                 std::swap(wavefront_next, wavefront_cur);
-                std::inclusive_scan(count_per_thread.begin(), count_per_thread.end(),
-                                    count_per_thread.begin());
-                if constexpr (LASTLEVEL)
-                {
-                    total_work_prev = total_work;
-                }
-                total_work = count_per_thread[nthreads];
-                width = std::max(width, total_work);
+                height++;
+            }
+            auto joined_local = wavefront_cur | std::views::join;
+            const COLTYPE total_work = static_cast<COLTYPE>(std::ranges::distance(joined_local));
+            if (total_work == 0)
+            {
+                break;
+            }
+            if constexpr (TRACK)
+            {
+              if (shortCutWidth <= total_work)
+              {
+                  stat = false;
+                  break;
+              }
+              width = std::max(width, total_work);
+            }
+            wavefront_next[tid].resize(0);
+            const auto [chunk_start, chunk_end] = utils::LoadBalancedPartitionPos(total_work, tid, nthreads);
+            auto partition_view = joined_local | std::views::drop(chunk_start) |
+                                  std::views::take(chunk_end - chunk_start);
 
-                int pos = 0;
-                COLTYPE target = 0;
-                for (int i = 0; i < nthreads; i++)
+            for (const auto u : partition_view)
+            {
+                for (ROWTYPE k = ai[u] - base; k < ai[u + 1] - base; k++)
                 {
-                    target += total_work / nthreads + ((total_work % nthreads) > i ? 1 : 0);
-                    while (count_per_thread[pos + 1] < target)
-                        pos++;
-                    chunk_pos_pairs[i + 1] = std::make_pair(pos, target - count_per_thread[pos]);
-                }
-
-                if constexpr (LASTLEVEL)
-                {
-                    if (total_work == 0)
+                    auto v = aj[k] - base;
+                    if constexpr (TRACK)
                     {
-                        lastLevel.resize(total_work_prev);
+                      auto old_val = atomic_fetch_set(levels.data(), v, height);
+                      if (old_val == INVALID)
+                      {
+                          wavefront_next[tid].push_back(v);
+                      }
                     }
                     else
                     {
-                        std::swap(count_per_thread, count_per_thread_prev);
-                    }
-                }
-                height++;
-            }
-#pragma omp barrier
-
-            if (total_work == 0)
-            {
-                if constexpr (LASTLEVEL)
-                {
-                    for (size_t i = 0; i < wavefront_next[tid].size(); i++)
-                    {
-                        *(lastLevel.data() + count_per_thread_prev[tid] + i) = wavefront_next[tid][i] + base;
-                    }
-                }
-                wavefront_next[tid].resize(0);
-                break;
-            }
-            if constexpr (SHORTCUT)
-            {
-                if (total_work >= shortCutWidth)
-                {
-                    stat = false;
-                    wavefront_next[tid].resize(0);
-                    break;
-                }
-            }
-
-            wavefront_next[tid].resize(0);
-
-            for (int i = chunk_pos_pairs[tid].first; i <= chunk_pos_pairs[tid + 1].first; i++)
-            {
-                int start = (i == chunk_pos_pairs[tid].first) ? chunk_pos_pairs[tid].second : 0;
-                int end = (i == chunk_pos_pairs[tid + 1].first) ? chunk_pos_pairs[tid + 1].second
-                                                                : wavefront_cur[i].size();
-                for (int j = start; j < end; j++)
-                {
-                    for (ROWTYPE k = ai[wavefront_cur[i][j]] - base; k < ai[wavefront_cur[i][j] + 1] - base; k++)
-                    {
-                        auto v = aj[k] - base;
-                        if (!visited.get(v))
+                        if (levels[v] == INVALID)
                         {
-                            visited.set(v);
-                            if (levels[v] == INVALID)
-                            {
-                                levels[v] = height;
-                                wavefront_next[tid].push_back(v);
-                            }
+                            levels[v] = height;
+                            wavefront_next[tid].push_back(v);
                         }
                     }
                 }
             }
-            count_per_thread[tid + 1] = wavefront_next[tid].size();
         }
     }
     height--;
-    return stat;
+
+    if constexpr (TRACK)
+    {
+        if (!stat)
+            return false;
+    }
+
+    if constexpr (LASTLEVEL)
+    {
+        lastLevel.clear();
+        for (const auto& vec : wavefront_next)
+        {
+            lastLevel.insert(lastLevel.end(), vec.begin(), vec.end());
+        }
+        if constexpr (!TRACK)
+        {
+            std::sort(lastLevel.begin(), lastLevel.end());
+            lastLevel.erase(std::unique(lastLevel.begin(), lastLevel.end()), lastLevel.end());
+        }
+    }
+    // width remains 0 in no-track path
+    return true;
 }
 
 // Explicit template instantiations for common types
 template bool BFSFunc<int, int, true, true>(int rows, int const* ai, int const* aj,
-                                             int source, int shortCut, int& level,
-                                             int& width, std::vector<int>& levels,
-                                             std::vector<int>& lastLevel);
+                                                  int source, int shortCut, int& level,
+                                                  int& width, std::vector<int>& levels,
+                                                  std::vector<int>& lastLevel);
 
 template bool BFSFunc<int, int, false, true>(int rows, int const* ai, int const* aj,
-                                              int source, int shortCut, int& level,
-                                              int& width, std::vector<int>& levels,
-                                              std::vector<int>& lastLevel);
+                                                   int source, int shortCut, int& level,
+                                                   int& width, std::vector<int>& levels,
+                                                   std::vector<int>& lastLevel);
 
 template bool BFSFunc<int, int, true, false>(int rows, int const* ai, int const* aj,
-                                              int source, int shortCut, int& level,
-                                              int& width, std::vector<int>& levels,
-                                              std::vector<int>& lastLevel);
+                                                   int source, int shortCut, int& level,
+                                                   int& width, std::vector<int>& levels,
+                                                   std::vector<int>& lastLevel);
 
 template bool BFSFunc<int, int, false, false>(int rows, int const* ai, int const* aj,
-                                               int source, int shortCut, int& level,
-                                               int& width, std::vector<int>& levels,
-                                               std::vector<int>& lastLevel);
+                                                    int source, int shortCut, int& level,
+                                                    int& width, std::vector<int>& levels,
+                                                    std::vector<int>& lastLevel);
 
 template bool PBFSFunc<int, int, true, true>(int rows, int const* ai, int const* aj,
                                               int source, int shortCut, int& level,
@@ -248,28 +233,28 @@ template bool PBFSFunc<int, int, false, false>(int rows, int const* ai, int cons
 
 // int64_t instantiations
 template bool BFSFunc<int64_t, int64_t, true, true>(int64_t rows, int64_t const* ai,
-                                                     int64_t const* aj, int64_t source,
-                                                     int64_t shortCut, int64_t& level,
-                                                     int64_t& width, std::vector<int64_t>& levels,
-                                                     std::vector<int64_t>& lastLevel);
+                                                          int64_t const* aj, int64_t source,
+                                                          int64_t shortCut, int64_t& level,
+                                                          int64_t& width, std::vector<int64_t>& levels,
+                                                          std::vector<int64_t>& lastLevel);
 
 template bool BFSFunc<int64_t, int64_t, false, true>(int64_t rows, int64_t const* ai,
-                                                      int64_t const* aj, int64_t source,
-                                                      int64_t shortCut, int64_t& level,
-                                                      int64_t& width, std::vector<int64_t>& levels,
-                                                      std::vector<int64_t>& lastLevel);
+                                                           int64_t const* aj, int64_t source,
+                                                           int64_t shortCut, int64_t& level,
+                                                           int64_t& width, std::vector<int64_t>& levels,
+                                                           std::vector<int64_t>& lastLevel);
 
 template bool BFSFunc<int64_t, int64_t, true, false>(int64_t rows, int64_t const* ai,
-                                                      int64_t const* aj, int64_t source,
-                                                      int64_t shortCut, int64_t& level,
-                                                      int64_t& width, std::vector<int64_t>& levels,
-                                                      std::vector<int64_t>& lastLevel);
+                                                           int64_t const* aj, int64_t source,
+                                                           int64_t shortCut, int64_t& level,
+                                                           int64_t& width, std::vector<int64_t>& levels,
+                                                           std::vector<int64_t>& lastLevel);
 
 template bool BFSFunc<int64_t, int64_t, false, false>(int64_t rows, int64_t const* ai,
-                                                       int64_t const* aj, int64_t source,
-                                                       int64_t shortCut, int64_t& level,
-                                                       int64_t& width, std::vector<int64_t>& levels,
-                                                       std::vector<int64_t>& lastLevel);
+                                                            int64_t const* aj, int64_t source,
+                                                            int64_t shortCut, int64_t& level,
+                                                            int64_t& width, std::vector<int64_t>& levels,
+                                                            std::vector<int64_t>& lastLevel);
 
 template bool PBFSFunc<int64_t, int64_t, true, true>(int64_t rows, int64_t const* ai,
                                                       int64_t const* aj, int64_t source,

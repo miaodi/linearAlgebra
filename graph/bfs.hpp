@@ -64,18 +64,19 @@ private:
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
 /// @tparam COLTYPE Column index type (typically int or int64_t)
 /// @tparam LASTLEVEL If true, records nodes in the last level
-/// @tparam SHORTCUT If true, enables early termination based on width threshold
+/// @tparam TRACK Controls both width tracking and early-exit by width.
 /// @param rows Number of rows in the graph
 /// @param ai Row pointers array (ai[0] contains the base indexing)
 /// @param aj Column indices array
 /// @param source Source node for BFS (in original indexing)
-/// @param shortCutWidth Maximum width threshold for early termination (only used if SHORTCUT=true)
+/// @param shortCutWidth Width threshold for early termination when TRACK=true
 /// @param height Output: number of levels in BFS tree
-/// @param width Output: maximum width across all levels
-/// @param levels Output: BFS level for each node (-1 if not visited)
+/// @param width Output: maximum width across all levels (0 when TRACK=false)
+/// @param levels Output: BFS level for each node (INVALID if not visited)
 /// @param lastLevel Output: nodes in the last level (if LASTLEVEL=true)
-/// @return true if successful, false if shortcut width exceeded (only when SHORTCUT=true)
-template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL = false, bool SHORTCUT = true>
+/// @return true if successful, false if early-exit triggered (only when TRACK=true)
+// When TRACK=false: no shortcut check and width is not updated/returned (left as 0).
+template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL = false, bool TRACK = true>
 bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
              COLTYPE source, COLTYPE shortCutWidth, COLTYPE& height,
              COLTYPE& width, std::vector<COLTYPE>& levels,
@@ -85,19 +86,19 @@ bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
 /// @tparam COLTYPE Column index type (typically int or int64_t)
 /// @tparam LASTLEVEL If true, records nodes in the last level
-/// @tparam SHORTCUT If true, enables early termination based on width threshold
+/// @tparam TRACK Controls both width tracking and early-exit by width.
 /// @param rows Number of rows in the graph
 /// @param ai Row pointers array (ai[0] contains the base indexing)
 /// @param aj Column indices array
 /// @param source Source node for BFS (in original indexing)
-/// @param shortCutWidth Maximum width threshold for early termination (only used if SHORTCUT=true)
+/// @param shortCutWidth Width threshold for early termination when TRACK=true
 /// @param height Output: number of levels in BFS tree
 /// @param width Output: maximum width across all levels
-/// @param levels Output: BFS level for each node (-1 if not visited)
+/// @param levels Output: BFS level for each node (INVALID if not visited)
 /// @param lastLevel Output: nodes in the last level (if LASTLEVEL=true)
 /// @param nthreads Number of threads to use (default = 1)
-/// @return true if successful, false if shortcut width exceeded (only when SHORTCUT=true)
-template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL = false, bool SHORTCUT = true>
+/// @return true if successful, false if early-exit triggered (only when TRACK=true)
+template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL = false, bool TRACK = true>
 bool PBFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
               COLTYPE source, COLTYPE shortCutWidth, COLTYPE& height,
               COLTYPE& width, std::vector<COLTYPE>& levels,
