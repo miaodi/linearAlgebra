@@ -23,25 +23,34 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #pragma once
+#include <cstdint>
+#include <cstring>
 
 namespace utils {
 template <typename IDX = int> class BitVector {
 public:
+  using BitVectorType = int64_t;
+  static constexpr int BITS_PER_ELEMENT = sizeof(BitVectorType) * 8;
+
   BitVector() = default;
   BitVector(IDX n) {
-    n_ = (n + sizeof(BitVectorType) - 1) / sizeof(BitVectorType);
+    n_ = (n + BITS_PER_ELEMENT - 1) / BITS_PER_ELEMENT;
     bv_ = new BitVectorType[n_];
-#pragma omp parallel for
-    for (IDX i = 0; i < n_; ++i) {
-      bv_[i] = 0;
-    }
+    std::memset(bv_, 0, n_ * sizeof(BitVectorType));
   }
 
   ~BitVector() { delete[] bv_; }
 
+  // Prevent dangerous copies
+  BitVector(const BitVector&) = delete;
+  BitVector& operator=(const BitVector&) = delete;
+
+
   void set(IDX i) { bv_[getIndexOf_(i)] |= getMaskOf_(i); }
 
-  bool get(IDX i) const { return bv_[getIndexOf_(i)] & getMaskOf_(i); }
+  bool get(IDX i) const { 
+    return bv_[getIndexOf_(i)] & getMaskOf_(i); 
+  }
 
   bool testAndSet(IDX i) {
     if (!get(i)) {
@@ -58,34 +67,28 @@ public:
   }
 
   void clearAll() {
-#pragma omp parallel for
-    for (IDX i = 0; i < n_; ++i) {
-      bv_[i] = 0;
-    }
+    std::memset(bv_, 0, n_ * sizeof(BitVectorType));
   }
 
   void resize(IDX n) {
-    const IDX new_n = (n + sizeof(BitVectorType) - 1) / sizeof(BitVectorType);
+    const IDX new_n = (n + BITS_PER_ELEMENT - 1) / BITS_PER_ELEMENT;
     if (new_n > n_) {
       if (bv_)
         delete[] bv_;
       n_ = new_n;
       bv_ = new BitVectorType[n_];
-#pragma omp parallel for
-      for (IDX i = 0; i < n_; ++i) {
-        bv_[i] = 0;
-      }
+      std::memset(bv_, 0, n_ * sizeof(BitVectorType));
     }
   }
 
 private:
-  typedef char BitVectorType;
+  static IDX getIndexOf_(IDX i) { return i / BITS_PER_ELEMENT; }
+  static IDX getBitIndexOf_(IDX i) { return i % BITS_PER_ELEMENT; }
+  static BitVectorType getMaskOf_(IDX i) { 
+    return BitVectorType(1) << getBitIndexOf_(i); 
+  }
 
-  static IDX getIndexOf_(IDX i) { return i / sizeof(BitVectorType); }
-  static IDX getBitIndexOf_(IDX i) { return i % sizeof(BitVectorType); }
-  static BitVectorType getMaskOf_(IDX i) { return 1 << getBitIndexOf_(i); }
-
-  BitVectorType *bv_{nullptr};
+  BitVectorType* bv_{nullptr};
   IDX n_{0};
 };
 
