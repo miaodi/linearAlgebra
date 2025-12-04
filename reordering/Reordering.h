@@ -179,8 +179,139 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
     return diameter;
 }
 
-/// @brief RCM ordering for a single component
-/// @details Helper function that performs RCM on a subset of nodes
+/// @brief RCM kernel selection policies
+enum class RCMKernel {
+    /// @brief Parallel-friendly global sort (sorts all nodes by level then degree)
+    ParallelSort,
+    /// @brief Traditional serial BFS (sorts neighbors at each node expansion)
+    Traditional
+};
+
+/// @brief RCM kernel: Parallel-friendly global sort implementation
+/// @details Performs single BFS to get levels, then globally sorts by (level, degree)
+template <typename ROWTYPE, typename COLTYPE>
+struct RCMKernel_ParallelSort {
+    static void execute(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
+                       COLTYPE base, COLTYPE const* degrees, COLTYPE source,
+                       COLTYPE comp_size, std::vector<COLTYPE>& cm_ordering,
+                       int numthreads)
+    {
+        // BFS from source to get level structure
+        COLTYPE height, width;
+        std::vector<COLTYPE> levels;
+        std::vector<COLTYPE> lastLevel;
+        graph::BFSFunc<ROWTYPE, COLTYPE, false, false>(rows, ai, aj, source,
+            std::numeric_limits<COLTYPE>::max(), height, width, levels, lastLevel, numthreads);
+#ifdef RCM_DEBUG
+        std::cerr << "[RCM_Par] BFS from source=" << source 
+                  << " height=" << height 
+                  << " width=" << width << std::endl;
+#endif
+        
+        // Create (level, degree, node) tuples for all nodes
+        std::vector<std::tuple<COLTYPE, COLTYPE, COLTYPE>> level_degree_node(comp_size);
+
+#pragma omp parallel for num_threads(numthreads)
+        for (COLTYPE idx = 0; idx < comp_size; ++idx)
+        {
+            COLTYPE node = cm_ordering[idx];  // cm_ordering initially contains component nodes
+            level_degree_node[idx] = std::make_tuple(levels[node - base], degrees[node - base], node);
+        }
+
+        // Sort by level, then by degree (ascending), then by node index
+        utils::sort(level_degree_node.begin(), level_degree_node.end(), numthreads);
+#ifdef RCM_DEBUG
+        std::cerr << "[RCM_Par] Sorted " << comp_size << " nodes by (level, degree)" << std::endl;
+#endif
+        
+        // Extract sorted nodes into cm_ordering
+        for (COLTYPE i = 0; i < comp_size; ++i)
+        {
+            cm_ordering[i] = std::get<2>(level_degree_node[i]);
+        }
+    }
+};
+
+/// @brief RCM kernel: Traditional serial BFS implementation
+/// @details Performs level-by-level BFS with neighbor sorting at each expansion
+template <typename ROWTYPE, typename COLTYPE>
+struct RCMKernel_Traditional {
+    static void execute(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
+                       COLTYPE base, COLTYPE const* degrees, COLTYPE source,
+                       COLTYPE comp_size, std::vector<COLTYPE>& cm_ordering,
+                       int numthreads)
+    {
+        const COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
+        
+        // Traditional Cuthill-McKee: level-by-level BFS with sorting within each level
+        std::vector<COLTYPE> visited(rows, 0);
+        cm_ordering.clear();
+        cm_ordering.reserve(comp_size);
+        
+        std::vector<COLTYPE> current_level;
+        std::vector<COLTYPE> next_level;
+        
+        // Start from source
+        current_level.push_back(source);
+        visited[source - base] = 1;
+        cm_ordering.push_back(source);
+        
+        COLTYPE level_num = 0;
+        while (!current_level.empty())
+        {
+#ifdef RCM_DEBUG
+            if (level_num < 5) {
+                std::cerr << "[RCM_Trad] Level " << level_num 
+                          << " size=" << current_level.size() << std::endl;
+            }
+#endif
+            next_level.clear();
+            
+            // For each node in current level (in the order they were added)
+            for (COLTYPE u : current_level)
+            {
+                // Collect unvisited neighbors
+                std::vector<COLTYPE> neighbors;
+                for (ROWTYPE k = ai[u - base] - base; k < ai[u - base + 1] - base; k++)
+                {
+                    COLTYPE v = aj[k];
+                    if (visited[v - base] == 0)
+                    {
+                        visited[v - base] = 1;
+                        neighbors.push_back(v);
+                    }
+                }
+                
+                // Sort neighbors by degree (ascending)
+                std::sort(neighbors.begin(), neighbors.end(),
+                          [&degrees, base](COLTYPE a, COLTYPE b) {
+                              return degrees[a - base] < degrees[b - base] ||
+                                     (degrees[a - base] == degrees[b - base] && a < b);
+                          });
+                
+                // Add sorted neighbors to ordering and next level
+                for (COLTYPE v : neighbors)
+                {
+                    cm_ordering.push_back(v);
+                    next_level.push_back(v);
+                }
+            }
+            
+            current_level = std::move(next_level);
+            level_num++;
+        }
+        
+#ifdef RCM_DEBUG
+        std::cerr << "[RCM_Trad] Cuthill-McKee complete, size=" 
+                  << cm_ordering.size() << ", levels=" << level_num << std::endl;
+#endif
+    }
+};
+
+/// @brief RCM ordering for a single component (unified implementation)
+/// @details Helper function that performs RCM on a subset of nodes using
+/// the specified kernel for ordering computation
+/// @tparam Kernel RCM kernel policy (ParallelSort or Traditional)
 /// @tparam ROWTYPE Row pointer type
 /// @tparam COLTYPE Column index type
 /// @tparam Iter Iterator type for component nodes
@@ -188,84 +319,67 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
 /// @param ai Row pointer array (CSR format)
 /// @param aj Column index array (CSR format)
 /// @param base Index base (0 or 1)
+/// @param degrees Precomputed node degrees array
 /// @param comp_begin Iterator to start of component nodes
 /// @param comp_end Iterator to end of component nodes
 /// @param perm Output: permutation array where perm[new_pos] = old_node
-///              (i.e., new position i contains old node perm[i])
+/// @param iperm Output: inverse permutation array
 /// @param perm_offset Starting offset for this component's permutation
 /// @param numthreads Number of threads for parallel operations
-template <typename ROWTYPE, typename COLTYPE, typename Iter>
+template <RCMKernel Kernel, typename ROWTYPE, typename COLTYPE, typename Iter>
 void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-                   COLTYPE base, Iter comp_begin, Iter comp_end,
+                   COLTYPE base, COLTYPE const* degrees,
+                   Iter comp_begin, Iter comp_end,
                    COLTYPE* perm, COLTYPE* iperm, COLTYPE perm_offset, int numthreads = 1)
 {
     COLTYPE comp_size = std::distance(comp_begin, comp_end);
-#define RCM_DEBUG 
 #ifdef RCM_DEBUG
-    std::cerr << "start RCM_Component: comp_size=" << comp_size << std::endl;
+    const char* kernel_name = (Kernel == RCMKernel::ParallelSort) ? "ParallelSort" : "Traditional";
+    std::cerr << "start RCM_Component<" << kernel_name << ">: comp_size=" << comp_size << std::endl;
 #endif
     
-    // Compute node degrees
-    std::vector<COLTYPE> degrees(rows);
-    NodeDegree(rows, ai, degrees.data(), numthreads);
-    std::vector<COLTYPE> degrees_copy = degrees;
+    // PseudoDiameter modifies degrees array, so make a copy for it
+    std::vector<COLTYPE> degrees_scratch(degrees, degrees + rows);
 
     // Find pseudo-peripheral node for this component
     COLTYPE source, target;
-    PseudoDiameter(rows, ai, aj, degrees_copy.data(), base, 
+    PseudoDiameter(rows, ai, aj, degrees_scratch.data(), base, 
                    comp_begin, comp_end, source, target, numthreads);
 #ifdef RCM_DEBUG
-    std::cerr << "[RCM] PseudoDiameter chosen source=" << (source) 
-              << " target=" << (target) << std::endl;
+    std::cerr << "[RCM] PseudoDiameter chosen source=" << source 
+              << " target=" << target << std::endl;
 #endif
-    
-    // BFS from source to get level structure
-    COLTYPE height, width;
-    std::vector<COLTYPE> levels;
-    std::vector<COLTYPE> lastLevel;
-    graph::BFSFunc<ROWTYPE, COLTYPE, false, false>(rows, ai, aj, source,
-        std::numeric_limits<COLTYPE>::max(), height, width, levels, lastLevel, numthreads);
-#ifdef RCM_DEBUG
-    std::cerr << "[RCM] BFS from source=" << (source) 
-              << " height=" << (height) 
-              << " width=" << (width) 
-              << " levels.size=" << levels.size() << std::endl;
-#endif
-    
-    // Create (level, degree, node) tuples for nodes in this component
-    std::vector<std::tuple<COLTYPE, COLTYPE, COLTYPE>> level_degree_node(comp_size);
 
-    // Parallel path
-#pragma omp parallel for num_threads(numthreads)
-    for (COLTYPE idx = 0; idx < comp_size; ++idx)
-    {
-        COLTYPE node = *(comp_begin + idx) - base;
-        level_degree_node[idx] = std::make_tuple(levels[node], degrees[node], node);
+    // Build Cuthill-McKee ordering using selected kernel
+    std::vector<COLTYPE> cm_ordering;
+    if constexpr (Kernel == RCMKernel::ParallelSort) {
+        // Initialize with component nodes for ParallelSort kernel
+        cm_ordering.reserve(comp_size);
+        for (auto it = comp_begin; it != comp_end; ++it) {
+            cm_ordering.push_back(*it);
+        }
+        RCMKernel_ParallelSort<ROWTYPE, COLTYPE>::execute(
+            rows, ai, aj, base, degrees, source, comp_size, cm_ordering, numthreads);
+    } else {
+        // Traditional kernel builds cm_ordering from scratch
+        RCMKernel_Traditional<ROWTYPE, COLTYPE>::execute(
+            rows, ai, aj, base, degrees, source, comp_size, cm_ordering, numthreads);
     }
-
-    // Sort by level, then by degree (ascending), then by node index
-    utils::sort(level_degree_node.begin(), level_degree_node.end(), numthreads);
-#ifdef RCM_DEBUG
-    std::cerr << "[RCM] Sorted component nodes by (level, degree). comp_size=" 
-              << comp_size << std::endl;
-#endif
     
-    
-    // Generate RCM ordering for this component (reverse of sorted order)
-    // perm[new_pos] = old_node (permutation) and iperm[old_node] = new_pos
+    // Reverse to get RCM ordering and build perm/iperm
 #pragma omp parallel for num_threads(numthreads)
     for (COLTYPE i = 0; i < comp_size; ++i)
     {
-        COLTYPE old_node = std::get<2>(level_degree_node[comp_size - 1 - i]);
+        COLTYPE old_node = cm_ordering[comp_size - 1 - i];
         COLTYPE new_pos = perm_offset + i;
-        perm[new_pos + base] = old_node + base;
-        iperm[old_node + base] = new_pos + base;
-    #ifdef RCM_DEBUG
+        perm[new_pos + base] = old_node;
+        iperm[old_node] = new_pos + base;
+#ifdef RCM_DEBUG
         if (i < 5) {
-            std::cerr << "[RCM] perm[" << (new_pos + base) << "] = " << (old_node + base)
-                  << ", iperm[" << (old_node + base) << "] = " << (new_pos + base) << std::endl;
+            std::cerr << "[RCM] perm[" << (new_pos + base) << "] = " << old_node
+                      << ", iperm[" << old_node << "] = " << (new_pos + base) << std::endl;
         }
-    #endif
+#endif
     }
 }
 
@@ -274,6 +388,9 @@ void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// with nodes at each level sorted by increasing degree. Produces both
 /// permutation (perm) and inverse permutation (iperm) suitable for matrix
 /// permutation routines.
+/// 
+/// @tparam Kernel RCM kernel policy: ParallelSort (default, parallel-friendly) 
+///                or Traditional (classic serial algorithm)
 /// @tparam ROWTYPE Row pointer type
 /// @tparam COLTYPE Column index type
 /// @param rows Number of rows in the graph
@@ -282,11 +399,15 @@ void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// @param perm Output: permutation array where perm[new_pos] = old_node
 /// @param iperm Output: inverse permutation where iperm[old_node] = new_pos
 /// @param numthreads Number of threads for parallel operations
-template <typename ROWTYPE, typename COLTYPE>
+template <RCMKernel Kernel = RCMKernel::ParallelSort, typename ROWTYPE, typename COLTYPE>
 void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
          COLTYPE* perm, COLTYPE* iperm, int numthreads = 1)
 {
     const COLTYPE base = ai[0];
+    
+    // Compute node degrees once for the entire graph
+    std::vector<COLTYPE> degrees(rows);
+    NodeDegree(rows, ai, degrees.data(), numthreads);
     
     // Create component with all nodes
     std::vector<COLTYPE> component(rows);
@@ -294,8 +415,9 @@ void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
         component[i] = i + base;
     }
     
-    RCM_Component(rows, ai, aj, base, component.begin(), component.end(),
-                  perm, iperm, 0, numthreads);
+    RCM_Component<Kernel>(rows, ai, aj, base, degrees.data(),
+                          component.begin(), component.end(),
+                          perm, iperm, 0, numthreads);
 }
 
 /// @brief Reverse Cuthill-McKee (RCM) reordering for multi-component graphs
@@ -303,6 +425,8 @@ void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// processing each connected component separately. Nodes at each level are
 /// sorted by increasing degree. Produces both permutation (perm) and inverse
 /// permutation (iperm).
+/// 
+/// @tparam Kernel RCM kernel policy: ParallelSort (default) or Traditional
 /// @tparam ROWTYPE Row pointer type
 /// @tparam COLTYPE Column index type
 /// @param rows Number of rows in the graph
@@ -311,11 +435,15 @@ void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// @param perm Output: permutation array where perm[new_pos] = old_node
 /// @param iperm Output: inverse permutation where iperm[old_node] = new_pos
 /// @param numthreads Number of threads for parallel operations
-template <typename ROWTYPE, typename COLTYPE>
+template <RCMKernel Kernel = RCMKernel::ParallelSort, typename ROWTYPE, typename COLTYPE>
 void RCM_MultiComponent(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
                         COLTYPE* perm, COLTYPE* iperm, int numthreads = 1)
 {
     const COLTYPE base = ai[0];
+    
+    // Compute node degrees once for the entire graph
+    std::vector<COLTYPE> degrees(rows);
+    NodeDegree(rows, ai, degrees.data(), numthreads);
     
     // Find connected components using union-find
     std::vector<COLTYPE> parents(rows);
@@ -348,9 +476,10 @@ void RCM_MultiComponent(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
         auto comp_begin = sortedComp.begin() + comp_start;
         auto comp_end = sortedComp.begin() + comp_start + comp_size;
         
-        // Apply RCM to this component
-        RCM_Component(rows, ai, aj, base, comp_begin, comp_end,
-                      perm, iperm, perm_offset, numthreads);
+        // Apply RCM to this component using selected kernel
+        RCM_Component<Kernel>(rows, ai, aj, base, degrees.data(),
+                              comp_begin, comp_end,
+                              perm, iperm, perm_offset, numthreads);
         
         perm_offset += comp_size;
     }
@@ -414,10 +543,4 @@ int MetisND(const COLTYPE nrows, const COLTYPE ncols,
             COLTYPE* perm, COLTYPE* iperm,
             const MetisNDOptions& opts = MetisNDOptions());
 #endif
-
-
-// // TODO: implement parallel one
-// void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
-//               std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm);
-
 } // namespace reordering
