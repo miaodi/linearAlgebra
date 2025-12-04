@@ -116,6 +116,24 @@ struct MatrixCache {
             reorder_names.push_back(config.name);
         }
         
+        // Write SVG files for visualization
+        std::cout << "\nGenerating SVG visualizations...\n";
+        for (size_t i = 0; i < reordered_matrices.size(); ++i) {
+            std::string svg_filename = "matrix_" + reorder_names[i] + ".svg";
+            std::ofstream svg_file(svg_filename);
+            if (svg_file.is_open()) {
+                matrix_utils::writeSVG(reordered_matrices[i].rows, 
+                                      reordered_matrices[i].cols,
+                                      reordered_matrices[i].AI(), 
+                                      reordered_matrices[i].AJ(),
+                                      svg_file);
+                svg_file.close();
+                std::cout << "  Saved: " << svg_filename << "\n";
+            } else {
+                std::cerr << "  Warning: Could not create " << svg_filename << "\n";
+            }
+        }
+        
         loaded = true;
     }
 };
