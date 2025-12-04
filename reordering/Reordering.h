@@ -1,133 +1,321 @@
 #pragma once
 #include "config.h"
-#include "BFS.h"
 #include <algorithm>
 #include <limits>
 #include <omp.h>
 #include <ranges>
 #include <utility>
 #include <vector>
+#include "bfs.hpp"
+#include "parallel_sort.hpp"
+#include "UnionFind.h"
 
 namespace reordering {
 
 // Modern interface with raw CSR pointers
 template <typename ROWTYPE, typename COLTYPE>
 void NodeDegree(COLTYPE rows, const ROWTYPE* ai, COLTYPE* degrees, int numthreads = 1);
+
+template <typename T>
+void PairReduce(std::pair<T, T> &inout, const std::pair<T, T> &in) {
+  if (in.second < inout.second) {
+    inout = in;
+  } else if (in.second == inout.second) {
+    inout.first = std::min(in.first, inout.first);
+  }
+}
+
 // returns node index and degree
-// template <typename View>
-// std::pair<MKL_INT, MKL_INT> MinDegreeNode(const std::vector<MKL_INT>& degrees, const MKL_INT base, View&& view)
-// {
-//     std::pair<MKL_INT, MKL_INT> res(-1, std::numeric_limits<MKL_INT>::max());
-//     for (const auto i : view)
-//     {
-//         if (degrees[i - base] < res.second)
-//         {
-//             res.first = i;
-//             res.second = degrees[i - base];
-//         }
-//     }
-//     return res;
-// }
+template <typename Iter>
+auto MinDegreeNode(const typename std::iterator_traits<Iter>::value_type* degrees, 
+                   const typename std::iterator_traits<Iter>::value_type base, 
+                   Iter begin, Iter end, int numthreads = 1)
+{
+    using T = typename std::iterator_traits<Iter>::value_type;
+    std::pair<T, T> res(-1, std::numeric_limits<T>::max());
+    
+    if (numthreads == 1) {
+        // Serial path
+        for (auto it = begin; it != end; ++it)
+        {
+            const T i = *it;
+            if (degrees[i - base] < res.second)
+            {
+                res.first = i;
+                res.second = degrees[i - base];
+            }
+        }
+    } else {
+        // Parallel path
+#pragma omp declare reduction(                                                 \
+        pairreduce : std::pair<T, T> : PairReduce<T>(                          \
+                omp_out, omp_in)) initializer(omp_priv = omp_orig)
 
-// template <typename T>
-// void PairReduce(std::pair<T, T> &inout, const std::pair<T, T> &in) {
-//   if (in.second < inout.second) {
-//     inout = in;
-//   } else if (in.second == inout.second) {
-//     inout.first = std::min(in.first, inout.first);
-//   }
-// }
+        const std::size_t n = std::distance(begin, end);
+#pragma omp parallel for num_threads(numthreads) reduction(pairreduce : res)
+        for (std::size_t idx = 0; idx < n; ++idx) {
+            const T i = *(begin + idx);
+            PairReduce(res, std::make_pair(i, degrees[i - base]));
+        }
+    }
+    return res;
+}
 
-// // returns node index and degree;
-// template <typename View>
-// std::pair<MKL_INT, MKL_INT> PMinDegreeNode(const std::vector<MKL_INT> &degrees,
-//                                            const MKL_INT base, View &&view) {
-// #pragma omp declare reduction(                                                 \
-//         pairreduce : std::pair<MKL_INT, MKL_INT> : PairReduce<MKL_INT>(        \
-//                 omp_out, omp_in)) initializer(omp_priv = omp_orig)
+/// @brief Compute pseudo-diameter of a graph component using BFS
+/// @details Implements heuristic from Duff (1989) "The use of profile reduction algorithms with a frontal code"
+/// @see https://github.com/dralves/sp1-sp2-galois/blob/1597f1f510cc1aa75f5595f0d42f5701dfc34a91/lonestar/experimental/cuthill/serial/cuthill.cpp#L815
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @tparam Iter Iterator type for the component nodes
+/// @param rows Number of rows in the graph
+/// @param ai Row pointer array (CSR format)
+/// @param aj Column index array (CSR format)
+/// @param degrees Degree array (will be modified - nodes are marked off)
+/// @param base Index base (0 or 1)
+/// @param begin Iterator to start of component nodes
+/// @param end Iterator to end of component nodes
+/// @param source Output: source node of pseudo-diameter
+/// @param target Output: target node of pseudo-diameter
+/// @param numthreads Number of threads for parallel operations
+/// @return Pseudo-diameter length
+template <typename ROWTYPE, typename COLTYPE, typename Iter>
+COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* degrees,
+                       COLTYPE base, Iter begin, Iter end, COLTYPE& source, COLTYPE& target,
+                       int numthreads = 1)
+{
+    source = MinDegreeNode(degrees, base, begin, end, numthreads).first;
+    target = -1;
+    std::vector<COLTYPE> chosen;
+    COLTYPE diameter;
+    COLTYPE forwardWidth;
+    COLTYPE backwardWidth;
+    
+    while (target == -1)
+    {
+        chosen.resize(0);
+        
+        // BFS from current source
+        COLTYPE height = 0;
+        COLTYPE width = 0;
+        std::vector<COLTYPE> levels;
+        std::vector<COLTYPE> lastLevel;
+        
+        graph::BFSFunc<ROWTYPE, COLTYPE, true, true>(rows, ai, aj, source, 
+            std::numeric_limits<COLTYPE>::max(), height, width, levels, lastLevel, numthreads);
+        
+        diameter = height;
+        forwardWidth = width;
 
-//   std::pair<MKL_INT, MKL_INT> res(-1, std::numeric_limits<MKL_INT>::max());
-// #pragma omp parallel for reduction(pairreduce : res)
-//   for (const auto i : view) {
-//     PairReduce(res, std::make_pair(i, degrees[i - base]));
-//   }
-//   return res;
-// }
+        // First five strategy: select up to 5 min-degree nodes from last level
+        while (chosen.size() < 5)
+        {
+            COLTYPE minDeg = std::numeric_limits<COLTYPE>::max();
+            COLTYPE sel = -1;
+            for (auto i : lastLevel)
+            {
+                if (degrees[i - base] < minDeg)
+                {
+                    minDeg = degrees[i - base];
+                    sel = i;
+                }
+                else if (degrees[i - base] == minDeg)
+                {
+                    // Ensure deterministic tie-breaking
+                    sel = std::min(sel, i);
+                }
+            }
+            if (minDeg == std::numeric_limits<COLTYPE>::max())
+                break;
 
-// // input view dof for a component
-// // returns source and target node indices and diameter
-// // NOTE: the relevant degrees will be modified
-// // https://github.com/dralves/sp1-sp2-galois/blob/1597f1f510cc1aa75f5595f0d42f5701dfc34a91/lonestar/experimental/cuthill/serial/cuthill.cpp#L815
-// // duff1989use The use of profile reduction algorithms with a frontal code
-// template <typename View>
-// double PseudoDiameter(mkl_wrapper::mkl_sparse_mat const *const mat,
-//                       std::vector<MKL_INT> &degrees, View &&view,
-//                       MKL_INT &source, MKL_INT &target) {
-//   source = MinDegreeNode(degrees, mat->mkl_base(), view).first;
-//   target = -1;
-//   std::vector<MKL_INT> choosen;
-//   auto ai = mat->get_ai();
-//   auto aj = mat->get_aj();
-//   const MKL_INT base = mat->mkl_base();
-//   MKL_INT diameter;
-//   MKL_INT forwardWidth;
-//   MKL_INT backwardWidth;
-//   while (target == -1) {
-//     choosen.resize(0);
-//     BFS bfs(reordering::PBFS_Fn<true, false>);
-//     bfs(mat, source);
-//     diameter = bfs.getHeight();
-//     forwardWidth = bfs.getWidth();
+            chosen.push_back(sel);
+            degrees[sel - base] = std::numeric_limits<COLTYPE>::max(); // mark-off selected node
+            
+            // Mark off neighbors of selected node
+            for (ROWTYPE k = ai[sel - base] - base; k < ai[sel - base + 1] - base; k++)
+            {
+                degrees[aj[k] - base] = std::numeric_limits<COLTYPE>::max();
+            }
+        }
+        
+        backwardWidth = std::numeric_limits<COLTYPE>::max();
+        for (auto i : chosen)
+        {
+            // BFS from candidate with shortcut
+            if (!graph::BFSFunc<ROWTYPE, COLTYPE, false, true>(
+                    rows, ai, aj, i, backwardWidth, height, width, levels, lastLevel, numthreads))
+                continue; // short-circuited
+            
+            if (height > diameter)
+            {
+                // Found a farther node - restart from it
+                source = i;
+                target = -1;
+                break;
+            }
+            else if (width < backwardWidth)
+            {
+                // Same diameter, narrower width - better peripheral node
+                backwardWidth = width;
+                target = i;
+            }
+        }
+    }
+    
+    if (forwardWidth > backwardWidth)
+        std::swap(source, target);
+    
+    return diameter;
+}
 
-//     // First five strategy
-//     while (choosen.size() < 5) {
-//       int minDeg = std::numeric_limits<int>::max();
-//       int sel = -1;
-//       for (auto i : bfs.getLastLevel()) {
-//         if (degrees[i - base] < minDeg) {
-//           minDeg = degrees[i - base];
-//           sel = i;
-//         } else if (degrees[i - base] ==
-//                    minDeg) { // make sure multi threading result is consistent
-//           sel = std::min(sel, i);
-//         }
-//       }
-//       if (minDeg == std::numeric_limits<int>::max())
-//         break;
+/// @brief RCM ordering for a single component
+/// @details Helper function that performs RCM on a subset of nodes
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @tparam Iter Iterator type for component nodes
+/// @param rows Number of rows in the graph
+/// @param ai Row pointer array (CSR format)
+/// @param aj Column index array (CSR format)
+/// @param base Index base (0 or 1)
+/// @param comp_begin Iterator to start of component nodes
+/// @param comp_end Iterator to end of component nodes
+/// @param perm Output: permutation array where perm[new_pos] = old_node
+///              (i.e., new position i contains old node perm[i])
+/// @param perm_offset Starting offset for this component's permutation
+/// @param numthreads Number of threads for parallel operations
+template <typename ROWTYPE, typename COLTYPE, typename Iter>
+void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
+                   COLTYPE base, Iter comp_begin, Iter comp_end,
+                   COLTYPE* perm, COLTYPE perm_offset, int numthreads = 1)
+{
+    COLTYPE comp_size = std::distance(comp_begin, comp_end);
+    
+    // Compute node degrees
+    std::vector<COLTYPE> degrees(rows);
+    NodeDegree(rows, ai, degrees.data(), numthreads);
+    std::vector<COLTYPE> degrees_copy = degrees;
+    
+    // Find pseudo-peripheral node for this component
+    COLTYPE source, target;
+    PseudoDiameter(rows, ai, aj, degrees_copy.data(), base, 
+                   comp_begin, comp_end, source, target, numthreads);
+    
+    // BFS from source to get level structure
+    COLTYPE height, width;
+    std::vector<COLTYPE> levels;
+    std::vector<COLTYPE> lastLevel;
+    graph::BFSFunc<ROWTYPE, COLTYPE, false, false>(rows, ai, aj, source,
+        std::numeric_limits<COLTYPE>::max(), height, width, levels, lastLevel, numthreads);
+    
+    // Create (level, degree, node) tuples for nodes in this component
+    std::vector<std::tuple<COLTYPE, COLTYPE, COLTYPE>> level_degree_node(comp_size);
 
-//       choosen.push_back(sel);
-//       degrees[sel - base] =
-//           std::numeric_limits<int>::max(); // mark-off selected node
-//       for (MKL_INT i = ai[sel - base] - base; i < ai[sel - base + 1] - base;
-//            i++) {
-//         degrees[aj[i] - base] =
-//             std::numeric_limits<int>::max(); // avoiding any node with a
-//                                              // neighbour that had been tested
-//       }
-//     }
-//     backwardWidth = std::numeric_limits<int>::max();
-//     for (auto i : choosen) {
-//       bfs.setShortCut(backwardWidth);
-//       if (!bfs(mat, i)) // short circuited
-//         continue;
-//       if (diameter < bfs.getHeight() && bfs.getWidth() < backwardWidth) {
-//         source = i;
-//         break;
-//       } else if (bfs.getWidth() < backwardWidth) {
+    // Parallel path
+#pragma omp parallel for num_threads(numthreads)
+    for (COLTYPE idx = 0; idx < comp_size; ++idx)
+    {
+        COLTYPE node = *(comp_begin + idx) - base;
+        level_degree_node[idx] = std::make_tuple(levels[node], degrees[node], node);
+    }
 
-//         backwardWidth = bfs.getWidth();
-//         target = i;
-//       }
-//     }
-//   }
-//   if (forwardWidth > backwardWidth)
-//     std::swap(source, target);
-//   return diameter;
-// }
+    // Sort by level, then by degree (ascending), then by node index
+    utils::sort(level_degree_node.begin(), level_degree_node.end(), numthreads);
+    
+    
+    // Generate RCM ordering for this component (reverse of sorted order)
+    // perm[new_pos] = old_node (permutation)
+#pragma omp parallel for num_threads(numthreads)
+    for (COLTYPE i = 0; i < comp_size; ++i)
+    {
+        COLTYPE old_node = std::get<2>(level_degree_node[comp_size - 1 - i]);
+        COLTYPE new_pos = perm_offset + i;
+        perm[new_pos + base] = old_node + base;
+    }
+}
 
-// // TODO: implement parallel one
-// void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
-//               std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm);
+/// @brief Reverse Cuthill-McKee (RCM) reordering algorithm
+/// @details Orders nodes by reverse BFS levels from a pseudo-peripheral node,
+/// with nodes at each level sorted by increasing degree.
+/// Returns permutation for direct use with permuteMat.
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @param rows Number of rows in the graph
+/// @param ai Row pointer array (CSR format)
+/// @param aj Column index array (CSR format)
+/// @param perm Output: permutation array where perm[new_pos] = old_node
+///              (i.e., new position i contains old node perm[i])
+/// @param numthreads Number of threads for parallel operations
+template <typename ROWTYPE, typename COLTYPE>
+void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
+         COLTYPE* perm, int numthreads = 1)
+{
+    const COLTYPE base = ai[0];
+    
+    // Create component with all nodes
+    std::vector<COLTYPE> component(rows);
+    for (COLTYPE i = 0; i < rows; ++i) {
+        component[i] = i + base;
+    }
+    
+    RCM_Component(rows, ai, aj, base, component.begin(), component.end(),
+                  perm, 0, numthreads);
+}
+
+/// @brief Reverse Cuthill-McKee (RCM) reordering for multi-component graphs
+/// @details Orders nodes by reverse BFS levels from pseudo-peripheral nodes,
+/// processing each connected component separately. Nodes at each level sorted by increasing degree.
+/// Returns permutation for direct use with permuteMat.
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @param rows Number of rows in the graph
+/// @param ai Row pointer array (CSR format)
+/// @param aj Column index array (CSR format)
+/// @param perm Output: permutation array where perm[new_pos] = old_node
+///              (i.e., new position i contains old node perm[i])
+/// @param numthreads Number of threads for parallel operations
+template <typename ROWTYPE, typename COLTYPE>
+void RCM_MultiComponent(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
+                        COLTYPE* perm, int numthreads = 1)
+{
+    const COLTYPE base = ai[0];
+    
+    // Find connected components using union-find
+    std::vector<COLTYPE> parents(rows);
+    ParUnionFindRem(rows, ai, aj, parents.data(), numthreads);
+    
+    std::vector<COLTYPE> compRoots, sortedComp, compPrefSum;
+    ComponentsStat(parents.data(), rows, base, compRoots, sortedComp, compPrefSum, numthreads);
+    
+    COLTYPE perm_offset = 0; // Offset from base (0, 1, 2, ...)
+    
+    // Process each connected component separately
+    for (size_t comp = 0; comp < compRoots.size(); ++comp)
+    {
+        COLTYPE comp_start = compPrefSum[comp];
+        COLTYPE comp_size = compPrefSum[comp + 1] - comp_start;
+        
+        // Skip small components (singletons, pairs, triples) - trivial ordering
+        if (comp_size <= 3)
+        {
+            for (COLTYPE i = 0; i < comp_size; ++i)
+            {
+                COLTYPE node = sortedComp[comp_start + i];
+                perm[perm_offset + i + base] = node;
+            }
+            perm_offset += comp_size;
+            continue;
+        }
+        
+        // Get component nodes as iterator range
+        auto comp_begin = sortedComp.begin() + comp_start;
+        auto comp_end = sortedComp.begin() + comp_start + comp_size;
+        
+        // Apply RCM to this component
+        RCM_Component(rows, ai, aj, base, comp_begin, comp_end,
+                      perm, perm_offset, numthreads);
+        
+        perm_offset += comp_size;
+    }
+}
 
 #ifdef USE_METIS_LIB
 /// @brief Configuration options for METIS nested dissection
@@ -186,5 +374,9 @@ int MetisND(const COLTYPE nrows, const COLTYPE ncols,
             const MetisNDOptions& opts = MetisNDOptions());
 #endif
 
+
+// // TODO: implement parallel one
+// void SerialCM(mkl_wrapper::mkl_sparse_mat const *const mat,
+//               std::vector<MKL_INT> &iperm, std::vector<MKL_INT> &perm);
 
 } // namespace reordering

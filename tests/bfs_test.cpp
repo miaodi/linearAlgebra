@@ -54,7 +54,7 @@ TEST(bfs, parallel) {
                        7, 4, 5, 7, 8, 4, 5, 6, 6};
 
   // Test parallel BFS with LASTLEVEL=false, TRACK=true
-  graph::BFS<graph::PBFSFunc<int, int, false, true>> bfs;
+  graph::BFS<graph::BFSFunc<int, int, false, true>> bfs;
   bfs(9, aiA.data(), ajA.data(), 0, 5);  // 5 threads
   EXPECT_EQ(bfs.getHeight(), 5);
   std::vector<int> ref{0, 1, 1, 1, 2, 2, 3, 3, 4};
@@ -64,12 +64,12 @@ TEST(bfs, parallel) {
   }
 
   // Test parallel BFS with LASTLEVEL=false, TRACK=false
-  graph::BFS<graph::PBFSFunc<int, int, false, false>> bfs2;
+  graph::BFS<graph::BFSFunc<int, int, false, false>> bfs2;
   bfs2(9, aiA.data(), ajA.data(), 0, 5);  // 5 threads
   EXPECT_EQ(bfs2.getHeight(), 5);
 
   // Test parallel BFS with LASTLEVEL=true, TRACK=true for width and lastLevel
-  graph::BFS<graph::PBFSFunc<int, int, true, true>> bfs3;
+  graph::BFS<graph::BFSFunc<int, int, true, true>> bfs3;
   bfs3(9, aiA.data(), ajA.data(), 0, 5);  // 5 threads
   EXPECT_EQ(bfs3.getHeight(), 5);
   
@@ -115,7 +115,7 @@ TEST(bfs, serial_vs_parallel) {
       
       for (int t : {1, 2, 4, 8}) {
         // Parallel BFS with tracking
-        graph::BFS<graph::PBFSFunc<int, int, true, true>> pbfs;
+        graph::BFS<graph::BFSFunc<int, int, true, true>> pbfs;
         pbfs(n, ai.data(), aj.data(), s, t);
         
         // Verify height, levels, and width match
@@ -130,7 +130,7 @@ TEST(bfs, serial_vs_parallel) {
         EXPECT_EQ(pbfs_lastLevel_set, bfs_lastLevel_set);
 
         // Parallel BFS without tracking (width)
-        graph::BFS<graph::PBFSFunc<int, int, true, false>> pbfs2;
+        graph::BFS<graph::BFSFunc<int, int, true, false>> pbfs2;
         pbfs2(n, ai.data(), aj.data(), s, t);
         EXPECT_EQ(pbfs2.getHeight(), bfs.getHeight());
         EXPECT_EQ(pbfs2.getLastLevel().size(), bfs.getLastLevel().size());

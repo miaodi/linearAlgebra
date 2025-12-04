@@ -54,7 +54,7 @@ void UnionFindRem(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* p
 
 // Multi-core Spanning Forest Algorithms using the Disjoint-set Data Structure
 template <typename ROWTYPE, typename COLTYPE>
-void ParUnionFindRem(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents);
+void ParUnionFindRem(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents, int numthreads = 1);
 
 // Wait-free parallel algorithms for the union-find problem
 // https://github.com/wjakob/dset
@@ -81,7 +81,7 @@ public:
 };
 
 template <typename T>
-int CountComponents(T* parents, T size);
+T CountComponents(T* parents, T size);
 
 // Compute statistics about connected components in a union-find structure
 // Input:

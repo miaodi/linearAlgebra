@@ -126,7 +126,7 @@ void UnionFindRem(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* p
 // Multi-core Spanning Forest Algorithms using the Disjoint-set Data Structure
 template <typename ROWTYPE, typename COLTYPE>
 void ParUnionFindRem(COLTYPE rows, ROWTYPE const *const ai,
-                                COLTYPE const *const aj, COLTYPE* parents) {
+                                COLTYPE const *const aj, COLTYPE* parents, int numthreads) {
   const COLTYPE base = ai[0];
   std::iota(parents, parents + rows, 0);
 
@@ -147,7 +147,7 @@ void ParUnionFindRem(COLTYPE rows, ROWTYPE const *const ai,
     }
   };
 
-#pragma omp parallel
+#pragma omp parallel num_threads(numthreads)
   {
     const int tid = omp_get_thread_num();
     const int nthreads = omp_get_num_threads();
@@ -246,8 +246,8 @@ void DisjointSets::execute(COLTYPE rows, ROWTYPE const *const ai,
 }
 
 template <typename T>
-int CountComponents(T* parents, T size) {
-  int sum = 0;
+T CountComponents(T* parents, T size) {
+  T sum = 0;
 #pragma omp parallel for reduction(+ : sum)
   for (T i = 0; i < size; i++) {
     if (Find(parents, i) == i)
@@ -373,14 +373,14 @@ template void UnionFindRank<int64_t, int64_t>(int64_t rows, int64_t const* ai, i
 template void UnionFindRem<int, int>(int rows, int const* ai, int const* aj, int* parents);
 template void UnionFindRem<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj, int64_t* parents);
 
-template void ParUnionFindRem<int, int>(int rows, int const* ai, int const* aj, int* parents);
-template void ParUnionFindRem<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj, int64_t* parents);
+template void ParUnionFindRem<int, int>(int rows, int const* ai, int const* aj, int* parents, int);
+template void ParUnionFindRem<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj, int64_t* parents, int);
 
 template void DisjointSets::execute<int, int>(int rows, int const* ai, int const* aj);
 template void DisjointSets::execute<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj);
 
 template int CountComponents<int>(int* parents, int size);
-template int CountComponents<int64_t>(int64_t* parents, int64_t size);
+template int64_t CountComponents<int64_t>(int64_t* parents, int64_t size);
 
 template void ComponentsStat<int>(const int* parents, int size, const int base, std::vector<int> &compRoots, std::vector<int> &sortedComp, std::vector<int> &compPrefSum, int numThreads);
 template void ComponentsStat<int64_t>(const int64_t* parents, int64_t size, const int64_t base, std::vector<int64_t> &compRoots, std::vector<int64_t> &sortedComp, std::vector<int64_t> &compPrefSum, int numThreads);
