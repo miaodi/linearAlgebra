@@ -118,7 +118,7 @@ int main(int argc, char* argv[])
     if (opts.algorithm == "rcm") {
         std::cout << "\n=== Computing RCM ordering (ParallelSort) ===" << std::endl;
         auto rcm_start = std::chrono::high_resolution_clock::now();
-        reordering::RCM<reordering::RCMKernel::ParallelSort>(
+        reordering::RCM_MultiComponent<reordering::RCMKernel::ParallelSort>(
             matrix.rows, xadj.data(), adjncy.data(),
             perm.data(), iperm.data(), opts.threads);
         auto rcm_end = std::chrono::high_resolution_clock::now();
@@ -127,7 +127,7 @@ int main(int argc, char* argv[])
     } else if (opts.algorithm == "rcm-trad") {
         std::cout << "\n=== Computing RCM ordering (Traditional) ===" << std::endl;
         auto rcm_start = std::chrono::high_resolution_clock::now();
-        reordering::RCM<reordering::RCMKernel::Traditional>(
+        reordering::RCM_MultiComponent<reordering::RCMKernel::Traditional>(
             matrix.rows, xadj.data(), adjncy.data(),
             perm.data(), iperm.data(), opts.threads);
         auto rcm_end = std::chrono::high_resolution_clock::now();
