@@ -102,7 +102,7 @@ void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
  *  @param rows Number of rows in the matrix
  *  @param cols Number of columns in the matrix
  *  @param permP Permutation vector for rows p[i] = j means P(i, j) = 1
- *  @param ipermQ Inverse permutation vector for columns q[j] = i means Q(i, j) = 1
+ *  @param ipermQ Inverse permutation vector for columns invq[j] = i means Q(i, j) = 1
  *  @param ai Row pointer of the input matrix
  *  @param aj Column indices of the input matrix
  *  @param perm_ai Output row pointer after permutation
@@ -121,7 +121,7 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
  *  @param rows Number of rows in the matrix
  *  @param cols Number of columns in the matrix
  *  @param permP Permutation vector for rows p[i] = j means P(i, j) = 1
- *  @param ipermQ Inverse permutation vector for columns q[j] = i means Q(i, j) = 1
+ *  @param ipermQ Inverse permutation vector for columns invq[j] = i means Q(i, j) = 1
  *  @param ai Row pointer of the input matrix
  *  @param aj Column indices of the input matrix
  *  @param av Values of the input matrix
