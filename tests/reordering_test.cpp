@@ -13,6 +13,80 @@
 #include <set>
 #include "permutation.hpp"
 
+TEST(MinDegreeNode, serial_basic) {
+  std::vector<int> degrees = {5, 2, 8, 1, 6, 3};
+  std::vector<int> nodes = {0, 1, 2, 3, 4, 5};
+  const int base = 0;
+  
+  auto result = reordering::MinDegreeNode(degrees.data(), base, nodes.begin(), nodes.end(), 1);
+  
+  // Node 3 has minimum degree 1
+  EXPECT_EQ(result.first, 3);
+  EXPECT_EQ(result.second, 1);
+}
+
+TEST(MinDegreeNode, serial_with_base_offset) {
+  std::vector<int> degrees = {5, 2, 8, 1, 6, 3};
+  std::vector<int> nodes = {10, 11, 12, 13, 14, 15};  // base-10 indexing
+  const int base = 10;
+  
+  auto result = reordering::MinDegreeNode(degrees.data(), base, nodes.begin(), nodes.end(), 1);
+  
+  // Node 13 (index 3 in degrees) has minimum degree 1
+  EXPECT_EQ(result.first, 13);
+  EXPECT_EQ(result.second, 1);
+}
+
+TEST(MinDegreeNode, parallel_vs_serial) {
+  std::vector<int> degrees = {15, 7, 23, 4, 18, 9, 2, 31, 11, 5};
+  std::vector<int> nodes(10);
+  std::iota(nodes.begin(), nodes.end(), 0);
+  const int base = 0;
+  
+  auto serial_result = reordering::MinDegreeNode(degrees.data(), base, nodes.begin(), nodes.end(), 1);
+  
+  for (int nthreads = 2; nthreads <= 8; nthreads *= 2) {
+    auto parallel_result = reordering::MinDegreeNode(degrees.data(), base, nodes.begin(), nodes.end(), nthreads);
+    EXPECT_EQ(serial_result.first, parallel_result.first);
+    EXPECT_EQ(serial_result.second, parallel_result.second);
+  }
+}
+
+TEST(MinDegreeNode, empty_range) {
+  std::vector<int> degrees = {5, 2, 8};
+  std::vector<int> nodes;
+  const int base = 0;
+  
+  auto result = reordering::MinDegreeNode(degrees.data(), base, nodes.begin(), nodes.end(), 1);
+  
+  EXPECT_EQ(result.first, -1);
+  EXPECT_EQ(result.second, std::numeric_limits<int>::max());
+}
+
+TEST(MinDegreeNode, single_node) {
+  std::vector<int> degrees = {42};
+  std::vector<int> nodes = {0};
+  const int base = 0;
+  
+  auto result = reordering::MinDegreeNode(degrees.data(), base, nodes.begin(), nodes.end(), 1);
+  
+  EXPECT_EQ(result.first, 0);
+  EXPECT_EQ(result.second, 42);
+}
+
+TEST(MinDegreeNode, tie_breaking) {
+  // Multiple nodes with same minimum degree - should return first one
+  std::vector<int> degrees = {5, 2, 8, 2, 6, 2};
+  std::vector<int> nodes = {0, 1, 2, 3, 4, 5};
+  const int base = 0;
+  
+  auto result = reordering::MinDegreeNode(degrees.data(), base, nodes.begin(), nodes.end(), 1);
+  
+  // Should find one of the nodes with degree 2 (nodes 1, 3, or 5)
+  EXPECT_EQ(result.second, 2);
+  EXPECT_TRUE(result.first == 1 || result.first == 3 || result.first == 5);
+}
+
 // TEST(global_min_degree, parallel_vs_serial) {
 //   std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
 //   for (const auto &fn : files) {
@@ -179,158 +253,192 @@ TEST(UnionFind, rank_vs_rem) {
   }
 }
 
-TEST(UnionFind, rem_vs_parrem) {
-  omp_set_num_threads(5);
-  for (int iter = 0; iter < 100; iter++) {
-    // Create random sparse matrix with raw CSR
-    const int rows = 1000;
-    const int cols = 1000;
-    const int nnz = 2000;
-    const int base = 0;
-    
-    std::vector<int> ai(rows + 1);
-    std::vector<int> aj(nnz);
-    
-    // Generate row pointers
-    ai[0] = base;
-    for (int i = 1; i <= rows; i++) {
-      ai[i] = ai[i - 1] + (nnz / rows) + (i <= (nnz % rows) ? 1 : 0);
-    }
-    
-    // Generate random column indices
-    matrix_utils::RandomCSR<int, int, double>(rows, cols, ai.data(), aj.data(), nullptr);
-    
-    std::vector<int> parents_rem(rows);
-    reordering::UnionFindRem(rows, ai.data(), aj.data(), parents_rem.data());
-    for (int j = 0; j < 100; j++) {
-      std::vector<int> parants_parrem(rows);
-      reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parants_parrem.data());
-      std::unordered_map<int, int> rank_to_rem;
-      std::unordered_map<int, int> rem_to_rank;
-      for (int i = 0; i < rows; i++) {
-        if (rank_to_rem.find(reordering::Find(parents_rem.data(), i)) ==
-            rank_to_rem.end()) {
-          rank_to_rem[reordering::Find(parents_rem.data(), i)] =
-              reordering::Find(parants_parrem.data(), i);
-        } else {
-          EXPECT_EQ(rank_to_rem[reordering::Find(parents_rem.data(), i)],
-                    reordering::Find(parants_parrem.data(), i));
+TEST(UnionFind, rem_vs_parrem)
+{
+    for (int nthreads = 1; nthreads <= 8; nthreads++)
+    {
+        for (int iter = 0; iter < 100; iter++)
+        {
+            // Create random sparse matrix with raw CSR
+            const int rows = 1000;
+            const int cols = 1000;
+            const int nnz = 2000;
+            const int base = 0;
+
+            std::vector<int> ai(rows + 1);
+            std::vector<int> aj(nnz);
+
+            // Generate row pointers
+            ai[0] = base;
+            for (int i = 1; i <= rows; i++)
+            {
+                ai[i] = ai[i - 1] + (nnz / rows) + (i <= (nnz % rows) ? 1 : 0);
+            }
+
+            // Generate random column indices
+            matrix_utils::RandomCSR<int, int, double>(rows, cols, ai.data(), aj.data(), nullptr);
+
+            std::vector<int> parents_rem(rows);
+            reordering::UnionFindRem(rows, ai.data(), aj.data(), parents_rem.data());
+            for (int j = 0; j < 100; j++)
+            {
+                std::vector<int> parants_parrem(rows);
+                reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parants_parrem.data(), nthreads);
+                std::unordered_map<int, int> rank_to_rem;
+                std::unordered_map<int, int> rem_to_rank;
+                for (int i = 0; i < rows; i++)
+                {
+                    if (rank_to_rem.find(reordering::Find(parents_rem.data(), i)) == rank_to_rem.end())
+                    {
+                        rank_to_rem[reordering::Find(parents_rem.data(), i)] =
+                            reordering::Find(parants_parrem.data(), i);
+                    }
+                    else
+                    {
+                        EXPECT_EQ(rank_to_rem[reordering::Find(parents_rem.data(), i)],
+                                  reordering::Find(parants_parrem.data(), i));
+                    }
+                    if (rem_to_rank.find(reordering::Find(parants_parrem.data(), i)) == rem_to_rank.end())
+                    {
+                        rem_to_rank[reordering::Find(parants_parrem.data(), i)] =
+                            reordering::Find(parents_rem.data(), i);
+                    }
+                    else
+                    {
+                        EXPECT_EQ(rem_to_rank[reordering::Find(parants_parrem.data(), i)],
+                                  reordering::Find(parents_rem.data(), i));
+                    }
+                }
+            }
         }
-        if (rem_to_rank.find(reordering::Find(parants_parrem.data(), i)) ==
-            rem_to_rank.end()) {
-          rem_to_rank[reordering::Find(parants_parrem.data(), i)] =
-              reordering::Find(parents_rem.data(), i);
-        } else {
-          EXPECT_EQ(rem_to_rank[reordering::Find(parants_parrem.data(), i)],
-                    reordering::Find(parents_rem.data(), i));
-        }
-      }
     }
-  }
 }
 
-TEST(UnionFind, parrem_base) {
-  omp_set_num_threads(5);
-  for (int iter = 0; iter < 100; iter++) {
-    // Create random sparse matrix with raw CSR
-    const int rows = 1000;
-    const int cols = 1000;
-    const int nnz = 2000;
-    
-    std::vector<int> ai(rows + 1);
-    std::vector<int> aj(nnz);
-    
-    // Test with 0-based indexing
-    int base0 = 0;
-    ai[0] = base0;
-    for (int i = 1; i <= rows; i++) {
-      ai[i] = ai[i - 1] + (nnz / rows) + (i <= (nnz % rows) ? 1 : 0);
-    }
-    matrix_utils::RandomCSR<int, int, double>(rows, cols, ai.data(), aj.data(), nullptr);
-    
-    std::vector<int> parants_parrem(rows);
-    reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parants_parrem.data());
-    
-    // Convert to 1-based indexing
-    int base1 = 1;
-    for (int i = 0; i <= rows; i++) {
-      ai[i] += (base1 - base0);
-    }
-    for (int i = 0; i < nnz; i++) {
-      aj[i] += (base1 - base0);
-    }
-    
-    std::vector<int> parants_parrem1(rows);
-    reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parants_parrem1.data());
+TEST(UnionFind, parrem_base)
+{
+    for (int nthreads = 1; nthreads <= 8; nthreads++)
+    {
+        for (int iter = 0; iter < 100; iter++)
+        {
+            // Create random sparse matrix with raw CSR
+            const int rows = 1000;
+            const int cols = 1000;
+            const int nnz = 2000;
 
-    std::unordered_map<int, int> zero_to_one;
-    std::unordered_map<int, int> one_to_zero;
-    for (int i = 0; i < rows; i++) {
-      if (zero_to_one.find(reordering::Find(parants_parrem.data(), i)) ==
-          zero_to_one.end()) {
-        zero_to_one[reordering::Find(parants_parrem.data(), i)] =
-            reordering::Find(parants_parrem1.data(), i);
-      } else {
-        EXPECT_EQ(zero_to_one[reordering::Find(parants_parrem.data(), i)],
-                  reordering::Find(parants_parrem1.data(), i));
-      }
-      if (one_to_zero.find(reordering::Find(parants_parrem1.data(), i)) ==
-          one_to_zero.end()) {
-        one_to_zero[reordering::Find(parants_parrem1.data(), i)] =
-            reordering::Find(parants_parrem.data(), i);
-      } else {
-        EXPECT_EQ(one_to_zero[reordering::Find(parants_parrem1.data(), i)],
-                  reordering::Find(parants_parrem.data(), i));
-      }
+            std::vector<int> ai(rows + 1);
+            std::vector<int> aj(nnz);
+
+            // Test with 0-based indexing
+            int base0 = 0;
+            ai[0] = base0;
+            for (int i = 1; i <= rows; i++)
+            {
+                ai[i] = ai[i - 1] + (nnz / rows) + (i <= (nnz % rows) ? 1 : 0);
+            }
+            matrix_utils::RandomCSR<int, int, double>(rows, cols, ai.data(), aj.data(), nullptr);
+
+            std::vector<int> parants_parrem(rows);
+            reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parants_parrem.data(), nthreads);
+
+            // Convert to 1-based indexing
+            int base1 = 1;
+            for (int i = 0; i <= rows; i++)
+            {
+                ai[i] += (base1 - base0);
+            }
+            for (int i = 0; i < nnz; i++)
+            {
+                aj[i] += (base1 - base0);
+            }
+
+            std::vector<int> parants_parrem1(rows);
+            reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parants_parrem1.data(), nthreads);
+
+            std::unordered_map<int, int> zero_to_one;
+            std::unordered_map<int, int> one_to_zero;
+            for (int i = 0; i < rows; i++)
+            {
+                if (zero_to_one.find(reordering::Find(parants_parrem.data(), i)) == zero_to_one.end())
+                {
+                    zero_to_one[reordering::Find(parants_parrem.data(), i)] =
+                        reordering::Find(parants_parrem1.data(), i);
+                }
+                else
+                {
+                    EXPECT_EQ(zero_to_one[reordering::Find(parants_parrem.data(), i)],
+                              reordering::Find(parants_parrem1.data(), i));
+                }
+                if (one_to_zero.find(reordering::Find(parants_parrem1.data(), i)) == one_to_zero.end())
+                {
+                    one_to_zero[reordering::Find(parants_parrem1.data(), i)] =
+                        reordering::Find(parants_parrem.data(), i);
+                }
+                else
+                {
+                    EXPECT_EQ(one_to_zero[reordering::Find(parants_parrem1.data(), i)],
+                              reordering::Find(parants_parrem.data(), i));
+                }
+            }
+        }
     }
-  }
 }
 
-TEST(UnionFind, rem_vs_parrank) {
-  omp_set_num_threads(5);
-  for (int iter = 0; iter < 100; iter++) {
-    // Create random sparse matrix with raw CSR
-    const int rows = 1000;
-    const int cols = 1000;
-    const int nnz = 1000;
-    const int base = 0;
-    
-    std::vector<int> ai(rows + 1);
-    std::vector<int> aj(nnz);
-    
-    // Generate row pointers
-    ai[0] = base;
-    for (int i = 1; i <= rows; i++) {
-      ai[i] = ai[i - 1] + (nnz / rows) + (i <= (nnz % rows) ? 1 : 0);
-    }
-    
-    // Generate random column indices
-    matrix_utils::RandomCSR<int, int, double>(rows, cols, ai.data(), aj.data(), nullptr);
-    
-    std::vector<int> parents_rem(rows);
-    reordering::UnionFindRem(rows, ai.data(), aj.data(), parents_rem.data());
-    for (int j = 0; j < 100; j++) {
-      reordering::DisjointSets ds{static_cast<uint32_t>(rows)};
-      ds.execute<int, int>(rows, ai.data(), aj.data());
-      std::unordered_map<int, int> rem_to_parrank;
-      std::unordered_map<int, int> parrank_to_rem;
-      for (int i = 0; i < rows; i++) {
-        if (rem_to_parrank.find(reordering::Find(parents_rem.data(), i)) ==
-            rem_to_parrank.end()) {
-          rem_to_parrank[reordering::Find(parents_rem.data(), i)] = ds.find(i);
-        } else {
-          EXPECT_EQ(rem_to_parrank[reordering::Find(parents_rem.data(), i)],
-                    ds.find(i));
+TEST(UnionFind, rem_vs_parrank)
+{
+    for (int nthreads = 1; nthreads <= 8; nthreads++)
+    {
+        for (int iter = 0; iter < 100; iter++)
+        {
+            // Create random sparse matrix with raw CSR
+            const int rows = 1000;
+            const int cols = 1000;
+            const int nnz = 1000;
+            const int base = 0;
+
+            std::vector<int> ai(rows + 1);
+            std::vector<int> aj(nnz);
+
+            // Generate row pointers
+            ai[0] = base;
+            for (int i = 1; i <= rows; i++)
+            {
+                ai[i] = ai[i - 1] + (nnz / rows) + (i <= (nnz % rows) ? 1 : 0);
+            }
+
+            // Generate random column indices
+            matrix_utils::RandomCSR<int, int, double>(rows, cols, ai.data(), aj.data(), nullptr);
+
+            std::vector<int> parents_rem(rows);
+            reordering::UnionFindRem(rows, ai.data(), aj.data(), parents_rem.data());
+            for (int j = 0; j < 100; j++)
+            {
+                reordering::DisjointSets ds{static_cast<uint32_t>(rows)};
+                ds.execute<int, int>(rows, ai.data(), aj.data());
+                std::unordered_map<int, int> rem_to_parrank;
+                std::unordered_map<int, int> parrank_to_rem;
+                for (int i = 0; i < rows; i++)
+                {
+                    if (rem_to_parrank.find(reordering::Find(parents_rem.data(), i)) ==
+                        rem_to_parrank.end())
+                    {
+                        rem_to_parrank[reordering::Find(parents_rem.data(), i)] = ds.find(i);
+                    }
+                    else
+                    {
+                        EXPECT_EQ(rem_to_parrank[reordering::Find(parents_rem.data(), i)], ds.find(i));
+                    }
+                    if (parrank_to_rem.find(ds.find(i)) == parrank_to_rem.end())
+                    {
+                        parrank_to_rem[ds.find(i)] = reordering::Find(parents_rem.data(), i);
+                    }
+                    else
+                    {
+                        EXPECT_EQ(parrank_to_rem[ds.find(i)], reordering::Find(parents_rem.data(), i));
+                    }
+                }
+            }
         }
-        if (parrank_to_rem.find(ds.find(i)) == parrank_to_rem.end()) {
-          parrank_to_rem[ds.find(i)] = reordering::Find(parents_rem.data(), i);
-        } else {
-          EXPECT_EQ(parrank_to_rem[ds.find(i)],
-                    reordering::Find(parents_rem.data(), i));
-        }
-      }
     }
-  }
 }
 
 // TEST(Reordering, SerialCM) {
@@ -432,7 +540,7 @@ TEST(UnionFind, ComponentsStat_basic) {
   
   // Run union-find to create a realistic parents array
   std::vector<int> parents(rows);
-  reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parents.data());
+  reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parents.data(), 1);
   
   // Compute component statistics
   std::vector<int> compRoots, sortedComp, compPrefSum;
@@ -529,7 +637,7 @@ TEST(UnionFind, ComponentsStat_from_graph) {
   
   // Run union-find
   std::vector<int> parents(rows);
-  reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parents.data());
+  reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parents.data(), 1);
   
   // Compute component statistics
   std::vector<int> compRoots, sortedComp, compPrefSum;
@@ -602,7 +710,7 @@ TEST(UnionFind, ComponentsStat_parallel) {
   
   // Run union-find once
   std::vector<int> parents(rows);
-  reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parents.data());
+  reordering::ParUnionFindRem(rows, ai.data(), aj.data(), parents.data(), 1);
   
   // Run with 1 thread (baseline)
   std::vector<int> compRoots1, sortedComp1, compPrefSum1;
@@ -758,7 +866,7 @@ TEST(UnionFind, ComponentsStat_block_diagonal_permutation) {
   
   // Run union-find on permuted matrix
   std::vector<int> parents(n);
-  reordering::ParUnionFindRem(n, ai_perm.data(), aj_perm.data(), parents.data());
+  reordering::ParUnionFindRem(n, ai_perm.data(), aj_perm.data(), parents.data(), 4);
   
   // Get component statistics
   std::vector<int> compRoots, sortedComp, compPrefSum;

@@ -9,8 +9,9 @@
 
 namespace graph {
 
+// Serial BFS kernel implementation
 template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL, bool TRACK>
-bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source, COLTYPE shortCutWidth,
+bool BFSKernel_Serial(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source, COLTYPE shortCutWidth,
              COLTYPE& height, COLTYPE& width, std::vector<COLTYPE>& levels, std::vector<COLTYPE>& lastLevel)
 {
     levels.resize(rows);
@@ -93,8 +94,9 @@ T atomic_fetch_set(T* base, std::size_t i, T new_val) {
   return ref.exchange(new_val, std::memory_order_relaxed);
 }
 
+// Parallel BFS kernel implementation
 template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL, bool TRACK>
-bool PBFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
+bool BFSKernel_Parallel(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
               COLTYPE shortCutWidth, COLTYPE& height, COLTYPE& width, std::vector<COLTYPE>& levels,
               std::vector<COLTYPE>& lastLevel, int nthreads)
 {
@@ -210,98 +212,65 @@ bool PBFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source
     return true;
 }
 
+// Unified BFS dispatcher - selects serial or parallel kernel based on nthreads
+template <typename ROWTYPE, typename COLTYPE, bool LASTLEVEL, bool TRACK>
+bool BFSFunc(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE source,
+             COLTYPE shortCutWidth, COLTYPE& height, COLTYPE& width,
+             std::vector<COLTYPE>& levels, std::vector<COLTYPE>& lastLevel, int nthreads)
+{
+    if (nthreads == 1) {
+        return BFSKernel_Serial<ROWTYPE, COLTYPE, LASTLEVEL, TRACK>(
+            rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel);
+    } else {
+        return BFSKernel_Parallel<ROWTYPE, COLTYPE, LASTLEVEL, TRACK>(
+            rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel, nthreads);
+    }
+}
+
 // Explicit template instantiations for common types
 template bool BFSFunc<int, int, true, true>(int rows, int const* ai, int const* aj,
-                                                  int source, int shortCut, int& level,
-                                                  int& width, std::vector<int>& levels,
-                                                  std::vector<int>& lastLevel);
+                                             int source, int shortCut, int& level,
+                                             int& width, std::vector<int>& levels,
+                                             std::vector<int>& lastLevel, int);
 
 template bool BFSFunc<int, int, false, true>(int rows, int const* ai, int const* aj,
-                                                   int source, int shortCut, int& level,
-                                                   int& width, std::vector<int>& levels,
-                                                   std::vector<int>& lastLevel);
-
-template bool BFSFunc<int, int, true, false>(int rows, int const* ai, int const* aj,
-                                                   int source, int shortCut, int& level,
-                                                   int& width, std::vector<int>& levels,
-                                                   std::vector<int>& lastLevel);
-
-template bool BFSFunc<int, int, false, false>(int rows, int const* ai, int const* aj,
-                                                    int source, int shortCut, int& level,
-                                                    int& width, std::vector<int>& levels,
-                                                    std::vector<int>& lastLevel);
-
-template bool PBFSFunc<int, int, true, true>(int rows, int const* ai, int const* aj,
                                               int source, int shortCut, int& level,
                                               int& width, std::vector<int>& levels,
                                               std::vector<int>& lastLevel, int);
 
-template bool PBFSFunc<int, int, true, false>(int rows, int const* ai, int const* aj,
+template bool BFSFunc<int, int, true, false>(int rows, int const* ai, int const* aj,
+                                              int source, int shortCut, int& level,
+                                              int& width, std::vector<int>& levels,
+                                              std::vector<int>& lastLevel, int);
+
+template bool BFSFunc<int, int, false, false>(int rows, int const* ai, int const* aj,
                                                int source, int shortCut, int& level,
                                                int& width, std::vector<int>& levels,
                                                std::vector<int>& lastLevel, int);
-
-template bool PBFSFunc<int, int, false, true>(int rows, int const* ai, int const* aj,
-                                               int source, int shortCut, int& level,
-                                               int& width, std::vector<int>& levels,
-                                               std::vector<int>& lastLevel, int);
-
-template bool PBFSFunc<int, int, false, false>(int rows, int const* ai, int const* aj,
-                                                int source, int shortCut, int& level,
-                                                int& width, std::vector<int>& levels,
-                                                std::vector<int>& lastLevel, int);
 
 // int64_t instantiations
 template bool BFSFunc<int64_t, int64_t, true, true>(int64_t rows, int64_t const* ai,
-                                                          int64_t const* aj, int64_t source,
-                                                          int64_t shortCut, int64_t& level,
-                                                          int64_t& width, std::vector<int64_t>& levels,
-                                                          std::vector<int64_t>& lastLevel);
+                                                     int64_t const* aj, int64_t source,
+                                                     int64_t shortCut, int64_t& level,
+                                                     int64_t& width, std::vector<int64_t>& levels,
+                                                     std::vector<int64_t>& lastLevel, int);
 
 template bool BFSFunc<int64_t, int64_t, false, true>(int64_t rows, int64_t const* ai,
-                                                           int64_t const* aj, int64_t source,
-                                                           int64_t shortCut, int64_t& level,
-                                                           int64_t& width, std::vector<int64_t>& levels,
-                                                           std::vector<int64_t>& lastLevel);
-
-template bool BFSFunc<int64_t, int64_t, true, false>(int64_t rows, int64_t const* ai,
-                                                           int64_t const* aj, int64_t source,
-                                                           int64_t shortCut, int64_t& level,
-                                                           int64_t& width, std::vector<int64_t>& levels,
-                                                           std::vector<int64_t>& lastLevel);
-
-template bool BFSFunc<int64_t, int64_t, false, false>(int64_t rows, int64_t const* ai,
-                                                            int64_t const* aj, int64_t source,
-                                                            int64_t shortCut, int64_t& level,
-                                                            int64_t& width, std::vector<int64_t>& levels,
-                                                            std::vector<int64_t>& lastLevel);
-
-template bool PBFSFunc<int64_t, int64_t, true, true>(int64_t rows, int64_t const* ai,
                                                       int64_t const* aj, int64_t source,
                                                       int64_t shortCut, int64_t& level,
-                                                      int64_t& width,
-                                                      std::vector<int64_t>& levels,
+                                                      int64_t& width, std::vector<int64_t>& levels,
                                                       std::vector<int64_t>& lastLevel, int);
 
-template bool PBFSFunc<int64_t, int64_t, true, false>(int64_t rows, int64_t const* ai,
+template bool BFSFunc<int64_t, int64_t, true, false>(int64_t rows, int64_t const* ai,
+                                                      int64_t const* aj, int64_t source,
+                                                      int64_t shortCut, int64_t& level,
+                                                      int64_t& width, std::vector<int64_t>& levels,
+                                                      std::vector<int64_t>& lastLevel, int);
+
+template bool BFSFunc<int64_t, int64_t, false, false>(int64_t rows, int64_t const* ai,
                                                        int64_t const* aj, int64_t source,
                                                        int64_t shortCut, int64_t& level,
-                                                       int64_t& width,
-                                                       std::vector<int64_t>& levels,
+                                                       int64_t& width, std::vector<int64_t>& levels,
                                                        std::vector<int64_t>& lastLevel, int);
-
-template bool PBFSFunc<int64_t, int64_t, false, true>(int64_t rows, int64_t const* ai,
-                                                       int64_t const* aj, int64_t source,
-                                                       int64_t shortCut, int64_t& level,
-                                                       int64_t& width,
-                                                       std::vector<int64_t>& levels,
-                                                       std::vector<int64_t>& lastLevel, int);
-
-template bool PBFSFunc<int64_t, int64_t, false, false>(int64_t rows, int64_t const* ai,
-                                                        int64_t const* aj, int64_t source,
-                                                        int64_t shortCut, int64_t& level,
-                                                        int64_t& width,
-                                                        std::vector<int64_t>& levels,
-                                                        std::vector<int64_t>& lastLevel, int);
 
 } // namespace graph

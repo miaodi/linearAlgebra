@@ -77,7 +77,7 @@ BENCHMARK_F(MyFixture, BM_BFS_DIRECT)(benchmark::State &state) {
     COL width = 0;
     std::vector<COL> levels;
     std::vector<COL> lastLevel;
-    graph::BFSFunc<ROW, COL, false, false>(rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel);
+    graph::BFSFunc<ROW, COL, false, false>(rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel, 1);
     benchmark::DoNotOptimize(height);
     benchmark::DoNotOptimize(width);
   }
@@ -98,7 +98,7 @@ BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_DIRECT_TRACK_ON)(benchmark::State &state) 
     COL width = 0;
     std::vector<COL> levels;
     std::vector<COL> lastLevel;
-    graph::PBFSFunc<ROW, COL, false, true>(rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel, state.range(0));
+    graph::BFSFunc<ROW, COL, false, true>(rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel, state.range(0));
     benchmark::DoNotOptimize(height);
     benchmark::DoNotOptimize(width);
   }
@@ -120,7 +120,7 @@ BENCHMARK_DEFINE_F(MyFixture, BM_PBFS_DIRECT_TRACK_OFF)(benchmark::State &state)
     COL width = 0;
     std::vector<COL> levels;
     std::vector<COL> lastLevel;
-    graph::PBFSFunc<ROW, COL, false, false>(rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel, state.range(0));
+    graph::BFSFunc<ROW, COL, false, false>(rows, ai, aj, source, shortCutWidth, height, width, levels, lastLevel, state.range(0));
     benchmark::DoNotOptimize(height);
     benchmark::DoNotOptimize(width);
   }

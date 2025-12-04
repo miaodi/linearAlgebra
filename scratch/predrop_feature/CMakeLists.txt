@@ -34,3 +34,19 @@ target_link_libraries(jaccard_compare PRIVATE
 target_include_directories(jaccard_compare PRIVATE
     ${PROJECT_BINARY_DIR}
 )
+
+# Create reorder executable
+add_executable(reorder reorder.cpp)
+target_link_libraries(reorder PRIVATE
+    utils
+    fast_matrix_market::fast_matrix_market
+    Eigen3::Eigen
+    mkl_wrapper
+    reordering
+    sparse_mat_op
+    factorization
+    cxxopts
+)
+target_include_directories(reorder PRIVATE
+    ${PROJECT_BINARY_DIR}
+)
