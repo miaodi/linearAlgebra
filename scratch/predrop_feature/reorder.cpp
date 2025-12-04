@@ -17,6 +17,7 @@ struct Options
     std::string output_file;
     int max_display_size;
     int threads;
+    std::string algorithm; // "rcm" or "metis"
 };
 
 void printOptions(const Options& opts)
@@ -30,7 +31,7 @@ void printOptions(const Options& opts)
 
 int main(int argc, char* argv[])
 {
-    cxxopts::Options options("rcm_reorder", "RCM reordering of matrix adjacency graph");
+    cxxopts::Options options("reorder", "Reordering of matrix adjacency graph (RCM or METIS)");
 
     // clang-format off
     options.add_options()
@@ -38,6 +39,7 @@ int main(int argc, char* argv[])
         ("o,output", "Output SVG file path", cxxopts::value<std::string>()->default_value("rcm_reordered.svg"))
         ("s,size", "Maximum display size (pixels)", cxxopts::value<int>()->default_value("200"))
         ("n,threads", "Number of threads", cxxopts::value<int>()->default_value("1"))
+        ("a,algorithm", "Reordering algorithm: rcm | nd", cxxopts::value<std::string>()->default_value("rcm"))
         ("h,help", "Print usage");
     // clang-format on
 
@@ -54,6 +56,7 @@ int main(int argc, char* argv[])
     opts.output_file = result["output"].as<std::string>();
     opts.max_display_size = result["size"].as<int>();
     opts.threads = result["threads"].as<int>();
+    opts.algorithm = result["algorithm"].as<std::string>();
 
     printOptions(opts);
 
@@ -107,21 +110,41 @@ int main(int argc, char* argv[])
     std::cout << "  Edges: " << actual_edges << std::endl;
     std::cout << "  Time: " << aplusat_time.count() << " s" << std::endl;
 
-    // Compute RCM ordering
-    std::cout << "\n=== Computing RCM ordering ===" << std::endl;
+    // Compute ordering (RCM or METIS)
     std::vector<int> perm(matrix.rows);
-    
-    auto rcm_start = std::chrono::high_resolution_clock::now();
-    reordering::RCM_MultiComponent(matrix.rows, xadj.data(), adjncy.data(),
-                                   perm.data(), opts.threads);
-    auto rcm_end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> rcm_time = rcm_end - rcm_start;
-    
-    std::cout << "RCM ordering computed successfully" << std::endl;
-
-    // Compute inverse permutation
     std::vector<int> iperm(matrix.rows);
-    matrix_utils::invPerm(matrix.rows, matrix.Base(), perm.data(), iperm.data(), opts.threads);
+
+    double order_time = 0.0;
+    if (opts.algorithm == "rcm") {
+        std::cout << "\n=== Computing RCM ordering ===" << std::endl;
+        auto rcm_start = std::chrono::high_resolution_clock::now();
+        reordering::RCM(matrix.rows, xadj.data(), adjncy.data(),
+                           perm.data(), iperm.data(), opts.threads);
+        auto rcm_end = std::chrono::high_resolution_clock::now();
+        order_time = std::chrono::duration<double>(rcm_end - rcm_start).count();
+        std::cout << "RCM ordering computed successfully" << std::endl;
+    } else if (opts.algorithm == "nd") {
+        std::cout << "\n=== Computing METIS ND ordering ===" << std::endl;
+        auto nd_start = std::chrono::high_resolution_clock::now();
+#ifdef USE_METIS_LIB
+        int rc = reordering::MetisND<int,int>(matrix.rows, matrix.cols,
+                                              xadj.data(), adjncy.data(),
+                                              iperm.data(), perm.data());
+        if (rc != 0) {
+            std::cerr << "METIS ND failed with code " << rc << std::endl;
+            return rc;
+        }
+#else
+        std::cerr << "METIS support not enabled (USE_METIS_LIB=OFF)." << std::endl;
+        return -1;
+#endif
+        auto nd_end = std::chrono::high_resolution_clock::now();
+        order_time = std::chrono::duration<double>(nd_end - nd_start).count();
+        std::cout << "METIS ND ordering computed successfully" << std::endl;
+    } else {
+        std::cerr << "Unknown algorithm: " << opts.algorithm << ". Use 'rcm' or 'metis'." << std::endl;
+        return -1;
+    }
 
     // Allocate permuted matrix
     matrix_utils::CSRMatrix<int, int, double> permuted;
@@ -158,13 +181,13 @@ int main(int argc, char* argv[])
     matrix_utils::writeSVG(permuted.rows, permuted.cols, permuted.AI(), permuted.AJ(),
                           out, opts.max_display_size);
     out.close();
-    std::cout << "RCM-reordered matrix written to: " << opts.output_file << std::endl;
+    std::cout << "Reordered matrix written to: " << opts.output_file << std::endl;
 
     // Summary
     std::cout << "\n=== Summary ===" << std::endl;
-    std::cout << "Total time: " << (aplusat_time.count() + rcm_time.count() + perm_time.count()) << " s" << std::endl;
+    std::cout << "Total time: " << (aplusat_time.count() + order_time + perm_time.count()) << " s" << std::endl;
     std::cout << "  A+A^T construction: " << aplusat_time.count() << " s" << std::endl;
-    std::cout << "  RCM ordering:       " << rcm_time.count() << " s" << std::endl;
+    std::cout << "  Ordering (" << opts.algorithm << "): " << order_time << " s" << std::endl;
     std::cout << "  Matrix permutation: " << perm_time.count() << " s" << std::endl;
 
     return 0;
