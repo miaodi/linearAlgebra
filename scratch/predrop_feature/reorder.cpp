@@ -39,7 +39,7 @@ int main(int argc, char* argv[])
         ("o,output", "Output SVG file path", cxxopts::value<std::string>()->default_value("rcm_reordered.svg"))
         ("s,size", "Maximum display size (pixels)", cxxopts::value<int>()->default_value("200"))
         ("n,threads", "Number of threads", cxxopts::value<int>()->default_value("1"))
-        ("a,algorithm", "Reordering algorithm: rcm | nd", cxxopts::value<std::string>()->default_value("rcm"))
+        ("a,algorithm", "Reordering algorithm: rcm | rcm-trad | nd", cxxopts::value<std::string>()->default_value("rcm"))
         ("h,help", "Print usage");
     // clang-format on
 
@@ -116,10 +116,20 @@ int main(int argc, char* argv[])
 
     double order_time = 0.0;
     if (opts.algorithm == "rcm") {
-        std::cout << "\n=== Computing RCM ordering ===" << std::endl;
+        std::cout << "\n=== Computing RCM ordering (ParallelSort) ===" << std::endl;
         auto rcm_start = std::chrono::high_resolution_clock::now();
-        reordering::RCM(matrix.rows, xadj.data(), adjncy.data(),
-                           perm.data(), iperm.data(), opts.threads);
+        reordering::RCM<reordering::RCMKernel::ParallelSort>(
+            matrix.rows, xadj.data(), adjncy.data(),
+            perm.data(), iperm.data(), opts.threads);
+        auto rcm_end = std::chrono::high_resolution_clock::now();
+        order_time = std::chrono::duration<double>(rcm_end - rcm_start).count();
+        std::cout << "RCM ordering computed successfully" << std::endl;
+    } else if (opts.algorithm == "rcm-trad") {
+        std::cout << "\n=== Computing RCM ordering (Traditional) ===" << std::endl;
+        auto rcm_start = std::chrono::high_resolution_clock::now();
+        reordering::RCM<reordering::RCMKernel::Traditional>(
+            matrix.rows, xadj.data(), adjncy.data(),
+            perm.data(), iperm.data(), opts.threads);
         auto rcm_end = std::chrono::high_resolution_clock::now();
         order_time = std::chrono::duration<double>(rcm_end - rcm_start).count();
         std::cout << "RCM ordering computed successfully" << std::endl;
@@ -142,7 +152,7 @@ int main(int argc, char* argv[])
         order_time = std::chrono::duration<double>(nd_end - nd_start).count();
         std::cout << "METIS ND ordering computed successfully" << std::endl;
     } else {
-        std::cerr << "Unknown algorithm: " << opts.algorithm << ". Use 'rcm' or 'metis'." << std::endl;
+        std::cerr << "Unknown algorithm: " << opts.algorithm << ". Use 'rcm', 'rcm-trad', or 'nd'." << std::endl;
         return -1;
     }
 
