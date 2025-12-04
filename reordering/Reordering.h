@@ -9,6 +9,7 @@
 #include "bfs.hpp"
 #include "parallel_sort.hpp"
 #include "UnionFind.h"
+#include <iostream>
 
 namespace reordering {
 
@@ -32,7 +33,10 @@ auto MinDegreeNode(const typename std::iterator_traits<Iter>::value_type* degree
                    Iter begin, Iter end, int numthreads = 1)
 {
     using T = typename std::iterator_traits<Iter>::value_type;
-    std::pair<T, T> res(-1, std::numeric_limits<T>::max());
+    // Initialize with sentinels for unsigned-safe operation
+    constexpr T INVALID = std::numeric_limits<T>::max();
+    constexpr T DEG_MAX = std::numeric_limits<T>::max();
+    std::pair<T, T> res(INVALID, DEG_MAX);
     
     if (numthreads == 1) {
         // Serial path
@@ -83,14 +87,15 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
                        COLTYPE base, Iter begin, Iter end, COLTYPE& source, COLTYPE& target,
                        int numthreads = 1)
 {
+    const COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
     source = MinDegreeNode(degrees, base, begin, end, numthreads).first;
-    target = -1;
+    target = INVALID;
     std::vector<COLTYPE> chosen;
     COLTYPE diameter;
     COLTYPE forwardWidth;
     COLTYPE backwardWidth;
     
-    while (target == -1)
+    while (target == INVALID)
     {
         chosen.resize(0);
         
@@ -101,7 +106,7 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
         std::vector<COLTYPE> lastLevel;
         
         graph::BFSFunc<ROWTYPE, COLTYPE, true, true>(rows, ai, aj, source, 
-            std::numeric_limits<COLTYPE>::max(), height, width, levels, lastLevel, numthreads);
+            INVALID, height, width, levels, lastLevel, numthreads);
         
         diameter = height;
         forwardWidth = width;
@@ -109,8 +114,8 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
         // First five strategy: select up to 5 min-degree nodes from last level
         while (chosen.size() < 5)
         {
-            COLTYPE minDeg = std::numeric_limits<COLTYPE>::max();
-            COLTYPE sel = -1;
+            COLTYPE minDeg = INVALID;
+            COLTYPE sel = INVALID;
             for (auto i : lastLevel)
             {
                 if (degrees[i - base] < minDeg)
@@ -124,20 +129,27 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
                     sel = std::min(sel, i);
                 }
             }
-            if (minDeg == std::numeric_limits<COLTYPE>::max())
+            if (minDeg == INVALID)
                 break;
 
             chosen.push_back(sel);
-            degrees[sel - base] = std::numeric_limits<COLTYPE>::max(); // mark-off selected node
+            degrees[sel - base] = INVALID; // mark-off selected node
             
             // Mark off neighbors of selected node
             for (ROWTYPE k = ai[sel - base] - base; k < ai[sel - base + 1] - base; k++)
             {
-                degrees[aj[k] - base] = std::numeric_limits<COLTYPE>::max();
+                degrees[aj[k] - base] = INVALID;
             }
         }
-        
-        backwardWidth = std::numeric_limits<COLTYPE>::max();
+
+        if (chosen.size() == 0)
+        {
+            // No candidates found - end of search
+            target = source;
+            break;
+        }
+
+        backwardWidth = INVALID;
         for (auto i : chosen)
         {
             // BFS from candidate with shortcut
@@ -149,7 +161,7 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
             {
                 // Found a farther node - restart from it
                 source = i;
-                target = -1;
+                target = INVALID;
                 break;
             }
             else if (width < backwardWidth)
@@ -185,19 +197,27 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
 template <typename ROWTYPE, typename COLTYPE, typename Iter>
 void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
                    COLTYPE base, Iter comp_begin, Iter comp_end,
-                   COLTYPE* perm, COLTYPE perm_offset, int numthreads = 1)
+                   COLTYPE* perm, COLTYPE* iperm, COLTYPE perm_offset, int numthreads = 1)
 {
     COLTYPE comp_size = std::distance(comp_begin, comp_end);
+#define RCM_DEBUG 
+#ifdef RCM_DEBUG
+    std::cerr << "start RCM_Component: comp_size=" << comp_size << std::endl;
+#endif
     
     // Compute node degrees
     std::vector<COLTYPE> degrees(rows);
     NodeDegree(rows, ai, degrees.data(), numthreads);
     std::vector<COLTYPE> degrees_copy = degrees;
-    
+
     // Find pseudo-peripheral node for this component
     COLTYPE source, target;
     PseudoDiameter(rows, ai, aj, degrees_copy.data(), base, 
                    comp_begin, comp_end, source, target, numthreads);
+#ifdef RCM_DEBUG
+    std::cerr << "[RCM] PseudoDiameter chosen source=" << (source) 
+              << " target=" << (target) << std::endl;
+#endif
     
     // BFS from source to get level structure
     COLTYPE height, width;
@@ -205,6 +225,12 @@ void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
     std::vector<COLTYPE> lastLevel;
     graph::BFSFunc<ROWTYPE, COLTYPE, false, false>(rows, ai, aj, source,
         std::numeric_limits<COLTYPE>::max(), height, width, levels, lastLevel, numthreads);
+#ifdef RCM_DEBUG
+    std::cerr << "[RCM] BFS from source=" << (source) 
+              << " height=" << (height) 
+              << " width=" << (width) 
+              << " levels.size=" << levels.size() << std::endl;
+#endif
     
     // Create (level, degree, node) tuples for nodes in this component
     std::vector<std::tuple<COLTYPE, COLTYPE, COLTYPE>> level_degree_node(comp_size);
@@ -219,34 +245,46 @@ void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 
     // Sort by level, then by degree (ascending), then by node index
     utils::sort(level_degree_node.begin(), level_degree_node.end(), numthreads);
+#ifdef RCM_DEBUG
+    std::cerr << "[RCM] Sorted component nodes by (level, degree). comp_size=" 
+              << comp_size << std::endl;
+#endif
     
     
     // Generate RCM ordering for this component (reverse of sorted order)
-    // perm[new_pos] = old_node (permutation)
+    // perm[new_pos] = old_node (permutation) and iperm[old_node] = new_pos
 #pragma omp parallel for num_threads(numthreads)
     for (COLTYPE i = 0; i < comp_size; ++i)
     {
         COLTYPE old_node = std::get<2>(level_degree_node[comp_size - 1 - i]);
         COLTYPE new_pos = perm_offset + i;
         perm[new_pos + base] = old_node + base;
+        iperm[old_node + base] = new_pos + base;
+    #ifdef RCM_DEBUG
+        if (i < 5) {
+            std::cerr << "[RCM] perm[" << (new_pos + base) << "] = " << (old_node + base)
+                  << ", iperm[" << (old_node + base) << "] = " << (new_pos + base) << std::endl;
+        }
+    #endif
     }
 }
 
 /// @brief Reverse Cuthill-McKee (RCM) reordering algorithm
 /// @details Orders nodes by reverse BFS levels from a pseudo-peripheral node,
-/// with nodes at each level sorted by increasing degree.
-/// Returns permutation for direct use with permuteMat.
+/// with nodes at each level sorted by increasing degree. Produces both
+/// permutation (perm) and inverse permutation (iperm) suitable for matrix
+/// permutation routines.
 /// @tparam ROWTYPE Row pointer type
 /// @tparam COLTYPE Column index type
 /// @param rows Number of rows in the graph
 /// @param ai Row pointer array (CSR format)
 /// @param aj Column index array (CSR format)
 /// @param perm Output: permutation array where perm[new_pos] = old_node
-///              (i.e., new position i contains old node perm[i])
+/// @param iperm Output: inverse permutation where iperm[old_node] = new_pos
 /// @param numthreads Number of threads for parallel operations
 template <typename ROWTYPE, typename COLTYPE>
 void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-         COLTYPE* perm, int numthreads = 1)
+         COLTYPE* perm, COLTYPE* iperm, int numthreads = 1)
 {
     const COLTYPE base = ai[0];
     
@@ -257,24 +295,25 @@ void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
     }
     
     RCM_Component(rows, ai, aj, base, component.begin(), component.end(),
-                  perm, 0, numthreads);
+                  perm, iperm, 0, numthreads);
 }
 
 /// @brief Reverse Cuthill-McKee (RCM) reordering for multi-component graphs
 /// @details Orders nodes by reverse BFS levels from pseudo-peripheral nodes,
-/// processing each connected component separately. Nodes at each level sorted by increasing degree.
-/// Returns permutation for direct use with permuteMat.
+/// processing each connected component separately. Nodes at each level are
+/// sorted by increasing degree. Produces both permutation (perm) and inverse
+/// permutation (iperm).
 /// @tparam ROWTYPE Row pointer type
 /// @tparam COLTYPE Column index type
 /// @param rows Number of rows in the graph
 /// @param ai Row pointer array (CSR format)
 /// @param aj Column index array (CSR format)
 /// @param perm Output: permutation array where perm[new_pos] = old_node
-///              (i.e., new position i contains old node perm[i])
+/// @param iperm Output: inverse permutation where iperm[old_node] = new_pos
 /// @param numthreads Number of threads for parallel operations
 template <typename ROWTYPE, typename COLTYPE>
 void RCM_MultiComponent(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-                        COLTYPE* perm, int numthreads = 1)
+                        COLTYPE* perm, COLTYPE* iperm, int numthreads = 1)
 {
     const COLTYPE base = ai[0];
     
@@ -311,10 +350,12 @@ void RCM_MultiComponent(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
         
         // Apply RCM to this component
         RCM_Component(rows, ai, aj, base, comp_begin, comp_end,
-                      perm, perm_offset, numthreads);
+                      perm, iperm, perm_offset, numthreads);
         
         perm_offset += comp_size;
     }
+
+    // iperm already built in RCM_Component
 }
 
 #ifdef USE_METIS_LIB
@@ -363,14 +404,14 @@ struct MetisNDOptions {
 /// @param ncols Number of columns in the matrix (must equal nrows for square matrix)
 /// @param xadj Row pointer array of size (nrows + 1), zero-based, with diagonals removed
 /// @param adjncy Column index array, zero-based, with diagonals removed
-/// @param iperm Inverse permutation array: iperm[i] = k means new row i comes from old row k
-/// @param perm Permutation array: perm[i] = k means old row i goes to new row k
+/// @param perm Inverse permutation array: perm[i] = k means new row i comes from old row k
+/// @param iperm Permutation array: iperm[i] = k means old row i goes to new row k
 /// @param opts METIS options (optional, uses defaults if not provided)
 /// @return 0 on success, non-zero on failure
 template <typename ROWTYPE, typename COLTYPE>
 int MetisND(const COLTYPE nrows, const COLTYPE ncols,
             const ROWTYPE* xadj, const COLTYPE* adjncy,
-            COLTYPE* iperm, COLTYPE* perm,
+            COLTYPE* perm, COLTYPE* iperm,
             const MetisNDOptions& opts = MetisNDOptions());
 #endif
 
