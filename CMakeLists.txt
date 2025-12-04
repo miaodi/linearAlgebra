@@ -38,6 +38,7 @@ option(USE_MUMPS_LIB "Use the linear solver library mumps. Note that only non-mp
 option(USE_ARPACK_LIB "Use arpack for generalize eigenvalue problem" OFF)
 
 option(USE_METIS_LIB "Use metis for matrix reordering" OFF)
+# To force using METIS from GitHub instead of system METIS, set: -DFORCE_FETCH_METIS=ON
 
 option(USE_BOOST_LIB "Use boost library" OFF)
 
@@ -102,6 +103,8 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 
+# METIS declarations moved to cmake/SetupMETIS.cmake
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # using GCC
   set(MKL_THREADING gnu_thread)
@@ -149,12 +152,9 @@ if(USE_ARPACK_LIB)
 endif()
 
 if(USE_METIS_LIB)
-  find_package(METIS REQUIRED)
-  # Define USE_MTMETIS if mt-metis is detected
-  if(METIS_IS_MTMETIS)
-    add_compile_definitions(USE_MTMETIS)
-    message(STATUS "Using mt-metis (multithreaded METIS)")
-  endif()
+  # METIS setup is handled in cmake/SetupMETIS.cmake
+  # Set FORCE_FETCH_METIS=ON to always fetch from GitHub instead of using system METIS
+  include(cmake/SetupMETIS.cmake)
 endif()
 
 if(USE_BOOST_LIB)
