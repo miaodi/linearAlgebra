@@ -12,6 +12,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <omp.h>
 
 // Benchmark configuration
 struct ReorderingConfig
@@ -48,6 +49,7 @@ struct MatrixCache
 
     void load(const std::string& file)
     {
+        const int num_threads = 10;
         if (loaded && filename == file)
             return;
 
@@ -92,12 +94,12 @@ struct MatrixCache
 
             case ReorderingConfig::Type::RCM_Parallel:
                 reordering::RCM_MultiComponent<reordering::RCMKernel::ParallelSort>(
-                    original.rows, xadj.data(), adjncy.data(), perm.data(), iperm.data());
+                    original.rows, xadj.data(), adjncy.data(), perm.data(), iperm.data(), num_threads);
                 break;
 
             case ReorderingConfig::Type::RCM_Traditional:
                 reordering::RCM_MultiComponent<reordering::RCMKernel::Traditional>(
-                    original.rows, xadj.data(), adjncy.data(), perm.data(), iperm.data());
+                    original.rows, xadj.data(), adjncy.data(), perm.data(), iperm.data(), num_threads);
                 break;
 
 #ifdef USE_METIS_LIB
@@ -218,14 +220,19 @@ int main(int argc, char** argv)
 {
     // Parse command line options
     int num_threads = 1;
+    std::vector<int> thread_list;
     std::string matrix_file;
 
     cxxopts::Options options("SPMV Reordering Benchmark",
                              "Compare SPMV performance across different reordering techniques");
-    options.allow_unrecognised_options().add_options()("n,nt", "Number of threads",
-                                                       cxxopts::value<int>()->default_value("1"))(
-        "f,file", "Matrix file location",
-        cxxopts::value<std::string>()->default_value("data/thermal2.mtx"))("h,help", "Print usage");
+    options.allow_unrecognised_options()
+        .add_options()("n,nt", "Number of threads",
+                        cxxopts::value<int>()->default_value("1"))
+        ("nt_list", "Comma-separated list of threads (e.g. 1,2,4,8)",
+         cxxopts::value<std::string>()->default_value(""))
+        ("f,file", "Matrix file location",
+         cxxopts::value<std::string>()->default_value("data/thermal2.mtx"))
+        ("h,help", "Print usage");
 
     auto result = options.parse(argc, argv);
 
@@ -240,8 +247,46 @@ int main(int argc, char** argv)
     num_threads = result["n"].as<int>();
     matrix_file = result["f"].as<std::string>();
 
+    // Parse optional thread list
+    {
+        const std::string tl = result["nt_list"].as<std::string>();
+        if (!tl.empty())
+        {
+            size_t start = 0;
+            while (start < tl.size())
+            {
+                size_t comma = tl.find(',', start);
+                std::string token = tl.substr(start, comma == std::string::npos ? std::string::npos : (comma - start));
+                if (!token.empty())
+                {
+                    try
+                    {
+                        int t = std::stoi(token);
+                        if (t > 0)
+                            thread_list.push_back(t);
+                    }
+                    catch (...)
+                    {
+                        // Ignore invalid entries
+                    }
+                }
+                if (comma == std::string::npos)
+                    break;
+                start = comma + 1;
+            }
+        }
+        // Fallback to single nt if no list provided
+        if (thread_list.empty())
+            thread_list.push_back(num_threads);
+    }
+
     std::cout << "Matrix file: " << matrix_file << "\n";
-    std::cout << "Threads: " << num_threads << "\n";
+    std::cout << "Threads: ";
+    for (size_t i = 0; i < thread_list.size(); ++i)
+    {
+        std::cout << thread_list[i] << (i + 1 < thread_list.size() ? "," : "");
+    }
+    std::cout << "\n";
 
     // Load and prepare matrices with all reorderings
     try
@@ -262,32 +307,38 @@ int main(int argc, char** argv)
         std::cout << "  [" << i << "] " << g_matrix_cache.reorder_names[i] << "\n";
     }
 
-    // Register benchmarks for ParallelSPMV with specified thread count only
+    // Register benchmarks for ParallelSPMV for each requested thread count
     for (size_t reorder_idx = 0; reorder_idx < reordering_configs.size(); ++reorder_idx)
     {
-        auto bm_parallel = [=](benchmark::State& state)
+        for (int t : thread_list)
         {
-            BM_SPMV_Reordering<matrix_utils::ParallelSPMV<int, int, double>>(state, matrix_file,
-                                                                             "ParallelSPMV");
-        };
-        std::string name = "ParallelSPMV/" + reordering_configs[reorder_idx].name;
-        benchmark::RegisterBenchmark(name.c_str(), bm_parallel)
-            ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(num_threads)})
-            ->Unit(benchmark::kMicrosecond);
+            auto bm_parallel = [=](benchmark::State& state)
+            {
+                BM_SPMV_Reordering<matrix_utils::ParallelSPMV<int, int, double>>(state, matrix_file,
+                                                                                 "ParallelSPMV");
+            };
+            std::string name = "ParallelSPMV/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
+            benchmark::RegisterBenchmark(name.c_str(), bm_parallel)
+                ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
+                ->Unit(benchmark::kMicrosecond);
+        }
     }
 
-    // Register benchmarks for ALBUSSPMV with specified thread count only
+    // Register benchmarks for ALBUSSPMV for each requested thread count
     for (size_t reorder_idx = 0; reorder_idx < reordering_configs.size(); ++reorder_idx)
     {
-        auto bm_albus = [=](benchmark::State& state)
+        for (int t : thread_list)
         {
-            BM_SPMV_Reordering<matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Simd>>(
-                state, matrix_file, "ALBUSSPMV");
-        };
-        std::string name = "ALBUSSPMV/" + reordering_configs[reorder_idx].name;
-        benchmark::RegisterBenchmark(name.c_str(), bm_albus)
-            ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(num_threads)})
-            ->Unit(benchmark::kMicrosecond);
+            auto bm_albus = [=](benchmark::State& state)
+            {
+                BM_SPMV_Reordering<matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Simd>>(
+                    state, matrix_file, "ALBUSSPMV");
+            };
+            std::string name = "ALBUSSPMV/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
+            benchmark::RegisterBenchmark(name.c_str(), bm_albus)
+                ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
+                ->Unit(benchmark::kMicrosecond);
+        }
     }
 
     // Initialize and run Google Benchmark with original argc/argv
