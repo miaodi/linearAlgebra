@@ -175,7 +175,7 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
     
     if (forwardWidth > backwardWidth)
         std::swap(source, target);
-    
+
     return diameter;
 }
 
@@ -467,6 +467,7 @@ void RCM_MultiComponent(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
             {
                 COLTYPE node = sortedComp[comp_start + i];
                 perm[perm_offset + i + base] = node;
+                iperm[node] = perm_offset + i + base;
             }
             perm_offset += comp_size;
             continue;
