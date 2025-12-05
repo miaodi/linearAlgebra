@@ -144,6 +144,54 @@ auto ALBUSSimd = [](benchmark::State &state, const auto &mat,
                           int64_t(it) * int64_t(mat.NNZ()));
 };
 
+template <typename VALTYPE>
+auto CAMLBSum = [](benchmark::State &state, const auto &mat,
+                   const int threads, const int it) {
+  std::vector<VALTYPE> x(mat.rows, 0.0);
+  std::vector<VALTYPE> b(mat.rows, 1.0);
+
+  matrix_utils::SPMV<
+      std::remove_cvref_t<decltype(mat)>,
+      matrix_utils::ALBUSSPMV<int32_t, int32_t, VALTYPE,
+                              matrix_utils::RowDotKernel::Scalar,
+                              matrix_utils::WorkloadMode::CAMLB>>
+      spmv;
+  spmv.setMatrix(&mat);
+  spmv._spmv.setNumThreads(threads);
+  spmv.preprocess();
+  for (auto _ : state) {
+    for (int i = 0; i < it; i++) {
+      spmv(b.data(), x.data());
+    }
+  }
+  state.SetBytesProcessed(2 * sizeof(VALTYPE) * int64_t(state.iterations()) *
+                          int64_t(it) * int64_t(mat.NNZ()));
+};
+
+template <typename VALTYPE>
+auto CAMLBSimd = [](benchmark::State &state, const auto &mat,
+                    const int threads, const int it) {
+  std::vector<VALTYPE> x(mat.rows, 0.0);
+  std::vector<VALTYPE> b(mat.rows, 1.0);
+
+  matrix_utils::SPMV<
+      std::remove_cvref_t<decltype(mat)>,
+      matrix_utils::ALBUSSPMV<int32_t, int32_t, VALTYPE,
+                              matrix_utils::RowDotKernel::Simd,
+                              matrix_utils::WorkloadMode::CAMLB>>
+      spmv;
+  spmv.setMatrix(&mat);
+  spmv._spmv.setNumThreads(threads);
+  spmv.preprocess();
+  for (auto _ : state) {
+    for (int i = 0; i < it; i++) {
+      spmv(b.data(), x.data());
+    }
+  }
+  state.SetBytesProcessed(2 * sizeof(VALTYPE) * int64_t(state.iterations()) *
+                          int64_t(it) * int64_t(mat.NNZ()));
+};
+
 int main(int argc, char **argv) {
 
   CSRTYPE_DOUBLE mat_double;
@@ -203,6 +251,10 @@ int main(int argc, char **argv) {
                                iterations);
   benchmark::RegisterBenchmark("ALBUSSimd_double", ALBUSSimd<double>, mat_double, num_threads,
                                iterations);
+  benchmark::RegisterBenchmark("CAMLBSum_double", CAMLBSum<double>, mat_double, num_threads,
+                               iterations);
+  benchmark::RegisterBenchmark("CAMLBSimd_double", CAMLBSimd<double>, mat_double, num_threads,
+                               iterations);
   
   // Float precision benchmarks
   benchmark::RegisterBenchmark("Serial_float", Serial<float>, mat_float, num_threads, iterations);
@@ -215,6 +267,10 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark("ALBUSSum_float", ALBUSSum<float>, mat_float, num_threads,
                                iterations);
   benchmark::RegisterBenchmark("ALBUSSimd_float", ALBUSSimd<float>, mat_float, num_threads,
+                               iterations);
+  benchmark::RegisterBenchmark("CAMLBSum_float", CAMLBSum<float>, mat_float, num_threads,
+                               iterations);
+  benchmark::RegisterBenchmark("CAMLBSimd_float", CAMLBSimd<float>, mat_float, num_threads,
                                iterations);
   
   benchmark::Initialize(&argc, argv);

@@ -341,6 +341,24 @@ int main(int argc, char** argv)
         }
     }
 
+    // Register benchmarks for CAMLB-SPMV for each requested thread count
+    for (size_t reorder_idx = 0; reorder_idx < reordering_configs.size(); ++reorder_idx)
+    {
+        for (int t : thread_list)
+        {
+            auto bm_camlb = [=](benchmark::State& state)
+            {
+                BM_SPMV_Reordering<matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Simd,
+                                                           matrix_utils::WorkloadMode::CAMLB>>(
+                    state, matrix_file, "CAMLBSPMV");
+            };
+            std::string name = "CAMLBSPMV/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
+            benchmark::RegisterBenchmark(name.c_str(), bm_camlb)
+                ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
+                ->Unit(benchmark::kMicrosecond);
+        }
+    }
+
     // Initialize and run Google Benchmark with original argc/argv
     // This allows benchmark flags like --benchmark_min_time to work
     benchmark::Initialize(&argc, argv);
