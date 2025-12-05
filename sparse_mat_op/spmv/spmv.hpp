@@ -326,9 +326,10 @@ public:
 
     void setNumThreads(const int num_threads) { _nthreads = num_threads; }
 
-    void preprocess(const COLTYPE size, const int base, ROWTYPE const* __restrict ai,
+    void preprocess(const COLTYPE size, ROWTYPE const* __restrict ai,
                     COLTYPE const* __restrict aj, VALTYPE const* __restrict av)
     {
+        const int base = static_cast<int>(ai ? ai[0] : 0);
         const ROWTYPE nnz = ai[size] - base;
 
         if (nnz <= 0)
@@ -508,10 +509,10 @@ private:
 };
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename T>
 constexpr bool spmv_has_preprocess = requires(const COLTYPE size,
-                                              const int base, ROWTYPE const * __restrict ai,
+                                              ROWTYPE const * __restrict ai,
                                               COLTYPE const * __restrict aj,
                                               VALTYPE const * __restrict av, T &t) {
-  t.preprocess(size, base, ai, aj, av);
+  t.preprocess(size, ai, aj, av);
 };
 
 /** 
@@ -534,7 +535,7 @@ template <typename CSRMatrixType, typename SPMVType> struct SPMV {
 
   void preprocess() {
     if constexpr (spmv_has_preprocess<ROWTYPE, COLTYPE, VALTYPE, SPMVType>) {
-      _spmv.preprocess(_matrix->rows, _matrix->Base(), _matrix->AI(),
+      _spmv.preprocess(_matrix->rows, _matrix->AI(),
                        _matrix->AJ(), _matrix->AV());
     }
   }
