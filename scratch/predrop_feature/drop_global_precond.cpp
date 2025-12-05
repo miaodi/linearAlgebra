@@ -37,6 +37,7 @@ struct Options
     double threshold;
     int level;
     int threads;
+    std::string perm_algorithm; // "nd" | "rcm" | "none"
     Factorization factorization;
     double droptol;
     iterative_solver::PreconditionerType precond_type;
@@ -48,6 +49,12 @@ struct Options
 
 // Forward declarations
 void printOptions(const Options& opts, const std::string& factorization_str, const std::string& precond_str);
+// Forward declaration for permutation helper
+static bool compute_permuted_pair(const matrix_utils::CSRMatrix<int,int,double>& original,
+                                  const matrix_utils::CSRMatrix<int,int,double>& pruned,
+                                  const Options& opts,
+                                  matrix_utils::CSRMatrix<int,int,double>& permuted_original,
+                                  matrix_utils::CSRMatrix<int,int,double>& permuted_pruned);
 
 template <matrix_utils::ResizableDiagonal CSRMatrixType>
 class ILUPrec;
@@ -57,11 +64,6 @@ iterative_solver::State solveWithPreconditioner(const Options& opts,
                                                 const matrix_utils::CSRMatrix<int, int, double>& pruned);
 
 void precondExplore(const Options& opts, const matrix_utils::CSRMatrix<int, int, double>& pruned);
-
-#ifdef USE_METIS_LIB
-matrix_utils::CSRMatrix<int, int, double> permuteMatrixWithMetisND(
-    const matrix_utils::CSRMatrix<int, int, double>& matrix);
-#endif
 
 int main(int argc, char* argv[])
 {
@@ -76,13 +78,14 @@ int main(int argc, char* argv[])
         ( "t,threshold", "Pruning threshold (absolute value)", cxxopts::value<double>()->default_value( "0.0" ) )
         ( "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )
         ( "n,threads", "Number of threads", cxxopts::value<int>()->default_value( "8" ) )
+        ( "P,perm", "Permutation source: nd | rcm | none", cxxopts::value<std::string>()->default_value( "nd" ) )
         ( "F,factorization", "ILU variant: iluk or ilut", cxxopts::value<std::string>()->default_value( "iluk" ) )
         ( "d,droptol", "ILUT drop tolerance", cxxopts::value<double>()->default_value( "1e-3" ) )
         ( "p,precond", "Preconditioner type: none (no preconditioning), left (M^-1 A x = M^-1 b), right (A M^-1 y = b)",
           cxxopts::value<std::string>()->default_value( "left" ) )
-        ( "r,restart", "GMRES restart parameter", cxxopts::value<int>()->default_value( "60" ) )
+        ( "r,restart", "GMRES restart parameter", cxxopts::value<int>()->default_value( "200" ) )
         ( "m,maxiter", "Maximum number of GMRES iterations", cxxopts::value<int>()->default_value( "1000" ) )
-        ( "reltol", "Relative tolerance for GMRES convergence", cxxopts::value<double>()->default_value( "1e-10" ) )
+        ( "reltol", "Relative tolerance for GMRES convergence", cxxopts::value<double>()->default_value( "1e-8" ) )
         ( "solve", "Execute solve routine", cxxopts::value<bool>()->default_value( "false" ) )
         ( "h,help", "Print usage" );
     // clang-format on
@@ -103,6 +106,7 @@ int main(int argc, char* argv[])
     opts.threshold = result["threshold"].as<double>();
     opts.level = result["level"].as<int>();
     opts.threads = result["threads"].as<int>();
+    opts.perm_algorithm = result["perm"].as<std::string>();
     opts.droptol = result["droptol"].as<double>();
     opts.restart = result["restart"].as<int>();
     opts.maxiter = result["maxiter"].as<int>();
@@ -186,14 +190,14 @@ int main(int argc, char* argv[])
     std::cout << "Matrix: " << csr_matrix.rows << " x " << csr_matrix.cols
               << ", NNZ: " << csr_matrix.NNZ() << std::endl;
 
-    // Apply Ruiz scaling to the matrix
-    std::cout << "\nApplying Ruiz scaling..." << std::endl;
-    std::vector<double> dr(csr_matrix.rows);
-    std::vector<double> dc(csr_matrix.cols);
-    scaling::RuizScaleSerial<int, int, double, scaling::RuizScalingNormType::MaxNorm>(
-        csr_matrix.rows, csr_matrix.cols, csr_matrix.AI(), csr_matrix.AJ(),
-        csr_matrix.AV(), dr.data(), dc.data(), 20, 1e-2);
-    std::cout << "Ruiz scaling completed" << std::endl;
+    // // Apply Ruiz scaling to the matrix
+    // std::cout << "\nApplying Ruiz scaling..." << std::endl;
+    // std::vector<double> dr(csr_matrix.rows);
+    // std::vector<double> dc(csr_matrix.cols);
+    // scaling::RuizScaleSerial<int, int, double, scaling::RuizScalingNormType::MaxNorm>(
+    //     csr_matrix.rows, csr_matrix.cols, csr_matrix.AI(), csr_matrix.AJ(),
+    //     csr_matrix.AV(), dr.data(), dc.data(), 20, 1e-2);
+    // std::cout << "Ruiz scaling completed" << std::endl;
 
     // Deep copy matrix for pruning
     matrix_utils::CSRMatrix<int, int, double> pruned;
@@ -220,55 +224,63 @@ int main(int argc, char* argv[])
                   << "%" << std::endl;
     }
 
-    // Write pruned matrix SVG to file
-    std::cout << "\nWriting pruned matrix to SVG..." << std::endl;
-    std::ofstream out(opts.output_file);
-    if (!out.is_open())
+    // // Write pruned matrix SVG to file
+    // std::cout << "\nWriting pruned matrix to SVG..." << std::endl;
+    // std::ofstream out(opts.output_file);
+    // if (!out.is_open())
+    // {
+    //     std::cerr << "Failed to create output file: " << opts.output_file << std::endl;
+    //     return -1;
+    // }
+
+    // matrix_utils::writeSVG(pruned.rows, pruned.cols, pruned.AI(), pruned.AJ(), out, opts.max_display_size);
+    // out.close();
+
+    // std::cout << "SVG written to: " << opts.output_file << std::endl;
+
+    // Select matrices for solve (initialize to original/pruned)
+    const matrix_utils::CSRMatrix<int, int, double>* A_for_solve = &csr_matrix;
+    const matrix_utils::CSRMatrix<int, int, double>* M_for_solve = &pruned;
+
+    // Build permuted pair using selected algorithm
+    matrix_utils::CSRMatrix<int,int,double> permuted_original;
+    matrix_utils::CSRMatrix<int,int,double> permuted_pruned;
+    if (compute_permuted_pair(csr_matrix, pruned, opts, permuted_original, permuted_pruned))
     {
-        std::cerr << "Failed to create output file: " << opts.output_file << std::endl;
-        return -1;
+        std::ofstream out_perm_orig("permuted_original_matrix.svg");
+        if (out_perm_orig.is_open())
+        {
+            std::cout << "\nWriting permuted original matrix to SVG..." << std::endl;
+            matrix_utils::writeSVG(permuted_original.rows, permuted_original.cols,
+                                   permuted_original.AI(), permuted_original.AJ(),
+                                   out_perm_orig, opts.max_display_size);
+            out_perm_orig.close();
+            std::cout << "Permuted original matrix written to permuted_original_matrix.svg" << std::endl;
+        }
+        std::ofstream out_perm_pruned("permuted_pruned_matrix.svg");
+        if (out_perm_pruned.is_open())
+        {
+            std::cout << "\nWriting permuted pruned matrix to SVG..." << std::endl;
+            matrix_utils::writeSVG(permuted_pruned.rows, permuted_pruned.cols,
+                                   permuted_pruned.AI(), permuted_pruned.AJ(),
+                                   out_perm_pruned, opts.max_display_size);
+            out_perm_pruned.close();
+            std::cout << "Permuted pruned matrix written to permuted_pruned_matrix.svg" << std::endl;
+        }
+        // Use permuted pair for subsequent solve
+        A_for_solve = &permuted_original;
+        M_for_solve = &permuted_pruned;
     }
 
-    matrix_utils::writeSVG(pruned.rows, pruned.cols, pruned.AI(), pruned.AJ(), out, opts.max_display_size);
-    out.close();
+//     precondExplore(opts, pruned);
 
-    std::cout << "SVG written to: " << opts.output_file << std::endl;
-
-#ifdef USE_METIS_LIB
-    // Permute original matrix with MetisND
-    auto permuted_original = permuteMatrixWithMetisND(csr_matrix);
-    std::ofstream out_perm_orig("permuted_original_matrix.svg");
-    if (out_perm_orig.is_open())
-    {
-        std::cout << "\nWriting permuted original matrix to SVG..." << std::endl;
-        matrix_utils::writeSVG(permuted_original.rows, permuted_original.cols, 
-                              permuted_original.AI(), permuted_original.AJ(), 
-                              out_perm_orig, opts.max_display_size);
-        out_perm_orig.close();
-        std::cout << "Permuted original matrix written to permuted_original_matrix.svg" << std::endl;
-    }
-
-    // Permute pruned matrix with MetisND
-    auto permuted_pruned = permuteMatrixWithMetisND(pruned);
-    std::ofstream out_perm_pruned("permuted_pruned_matrix.svg");
-    if (out_perm_pruned.is_open())
-    {
-        std::cout << "\nWriting permuted pruned matrix to SVG..." << std::endl;
-        matrix_utils::writeSVG(permuted_pruned.rows, permuted_pruned.cols, 
-                              permuted_pruned.AI(), permuted_pruned.AJ(), 
-                              out_perm_pruned, opts.max_display_size);
-        out_perm_pruned.close();
-        std::cout << "Permuted pruned matrix written to permuted_pruned_matrix.svg" << std::endl;
-    }
-#endif
-
-    precondExplore(opts, pruned);
+    // A_for_solve and M_for_solve already prefer the permuted pair if available
 
     // Solve with preconditioner
     iterative_solver::State state = iterative_solver::State::CONVERGED;
     if (opts.solve)
     {
-        state = solveWithPreconditioner(opts, csr_matrix, pruned);
+        state = solveWithPreconditioner(opts, *A_for_solve, *M_for_solve);
     }
     else
     {
@@ -291,6 +303,7 @@ void printOptions(const Options& opts, const std::string& factorization_str, con
     std::cout << "  threshold: " << opts.threshold << std::endl;
     std::cout << "  level: " << opts.level << std::endl;
     std::cout << "  threads: " << opts.threads << std::endl;
+    std::cout << "  perm: " << opts.perm_algorithm << std::endl;
     std::cout << "  factorization: " << factorization_str << std::endl;
     if (opts.factorization == Factorization::ILUT)
     {
@@ -303,6 +316,91 @@ void printOptions(const Options& opts, const std::string& factorization_str, con
     std::cout << "  solve: " << (opts.solve ? "true" : "false") << std::endl;
 }
 
+// Compute permutation from pruned adjacency using selected algorithm,
+// then apply to both original and pruned to produce a permuted pair.
+static bool compute_permuted_pair(const matrix_utils::CSRMatrix<int,int,double>& original,
+                                  const matrix_utils::CSRMatrix<int,int,double>& pruned,
+                                  const Options& opts,
+                                  matrix_utils::CSRMatrix<int,int,double>& permuted_original,
+                                  matrix_utils::CSRMatrix<int,int,double>& permuted_pruned)
+{
+    if (opts.perm_algorithm == "none")
+    {
+        permuted_original = original;
+        permuted_pruned = pruned;
+        return true;
+    }
+
+    std::vector<int> xadj(pruned.rows + 1);
+    matrix_utils::APlusATPrefix<int,int,false>(pruned.rows, pruned.AI(), pruned.AJ(), xadj.data());
+    int actual_edges = xadj[pruned.rows] - xadj[0];
+    std::vector<int> adjncy(actual_edges);
+    matrix_utils::APlusATFill<int,int,false>(pruned.rows, pruned.AI(), pruned.AJ(), xadj.data(), adjncy.data());
+
+    std::vector<int> iperm(pruned.rows);
+    std::vector<int> perm(pruned.rows);
+
+    int rc = 0;
+    auto start = std::chrono::high_resolution_clock::now();
+    if (opts.perm_algorithm == "rcm")
+    {
+        reordering::RCM_MultiComponent<reordering::RCMKernel::ParallelSort>(
+            pruned.rows, xadj.data(), adjncy.data(), perm.data(), iperm.data(), opts.threads);
+    }
+    else // default to nd
+    {
+#ifdef USE_METIS_LIB
+        reordering::MetisNDOptions nd_opts; nd_opts.seed = 42;
+        rc = reordering::MetisND(pruned.rows, pruned.cols,
+                                 xadj.data(), adjncy.data(), iperm.data(), perm.data(), nd_opts);
+#else
+        std::cerr << "METIS support not enabled (USE_METIS_LIB=OFF)." << std::endl;
+        return false;
+#endif
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "Permutation (" << opts.perm_algorithm << ") time: "
+              << std::chrono::duration<double>(end - start).count() << " s" << std::endl;
+    if (rc != 0)
+    {
+        std::cerr << "Permutation algorithm failed with code " << rc << std::endl;
+        return false;
+    }
+
+    // Validate permutation vectors
+    bool perm_ok = matrix_utils::isPermutation<int>(pruned.rows, /*base=*/0, perm.data(), opts.threads);
+    bool iperm_ok = matrix_utils::isPermutation<int>(pruned.rows, /*base=*/0, iperm.data(), opts.threads);
+    if (!perm_ok || !iperm_ok)
+    {
+        std::cerr << "Invalid permutation detected: perm_ok=" << (perm_ok ? "true" : "false")
+                  << ", iperm_ok=" << (iperm_ok ? "true" : "false") << std::endl;
+        return false;
+    }
+
+    // Apply symmetric permutation to both matrices
+    permuted_original.rows = original.rows;
+    permuted_original.cols = original.cols;
+    permuted_original.ResizeAI(original.rows + 1);
+    permuted_original.ResizeAJ(original.NNZ());
+    permuted_original.ResizeAV(original.NNZ());
+    matrix_utils::permuteMat(original.rows, original.cols,
+                             perm.data(), iperm.data(),
+                             original.AI(), original.AJ(), original.AV(),
+                             permuted_original.AI(), permuted_original.AJ(), permuted_original.AV(), opts.threads);
+
+    permuted_pruned.rows = pruned.rows;
+    permuted_pruned.cols = pruned.cols;
+    permuted_pruned.ResizeAI(pruned.rows + 1);
+    permuted_pruned.ResizeAJ(pruned.NNZ());
+    permuted_pruned.ResizeAV(pruned.NNZ());
+    matrix_utils::permuteMat(pruned.rows, pruned.cols,
+                             perm.data(), iperm.data(),
+                             pruned.AI(), pruned.AJ(), pruned.AV(),
+                             permuted_pruned.AI(), permuted_pruned.AJ(), permuted_pruned.AV(), opts.threads);
+
+    return true;
+}
+
 template <matrix_utils::ResizableDiagonal CSRMatrixType>
 class ILUPrec
 {
@@ -310,29 +408,43 @@ public:
     using ROWTYPE = typename CSRMatrixType::ROWTYPE;
     using COLTYPE = typename CSRMatrixType::COLTYPE;
     using VALTYPE = typename CSRMatrixType::VALTYPE;
-    ILUPrec(const COLTYPE size, const CSRMatrixType& ilu) : _size(size), _ilu(ilu), tmp(size)
+    ILUPrec(const COLTYPE size, const CSRMatrixType& ilu, const int num_threads = omp_get_max_threads())
+        : _size(size), _ilu(ilu), _nthreads(num_threads), tmp(size),
+          forward(num_threads),
+          backward(num_threads)
     {
         matrix_utils::SplitLDU(_size, _ilu.AI()[0], _ilu.AI(), _ilu.AJ(), _ilu.AV(), L, D, U);
+        forward.analysis(_size, L.AI(), L.AJ(), L.AV(), nullptr);
+        backward.analysis(_size, U.AI(), U.AJ(), U.AV(), D.data());
+        std::cout << "Level-schedule analysis done: "
+              << "L levels = " << forward._levels << ", "
+              << "U levels = " << backward._levels << std::endl;
     }
 
     COLTYPE size() const { return _size; }
 
     bool operator()(VALTYPE const* const b, VALTYPE* const x) const
     {
-        matrix_utils::TriangularSolve<matrix_utils::TriangularMatrix::L>(
-            _size, L.AI(), L.AJ(), L.AV(), null_diag, b, tmp.data());
-        matrix_utils::TriangularSolve<matrix_utils::TriangularMatrix::U>(
-            _size, U.AI(), U.AJ(), U.AV(), D.data(), tmp.data(), x);
+        forward(b, tmp.data());
+        backward(tmp.data(), x);
         return true;
     }
 
     COLTYPE _size;
+    int _nthreads;
     const CSRMatrixType& _ilu;
     CSRMatrixType L;
     CSRMatrixType U;
     std::vector<typename CSRMatrixType::VALTYPE> D;
     mutable std::vector<VALTYPE> tmp;
     static constexpr VALTYPE* null_diag = nullptr;
+
+    matrix_utils::LevelScheduleTriangularSubstitution<matrix_utils::TriangularMatrix::L,
+                                                      ROWTYPE, COLTYPE, VALTYPE>
+        forward;
+    matrix_utils::LevelScheduleTriangularSubstitution<matrix_utils::TriangularMatrix::U,
+                                                      ROWTYPE, COLTYPE, VALTYPE>
+        backward;
 };
 
 iterative_solver::State solveWithPreconditioner(const Options& opts,
@@ -401,14 +513,15 @@ iterative_solver::State solveWithPreconditioner(const Options& opts,
     // Setup SPMV operator on original matrix
     std::cout << "\nSetting up SPMV operator on original matrix..." << std::endl;
     using CSRTYPE = typename matrix_utils::CSRMatrix<int, int, double>;
-    matrix_utils::SPMV<CSRTYPE, matrix_utils::SerialSPMV> spmv;
+    using ALBUSSimd = matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Simd>;
+    matrix_utils::SPMV<CSRTYPE, ALBUSSimd> spmv;
     spmv.setMatrix(&csr_matrix);
     spmv.preprocess();
     std::cout << "SPMV operator done." << std::endl;
 
     // Setup preconditioner operator
     std::cout << "Setting up preconditioner operator..." << std::endl;
-    ILUPrec<decltype(ilu_matrix)> ilu_prec(csr_matrix.rows, ilu_matrix);
+    ILUPrec<decltype(ilu_matrix)> ilu_prec(csr_matrix.rows, ilu_matrix, opts.threads);
     std::cout << "Preconditioner operator done." << std::endl;
 
     // Setup RHS and initial guess
@@ -533,86 +646,4 @@ void precondExplore(const Options& opts, const matrix_utils::CSRMatrix<int, int,
     out_lpu.close();
     std::cout << "L+U sparsity pattern written to L_plus_U_pattern.svg" << std::endl;
 }
-
-#ifdef USE_METIS_LIB
-matrix_utils::CSRMatrix<int, int, double> permuteMatrixWithMetisND(
-    const matrix_utils::CSRMatrix<int, int, double>& matrix)
-{
-    std::cout << "\n=== Permuting matrix with MetisND ===" << std::endl;
-    
-    // Compute symmetric adjacency graph using A+A^T (without diagonal)
-    // This is more efficient than CSRToMetisGraph and naturally handles symmetrization
-    std::vector<int> xadj(matrix.rows + 1);
-    matrix_utils::APlusATPrefix<int, int, false>(
-        matrix.rows, matrix.AI(), matrix.AJ(), xadj.data());
-    
-    // Allocate and fill adjacency list
-    int actual_edges = xadj[matrix.rows] - xadj[0];
-    std::vector<int> adjncy(actual_edges);
-    matrix_utils::APlusATFill<int, int, false>(
-        matrix.rows, matrix.AI(), matrix.AJ(), xadj.data(), adjncy.data());
-    
-    std::cout << "Adjacency graph created (A+A^T without diagonal): " 
-              << matrix.rows << " vertices, " << actual_edges << " edges" << std::endl;
-    
-    // Compute METIS nested dissection ordering
-    std::vector<int> iperm(matrix.rows);
-    std::vector<int> perm(matrix.rows);
-    
-    reordering::MetisNDOptions opts;
-    opts.seed = 42;  // For reproducibility
-    
-    std::cout << "Computing MetisND ordering..." << std::endl;
-    auto metis_start = std::chrono::high_resolution_clock::now();
-    int result = reordering::MetisND(matrix.rows, matrix.cols,
-                                     xadj.data(), adjncy.data(),
-                                     iperm.data(), perm.data(), opts);
-    auto metis_end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> metis_time = metis_end - metis_start;
-    std::cout << "MetisND ordering time: " << metis_time.count() << " s" << std::endl;
-
-    // Print first 10 entries of iperm and perm for inspection
-    std::cout << "\nFirst 10 entries of permutation vectors:" << std::endl;
-    std::cout << "iperm: ";
-    for (int i = 0; i < std::min(10, static_cast<int>(iperm.size())); ++i)
-    {
-        std::cout << iperm[i] << " ";
-    }
-    std::cout << std::endl;
-    std::cout << "perm:  ";
-    for (int i = 0; i < std::min(10, static_cast<int>(perm.size())); ++i)
-    {
-        std::cout << perm[i] << " ";
-    }
-    std::cout << std::endl;
-
-    if (result != 0) {
-        std::cerr << "MetisND failed with error code: " << result << std::endl;
-        return matrix;  // Return original matrix on failure
-    }
-    
-    std::cout << "MetisND ordering computed successfully" << std::endl;
-    
-    // Allocate permuted matrix
-    matrix_utils::CSRMatrix<int, int, double> permuted;
-    permuted.rows = matrix.rows;
-    permuted.cols = matrix.cols;
-    permuted.ResizeAI(matrix.rows + 1);
-    permuted.ResizeAJ(matrix.NNZ());
-    permuted.ResizeAV(matrix.NNZ());
-    
-    // Permute the matrix: permuted = P * matrix * P^T (symmetric permutation)
-    std::cout << "Permuting matrix structure and values..." << std::endl;
-    matrix_utils::permuteMat(matrix.rows, matrix.cols,
-                            perm.data(), iperm.data(),  // Use same perm for rows and cols (symmetric)
-                            matrix.AI(), matrix.AJ(), matrix.AV(),
-                            permuted.AI(), permuted.AJ(), permuted.AV());
-    
-    std::cout << "Matrix permuted successfully" << std::endl;
-    std::cout << "Permuted matrix: " << permuted.rows << " x " << permuted.cols 
-              << ", NNZ: " << permuted.NNZ() << std::endl;
-    
-    return permuted;
-}
-#endif
 
