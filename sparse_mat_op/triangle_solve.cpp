@@ -159,6 +159,101 @@ void LevelScheduleTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::operato
     }
 }
 
+
+// JacobiTriangularSubstitution moved from header: analysis and operator()
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+bool JacobiTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::analysis(
+    const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av,
+    VALTYPE const* diag)
+{
+    if (size < static_cast<COLTYPE>(0) || ai == nullptr || aj == nullptr || av == nullptr)
+        return false;
+
+    _diag = diag;
+
+    if constexpr (TM == TriangularMatrix::U)
+    {
+        if (_diag == nullptr)
+        {
+            return false;
+        }
+        for (COLTYPE i = 0; i < size; ++i)
+        {
+            if (_diag[i] == static_cast<VALTYPE>(0))
+                return false;
+        }
+    }
+
+    _mat.rows = size;
+    _mat.cols = size;
+    _mat.ai = ai;
+    _mat.aj = aj;
+    _mat.av = av;
+    _spmv.setMatrix(&_mat);
+    _spmv.preprocess();
+
+    if constexpr (TM == TriangularMatrix::U)
+    {
+        _dinv.resize(_mat.rows);
+#pragma omp parallel for num_threads(_nthreads)
+        for (COLTYPE i = 0; i < _mat.rows; ++i)
+        {
+            _dinv[i] = static_cast<VALTYPE>(1) / _diag[i];
+        }
+    }
+
+    return true;
+}
+
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+bool JacobiTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::operator()(VALTYPE const* const b, VALTYPE* const x) const
+{
+    if (_mat.rows == 0)
+        return true;
+
+#pragma omp parallel for num_threads(_nthreads)
+    for (COLTYPE i = 0; i < _mat.rows; ++i)
+        x[i] = static_cast<VALTYPE>(0);
+
+    std::vector<VALTYPE> y(_mat.rows);
+    std::vector<VALTYPE> xnew(_mat.rows);
+
+    for (int k = 0; k < _max_iters; ++k)
+    {
+        _spmv(x, y.data(), static_cast<VALTYPE>(1), static_cast<VALTYPE>(0));
+
+        if constexpr (TM == TriangularMatrix::U)
+        {
+#pragma omp parallel for num_threads(_nthreads)
+            for (COLTYPE i = 0; i < _mat.rows; ++i)
+            {
+                xnew[i] = (b[i] - y[i]) * _dinv[i];
+            }
+        }
+        else
+        {
+#pragma omp parallel for num_threads(_nthreads)
+            for (COLTYPE i = 0; i < _mat.rows; ++i)
+            {
+                xnew[i] = b[i] - y[i];
+            }
+        }
+
+        VALTYPE diff_max = static_cast<VALTYPE>(0);
+#pragma omp parallel for reduction(max : diff_max) num_threads(_nthreads)
+        for (COLTYPE i = 0; i < _mat.rows; ++i)
+        {
+            VALTYPE d = std::abs(xnew[i] - x[i]);
+            if (d > diff_max)
+                diff_max = d;
+            x[i] = xnew[i];
+        }
+        if (diff_max <= _tol)
+            break;
+    }
+    return true;
+}
+
 template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::analysis(
     const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av, VALTYPE const* diag )
@@ -1818,6 +1913,9 @@ template void TriangularSolve<TriangularMatrix::U, int, int, double>(
 
 template class LevelScheduleTriangularSubstitution<TriangularMatrix::L, int, int, double>;
 template class LevelScheduleTriangularSubstitution<TriangularMatrix::U, int, int, double>;
+
+template class JacobiTriangularSubstitution<TriangularMatrix::L, int, int, double>;
+template class JacobiTriangularSubstitution<TriangularMatrix::U, int, int, double>;
 
 template class P2PTriangularSubstitution<TriangularMatrix::L, int, int, double>;
 template class P2PTriangularSubstitution<TriangularMatrix::U, int, int, double>;

@@ -16,6 +16,7 @@
 #include "matrix_utils.hpp"
 #include "graph_algs.hpp"
 #include "permutation.hpp"
+#include "spmv.hpp"
 
 namespace matrix_utils
 {
@@ -172,6 +173,50 @@ private:
 
 private:
     std::vector<std::vector<COLTYPE>> _taskScratch; // temporary workspace (zero-based neighbors per task)
+};
+
+// Jacobi iteration based triangular substitution using a pluggable SPMV
+// Works for both L and U by treating the input as a general sparse matrix
+// and performing Jacobi iterations: x^{k+1} = D^{-1} (b - (A - D) x^{k})
+// If diag == nullptr, assumes unit diagonal.
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+struct JacobiTriangularSubstitution
+{
+    // Default SPMV type: ALBUSSPMV with SIMD kernel
+    using SpmvType = ALBUSSPMV<ROWTYPE, COLTYPE, VALTYPE, RowDotKernel::Simd>;
+
+    JacobiTriangularSubstitution(const int num_threads = omp_get_num_threads(), const int max_iters = 100,
+                                 const VALTYPE tol = static_cast<VALTYPE>(1e-10))
+        : _nthreads{num_threads}, _max_iters{max_iters}, _tol{tol}
+    {
+        if (_nthreads < 1)
+            throw std::runtime_error("Number of threads must be at least 1.");
+        if (_max_iters < 1)
+            throw std::runtime_error("Max iterations must be at least 1.");
+        if (_tol < static_cast<VALTYPE>(0))
+            throw std::runtime_error("Tolerance must be non-negative.");
+    }
+
+    void set_num_threads(const int num_threads) { _nthreads = num_threads; }
+    void set_max_iters(const int iters) { _max_iters = iters; }
+    void set_tol(const VALTYPE tol) { _tol = tol; }
+
+    bool analysis(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av,
+                  VALTYPE const* diag = nullptr);
+
+    bool operator()(VALTYPE const* const b, VALTYPE* const x) const;
+
+private:
+    int _nthreads;
+    int _max_iters;
+    VALTYPE _tol;
+
+    VALTYPE const* _diag{nullptr};
+
+    mutable std::vector<VALTYPE> _dinv;
+
+    CSRMatrixRawPtr<ROWTYPE, COLTYPE, VALTYPE> _mat;
+    SPMV<CSRMatrixRawPtr<ROWTYPE, COLTYPE, VALTYPE>, SpmvType> _spmv;
 };
 
 enum class FBSubstitutionType
