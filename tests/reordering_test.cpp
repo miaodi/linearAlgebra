@@ -59,7 +59,7 @@ TEST(MinDegreeNode, empty_range) {
   
   auto result = reordering::MinDegreeNode(degrees.data(), base, nodes.begin(), nodes.end(), 1);
   
-  EXPECT_EQ(result.first, -1);
+  EXPECT_EQ(result.first, std::numeric_limits<int>::max());
   EXPECT_EQ(result.second, std::numeric_limits<int>::max());
 }
 
