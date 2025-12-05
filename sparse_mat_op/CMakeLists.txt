@@ -19,7 +19,10 @@ endif()
 
 add_library(${PROJECT_NAME} STATIC ${SPARSE_MAT_OP_SRC})
 
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(${PROJECT_NAME} PUBLIC 
+  ${CMAKE_CURRENT_LIST_DIR}
+  ${CMAKE_CURRENT_LIST_DIR}/spmv
+)
 target_link_libraries(${PROJECT_NAME} PUBLIC ${DEPENDENCIES})
 
 target_enable_simd(${PROJECT_NAME})
