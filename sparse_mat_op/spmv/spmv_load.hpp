@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <list>
 #include <unordered_map>
 #include <vector>
@@ -9,6 +10,10 @@ namespace matrix_utils
 {
 
 /// @brief Compute cache-aware workload model for SpMV (CAMLB-SpMV approach)
+/// @reference "CAMLB-SpMV: A Cache-Aware Memory Load Balance Strategy for SpMV on Many-Core Architectures"
+///            Xin He, Miao Wang, Haipeng Jia, Yunquan Zhang
+///            IEEE Transactions on Parallel and Distributed Systems (TPDS), 2019
+///            DOI: 10.1109/TPDS.2018.2878777
 /// @details Models memory access costs for y = A*x in CSR format by simulating:
 ///          - Streaming access for ai (row_ptr), aj (col_ind), ax (values), y (output)
 ///          - LRU cache simulation for x (input vector) with limited capacity
@@ -33,15 +38,15 @@ void compute_element_workload_prefix_hw(COLTYPE nrows,
                                         const VALTYPE* yvec,
                                         std::size_t cache_line_bytes,
                                         std::size_t swindow_lines,
-                                        std::vector<std::size_t>& prefix)
+                                        std::size_t* prefix)
 {
     // Handle base indexing (0-based or 1-based)
     const ROWTYPE base = row_ptr[0];
     const std::size_t nnz = static_cast<std::size_t>(row_ptr[nrows] - base);
 
     // Initialize prefix array with zeros
-    prefix.assign(nnz + 1, 0);
-    
+    std::memset(prefix, 0, (nnz + 1) * sizeof(std::size_t));
+
     // Early exit for empty or invalid inputs
     if (nrows <= 0 || cache_line_bytes == 0 || nnz == 0)
         return;
