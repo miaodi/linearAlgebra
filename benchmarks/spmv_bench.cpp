@@ -237,7 +237,15 @@ int main(int argc, char **argv) {
   std::transform(mat_double.av.begin(), mat_double.av.end(), mat_float.av.begin(),
                  [](double d) { return static_cast<float>(d); });
   
-  std::cout << "matrix size: " << mat_double.rows << "\n";
+  // Print matrix statistics
+  std::size_t nnz = mat_double.av.size();
+  std::cout << "Matrix information:\n";
+  std::cout << "  Size: " << mat_double.rows << " x " << mat_double.rows << "\n";
+  std::cout << "  NNZ: " << nnz << "\n";
+  std::cout << "  Avg NNZ/row: " << static_cast<double>(nnz) / mat_double.rows << "\n";
+  std::cout << "  Sparsity: " << (100.0 * nnz) / (static_cast<double>(mat_double.rows) * mat_double.rows) << "%\n";
+  std::cout << "  Threads: " << num_threads << "\n";
+  std::cout << "  Iterations: " << iterations << "\n";
 
   // Double precision benchmarks
   benchmark::RegisterBenchmark("Serial_double", Serial<double>, mat_double, num_threads, iterations);
