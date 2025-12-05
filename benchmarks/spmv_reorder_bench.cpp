@@ -222,6 +222,7 @@ int main(int argc, char** argv)
     int num_threads = 1;
     std::vector<int> thread_list;
     std::string matrix_file;
+    bool use_simd = true;
 
     cxxopts::Options options("SPMV Reordering Benchmark",
                              "Compare SPMV performance across different reordering techniques");
@@ -232,6 +233,8 @@ int main(int argc, char** argv)
          cxxopts::value<std::string>()->default_value(""))
         ("f,file", "Matrix file location",
          cxxopts::value<std::string>()->default_value("data/thermal2.mtx"))
+        ("simd", "Enable SIMD kernels (default: true)",
+         cxxopts::value<bool>()->default_value("true"))
         ("h,help", "Print usage");
 
     auto result = options.parse(argc, argv);
@@ -246,6 +249,7 @@ int main(int argc, char** argv)
 
     num_threads = result["n"].as<int>();
     matrix_file = result["f"].as<std::string>();
+    use_simd = result["simd"].as<bool>();
 
     // Parse optional thread list
     {
@@ -281,6 +285,7 @@ int main(int argc, char** argv)
     }
 
     std::cout << "Matrix file: " << matrix_file << "\n";
+    std::cout << "SIMD: " << (use_simd ? "enabled" : "disabled") << "\n";
     std::cout << "Threads: ";
     for (size_t i = 0; i < thread_list.size(); ++i)
     {
@@ -329,15 +334,30 @@ int main(int argc, char** argv)
     {
         for (int t : thread_list)
         {
-            auto bm_albus = [=](benchmark::State& state)
+            if (use_simd)
             {
-                BM_SPMV_Reordering<matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Simd>>(
-                    state, matrix_file, "ALBUSSPMV");
-            };
-            std::string name = "ALBUSSPMV/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
-            benchmark::RegisterBenchmark(name.c_str(), bm_albus)
-                ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
-                ->Unit(benchmark::kMicrosecond);
+                auto bm_albus = [=](benchmark::State& state)
+                {
+                    BM_SPMV_Reordering<matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Simd>>(
+                        state, matrix_file, "ALBUSSPMV-Simd");
+                };
+                std::string name = "ALBUSSPMV-Simd/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
+                benchmark::RegisterBenchmark(name.c_str(), bm_albus)
+                    ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
+                    ->Unit(benchmark::kMicrosecond);
+            }
+            else
+            {
+                auto bm_albus = [=](benchmark::State& state)
+                {
+                    BM_SPMV_Reordering<matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Scalar>>(
+                        state, matrix_file, "ALBUSSPMV-Scalar");
+                };
+                std::string name = "ALBUSSPMV-Scalar/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
+                benchmark::RegisterBenchmark(name.c_str(), bm_albus)
+                    ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
+                    ->Unit(benchmark::kMicrosecond);
+            }
         }
     }
 
@@ -346,16 +366,32 @@ int main(int argc, char** argv)
     {
         for (int t : thread_list)
         {
-            auto bm_camlb = [=](benchmark::State& state)
+            if (use_simd)
             {
-                BM_SPMV_Reordering<matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Simd,
-                                                           matrix_utils::WorkloadMode::CAMLB>>(
-                    state, matrix_file, "CAMLBSPMV");
-            };
-            std::string name = "CAMLBSPMV/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
-            benchmark::RegisterBenchmark(name.c_str(), bm_camlb)
-                ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
-                ->Unit(benchmark::kMicrosecond);
+                auto bm_camlb = [=](benchmark::State& state)
+                {
+                    BM_SPMV_Reordering<matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Simd,
+                                                               matrix_utils::WorkloadMode::CAMLB>>(
+                        state, matrix_file, "CAMLBSPMV-Simd");
+                };
+                std::string name = "CAMLBSPMV-Simd/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
+                benchmark::RegisterBenchmark(name.c_str(), bm_camlb)
+                    ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
+                    ->Unit(benchmark::kMicrosecond);
+            }
+            else
+            {
+                auto bm_camlb = [=](benchmark::State& state)
+                {
+                    BM_SPMV_Reordering<matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Scalar,
+                                                               matrix_utils::WorkloadMode::CAMLB>>(
+                        state, matrix_file, "CAMLBSPMV-Scalar");
+                };
+                std::string name = "CAMLBSPMV-Scalar/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
+                benchmark::RegisterBenchmark(name.c_str(), bm_camlb)
+                    ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
+                    ->Unit(benchmark::kMicrosecond);
+            }
         }
     }
 
