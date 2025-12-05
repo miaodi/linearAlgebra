@@ -27,7 +27,7 @@ int main() {
        x_serial.data(), 1.0, 0.0);
 
   ALBUSSPMV<int, int, double> albus_spmv(2);
-  albus_spmv.preprocess(n, base, csr_rows.data(), csr_cols.data(),
+  albus_spmv.preprocess(n, csr_rows.data(), csr_cols.data(),
                         csr_vals.data());
   albus_spmv(n, csr_rows.data(), csr_cols.data(), csr_vals.data(), b.data(),
              x_albus.data(), 1.0, 0.0);
