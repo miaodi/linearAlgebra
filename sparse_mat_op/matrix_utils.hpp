@@ -984,6 +984,23 @@ ROWTYPE DiagonalScaledPrune( const COLTYPE rows,
                               VALTYPE* av,
                               const VALTYPE threshold );
 
+/// @brief Compute per-row maximum absolute value and prune entries below threshold*row_max
+/// @tparam ROWTYPE Row pointer type
+/// @tparam COLTYPE Column index type
+/// @tparam VALTYPE Value type
+/// @param rows Number of rows
+/// @param ai Row pointers (modified in-place by prune)
+/// @param aj Column indices (modified in-place by prune)
+/// @param av Values (modified in-place by prune)
+/// @param threshold Multiplier applied to per-row maxima
+/// @return Number of pruned entries
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+ROWTYPE RowMaxPrune( const COLTYPE rows,
+                     ROWTYPE* ai,
+                     COLTYPE* aj,
+                     VALTYPE* av,
+                     const VALTYPE threshold );
+
 /// @brief Fill CSR arrays with random sparsity pattern using pre-sized buffers.
 /// @details Uses Knuth's algorithm S to generate sorted, unique column indices
 ///          for each row based on the row pointer layout in @p ai. Column
