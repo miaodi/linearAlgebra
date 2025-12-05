@@ -227,14 +227,43 @@ ROWTYPE DiagonalScaledPrune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYP
                 const VALTYPE threshold_ij = abs_diag_i * abs_diag_j * threshold;
                 if (av[j] * av[j] < threshold_ij)
                 {
-                    av[j] = 0.0;
+                    av[j] = static_cast<VALTYPE>(0);
                 }
             }
         }
     }
 
     // Step 3: Prune zeros
-    return Prune(rows, ai, aj, av, static_cast<VALTYPE>(0.0), (VALTYPE*)nullptr);
+    return Prune(rows, ai, aj, av, static_cast<VALTYPE>(0), (VALTYPE*)nullptr);
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+ROWTYPE RowMaxPrune( const COLTYPE rows,
+                     ROWTYPE* ai,
+                     COLTYPE* aj,
+                     VALTYPE* av,
+                     const VALTYPE threshold )
+{
+    const ROWTYPE base = ai ? ai[0] : ROWTYPE{};
+    if (!ai || !aj || !av || rows <= 0)
+        return ROWTYPE{};
+
+    std::vector<VALTYPE> row_max(rows, static_cast<VALTYPE>(0));
+
+#pragma omp parallel for
+    for (COLTYPE i = 0; i < rows; ++i)
+    {
+        VALTYPE m = static_cast<VALTYPE>(0);
+        for (ROWTYPE p = ai[i] - base; p < ai[i + 1] - base; ++p)
+        {
+            VALTYPE a = std::abs(av[p]);
+            if (a > m)
+                m = a;
+        }
+        row_max[i] = m * threshold;
+    }
+
+    return Prune<ROWTYPE, COLTYPE, VALTYPE>(rows, ai, aj, av, static_cast<VALTYPE>(0), row_max.data());
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
@@ -362,6 +391,9 @@ bool CSRToMetisGraph(const COLTYPE nrows,
   template ROWTYPE Prune<ROWTYPE, COLTYPE, VALTYPE>(                          \
       const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av,              \
       const VALTYPE threshold, VALTYPE const* row_thresholds);                 \
+  template ROWTYPE RowMaxPrune<ROWTYPE, COLTYPE, VALTYPE>(                    \
+    const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av,              \
+    const VALTYPE threshold);                                               \
   template ROWTYPE DiagonalScaledPrune<ROWTYPE, COLTYPE, VALTYPE>(            \
       const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYPE* av,              \
       const VALTYPE threshold);                                                \
