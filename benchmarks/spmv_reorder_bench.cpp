@@ -21,6 +21,7 @@
 
 #ifdef USE_MKL
 #include <mkl_types.h>
+#include <mkl.h>
 #endif
 
 // Benchmark configuration
@@ -324,6 +325,7 @@ static void BM_MKLSPMV_Reordering(benchmark::State& state, const std::string& ma
     }
 
     const int reorder_idx = state.range(0);
+    const int nthreads = state.range(1);
 
     if (reorder_idx >= g_matrix_cache.reordered_matrices.size())
     {
@@ -338,13 +340,13 @@ static void BM_MKLSPMV_Reordering(benchmark::State& state, const std::string& ma
     matrix_utils::SPMV<matrix_utils::CSRMatrix<int, int, double>, 
                        matrix_utils::MKLSPMV<MKL_INT, MKL_INT, double>> spmv;
     spmv._matrix = &matrix;
-    spmv._spmv = matrix_utils::MKLSPMV<MKL_INT, MKL_INT, double>(); // Move temporary
+    spmv._spmv = matrix_utils::MKLSPMV<MKL_INT, MKL_INT, double>();
     spmv.preprocess();
 
     // Allocate vectors
     std::vector<double> b(matrix.rows, 1.0);
     std::vector<double> x(matrix.rows, 0.0);
-
+    mkl_set_num_threads(nthreads);
     // Warm-up
     spmv._spmv(b.data(), x.data(), 1.0, 0.0);
 
@@ -355,6 +357,7 @@ static void BM_MKLSPMV_Reordering(benchmark::State& state, const std::string& ma
         benchmark::DoNotOptimize(x.data());
         benchmark::ClobberMemory();
     }
+    mkl_set_num_threads(1); // Reset to default
 
     // Compute metrics
     const double nnz = static_cast<double>(matrix.NNZ());
@@ -369,7 +372,7 @@ static void BM_MKLSPMV_Reordering(benchmark::State& state, const std::string& ma
         benchmark::Counter(nnz * (sizeof(int) + sizeof(double)) + matrix.rows * sizeof(double) * 2,
                            benchmark::Counter::kIsIterationInvariantRate, benchmark::Counter::kIs1024);
 
-    state.SetLabel("MKLSPMV/" + reorder_name);
+    state.SetLabel("MKLSPMV/" + reorder_name + "/threads=" + std::to_string(nthreads));
 }
 #endif
 
@@ -573,14 +576,17 @@ int main(int argc, char** argv)
     std::cout << "\nMKL enabled - registering MKLSPMV benchmarks\n";
     for (size_t reorder_idx = 0; reorder_idx < reordering_configs.size(); ++reorder_idx)
     {
-        auto bm_mkl = [=](benchmark::State& state)
+        for (int t : thread_list)
         {
-            BM_MKLSPMV_Reordering(state, matrix_file);
-        };
-        std::string name = "MKLSPMV/" + reordering_configs[reorder_idx].name;
-        benchmark::RegisterBenchmark(name.c_str(), bm_mkl)
-            ->Args({static_cast<int64_t>(reorder_idx)})
-            ->Unit(benchmark::kMicrosecond);
+            auto bm_mkl = [=](benchmark::State& state)
+            {
+                BM_MKLSPMV_Reordering(state, matrix_file);
+            };
+            std::string name = "MKLSPMV/" + reordering_configs[reorder_idx].name + "/nt=" + std::to_string(t);
+            benchmark::RegisterBenchmark(name.c_str(), bm_mkl)
+                ->Args({static_cast<int64_t>(reorder_idx), static_cast<int64_t>(t)})
+                ->Unit(benchmark::kMicrosecond);
+        }
     }
 #endif
 
