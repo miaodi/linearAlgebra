@@ -14,6 +14,11 @@
 #include <vector>
 #include <omp.h>
 
+#ifdef USE_CUDA
+#include "cuda_spmv.h"
+#include <cuda_runtime.h>
+#endif
+
 // Benchmark configuration
 struct ReorderingConfig
 {
@@ -216,6 +221,89 @@ static void BM_SPMV_Reordering(benchmark::State& state, const std::string& matri
     state.SetLabel(spmv_name + "/" + reorder_name + "/threads=" + std::to_string(nthreads));
 }
 
+#ifdef USE_CUDA
+// Benchmark for CudaSPMV
+static void BM_CudaSPMV_Reordering(benchmark::State& state, const std::string& matrix_file)
+{
+    // Load and prepare matrices
+    try
+    {
+        g_matrix_cache.load(matrix_file);
+    }
+    catch (const std::exception& e)
+    {
+        state.SkipWithError(e.what());
+        return;
+    }
+
+    const int reorder_idx = state.range(0);
+
+    if (reorder_idx >= g_matrix_cache.reordered_matrices.size())
+    {
+        state.SkipWithError("Invalid reordering index");
+        return;
+    }
+
+    const auto& matrix = g_matrix_cache.reordered_matrices[reorder_idx];
+    const auto& reorder_name = g_matrix_cache.reorder_names[reorder_idx];
+
+    // Setup CUDA SPMV - use move semantics to avoid copying
+    matrix_utils::SPMV<matrix_utils::CSRMatrix<int, int, double>, 
+                       matrix_utils::CudaSPMV<int, int, double>> spmv;
+    spmv._matrix = &matrix;
+    spmv._spmv = matrix_utils::CudaSPMV<int, int, double>(); // Move temporary
+    spmv.preprocess();
+
+    // Allocate host vectors
+    std::vector<double> b(matrix.rows, 1.0);
+    std::vector<double> x(matrix.rows, 0.0);
+
+    // Allocate device vectors
+    double* d_b = nullptr;
+    double* d_x = nullptr;
+    cudaMalloc(&d_b, matrix.rows * sizeof(double));
+    cudaMalloc(&d_x, matrix.rows * sizeof(double));
+    
+    // Copy input vector to device
+    cudaMemcpy(d_b, b.data(), matrix.rows * sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemset(d_x, 0, matrix.rows * sizeof(double));
+
+    // Warm-up
+    spmv._spmv(d_b, d_x, 1.0, 0.0);
+    cudaDeviceSynchronize();
+
+    // Benchmark
+    for (auto _ : state)
+    {
+        spmv._spmv(d_b, d_x, 1.0, 0.0);
+        cudaDeviceSynchronize();
+        benchmark::DoNotOptimize(d_x);
+    }
+
+    // Copy result back (optional, for verification)
+    cudaMemcpy(x.data(), d_x, matrix.rows * sizeof(double), cudaMemcpyDeviceToHost);
+
+    // Cleanup
+    cudaFree(d_b);
+    cudaFree(d_x);
+
+    // Compute metrics
+    const double nnz = static_cast<double>(matrix.NNZ());
+    const double flops = 2.0 * nnz; // One multiply and one add per non-zero
+
+    state.counters["Rows"] = matrix.rows;
+    state.counters["NNZ"] = nnz;
+    state.counters["NNZ/Row"] = nnz / matrix.rows;
+    state.counters["GFLOPS"] = benchmark::Counter(
+        flops, benchmark::Counter::kIsIterationInvariantRate, benchmark::Counter::kIs1000);
+    state.counters["GB/s"] =
+        benchmark::Counter(nnz * (sizeof(int) + sizeof(double)) + matrix.rows * sizeof(double) * 2,
+                           benchmark::Counter::kIsIterationInvariantRate, benchmark::Counter::kIs1024);
+
+    state.SetLabel("CudaSPMV/" + reorder_name);
+}
+#endif
+
 int main(int argc, char** argv)
 {
     // Parse command line options
@@ -394,6 +482,22 @@ int main(int argc, char** argv)
             }
         }
     }
+
+#ifdef USE_CUDA
+    // Register benchmarks for CudaSPMV for each reordering
+    std::cout << "\nCUDA enabled - registering CudaSPMV benchmarks\n";
+    for (size_t reorder_idx = 0; reorder_idx < reordering_configs.size(); ++reorder_idx)
+    {
+        auto bm_cuda = [=](benchmark::State& state)
+        {
+            BM_CudaSPMV_Reordering(state, matrix_file);
+        };
+        std::string name = "CudaSPMV/" + reordering_configs[reorder_idx].name;
+        benchmark::RegisterBenchmark(name.c_str(), bm_cuda)
+            ->Args({static_cast<int64_t>(reorder_idx)})
+            ->Unit(benchmark::kMicrosecond);
+    }
+#endif
 
     // Initialize and run Google Benchmark with original argc/argv
     // This allows benchmark flags like --benchmark_min_time to work

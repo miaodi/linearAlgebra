@@ -10,6 +10,11 @@
 #include <string_view>
 #include <vector>
 
+#ifdef USE_CUDA
+#include "cuda_spmv.h"
+#include <cuda_runtime.h>
+#endif
+
 using CSRTYPE_DOUBLE = typename matrix_utils::CSRMatrixVec<int, int, double>;
 using CSRTYPE_FLOAT = typename matrix_utils::CSRMatrixVec<int, int, float>;
 
@@ -192,6 +197,49 @@ auto CAMLBSimd = [](benchmark::State &state, const auto &mat,
                           int64_t(it) * int64_t(mat.NNZ()));
 };
 
+#ifdef USE_CUDA
+template <typename VALTYPE>
+auto CudaSPMV_Bench = [](benchmark::State &state, const auto &mat,
+                         const int threads, const int it) {
+  // Allocate host memory
+  std::vector<VALTYPE> x(mat.rows, 0.0);
+  std::vector<VALTYPE> b(mat.rows, 1.0);
+  
+  // Allocate device memory for vectors
+  VALTYPE* d_x;
+  VALTYPE* d_y;
+  cudaMalloc(&d_x, mat.rows * sizeof(VALTYPE));
+  cudaMalloc(&d_y, mat.rows * sizeof(VALTYPE));
+  
+  // Copy input vector to device
+  cudaMemcpy(d_x, b.data(), mat.rows * sizeof(VALTYPE), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_y, x.data(), mat.rows * sizeof(VALTYPE), cudaMemcpyHostToDevice);
+  
+  // Create and preprocess CUDA SpMV
+  matrix_utils::CudaSPMV<int, int, VALTYPE> cuda_spmv;
+  cuda_spmv.preprocess(mat.rows, mat.ai.data(), mat.aj.data(), mat.av.data());
+  
+  // Warm-up run
+  cuda_spmv(d_x, d_y);
+  cudaDeviceSynchronize();
+  
+  // Benchmark
+  for (auto _ : state) {
+    for (int i = 0; i < it; i++) {
+      cuda_spmv(d_x, d_y);
+    }
+    cudaDeviceSynchronize();
+  }
+  
+  state.SetBytesProcessed(2 * sizeof(VALTYPE) * int64_t(state.iterations()) *
+                          int64_t(it) * int64_t(mat.NNZ()));
+  
+  // Cleanup
+  cudaFree(d_x);
+  cudaFree(d_y);
+};
+#endif
+
 int main(int argc, char **argv) {
 
   CSRTYPE_DOUBLE mat_double;
@@ -264,6 +312,11 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark("CAMLBSimd_double", CAMLBSimd<double>, mat_double, num_threads,
                                iterations);
   
+#ifdef USE_CUDA
+  benchmark::RegisterBenchmark("CudaSPMV_double", CudaSPMV_Bench<double>, mat_double, num_threads,
+                               iterations);
+#endif
+  
   // Float precision benchmarks
   benchmark::RegisterBenchmark("Serial_float", Serial<float>, mat_float, num_threads, iterations);
   benchmark::RegisterBenchmark("Parallel_float", Parallel<float>, mat_float,
@@ -280,6 +333,11 @@ int main(int argc, char **argv) {
                                iterations);
   benchmark::RegisterBenchmark("CAMLBSimd_float", CAMLBSimd<float>, mat_float, num_threads,
                                iterations);
+  
+#ifdef USE_CUDA
+  benchmark::RegisterBenchmark("CudaSPMV_float", CudaSPMV_Bench<float>, mat_float, num_threads,
+                               iterations);
+#endif
   
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();

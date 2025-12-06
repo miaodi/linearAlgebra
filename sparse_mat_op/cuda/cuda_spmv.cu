@@ -32,7 +32,85 @@ CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::~CudaSPMV()
     cleanup();
     if (_handle) {
         cusparseDestroy(_handle);
+        _handle = nullptr;
     }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::CudaSPMV(CudaSPMV&& other) noexcept
+    : _handle(other._handle)
+    , _mat_A(other._mat_A)
+    , _vec_x(other._vec_x)
+    , _vec_y(other._vec_y)
+    , _d_ia(other._d_ia)
+    , _d_ja(other._d_ja)
+    , _d_av(other._d_av)
+    , _d_x(other._d_x)
+    , _d_y(other._d_y)
+    , _d_buffer(other._d_buffer)
+    , _buffer_size(other._buffer_size)
+    , _n(other._n)
+    , _nnz(other._nnz)
+    , _index_base(other._index_base)
+    , _is_initialized(other._is_initialized)
+{
+    // Nullify the other object's pointers so it won't delete them
+    other._handle = nullptr;
+    other._mat_A = nullptr;
+    other._vec_x = nullptr;
+    other._vec_y = nullptr;
+    other._d_ia = nullptr;
+    other._d_ja = nullptr;
+    other._d_av = nullptr;
+    other._d_x = nullptr;
+    other._d_y = nullptr;
+    other._d_buffer = nullptr;
+    other._buffer_size = 0;
+    other._is_initialized = false;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>& CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator=(CudaSPMV&& other) noexcept
+{
+    if (this != &other) {
+        // Clean up existing resources
+        cleanup();
+        if (_handle) {
+            cusparseDestroy(_handle);
+        }
+        
+        // Move resources from other
+        _handle = other._handle;
+        _mat_A = other._mat_A;
+        _vec_x = other._vec_x;
+        _vec_y = other._vec_y;
+        _d_ia = other._d_ia;
+        _d_ja = other._d_ja;
+        _d_av = other._d_av;
+        _d_x = other._d_x;
+        _d_y = other._d_y;
+        _d_buffer = other._d_buffer;
+        _buffer_size = other._buffer_size;
+        _n = other._n;
+        _nnz = other._nnz;
+        _index_base = other._index_base;
+        _is_initialized = other._is_initialized;
+        
+        // Nullify other's pointers
+        other._handle = nullptr;
+        other._mat_A = nullptr;
+        other._vec_x = nullptr;
+        other._vec_y = nullptr;
+        other._d_ia = nullptr;
+        other._d_ja = nullptr;
+        other._d_av = nullptr;
+        other._d_x = nullptr;
+        other._d_y = nullptr;
+        other._d_buffer = nullptr;
+        other._buffer_size = 0;
+        other._is_initialized = false;
+    }
+    return *this;
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
@@ -142,8 +220,8 @@ void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::preprocess(COLTYPE n,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()(const VALTYPE* h_x,
-                                                      VALTYPE* h_y,
+void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()(const VALTYPE* d_x,
+                                                      VALTYPE* d_y,
                                                       VALTYPE alpha,
                                                       VALTYPE beta)
 {
@@ -151,15 +229,14 @@ void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()(const VALTYPE* h_x,
         throw std::runtime_error("CudaSPMV: preprocess() must be called before operator()");
     }
     
-    // Copy input vector to device
-    check_cuda_error(cudaMemcpy(_d_x, h_x, _n * sizeof(VALTYPE), cudaMemcpyHostToDevice),
-                     "Failed to copy x to device");
+    // Update vector descriptors to point to the provided device memory
+    check_cusparse_error(
+        cusparseDnVecSetValues(_vec_x, const_cast<VALTYPE*>(d_x)),
+        "Failed to set vector x values");
     
-    // Copy output vector to device (needed if beta != 0)
-    if (beta != static_cast<VALTYPE>(0)) {
-        check_cuda_error(cudaMemcpy(_d_y, h_y, _n * sizeof(VALTYPE), cudaMemcpyHostToDevice),
-                         "Failed to copy y to device");
-    }
+    check_cusparse_error(
+        cusparseDnVecSetValues(_vec_y, d_y),
+        "Failed to set vector y values");
     
     // Perform SpMV: y = alpha * A * x + beta * y
     check_cusparse_error(
@@ -168,13 +245,6 @@ void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()(const VALTYPE* h_x,
                     get_cuda_data_type(), CUSPARSE_SPMV_ALG_DEFAULT,
                     _d_buffer),
         "Failed to execute SpMV");
-    
-    // Copy result back to host
-    check_cuda_error(cudaMemcpy(h_y, _d_y, _n * sizeof(VALTYPE), cudaMemcpyDeviceToHost),
-                     "Failed to copy y to host");
-    
-    // Synchronize to ensure completion
-    check_cuda_error(cudaDeviceSynchronize(), "Failed to synchronize device");
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>

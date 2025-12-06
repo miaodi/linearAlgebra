@@ -30,6 +30,14 @@ class CudaSPMV
 public:
     CudaSPMV();
     ~CudaSPMV();
+    
+    // Delete copy constructor and copy assignment to prevent double-free
+    CudaSPMV(const CudaSPMV&) = delete;
+    CudaSPMV& operator=(const CudaSPMV&) = delete;
+    
+    // Move constructor and move assignment
+    CudaSPMV(CudaSPMV&& other) noexcept;
+    CudaSPMV& operator=(CudaSPMV&& other) noexcept;
 
     /**
      * @brief Preprocess the matrix structure for subsequent SpMV operations
@@ -50,15 +58,32 @@ public:
     /**
      * @brief Perform SpMV: y = alpha * A * x + beta * y
      * 
-     * @param h_x Input vector x (host memory, size n)
-     * @param h_y Output vector y (host memory, size n)
+     * Expects device memory pointers for x and y.
+     * 
+     * @param d_x Input vector x (device memory, size n)
+     * @param d_y Output vector y (device memory, size n)
      * @param alpha Scalar multiplier for A*x
      * @param beta Scalar multiplier for y
      */
-    void operator()(const VALTYPE* h_x,
-                   VALTYPE* h_y,
+    void operator()(const VALTYPE* d_x,
+                   VALTYPE* d_y,
                    VALTYPE alpha = 1.0,
                    VALTYPE beta = 0.0);
+    
+    /**
+     * @brief Get device memory pointers for vectors (for direct access)
+     */
+    VALTYPE* get_device_x() { return _d_x; }
+    VALTYPE* get_device_y() { return _d_y; }
+    const VALTYPE* get_device_x() const { return _d_x; }
+    const VALTYPE* get_device_y() const { return _d_y; }
+    
+    /**
+     * @brief Get matrix size
+     */
+    COLTYPE size() const { return _n; }
+    
+    using VALTYPE_ALIAS = VALTYPE;
 
 private:
     // CUDA handles
