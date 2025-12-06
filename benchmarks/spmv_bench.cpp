@@ -20,7 +20,7 @@ auto Serial = [](benchmark::State &state, const auto &mat, const int threads,
   std::vector<VALTYPE> b(mat.rows, 1.0);
 
   matrix_utils::SPMV<std::remove_cvref_t<decltype(mat)>,
-                     matrix_utils::SerialSPMV>
+                     matrix_utils::SerialSPMV<int, int, VALTYPE>>
       spmv;
   spmv.setMatrix(&mat);
   spmv.preprocess();

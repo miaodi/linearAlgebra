@@ -230,7 +230,7 @@ int main( int argc, char** argv )
     // spmv operator
     std::cout << "spmv operator..." << std::endl;
     using CSRTYPE = typename matrix_utils::CSRMatrix<int, int, double>;
-    matrix_utils::SPMV<CSRTYPE, matrix_utils::SerialSPMV> spmv;
+    matrix_utils::SPMV<CSRTYPE, matrix_utils::SerialSPMV<int, int, double>> spmv;
     spmv.setMatrix( &csr_matrix );
     spmv.preprocess();
     std::cout << "spmv operator done." << std::endl;

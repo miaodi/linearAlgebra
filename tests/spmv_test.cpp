@@ -101,19 +101,19 @@ TEST_F(spmv_Test, row_balanced_parallel_spmv) {
       std::vector<double> x_simd(mat.rows, 0.0);
       std::vector<double> x_serial(mat.rows, 0.0);
 
-      SerialSPMV spmv;
-      spmv(mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), b.data(),
-           x_serial.data(), 1., 0.);
+      SerialSPMV<int, int, double> spmv;
+      spmv.preprocess(mat.rows, mat.AI(), mat.AJ(), mat.AV());
+      spmv(b.data(), x_serial.data(), 1., 0.);
 
       // Test Scalar kernel
       RowBalancedParallelSPMV<int, int, double, RowDotKernel::Scalar> p_spmv_scalar(nthreads);
-      p_spmv_scalar(mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), b.data(),
-                    x_scalar.data(), 1., 0.);
+      p_spmv_scalar.preprocess(mat.rows, mat.AI(), mat.AJ(), mat.AV());
+      p_spmv_scalar(b.data(), x_scalar.data(), 1., 0.);
       
       // Test SIMD kernel
       RowBalancedParallelSPMV<int, int, double, RowDotKernel::Simd> p_spmv_simd(nthreads);
-      p_spmv_simd(mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), b.data(),
-                  x_simd.data(), 1., 0.);
+      p_spmv_simd.preprocess(mat.rows, mat.AI(), mat.AJ(), mat.AV());
+      p_spmv_simd(b.data(), x_simd.data(), 1., 0.);
 
       // Both should match serial exactly (same summation order)
       for (int i = 0; i < mat.rows; i++) {
@@ -135,19 +135,19 @@ TEST_F(spmv_Test, ALBUS_spmv) {
       std::vector<double> x_simd(mat.rows, 0.0);
       std::vector<double> x_serial(mat.rows, 0.0);
 
-      SerialSPMV spmv;
-      spmv(mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), b.data(),
-           x_serial.data(), 1., 0.);
+      SerialSPMV<int, int, double> spmv;
+      spmv.preprocess(mat.rows, mat.AI(), mat.AJ(), mat.AV());
+      spmv(b.data(), x_serial.data(), 1., 0.);
 
       // Test Scalar kernel
       ALBUSSPMV<int, int, double, RowDotKernel::Scalar> albus_scalar(nthreads);
       albus_scalar.preprocess(mat.rows, mat.AI(), mat.AJ(), mat.AV());
-      albus_scalar(mat.rows, mat.AI(), mat.AJ(), mat.AV(), b.data(), x_scalar.data(), 1., 0.);
+      albus_scalar(b.data(), x_scalar.data(), 1., 0.);
 
       // Test SIMD kernel
       ALBUSSPMV<int, int, double, RowDotKernel::Simd> albus_simd(nthreads);
       albus_simd.preprocess(mat.rows, mat.AI(), mat.AJ(), mat.AV());
-      albus_simd(mat.rows, mat.AI(), mat.AJ(), mat.AV(), b.data(), x_simd.data(), 1., 0.);
+      albus_simd(b.data(), x_simd.data(), 1., 0.);
 
       // ALBUS uses different summation order (by nnz), allow small rounding differences
       const double serial_l2 = l2_norm(x_serial);
@@ -177,19 +177,19 @@ TEST_F(spmv_Test, CAMLB_spmv) {
       std::vector<double> x_simd(mat.rows, 0.0);
       std::vector<double> x_serial(mat.rows, 0.0);
 
-      SerialSPMV spmv;
-      spmv(mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), b.data(),
-           x_serial.data(), 1., 0.);
+      SerialSPMV<int, int, double> spmv;
+      spmv.preprocess(mat.rows, mat.AI(), mat.AJ(), mat.AV());
+      spmv(b.data(), x_serial.data(), 1., 0.);
 
       // Test Scalar kernel with CAMLB workload partitioning
       ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb_scalar(nthreads);
       camlb_scalar.preprocess(mat.rows, mat.AI(), mat.AJ(), mat.AV());
-      camlb_scalar(mat.rows, mat.AI(), mat.AJ(), mat.AV(), b.data(), x_scalar.data(), 1., 0.);
+      camlb_scalar(b.data(), x_scalar.data(), 1., 0.);
 
       // Test SIMD kernel with CAMLB workload partitioning
       ALBUSSPMV<int, int, double, RowDotKernel::Simd, WorkloadMode::CAMLB> camlb_simd(nthreads);
       camlb_simd.preprocess(mat.rows, mat.AI(), mat.AJ(), mat.AV());
-      camlb_simd(mat.rows, mat.AI(), mat.AJ(), mat.AV(), b.data(), x_simd.data(), 1., 0.);
+      camlb_simd(b.data(), x_simd.data(), 1., 0.);
 
       // CAMLB uses different summation order (by cache-aware workload), allow small rounding differences
       const double serial_l2 = l2_norm(x_serial);
@@ -239,16 +239,14 @@ TEST_F(spmv_Test, ALBUS_edge_cases) {
     std::vector<double> b(tc.nvec, 1.0);
     std::vector<double> x(tc.nrows, 0.0);
     std::vector<double> x_serial(tc.nrows, 0.0);
-    int base = 0;
 
-    SerialSPMV spmv;
-    spmv(tc.nrows, base, tc.ai.data(), tc.aj.data(), tc.av.data(), 
-         b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(tc.nrows, tc.ai.data(), tc.aj.data(), tc.av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
 
     ALBUSSPMV<int, int, double> albus_spmv(tc.nthreads);
     albus_spmv.preprocess(tc.nrows, tc.ai.data(), tc.aj.data(), tc.av.data());
-    albus_spmv(tc.nrows, tc.ai.data(), tc.aj.data(), tc.av.data(), 
-               b.data(), x.data(), 1.0, 0.0);
+    albus_spmv(b.data(), x.data(), 1.0, 0.0);
 
     for (int i = 0; i < tc.nrows; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "Test '" << tc.name << "' failed at row " << i;
@@ -280,16 +278,14 @@ TEST_F(spmv_Test, CAMLB_edge_cases) {
     std::vector<double> b(tc.nvec, 1.0);
     std::vector<double> x(tc.nrows, 0.0);
     std::vector<double> x_serial(tc.nrows, 0.0);
-    int base = 0;
 
-    SerialSPMV spmv;
-    spmv(tc.nrows, base, tc.ai.data(), tc.aj.data(), tc.av.data(), 
-         b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(tc.nrows, tc.ai.data(), tc.aj.data(), tc.av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
 
     ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb_spmv(tc.nthreads);
     camlb_spmv.preprocess(tc.nrows, tc.ai.data(), tc.aj.data(), tc.av.data());
-    camlb_spmv(tc.nrows, tc.ai.data(), tc.aj.data(), tc.av.data(), 
-               b.data(), x.data(), 1.0, 0.0);
+    camlb_spmv(b.data(), x.data(), 1.0, 0.0);
 
     for (int i = 0; i < tc.nrows; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) 
@@ -322,12 +318,13 @@ TEST_F(spmv_Test, ALBUS_alpha_beta) {
     std::vector<double> x(n, init_val);
     std::vector<double> x_serial(n, init_val);
 
-    SerialSPMV spmv;
-    spmv(n, base, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), alpha, beta);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(n, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), alpha, beta);
 
     ALBUSSPMV<int, int, double> albus_spmv(3);
     albus_spmv.preprocess(n, ai.data(), aj.data(), av.data());
-    albus_spmv(n, ai.data(), aj.data(), av.data(), b.data(), x.data(), alpha, beta);
+    albus_spmv(b.data(), x.data(), alpha, beta);
 
     for (int i = 0; i < n; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "Failed for " << desc << " at row " << i;
@@ -342,12 +339,13 @@ TEST_F(spmv_Test, ALBUS_alpha_beta) {
   std::vector<double> x2(2, 100.0);
   std::vector<double> x2_serial(2, 100.0);
 
-  SerialSPMV spmv2;
-  spmv2(2, base, ai2.data(), aj2.data(), av2.data(), b2.data(), x2_serial.data(), 0.5, 1.5);
+  SerialSPMV<int, int, double> spmv2;
+  spmv2.preprocess(2, ai2.data(), aj2.data(), av2.data());
+  spmv2(b2.data(), x2_serial.data(), 0.5, 1.5);
 
   ALBUSSPMV<int, int, double> albus_spmv2(4);
   albus_spmv2.preprocess(2, ai2.data(), aj2.data(), av2.data());
-  albus_spmv2(2, ai2.data(), aj2.data(), av2.data(), b2.data(), x2.data(), 0.5, 1.5);
+  albus_spmv2(b2.data(), x2.data(), 0.5, 1.5);
 
   for (int i = 0; i < 2; i++) {
     EXPECT_DOUBLE_EQ(x2[i], x2_serial[i]) << "Row split with beta failed at row " << i;
@@ -367,7 +365,7 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     ALBUSSPMV<int, int, double> albus(2);
     albus.preprocess(0, ai.data(), aj.data(), av.data());
     // Should not crash
-    albus(0, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    albus(b.data(), x.data(), 1.0, 0.0);
   }
 
   // Case 2: Matrix with nnz=0 but size>0
@@ -379,12 +377,13 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     std::vector<double> x(4, 5.0);
     std::vector<double> x_serial(4, 5.0);
     
-    SerialSPMV spmv;
-    spmv(4, 0, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(4, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double> albus(2);
     albus.preprocess(4, ai.data(), aj.data(), av.data());
-    albus(4, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    albus(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 4; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "Empty matrix failed at row " << i;
@@ -400,12 +399,13 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     std::vector<double> x(4, 0.0);
     std::vector<double> x_serial(4, 0.0);
     
-    SerialSPMV spmv;
-    spmv(4, 0, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(4, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double> albus(3);
     albus.preprocess(4, ai.data(), aj.data(), av.data());
-    albus(4, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    albus(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 4; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "Empty rows in middle failed at row " << i;
@@ -421,12 +421,13 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     std::vector<double> x(3, 0.0);
     std::vector<double> x_serial(3, 0.0);
     
-    SerialSPMV spmv;
-    spmv(3, 1, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(3, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double> albus(2);
     albus.preprocess(3, ai.data(), aj.data(), av.data());
-    albus(3, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    albus(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 3; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "1-indexed matrix failed at row " << i;
@@ -442,12 +443,13 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     std::vector<double> x(3, 0.0);
     std::vector<double> x_serial(3, 0.0);
     
-    SerialSPMV spmv;
-    spmv(3, 0, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(3, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double> albus(10);  // 10 threads for 3 nnz
     albus.preprocess(3, ai.data(), aj.data(), av.data());
-    albus(3, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    albus(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 3; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "More threads than nnz failed at row " << i;
@@ -463,12 +465,13 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     std::vector<double> x(4, 0.0);
     std::vector<double> x_serial(4, 0.0);
     
-    SerialSPMV spmv;
-    spmv(4, 0, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(4, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double> albus(4);
     albus.preprocess(4, ai.data(), aj.data(), av.data());
-    albus(4, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    albus(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 4; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "Single nnz failed at row " << i;
@@ -484,12 +487,13 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     std::vector<double> x(3, 0.0);
     std::vector<double> x_serial(3, 0.0);
     
-    SerialSPMV spmv;
-    spmv(3, 0, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(3, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double> albus(4);
     albus.preprocess(3, ai.data(), aj.data(), av.data());
-    albus(3, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    albus(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 3; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "All nnz in first row failed at row " << i;
@@ -507,7 +511,7 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     std::vector<double> x1(2, 5.0);
     ALBUSSPMV<int, int, double> albus1(2);
     albus1.preprocess(2, ai.data(), aj.data(), av.data());
-    albus1(2, ai.data(), aj.data(), av.data(), b.data(), x1.data(), 1.0, 0.0);
+    albus1(b.data(), x1.data(), 1.0, 0.0);
     EXPECT_DOUBLE_EQ(x1[0], 0.0);
     EXPECT_DOUBLE_EQ(x1[1], 0.0);
     
@@ -515,7 +519,7 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     std::vector<double> x2(2, 5.0);
     ALBUSSPMV<int, int, double> albus2(2);
     albus2.preprocess(2, ai.data(), aj.data(), av.data());
-    albus2(2, ai.data(), aj.data(), av.data(), b.data(), x2.data(), 1.0, 1.0);
+    albus2(b.data(), x2.data(), 1.0, 1.0);
     EXPECT_DOUBLE_EQ(x2[0], 5.0);
     EXPECT_DOUBLE_EQ(x2[1], 5.0);
     
@@ -523,7 +527,7 @@ TEST_F(spmv_Test, ALBUS_corner_cases) {
     std::vector<double> x3(2, 5.0);
     ALBUSSPMV<int, int, double> albus3(2);
     albus3.preprocess(2, ai.data(), aj.data(), av.data());
-    albus3(2, ai.data(), aj.data(), av.data(), b.data(), x3.data(), 1.0, 2.0);
+    albus3(b.data(), x3.data(), 1.0, 2.0);
     EXPECT_DOUBLE_EQ(x3[0], 10.0);
     EXPECT_DOUBLE_EQ(x3[1], 10.0);
   }
@@ -542,7 +546,7 @@ TEST_F(spmv_Test, CAMLB_corner_cases) {
     ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb(2);
     camlb.preprocess(0, ai.data(), aj.data(), av.data());
     // Should not crash
-    camlb(0, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    camlb(b.data(), x.data(), 1.0, 0.0);
   }
 
   // Case 2: Matrix with nnz=0 but size>0
@@ -554,12 +558,13 @@ TEST_F(spmv_Test, CAMLB_corner_cases) {
     std::vector<double> x(4, 0.0);
     std::vector<double> x_serial(4, 0.0);
     
-    SerialSPMV spmv;
-    spmv(4, 0, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(4, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb(2);
     camlb.preprocess(4, ai.data(), aj.data(), av.data());
-    camlb(4, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    camlb(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 4; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "CAMLB empty matrix failed at row " << i;
@@ -575,12 +580,13 @@ TEST_F(spmv_Test, CAMLB_corner_cases) {
     std::vector<double> x(3, 0.0);
     std::vector<double> x_serial(3, 0.0);
     
-    SerialSPMV spmv;
-    spmv(3, 0, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(3, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb(10);  // 10 threads for 3 nnz
     camlb.preprocess(3, ai.data(), aj.data(), av.data());
-    camlb(3, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    camlb(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 3; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "CAMLB more threads than nnz failed at row " << i;
@@ -596,12 +602,13 @@ TEST_F(spmv_Test, CAMLB_corner_cases) {
     std::vector<double> x(4, 0.0);
     std::vector<double> x_serial(4, 0.0);
     
-    SerialSPMV spmv;
-    spmv(4, 0, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(4, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb(4);
     camlb.preprocess(4, ai.data(), aj.data(), av.data());
-    camlb(4, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    camlb(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 4; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "CAMLB single nnz failed at row " << i;
@@ -617,12 +624,13 @@ TEST_F(spmv_Test, CAMLB_corner_cases) {
     std::vector<double> x(3, 0.0);
     std::vector<double> x_serial(3, 0.0);
     
-    SerialSPMV spmv;
-    spmv(3, 0, ai.data(), aj.data(), av.data(), b.data(), x_serial.data(), 1.0, 0.0);
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(3, ai.data(), aj.data(), av.data());
+    spmv(b.data(), x_serial.data(), 1.0, 0.0);
     
     ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb(4);
     camlb.preprocess(3, ai.data(), aj.data(), av.data());
-    camlb(3, ai.data(), aj.data(), av.data(), b.data(), x.data(), 1.0, 0.0);
+    camlb(b.data(), x.data(), 1.0, 0.0);
     
     for (int i = 0; i < 3; i++) {
       EXPECT_DOUBLE_EQ(x[i], x_serial[i]) << "CAMLB all nnz in first row failed at row " << i;
@@ -640,7 +648,7 @@ TEST_F(spmv_Test, CAMLB_corner_cases) {
     std::vector<double> x1(2, 5.0);
     ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb1(2);
     camlb1.preprocess(2, ai.data(), aj.data(), av.data());
-    camlb1(2, ai.data(), aj.data(), av.data(), b.data(), x1.data(), 1.0, 0.0);
+    camlb1(b.data(), x1.data(), 1.0, 0.0);
     EXPECT_DOUBLE_EQ(x1[0], 0.0);
     EXPECT_DOUBLE_EQ(x1[1], 0.0);
     
@@ -648,7 +656,7 @@ TEST_F(spmv_Test, CAMLB_corner_cases) {
     std::vector<double> x2(2, 5.0);
     ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb2(2);
     camlb2.preprocess(2, ai.data(), aj.data(), av.data());
-    camlb2(2, ai.data(), aj.data(), av.data(), b.data(), x2.data(), 1.0, 1.0);
+    camlb2(b.data(), x2.data(), 1.0, 1.0);
     EXPECT_DOUBLE_EQ(x2[0], 5.0);
     EXPECT_DOUBLE_EQ(x2[1], 5.0);
     
@@ -656,7 +664,7 @@ TEST_F(spmv_Test, CAMLB_corner_cases) {
     std::vector<double> x3(2, 5.0);
     ALBUSSPMV<int, int, double, RowDotKernel::Scalar, WorkloadMode::CAMLB> camlb3(2);
     camlb3.preprocess(2, ai.data(), aj.data(), av.data());
-    camlb3(2, ai.data(), aj.data(), av.data(), b.data(), x3.data(), 1.0, 2.0);
+    camlb3(b.data(), x3.data(), 1.0, 2.0);
     EXPECT_DOUBLE_EQ(x3[0], 10.0);
     EXPECT_DOUBLE_EQ(x3[1], 10.0);
   }

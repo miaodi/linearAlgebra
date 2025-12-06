@@ -13,44 +13,52 @@ enum class WorkloadMode { ALBUS, CAMLB };
 
 // compute x = alpha * A * b + beta * x
 
+template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
 struct SerialSPMV {
   SerialSPMV() = default;
 
-  template <BetaMode Mode, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-  void compute(const COLTYPE size, const int base,
-               ROWTYPE const * __restrict ai,
-               COLTYPE const * __restrict aj,
-               VALTYPE const * __restrict av,
-               VALTYPE const * __restrict const b,
+  void preprocess(const COLTYPE size, ROWTYPE const* __restrict ai,
+                  COLTYPE const* __restrict aj, VALTYPE const* __restrict av) {
+    _size = size;
+    _ai = ai;
+    _aj = aj;
+    _av = av;
+    _base = static_cast<int>(ai ? ai[0] : 0);
+  }
+
+  template <BetaMode Mode>
+  void compute(VALTYPE const * __restrict const b,
                VALTYPE * __restrict const x, const VALTYPE alpha,
                const VALTYPE beta) const {
-    for (COLTYPE i = 0; i < size; i++) {
+    for (COLTYPE i = 0; i < _size; i++) {
       VALTYPE val = 0;
 #pragma unroll
-      for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
-        val += av[j] * b[aj[j] - base];
+      for (ROWTYPE j = _ai[i] - _base; j < _ai[i + 1] - _base; j++) {
+        val += _av[j] * b[_aj[j] - _base];
       }
       const VALTYPE ax = alpha * val;
       x[i] = apply_beta<Mode>(ax, beta, x[i]);
     }
   }
 
-  template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-  void operator()(const COLTYPE size, const int base,
-                  ROWTYPE const * __restrict ai,
-                  COLTYPE const * __restrict aj,
-                  VALTYPE const * __restrict av,
-                  VALTYPE const * __restrict const b,
+  void operator()(VALTYPE const * __restrict const b,
                   VALTYPE * __restrict const x, const VALTYPE alpha,
                   const VALTYPE beta) const {
     if (beta == static_cast<VALTYPE>(0)) {
-      compute<BetaMode::Zero>(size, base, ai, aj, av, b, x, alpha, beta);
+      compute<BetaMode::Zero>(b, x, alpha, beta);
     } else if (beta == static_cast<VALTYPE>(1)) {
-      compute<BetaMode::One>(size, base, ai, aj, av, b, x, alpha, beta);
+      compute<BetaMode::One>(b, x, alpha, beta);
     } else {
-      compute<BetaMode::Generic>(size, base, ai, aj, av, b, x, alpha, beta);
+      compute<BetaMode::Generic>(b, x, alpha, beta);
     }
   }
+
+private:
+  COLTYPE _size;
+  ROWTYPE const* _ai;
+  COLTYPE const* _aj;
+  VALTYPE const* _av;
+  int _base;
 };
 
 // Plain OpenMP parallel SPMV (simple row distribution)
@@ -61,42 +69,49 @@ struct ParallelSPMV {
 
   void setNumThreads(const int num_threads) { _nthreads = num_threads; }
 
+  void preprocess(const COLTYPE size, ROWTYPE const* __restrict ai,
+                  COLTYPE const* __restrict aj, VALTYPE const* __restrict av) {
+    _size = size;
+    _ai = ai;
+    _aj = aj;
+    _av = av;
+    _base = static_cast<int>(ai ? ai[0] : 0);
+  }
+
   template <BetaMode Mode>
-  void compute(const COLTYPE size, const int base,
-               ROWTYPE const *__restrict ai, COLTYPE const *__restrict aj,
-               VALTYPE const *__restrict av,
-               VALTYPE const *__restrict const b,
+  void compute(VALTYPE const *__restrict const b,
                VALTYPE *__restrict const x, const VALTYPE alpha,
                const VALTYPE beta) const {
 #pragma omp parallel for num_threads(_nthreads)
-    for (COLTYPE i = 0; i < size; i++) {
+    for (COLTYPE i = 0; i < _size; i++) {
       VALTYPE val = 0;
-      for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; j++) {
-        val += av[j] * b[aj[j] - base];
+      for (ROWTYPE j = _ai[i] - _base; j < _ai[i + 1] - _base; j++) {
+        val += _av[j] * b[_aj[j] - _base];
       }
       const VALTYPE ax = alpha * val;
       x[i] = apply_beta<Mode>(ax, beta, x[i]);
     }
   }
 
-  void operator()(const COLTYPE size, const int base,
-                  ROWTYPE const *__restrict ai,
-                  COLTYPE const *__restrict aj,
-                  VALTYPE const *__restrict av,
-                  VALTYPE const *__restrict const b,
+  void operator()(VALTYPE const *__restrict const b,
                   VALTYPE *__restrict const x, const VALTYPE alpha,
                   const VALTYPE beta) const {
     if (beta == static_cast<VALTYPE>(0)) {
-      compute<BetaMode::Zero>(size, base, ai, aj, av, b, x, alpha, beta);
+      compute<BetaMode::Zero>(b, x, alpha, beta);
     } else if (beta == static_cast<VALTYPE>(1)) {
-      compute<BetaMode::One>(size, base, ai, aj, av, b, x, alpha, beta);
+      compute<BetaMode::One>(b, x, alpha, beta);
     } else {
-      compute<BetaMode::Generic>(size, base, ai, aj, av, b, x, alpha, beta);
+      compute<BetaMode::Generic>(b, x, alpha, beta);
     }
   }
 
 private:
   int _nthreads;
+  COLTYPE _size;
+  ROWTYPE const* _ai;
+  COLTYPE const* _aj;
+  VALTYPE const* _av;
+  int _base;
 };
 
 template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double,
@@ -107,11 +122,17 @@ struct RowBalancedParallelSPMV {
 
   void setNumThreads(const int num_threads) { _nthreads = num_threads; }
 
+  void preprocess(const COLTYPE size, ROWTYPE const* __restrict ai,
+                  COLTYPE const* __restrict aj, VALTYPE const* __restrict av) {
+    _size = size;
+    _ai = ai;
+    _aj = aj;
+    _av = av;
+    _base = static_cast<int>(ai ? ai[0] : 0);
+  }
+
   template <BetaMode Mode, int Base>
-  void compute(const COLTYPE size,
-               ROWTYPE const *__restrict ai, COLTYPE const *__restrict aj,
-               VALTYPE const *__restrict av,
-               VALTYPE const *__restrict const b,
+  void compute(VALTYPE const *__restrict const b,
                VALTYPE *__restrict const x, const VALTYPE alpha,
                const VALTYPE beta) const {
 #pragma omp parallel num_threads(_nthreads)
@@ -120,45 +141,46 @@ struct RowBalancedParallelSPMV {
       const int nthreads = omp_get_num_threads();
 
       auto [start, end] =
-          utils::LoadPrefixBalancedPartitionPos(ai, ai + size, tid, nthreads);
+          utils::LoadPrefixBalancedPartitionPos(_ai, _ai + _size, tid, nthreads);
 
       for (COLTYPE i = start; i < end; i++) {
-        VALTYPE val = DotRangeSIMD<Kernel, Base>(ai[i] - Base, ai[i + 1] - Base,
-                                                  aj, av, b);
+        VALTYPE val = DotRangeSIMD<Kernel, Base>(_ai[i] - Base, _ai[i + 1] - Base,
+                                                  _aj, _av, b);
         const VALTYPE ax = alpha * val;
         x[i] = apply_beta<Mode>(ax, beta, x[i]);
       }
     }
   }
 
-  void operator()(const COLTYPE size, const int base,
-                  ROWTYPE const *__restrict ai,
-                  COLTYPE const *__restrict aj,
-                  VALTYPE const *__restrict av,
-                  VALTYPE const *__restrict const b,
+  void operator()(VALTYPE const *__restrict const b,
                   VALTYPE *__restrict const x, const VALTYPE alpha,
                   const VALTYPE beta) const {
-    if (base == 0) {
+    if (_base == 0) {
       if (beta == static_cast<VALTYPE>(0)) {
-        compute<BetaMode::Zero, 0>(size, ai, aj, av, b, x, alpha, beta);
+        compute<BetaMode::Zero, 0>(b, x, alpha, beta);
       } else if (beta == static_cast<VALTYPE>(1)) {
-        compute<BetaMode::One, 0>(size, ai, aj, av, b, x, alpha, beta);
+        compute<BetaMode::One, 0>(b, x, alpha, beta);
       } else {
-        compute<BetaMode::Generic, 0>(size, ai, aj, av, b, x, alpha, beta);
+        compute<BetaMode::Generic, 0>(b, x, alpha, beta);
       }
     } else {
       if (beta == static_cast<VALTYPE>(0)) {
-        compute<BetaMode::Zero, 1>(size, ai, aj, av, b, x, alpha, beta);
+        compute<BetaMode::Zero, 1>(b, x, alpha, beta);
       } else if (beta == static_cast<VALTYPE>(1)) {
-        compute<BetaMode::One, 1>(size, ai, aj, av, b, x, alpha, beta);
+        compute<BetaMode::One, 1>(b, x, alpha, beta);
       } else {
-        compute<BetaMode::Generic, 1>(size, ai, aj, av, b, x, alpha, beta);
+        compute<BetaMode::Generic, 1>(b, x, alpha, beta);
       }
     }
   }
 
 private:
   int _nthreads;
+  COLTYPE _size;
+  ROWTYPE const* _ai;
+  COLTYPE const* _aj;
+  VALTYPE const* _av;
+  int _base;
 };
 
 /// @brief Advanced Load-Balanced SPMV with workload-aware partitioning
@@ -195,8 +217,12 @@ public:
     void preprocess(const COLTYPE size, ROWTYPE const* __restrict ai,
                     COLTYPE const* __restrict aj, VALTYPE const* __restrict av)
     {
-        const int base = static_cast<int>(ai ? ai[0] : 0);
-        const ROWTYPE nnz = ai[size] - base;
+        _size = size;
+        _ai = ai;
+        _aj = aj;
+        _av = av;
+        _base = static_cast<int>(ai ? ai[0] : 0);
+        const ROWTYPE nnz = ai[size] - _base;
 
         if (nnz <= 0)
         {
@@ -244,7 +270,7 @@ public:
                 _threadBlockSizePrefix[i] = elem_idx;
                 
                 // Find row containing this element
-                const ROWTYPE target = elem_idx + base;
+                const ROWTYPE target = elem_idx + _base;
                 auto row_it = std::upper_bound(ai, ai + size + 1, target);
                 ROWTYPE row = static_cast<ROWTYPE>(std::distance(ai, row_it)) - 1;
                 
@@ -272,7 +298,7 @@ public:
                 _threadBlockSizePrefix[i] = target_nnz;
                 
                 // Find which row contains this element boundary
-                const ROWTYPE target = target_nnz + base;
+                const ROWTYPE target = target_nnz + _base;
                 auto it = std::upper_bound(ai, ai + size + 1, target);
                 ROWTYPE row = static_cast<ROWTYPE>(std::distance(ai, it)) - 1;
                 
@@ -284,39 +310,37 @@ public:
         _threadBoundaryValue.assign(2 * _nthreads, static_cast<VALTYPE>(0));
     }
 
-    void operator()(const COLTYPE size, ROWTYPE const* __restrict ai, COLTYPE const* __restrict aj,
-                    VALTYPE const* __restrict av, const VALTYPE* __restrict const b, VALTYPE* __restrict const x,
+    void operator()(const VALTYPE* __restrict const b, VALTYPE* __restrict const x,
                     const VALTYPE alpha, const VALTYPE beta) const
     {
-        const int base = static_cast<int>(ai ? ai[0] : 0);
-        if (base == 0)
+        if (_base == 0)
         {
             if (beta == static_cast<VALTYPE>(0))
             {
-                compute<BetaMode::Zero, 0>(size, ai, aj, av, b, x, alpha, beta);
+                compute<BetaMode::Zero, 0>(_size, _ai, _aj, _av, b, x, alpha, beta);
             }
             else if (beta == static_cast<VALTYPE>(1))
             {
-                compute<BetaMode::One, 0>(size, ai, aj, av, b, x, alpha, beta);
+                compute<BetaMode::One, 0>(_size, _ai, _aj, _av, b, x, alpha, beta);
             }
             else
             {
-                compute<BetaMode::Generic, 0>(size, ai, aj, av, b, x, alpha, beta);
+                compute<BetaMode::Generic, 0>(_size, _ai, _aj, _av, b, x, alpha, beta);
             }
         }
         else
         {
             if (beta == static_cast<VALTYPE>(0))
             {
-                compute<BetaMode::Zero, 1>(size, ai, aj, av, b, x, alpha, beta);
+                compute<BetaMode::Zero, 1>(_size, _ai, _aj, _av, b, x, alpha, beta);
             }
             else if (beta == static_cast<VALTYPE>(1))
             {
-                compute<BetaMode::One, 1>(size, ai, aj, av, b, x, alpha, beta);
+                compute<BetaMode::One, 1>(_size, _ai, _aj, _av, b, x, alpha, beta);
             }
             else
             {
-                compute<BetaMode::Generic, 1>(size, ai, aj, av, b, x, alpha, beta);
+                compute<BetaMode::Generic, 1>(_size, _ai, _aj, _av, b, x, alpha, beta);
             }
         }
     }
@@ -417,6 +441,11 @@ private:
     }
 
     int _nthreads;
+    COLTYPE _size;
+    ROWTYPE const* _ai;
+    COLTYPE const* _aj;
+    VALTYPE const* _av;
+    int _base;
     mutable std::vector<ROWTYPE> _threadBlockSizePrefix;
     mutable std::vector<COLTYPE> _threadStartRow;
     mutable std::vector<VALTYPE> _threadBoundaryValue;
@@ -464,20 +493,7 @@ template <typename CSRMatrixType, typename SPMVType> struct SPMV {
   void operator()(const VALTYPE * __restrict const b,
                   VALTYPE * __restrict const x, const VALTYPE alpha = 1.,
                   const VALTYPE beta = 0.) const {
-    if constexpr (requires { _spmv(_matrix->rows, _matrix->Base(), _matrix->AI(),
-                                   _matrix->AJ(), _matrix->AV(), b, x, alpha,
-                                   beta); }) {
-      _spmv(_matrix->rows, _matrix->Base(), _matrix->AI(), _matrix->AJ(),
-            _matrix->AV(), b, x, alpha, beta);
-    } else if constexpr (requires { _spmv(_matrix->rows, _matrix->AI(),
-                                          _matrix->AJ(), _matrix->AV(), b, x,
-                                          alpha, beta); }) {
-      _spmv(_matrix->rows, _matrix->AI(), _matrix->AJ(), _matrix->AV(), b, x,
-            alpha, beta);
-    } else {
-      static_assert(sizeof(SPMVType) == 0,
-                    "SPMVType operator() signature not supported");
-    }
+    _spmv(b, x, alpha, beta);
   }
 
   CSRMatrixType const *_matrix;

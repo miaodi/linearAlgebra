@@ -132,9 +132,10 @@ TEST_F(RowScalingTest, spanConstructor) {
 
 // Helper function to perform CSR matrix-vector multiplication: y = A * x
 void csrMatVecMult(const CSRMatrixVec<int, int, double>& A, const std::vector<double>& x, std::vector<double>& y) {
-    SerialSPMV spmv;
+    SerialSPMV<int, int, double> spmv;
+    spmv.preprocess(A.rows, A.ai.data(), A.aj.data(), A.av.data());
     y.assign(A.rows, 0.0);
-    spmv(A.rows, A.ai[0], A.ai.data(), A.aj.data(), A.av.data(), x.data(), y.data(), 1.0, 0.0);
+    spmv(x.data(), y.data(), 1.0, 0.0);
 }
 
 TEST_F(RowScalingTest, scalingMatrixVectorProperty) {
