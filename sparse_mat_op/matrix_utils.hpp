@@ -539,33 +539,39 @@ void ParallelTranspose2(const COLTYPE rows, const COLTYPE cols,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool Diagonal(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
-              VALTYPE const *av, ROWTYPE *diagpos, VALTYPE *diag,
-              const bool invert = false) {
-  volatile bool missing_diag = false;
-  const auto base = ai[0];
+bool Diagonal(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av,
+              ROWTYPE* diagpos, VALTYPE* diag, const bool invert = false)
+{
+    volatile bool missing_diag = false;
+    const auto base = ai[0];
 #pragma omp parallel for shared(missing_diag)
-  for (COLTYPE i = 0; i < rows; i++) {
-    auto mid =
-        std::lower_bound(aj + ai[i] - base, aj + ai[i + 1] - base, i + base);
-    if (*mid != i + base) {
-      missing_diag = true;
-    }
-    if (diagpos)
-      diagpos[i] = mid - aj + base;
-    if (diag) {
-      VALTYPE val = av[mid - aj];
-      if (invert) {
-        if (val == 0) {
-          val = 1.;
-        } else {
-          val = 1. / val;
+    for (COLTYPE i = 0; i < rows; i++)
+    {
+        auto mid = std::lower_bound(aj + ai[i] - base, aj + ai[i + 1] - base, i + base);
+        if (*mid != i + base)
+        {
+            missing_diag = true;
         }
-      }
-      diag[i] = val;
+        if (diagpos)
+            diagpos[i] = mid - aj + base;
+        if (diag)
+        {
+            VALTYPE val = av[mid - aj];
+            if (invert)
+            {
+                if (val == 0)
+                {
+                    val = static_cast<VALTYPE>(1);
+                }
+                else
+                {
+                    val = static_cast<VALTYPE>(1) / val;
+                }
+            }
+            diag[i] = val;
+        }
     }
-  }
-  return !missing_diag;
+    return !missing_diag;
 }
 
 /// @brief Split a matrix into strictly lower triangular matrix L, diagonal D,
