@@ -26,7 +26,8 @@
 enum class Factorization
 {
     ILUK,
-    ILUT
+    ILUT,
+    JACOBI
 };
 
 struct Options
@@ -79,7 +80,7 @@ int main(int argc, char* argv[])
         ( "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )
         ( "n,threads", "Number of threads", cxxopts::value<int>()->default_value( "8" ) )
         ( "P,perm", "Permutation source: nd | rcm | none", cxxopts::value<std::string>()->default_value( "nd" ) )
-        ( "F,factorization", "ILU variant: iluk or ilut", cxxopts::value<std::string>()->default_value( "iluk" ) )
+        ( "F,factorization", "Preconditioner: iluk | ilut | jacobi", cxxopts::value<std::string>()->default_value( "iluk" ) )
         ( "d,droptol", "ILUT drop tolerance", cxxopts::value<double>()->default_value( "1e-3" ) )
         ( "p,precond", "Preconditioner type: none (no preconditioning), left (M^-1 A x = M^-1 b), right (A M^-1 y = b)",
           cxxopts::value<std::string>()->default_value( "left" ) )
@@ -129,10 +130,14 @@ int main(int argc, char* argv[])
     {
         opts.factorization = Factorization::ILUT;
     }
+    else if (factorization_lower == "jacobi")
+    {
+        opts.factorization = Factorization::JACOBI;
+    }
     else
     {
         std::cerr << "Invalid factorization type: " << factorization_str
-                  << ". Valid options are: iluk, ilut" << std::endl;
+                  << ". Valid options are: iluk, ilut, jacobi" << std::endl;
         return -1;
     }
 
@@ -224,19 +229,34 @@ int main(int argc, char* argv[])
                   << "%" << std::endl;
     }
 
-    // // Write pruned matrix SVG to file
-    // std::cout << "\nWriting pruned matrix to SVG..." << std::endl;
-    // std::ofstream out(opts.output_file);
-    // if (!out.is_open())
-    // {
-    //     std::cerr << "Failed to create output file: " << opts.output_file << std::endl;
-    //     return -1;
-    // }
+    // Write original and pruned matrix SVGs (before reordering)
+    {
+        std::cout << "\nWriting original matrix to SVG..." << std::endl;
+        std::ofstream out_orig("original_matrix.svg");
+        if (!out_orig.is_open())
+        {
+            std::cerr << "Failed to create output file: original_matrix.svg" << std::endl;
+            return -1;
+        }
+        matrix_utils::writeSVG(csr_matrix.rows, csr_matrix.cols, csr_matrix.AI(), csr_matrix.AJ(),
+                               out_orig, opts.max_display_size);
+        out_orig.close();
+        std::cout << "Original matrix written to original_matrix.svg" << std::endl;
+    }
 
-    // matrix_utils::writeSVG(pruned.rows, pruned.cols, pruned.AI(), pruned.AJ(), out, opts.max_display_size);
-    // out.close();
-
-    // std::cout << "SVG written to: " << opts.output_file << std::endl;
+    {
+        std::cout << "\nWriting pruned matrix to SVG..." << std::endl;
+        std::ofstream out_pruned("pruned_matrix.svg");
+        if (!out_pruned.is_open())
+        {
+            std::cerr << "Failed to create output file: pruned_matrix.svg" << std::endl;
+            return -1;
+        }
+        matrix_utils::writeSVG(pruned.rows, pruned.cols, pruned.AI(), pruned.AJ(),
+                               out_pruned, opts.max_display_size);
+        out_pruned.close();
+        std::cout << "Pruned matrix written to pruned_matrix.svg" << std::endl;
+    }
 
     // Select matrices for solve (initialize to original/pruned)
     const matrix_utils::CSRMatrix<int, int, double>* A_for_solve = &csr_matrix;
@@ -451,8 +471,8 @@ iterative_solver::State solveWithPreconditioner(const Options& opts,
                                                 const matrix_utils::CSRMatrix<int, int, double>& csr_matrix,
                                                 const matrix_utils::CSRMatrix<int, int, double>& pruned)
 {
-    // Build ILU preconditioner from pruned matrix
-    std::cout << "\nBuilding ILU preconditioner from pruned matrix..." << std::endl;
+    // Build selected preconditioner from pruned matrix
+    std::cout << "\nBuilding preconditioner from pruned matrix..." << std::endl;
     matrix_utils::CSRMatrix<int, int, double> ilu_matrix;
     bool success = false;
 
@@ -488,7 +508,7 @@ iterative_solver::State solveWithPreconditioner(const Options& opts,
         std::chrono::duration<double> elapsed_numeric = t4 - t3;
         std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count() << " s" << std::endl;
     }
-    else
+    else if (opts.factorization == Factorization::ILUT)
     {
         std::cout << "Using ILUTNumeric with droptol = " << opts.droptol << std::endl;
         auto t3 = std::chrono::high_resolution_clock::now();
@@ -498,16 +518,23 @@ iterative_solver::State solveWithPreconditioner(const Options& opts,
         std::chrono::duration<double> elapsed_numeric = t4 - t3;
         std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count() << " s" << std::endl;
     }
+    else // JACOBI
+    {
+        success = true; // no factorization required
+    }
 
     if (!success)
     {
         std::cout << "Numeric ILU factorization failed." << std::endl;
         return iterative_solver::State::FAILED;
     }
-    std::cout << "ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
-    if (opts.factorization == Factorization::ILUT)
+    if (opts.factorization != Factorization::JACOBI)
     {
-        std::cout << "  Fill ratio: " << static_cast<double>(ilu_matrix.NNZ()) / pruned.NNZ() << std::endl;
+        std::cout << "ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
+        if (opts.factorization == Factorization::ILUT)
+        {
+            std::cout << "  Fill ratio: " << static_cast<double>(ilu_matrix.NNZ()) / pruned.NNZ() << std::endl;
+        }
     }
 
     // Setup SPMV operator on original matrix
@@ -521,9 +548,6 @@ iterative_solver::State solveWithPreconditioner(const Options& opts,
 
     // Setup preconditioner operator
     std::cout << "Setting up preconditioner operator..." << std::endl;
-    ILUPrec<decltype(ilu_matrix)> ilu_prec(csr_matrix.rows, ilu_matrix, opts.threads);
-    std::cout << "Preconditioner operator done." << std::endl;
-
     // Setup RHS and initial guess
     std::vector<double> b(csr_matrix.rows, 1.0);
     std::vector<double> x(csr_matrix.rows, 0.0);
@@ -536,7 +560,18 @@ iterative_solver::State solveWithPreconditioner(const Options& opts,
     gmres_solver.setPreconditionerType(opts.precond_type);
 
     auto solve_start = std::chrono::high_resolution_clock::now();
-    auto state = gmres_solver(&spmv, &ilu_prec, b.data(), x.data());
+    iterative_solver::State state;
+    if (opts.factorization == Factorization::JACOBI)
+    {
+        matrix_utils::JacobiPrec<matrix_utils::CSRMatrix<int,int,double>> jac_prec(pruned, opts.threads);
+        state = gmres_solver(&spmv, &jac_prec, b.data(), x.data());
+    }
+    else
+    {
+        ILUPrec<decltype(ilu_matrix)> ilu_prec(csr_matrix.rows, ilu_matrix, opts.threads);
+        std::cout << "Preconditioner operator done." << std::endl;
+        state = gmres_solver(&spmv, &ilu_prec, b.data(), x.data());
+    }
     auto solve_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> solve_time = solve_end - solve_start;
 
