@@ -193,4 +193,35 @@ public:
   }
   std::size_t _size;
 };
+
+// Jacobi (diagonal) preconditioner: x = D^{-1} b
+// Requires diagonal entries present in the matrix; zeros are treated as 1.0 to avoid division by zero.
+template <ResizableDiagonal CSRMatrixType> class JacobiPrec {
+public:
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using VALTYPE = typename CSRMatrixType::VALTYPE;
+
+  JacobiPrec(const CSRMatrixType &A, int nthreads = omp_get_max_threads())
+      : _n(A.rows), _invD(A.rows), _nthreads(nthreads) {
+    // Build inverse diagonal using utility function Diagonal
+    // Ask Diagonal to compute the inverted diagonal directly (invert=true)
+    const bool ok = matrix_utils::Diagonal(A.rows, A.AI(), A.AJ(), A.AV(), static_cast<ROWTYPE*>(nullptr), _invD.data(), true);
+  }
+  COLTYPE size() const { return _n; }
+
+  bool operator()(VALTYPE const *const b, VALTYPE *const x) const {
+    // Apply inverse diagonal
+#pragma omp parallel for num_threads(_nthreads)
+    for (COLTYPE i = 0; i < _n; ++i) {
+      x[i] = _invD[i] * b[i];
+    }
+    return true;
+  }
+
+private:
+  COLTYPE _n;
+  std::vector<VALTYPE> _invD;
+  int _nthreads;
+};
 } // namespace matrix_utils
