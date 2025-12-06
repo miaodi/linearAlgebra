@@ -8,6 +8,8 @@
 #include <immintrin.h>
 #include <omp.h>
 #include "dot_kernel.hpp"
+#include "mkl_spmv.hpp"
+
 namespace matrix_utils {
 enum class WorkloadMode { ALBUS, CAMLB };
 

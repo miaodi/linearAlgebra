@@ -19,6 +19,10 @@
 #include <cuda_runtime.h>
 #endif
 
+#ifdef USE_MKL
+#include <mkl_types.h>
+#endif
+
 // Benchmark configuration
 struct ReorderingConfig
 {
@@ -304,6 +308,71 @@ static void BM_CudaSPMV_Reordering(benchmark::State& state, const std::string& m
 }
 #endif
 
+#ifdef USE_MKL
+// Benchmark for MKLSPMV
+static void BM_MKLSPMV_Reordering(benchmark::State& state, const std::string& matrix_file)
+{
+    // Load and prepare matrices
+    try
+    {
+        g_matrix_cache.load(matrix_file);
+    }
+    catch (const std::exception& e)
+    {
+        state.SkipWithError(e.what());
+        return;
+    }
+
+    const int reorder_idx = state.range(0);
+
+    if (reorder_idx >= g_matrix_cache.reordered_matrices.size())
+    {
+        state.SkipWithError("Invalid reordering index");
+        return;
+    }
+
+    const auto& matrix = g_matrix_cache.reordered_matrices[reorder_idx];
+    const auto& reorder_name = g_matrix_cache.reorder_names[reorder_idx];
+
+    // Setup MKL SPMV - use MKL_INT for compatibility with MKL functions
+    matrix_utils::SPMV<matrix_utils::CSRMatrix<int, int, double>, 
+                       matrix_utils::MKLSPMV<MKL_INT, MKL_INT, double>> spmv;
+    spmv._matrix = &matrix;
+    spmv._spmv = matrix_utils::MKLSPMV<MKL_INT, MKL_INT, double>(); // Move temporary
+    spmv.preprocess();
+
+    // Allocate vectors
+    std::vector<double> b(matrix.rows, 1.0);
+    std::vector<double> x(matrix.rows, 0.0);
+
+    // Warm-up
+    spmv._spmv(b.data(), x.data(), 1.0, 0.0);
+
+    // Benchmark
+    for (auto _ : state)
+    {
+        spmv._spmv(b.data(), x.data(), 1.0, 0.0);
+        benchmark::DoNotOptimize(x.data());
+        benchmark::ClobberMemory();
+    }
+
+    // Compute metrics
+    const double nnz = static_cast<double>(matrix.NNZ());
+    const double flops = 2.0 * nnz; // One multiply and one add per non-zero
+
+    state.counters["Rows"] = matrix.rows;
+    state.counters["NNZ"] = nnz;
+    state.counters["NNZ/Row"] = nnz / matrix.rows;
+    state.counters["GFLOPS"] = benchmark::Counter(
+        flops, benchmark::Counter::kIsIterationInvariantRate, benchmark::Counter::kIs1000);
+    state.counters["GB/s"] =
+        benchmark::Counter(nnz * (sizeof(int) + sizeof(double)) + matrix.rows * sizeof(double) * 2,
+                           benchmark::Counter::kIsIterationInvariantRate, benchmark::Counter::kIs1024);
+
+    state.SetLabel("MKLSPMV/" + reorder_name);
+}
+#endif
+
 int main(int argc, char** argv)
 {
     // Parse command line options
@@ -494,6 +563,22 @@ int main(int argc, char** argv)
         };
         std::string name = "CudaSPMV/" + reordering_configs[reorder_idx].name;
         benchmark::RegisterBenchmark(name.c_str(), bm_cuda)
+            ->Args({static_cast<int64_t>(reorder_idx)})
+            ->Unit(benchmark::kMicrosecond);
+    }
+#endif
+
+#ifdef USE_MKL
+    // Register benchmarks for MKLSPMV for each reordering
+    std::cout << "\nMKL enabled - registering MKLSPMV benchmarks\n";
+    for (size_t reorder_idx = 0; reorder_idx < reordering_configs.size(); ++reorder_idx)
+    {
+        auto bm_mkl = [=](benchmark::State& state)
+        {
+            BM_MKLSPMV_Reordering(state, matrix_file);
+        };
+        std::string name = "MKLSPMV/" + reordering_configs[reorder_idx].name;
+        benchmark::RegisterBenchmark(name.c_str(), bm_mkl)
             ->Args({static_cast<int64_t>(reorder_idx)})
             ->Unit(benchmark::kMicrosecond);
     }
