@@ -108,16 +108,13 @@ public:
         }
         
         // Optimize for SpMV operations
-        matrix_descr descr;
-        descr.type = SPARSE_MATRIX_TYPE_GENERAL;
-        descr.mode = SPARSE_FILL_MODE_FULL;
-        descr.diag = SPARSE_DIAG_NON_UNIT;
+        _descr.type = SPARSE_MATRIX_TYPE_GENERAL;
+        _descr.mode = SPARSE_FILL_MODE_FULL;
+        _descr.diag = SPARSE_DIAG_NON_UNIT;
         
-        mkl_sparse_set_mv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, descr, 1000);
+        mkl_sparse_set_mv_hint(_mkl_mat, SPARSE_OPERATION_NON_TRANSPOSE, _descr, 1000);
         mkl_sparse_set_memory_hint(_mkl_mat, SPARSE_MEMORY_AGGRESSIVE);
         mkl_sparse_optimize(_mkl_mat);
-        
-        _descr = descr;
     }
     
     ~MKLSPMV() {

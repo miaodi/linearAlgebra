@@ -346,7 +346,7 @@ static void BM_MKLSPMV_Reordering(benchmark::State& state, const std::string& ma
     // Allocate vectors
     std::vector<double> b(matrix.rows, 1.0);
     std::vector<double> x(matrix.rows, 0.0);
-    mkl_set_num_threads(nthreads);
+    
     // Warm-up
     spmv._spmv(b.data(), x.data(), 1.0, 0.0);
 
@@ -357,7 +357,6 @@ static void BM_MKLSPMV_Reordering(benchmark::State& state, const std::string& ma
         benchmark::DoNotOptimize(x.data());
         benchmark::ClobberMemory();
     }
-    mkl_set_num_threads(1); // Reset to default
 
     // Compute metrics
     const double nnz = static_cast<double>(matrix.NNZ());
