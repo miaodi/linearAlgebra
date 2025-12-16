@@ -103,6 +103,8 @@ public:
      * The solver does not take ownership - caller is responsible for keeping
      * the preconditioner alive for the duration of solver usage.
      * 
+     * By default, NoPreconditioner is used (identity operation).
+     * 
      * @param preconditioner Pointer to a preconditioner object (does not take ownership)
      */
     void setPreconditioner(Preconditioner* preconditioner);
@@ -130,8 +132,9 @@ private:
     // Matrix and vector descriptors
     cusparseSpMatDescr_t _mat_A;
     
-    // Preconditioner (not owned by solver)
+    // Preconditioner (not owned by solver, except for default NoPreconditioner)
     Preconditioner* _preconditioner;
+    NoPreconditioner _default_preconditioner;
     
     // DeviceVectorView objects for cuSPARSE operations
     DeviceVectorView _view_prec_x, _view_prec_y, _view_prec_tmp;
@@ -204,10 +207,7 @@ private:
      */
     void apply_operator_with_preconditioning(const DeviceVectorView& d_input, DeviceVectorView& d_output);
 
-    /**
-     * @brief Apply preconditioner (triangular solve using SpSV)
-     */
-    void apply_preconditioner(const DeviceVectorView& d_input, DeviceVectorView& d_output);
+
 
     /**
      * @brief Perform one GMRES restart cycle

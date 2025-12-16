@@ -12,7 +12,8 @@ CudaGMRES::CudaGMRES()
     : _cublas_handle(nullptr)
     , _cusparse_handle(nullptr)
     , _mat_A(nullptr)
-    , _preconditioner(nullptr)
+    , _preconditioner(&_default_preconditioner)
+    , _default_preconditioner()
     , _max_iter(100)
     , _abs_tol(0.0)
     , _rel_tol(1e-8)
@@ -286,7 +287,7 @@ double CudaGMRES::compute_initial_residual(const DeviceVectorView& d_b, const De
 
     // Apply left preconditioning if needed
     if (_prec_type == PreconditionerType::LEFT) {
-        apply_preconditioner(_view_q_j, _view_q_j);
+        (*_preconditioner)(_cusparse_handle, _view_q_j, _view_q_j);
     }
     
     // Compute norm of residual
@@ -304,7 +305,7 @@ void CudaGMRES::apply_operator_with_preconditioning(const DeviceVectorView& d_in
     switch (_prec_type) {
     case PreconditionerType::RIGHT:
         // Right preconditioning: A * M^{-1} * input
-        apply_preconditioner(d_input, _view_d_w);
+        (*_preconditioner)(_cusparse_handle, d_input, _view_d_w);
         check_cusparse_error(
             cusparseSpMV(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                         &one, _mat_A, _view_d_w.descriptor(), &zero, d_output.descriptor(), CUDA_R_64F,
@@ -319,7 +320,7 @@ void CudaGMRES::apply_operator_with_preconditioning(const DeviceVectorView& d_in
                         &one, _mat_A, d_input.descriptor(), &zero, d_output.descriptor(), CUDA_R_64F,
                         CUSPARSE_SPMV_ALG_DEFAULT, spmv_buffer),
             "Failed to compute SpMV");
-        apply_preconditioner( d_output, d_output );
+        (*_preconditioner)(_cusparse_handle, d_output, d_output);
         break;
         
     case PreconditionerType::NONE:
@@ -331,23 +332,6 @@ void CudaGMRES::apply_operator_with_preconditioning(const DeviceVectorView& d_in
             "Failed to compute SpMV without preconditioning");
         break;
     }
-}
-
-void CudaGMRES::apply_preconditioner(const DeviceVectorView& d_input, DeviceVectorView& d_output)
-{
-    if (_prec_type == PreconditionerType::NONE || !_preconditioner)
-    {
-        // No preconditioner, just copy if needed
-        if (d_input.data() != d_output.data())
-        {
-            check_cuda_error(cudaMemcpy(d_output.data(), d_input.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
-                             "Failed to copy input to output");
-        }
-        return;
-    }
-
-    // Apply the preconditioner using the operator() method
-    (*_preconditioner)(_cusparse_handle, d_input, d_output);
 }
 
 State CudaGMRES::perform_restart_cycle(const DeviceVectorView& d_b, DeviceVectorView& d_x,
@@ -495,6 +479,7 @@ void CudaGMRES::givens_rotation(double beta, int j, double& resid)
     double* H_col_j = _h_H.data() + j * _current_restart;
     
     // Apply previous Givens rotations to H_col_j
+    #pragma unroll(8)
     for (int i = 0; i < j; i++) {
         double tmp = _h_c[i] * H_col_j[i] - _h_s[i] * H_col_j[i + 1];
         H_col_j[i + 1] = _h_s[i] * H_col_j[i] + _h_c[i] * H_col_j[i + 1];
@@ -564,7 +549,7 @@ void CudaGMRES::update_solution(DeviceVectorView& d_x, int j)
     
     if (_prec_type == PreconditionerType::RIGHT) {
         // For right preconditioning: x = x + M^{-1} * delta_x
-        apply_preconditioner(_view_d_w, _view_d_w);
+        (*_preconditioner)(_cusparse_handle, _view_d_w, _view_d_w);
         check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_w.data(), 1, d_x.data(), 1),
                            "Failed to update solution with right preconditioning");
     } else {

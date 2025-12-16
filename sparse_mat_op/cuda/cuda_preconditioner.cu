@@ -29,12 +29,14 @@ void NoPreconditioner::operator()(cusparseHandle_t handle,
                                   const DeviceVectorView& d_input,
                                   DeviceVectorView& d_output)
 {
-    // Simply copy input to output (would need a temporary DeviceArray)
-    // For now, keep cudaMemcpy as we don't have direct access to a DeviceArray here
-    check_cuda_error(
-        cudaMemcpy(d_output.data(), d_input.data(), 
-                   d_input.size() * sizeof(double), cudaMemcpyDeviceToDevice),
-        "Failed to copy input to output in NoPreconditioner");
+    // Only copy if input and output point to different memory locations
+    if (d_input.data() != d_output.data())
+    {
+        check_cuda_error(
+            cudaMemcpy(d_output.data(), d_input.data(), 
+                       d_input.size() * sizeof(double), cudaMemcpyDeviceToDevice),
+            "Failed to copy input to output in NoPreconditioner");
+    }
 }
 
 // ============================================================================
@@ -42,12 +44,18 @@ void NoPreconditioner::operator()(cusparseHandle_t handle,
 // ============================================================================
 
 // CUDA kernel for element-wise division (Jacobi preconditioning)
+// Each thread processes items_per_thread elements with coalesced access pattern
 __global__ void jacobi_precond_kernel(const double* d_inv_diag, const double* d_input,
-                                      double* d_output, size_t n)
+                                      double* d_output, size_t n, int items_per_thread)
 {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) {
-        d_output[idx] = d_inv_diag[idx] * d_input[idx];
+    size_t block_start = blockIdx.x * blockDim.x * items_per_thread;
+    
+    #pragma unroll
+    for (int i = 0; i < items_per_thread; ++i) {
+        size_t idx = block_start + threadIdx.x + i * blockDim.x;
+        if (idx < n) {
+            d_output[idx] = d_inv_diag[idx] * d_input[idx];
+        }
     }
 }
 
@@ -72,8 +80,6 @@ void JacobiPreconditioner::cleanup()
 
 void JacobiPreconditioner::setup(size_t n, const double* h_diag)
 {
-    cleanup();
-    
     _n = n;
     
     // Allocate device memory and compute inverse diagonal
@@ -82,11 +88,7 @@ void JacobiPreconditioner::setup(size_t n, const double* h_diag)
     // Copy diagonal to host buffer, compute inverse, then copy to device
     std::vector<double> inv_diag(n);
     for (size_t i = 0; i < n; ++i) {
-        if (std::abs(h_diag[i]) < 1e-14) {
-            throw std::runtime_error("Jacobi preconditioner: zero or near-zero diagonal at position " + 
-                                    std::to_string(i));
-        }
-        inv_diag[i] = 1.0 / h_diag[i];
+        inv_diag[i] = (h_diag[i] == 0.0) ? 1.0 : (1.0 / h_diag[i]);
     }
     
     _d_inv_diag->copy<MemoryLocation::Host>(inv_diag.data(), n);
@@ -96,27 +98,19 @@ void JacobiPreconditioner::setup(size_t n, const double* h_diag)
 
 void JacobiPreconditioner::setupFromMatrix(size_t n, const int* h_ia, const int* h_ja, const double* h_va)
 {
-    cleanup();
-    
     _n = n;
     
     // Extract diagonal from CSR matrix
-    std::vector<double> diag(n, 0.0);
+    std::vector<double> diag(n, 1.0);  // Default to 1.0 if diagonal is missing
     int index_base = h_ia[0];
     
     for (size_t i = 0; i < n; ++i) {
-        bool found_diag = false;
         for (int j = h_ia[i] - index_base; j < h_ia[i + 1] - index_base; ++j) {
             int col = h_ja[j] - index_base;
             if (col == static_cast<int>(i)) {
                 diag[i] = h_va[j];
-                found_diag = true;
                 break;
             }
-        }
-        if (!found_diag) {
-            throw std::runtime_error("Jacobi preconditioner: missing diagonal at row " + 
-                                    std::to_string(i));
         }
     }
     
@@ -134,10 +128,11 @@ void JacobiPreconditioner::operator()(cusparseHandle_t handle,
     
     // Launch kernel for element-wise multiplication by inverse diagonal
     const int block_size = 256;
-    const int num_blocks = (_n + block_size - 1) / block_size;
+    const int items_per_thread = 8;  // Each thread processes 8 elements
+    const int num_blocks = (_n + block_size * items_per_thread - 1) / (block_size * items_per_thread);
     
     jacobi_precond_kernel<<<num_blocks, block_size>>>(
-        _d_inv_diag->data(), d_input.data(), d_output.data(), _n);
+        _d_inv_diag->data(), d_input.data(), d_output.data(), _n, items_per_thread);
     
     check_cuda_error(cudaGetLastError(), "Failed to launch Jacobi preconditioner kernel");
 }
@@ -408,6 +403,7 @@ void GPUILU0Preconditioner::cleanup()
     _d_ia->release();
     _d_ja->release();
     _d_va->release();
+    _d_tmp->release();
     _d_ilu0_buffer->release();
     _d_buffer_L->release();
     _d_buffer_U->release();

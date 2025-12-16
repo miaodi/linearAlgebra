@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cusparse.h>
 #include <cuda_runtime.h>
+#include <cusparse.h>
 #include <memory>
 #include "cuda_memory.h"
 

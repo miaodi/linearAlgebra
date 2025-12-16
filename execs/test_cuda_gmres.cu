@@ -16,6 +16,62 @@
 
 using namespace cuda_iterative_solver;
 
+enum class PreconditionerImpl {
+    NONE,
+    ILU,
+    GPU_ILU0,
+    JACOBI
+};
+
+/**
+ * @brief Create and setup a preconditioner based on the specified type
+ * 
+ * @param precond_impl The preconditioner implementation type
+ * @param cusparse_handle cuSPARSE handle from the solver
+ * @param n Matrix dimension
+ * @param csr_matrix The original CSR matrix
+ * @param L_matrix Lower triangular factor (for ILU)
+ * @param U_matrix Upper triangular factor (for ILU)
+ * @return unique_ptr to the setup preconditioner, or nullptr if none
+ */
+std::unique_ptr<Preconditioner> setupPreconditioner(
+    PreconditionerImpl precond_impl,
+    cusparseHandle_t cusparse_handle,
+    size_t n,
+    const matrix_utils::CSRMatrix<int, int, double>& csr_matrix,
+    const matrix_utils::CSRMatrix<int, int, double>& L_matrix,
+    const matrix_utils::CSRMatrix<int, int, double>& U_matrix)
+{
+    if (precond_impl == PreconditionerImpl::ILU)
+    {
+        std::cout << "Setting up ILU preconditioner..." << std::endl;
+        auto precond = std::make_unique<ILUPreconditioner>();
+        precond->setup(cusparse_handle, n,
+                      L_matrix.AI(), L_matrix.AJ(), L_matrix.AV(), // L factor
+                      U_matrix.AI(), U_matrix.AJ(), U_matrix.AV()); // U factor
+        return precond;
+    }
+    else if (precond_impl == PreconditionerImpl::GPU_ILU0)
+    {
+        std::cout << "Setting up GPU ILU0 preconditioner..." << std::endl;
+        auto precond = std::make_unique<GPUILU0Preconditioner>();
+        precond->setup(cusparse_handle, n,
+                      csr_matrix.AI(), csr_matrix.AJ(), csr_matrix.AV());
+        return precond;
+    }
+    else if (precond_impl == PreconditionerImpl::JACOBI)
+    {
+        std::cout << "Setting up Jacobi preconditioner..." << std::endl;
+        auto precond = std::make_unique<JacobiPreconditioner>();
+        precond->setupFromMatrix(n,
+                                csr_matrix.AI(), csr_matrix.AJ(), csr_matrix.AV());
+        return precond;
+    }
+    
+    // Default: no preconditioning
+    return std::make_unique<NoPreconditioner>();
+}
+
 /**
  * @brief CUDA GMRES solver with Matrix Market file support
  *
@@ -45,6 +101,8 @@ int main( int argc, char** argv )
         cxxopts::value<double>()->default_value( "1e-12" ) )(
         "p,precond", "Preconditioner type: none, left, right",
         cxxopts::value<std::string>()->default_value( "none" ) )(
+        "precond-impl", "Preconditioner implementation: none, ilu, gpuilu0, jacobi",
+        cxxopts::value<std::string>()->default_value( "ilu" ) )(
         "print-lu", "Write L and U factors to SVG files for visualization",
         cxxopts::value<bool>()->default_value( "false" ) )(
         "rhs-file", "Text file containing RHS vector data (one value per line)",
@@ -74,6 +132,7 @@ int main( int argc, char** argv )
     double reltol = result["reltol"].as<double>();
     double abstol = result["abstol"].as<double>();
     std::string precond_str = result["precond"].as<std::string>();
+    std::string precond_impl_str = result["precond-impl"].as<std::string>();
     bool print_lu = result["print-lu"].as<bool>();
     std::string rhs_file = result["rhs-file"].as<std::string>();
     std::string l_file = result["L-file"].as<std::string>();
@@ -113,6 +172,31 @@ int main( int argc, char** argv )
         return 1;
     }
 
+    // Parse preconditioner implementation
+    PreconditionerImpl precond_impl;
+    if ( precond_impl_str == "none" )
+    {
+        precond_impl = PreconditionerImpl::NONE;
+    }
+    else if ( precond_impl_str == "ilu" )
+    {
+        precond_impl = PreconditionerImpl::ILU;
+    }
+    else if ( precond_impl_str == "gpuilu0" )
+    {
+        precond_impl = PreconditionerImpl::GPU_ILU0;
+    }
+    else if ( precond_impl_str == "jacobi" )
+    {
+        precond_impl = PreconditionerImpl::JACOBI;
+    }
+    else
+    {
+        std::cerr << "Invalid preconditioner implementation: " << precond_impl_str
+                  << ". Valid options are: none, ilu, gpuilu0, jacobi" << std::endl;
+        return 1;
+    }
+
     // Print configuration
     std::cout << "CUDA GMRES Configuration:" << std::endl;
     std::cout << "  Matrix file: " << filename << std::endl;
@@ -122,6 +206,7 @@ int main( int argc, char** argv )
     std::cout << "  Relative tolerance: " << std::scientific << reltol << std::endl;
     std::cout << "  Absolute tolerance: " << std::scientific << abstol << std::endl;
     std::cout << "  Preconditioner: " << precond_str << std::endl;
+    std::cout << "  Preconditioner implementation: " << precond_impl_str << std::endl;
     std::cout << "  Print LU factors: " << ( print_lu ? "yes" : "no" ) << std::endl;
     std::cout << "  Batch orthogonalization: " << ( batch_ortho ? "enabled" : "disabled" ) << std::endl;
     std::cout << "  RHS file: " << ( rhs_file.empty() ? "(none - using all ones)" : rhs_file )
@@ -155,12 +240,11 @@ int main( int argc, char** argv )
         std::cout << "  Density: " << std::fixed << std::setprecision( 4 )
                   << ( 100.0 * csr_matrix.NNZ() ) / ( n * n ) << "%" << std::endl;
 
-        // Perform ILU factorization if preconditioner is requested
+        // Perform ILU factorization if ILU-based preconditioner is requested
         matrix_utils::CSRMatrix<int, int, double> ilu_matrix;
         matrix_utils::CSRMatrix<int, int, double> L_matrix, U_matrix;
-        bool has_preconditioner = ( precond_type != PreconditionerType::NONE );
 
-        if ( has_preconditioner )
+        if ( precond_impl == PreconditionerImpl::ILU || precond_impl == PreconditionerImpl::GPU_ILU0 )
         {
             if ( has_lu_files )
             {
@@ -382,16 +466,16 @@ int main( int argc, char** argv )
         std::cout << "Setting up matrix operator..." << std::endl;
         solver.setupOperator( n, csr_matrix.AI(), csr_matrix.AJ(), csr_matrix.AV() );
 
-        // Setup ILU preconditioner if needed
-        ILUPreconditioner precond;
-        if ( has_preconditioner )
-        {
-            std::cout << "Setting up ILU preconditioner..." << std::endl;
-            precond.setup( solver.getCusparseHandle(), n,
-                          L_matrix.AI(), L_matrix.AJ(), L_matrix.AV(), // L factor
-                          U_matrix.AI(), U_matrix.AJ(), U_matrix.AV() ); // U factor
-            solver.setPreconditioner( &precond );
-        }
+        // Setup preconditioner
+        std::unique_ptr<Preconditioner> precond = setupPreconditioner(
+            precond_impl,
+            solver.getCusparseHandle(),
+            n,
+            csr_matrix,
+            L_matrix,
+            U_matrix);
+        
+        solver.setPreconditioner( precond.get() );
         auto start_time = std::chrono::high_resolution_clock::now();
         // Solve the system
         std::cout << "Solving linear system..." << std::endl;
