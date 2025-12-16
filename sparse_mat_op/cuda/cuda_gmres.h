@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include "cuda_preconditioner.h"
 
 namespace cuda_iterative_solver
 {
@@ -204,6 +205,12 @@ public:
      * @return Number of iterations performed in the last solve call
      */
     int getLastIterations() const { return _last_iterations; }
+    
+    /**
+     * @brief Get the cuSPARSE handle for setting up preconditioners
+     * @return cuSPARSE handle used by the solver
+     */
+    cusparseHandle_t getCusparseHandle() const { return _cusparse_handle; }
 
     /**
      * @brief Setup matrix operator for subsequent solve operations
@@ -222,35 +229,15 @@ public:
                       const int* h_ia_A, const int* h_ja_A, const double* h_va_A);
     
     /**
-     * @brief Setup ILU preconditioner for subsequent solve operations
+     * @brief Set preconditioner for subsequent solve operations
      * 
-     * This method should be called to setup the ILU preconditioner.
-     * Data is copied from host to device.
-     * The number of non-zeros is calculated as ia[n] - ia[0] for each factor.
+     * The preconditioner must be already setup before passing to this method.
+     * The solver does not take ownership - caller is responsible for keeping
+     * the preconditioner alive for the duration of solver usage.
      * 
-     * @param n Matrix size  
-     * @param h_ia_L Row pointers for L factor (size n+1, host data)
-     * @param h_ja_L Column indices for L factor (host data)
-     * @param h_va_L Values for L factor (host data)
-     * @param h_ia_U Row pointers for U factor (size n+1, host data)
-     * @param h_ja_U Column indices for U factor (host data)
-     * @param h_va_U Values for U factor (host data)
+     * @param preconditioner Pointer to a preconditioner object (does not take ownership)
      */
-    void setupILU(size_t n,
-                  const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
-                  const int* h_ia_U, const int* h_ja_U, const double* h_va_U);
-
-    /**
-     * @brief Setup ILU0 preconditioner using GPU-based factorization
-     * 
-     * This method computes ILU0 factorization directly on GPU using cuSPARSE csrilu02.
-     * The matrix A must be already setup via setupOperator() before calling this function.
-     * The factorization is performed in-place on a copy of matrix A.
-     * 
-     * Note: This is more efficient than setupILU() for ILU0 since it avoids host-device transfers
-     * and uses GPU-optimized factorization algorithms.
-     */
-    void setupGPUILU0();
+    void setPreconditioner(Preconditioner* preconditioner);
 
     /**
      * @brief Solve the linear system Ax = b using GMRES (host interface)
@@ -274,15 +261,9 @@ private:
 
     // Matrix and vector descriptors
     cusparseSpMatDescr_t _mat_A;
-    cusparseSpSVDescr_t _spv_descr_L, _spv_descr_U;
-    cusparseSpMatDescr_t _mat_prec_L, _mat_prec_U;
     
-    // ILU0-specific descriptors (using deprecated API - will be updated in future cuSPARSE versions)
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    csrilu02Info_t _ilu0_info;
-    #pragma GCC diagnostic pop
-    cusparseSpMatDescr_t _mat_ilu0;
+    // Preconditioner (not owned by solver)
+    Preconditioner* _preconditioner;
     
     // DeviceVectorView objects for cuSPARSE operations
     DeviceVectorView _view_prec_x, _view_prec_y, _view_prec_tmp;
@@ -301,28 +282,20 @@ private:
     
     // Setup state
     bool _is_operator_setup;
-    bool _is_ilu_setup;
-    bool _is_ilu0_setup;
     int _n;
     int _current_restart;
     
     // Matrix properties
     size_t _matrix_n, _matrix_nnz;
-    size_t _ilu_nnz_L, _ilu_nnz_U;
-    int _index_base, _index_base_L, _index_base_U;
+    int _index_base;
     
     // Device memory arrays
-    DeviceArray<int> _d_ia_A, _d_ja_A, _d_ia_L, _d_ja_L, _d_ia_U, _d_ja_U;
-    DeviceArray<double> _d_va_A, _d_va_L, _d_va_U;
+    DeviceArray<int> _d_ia_A, _d_ja_A;
+    DeviceArray<double> _d_va_A;
     DeviceArray<double> _d_b, _d_x;
     DeviceArray<double> _d_Q, _d_tmp, _d_w, _d_prec_tmp;
     DeviceArray<double> _d_g, _d_h_batch;
-    DeviceArray<char> _d_spv_buffer_L, _d_spv_buffer_U, _d_spmv_buffer;
-    
-    // ILU0-specific arrays for GPU factorization
-    DeviceArray<int> _d_ia_ilu0, _d_ja_ilu0;
-    DeviceArray<double> _d_va_ilu0;
-    DeviceArray<char> _d_ilu0_buffer;
+    DeviceArray<char> _d_spmv_buffer;
     
     // Host memory arrays
     std::vector<double> _h_c, _h_s;
@@ -337,16 +310,6 @@ private:
      * @brief Cleanup CUDA resources
      */
     void cleanup_cuda();
-    
-    /**
-     * @brief Cleanup regular ILU resources
-     */
-    void cleanup_ilu();
-    
-    /**
-     * @brief Cleanup ILU0 resources
-     */
-    void cleanup_ilu0();
 
     /**
      * @brief Initialize workspace memory for given problem size
@@ -357,16 +320,6 @@ private:
      * @brief Setup matrix A descriptor
      */
     void setup_matrix_descriptor();
-    
-    /**
-     * @brief Setup ILU preconditioner descriptors
-     */
-    void setup_ilu_descriptors();
-    
-    /**
-     * @brief Setup ILU0 descriptors for GPU factorization
-     */
-    void setup_ilu0_descriptors();
 
     /**
      * @brief Solve the linear system Ax = b using GMRES (device interface)

@@ -1,4 +1,5 @@
 #include "cuda_gmres.h"
+#include "cuda_preconditioner.h"
 #include "io.hpp"
 #include "matrix_utils.hpp"
 #include "precond.hpp"
@@ -35,9 +36,9 @@ int main( int argc, char** argv )
         cxxopts::value<std::string>()->default_value( "../data/ex5.mtx" ) )(
         "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )(
         "r,restart", "GMRES restart parameter",
-        cxxopts::value<int>()->default_value( "20" ) )(
+        cxxopts::value<int>()->default_value( "60" ) )(
         "m,maxiter", "Maximum number of GMRES iterations",
-        cxxopts::value<int>()->default_value( "100" ) )(
+        cxxopts::value<int>()->default_value( "1000" ) )(
         "t,reltol", "Relative tolerance for GMRES convergence",
         cxxopts::value<double>()->default_value( "1e-8" ) )(
         "a,abstol", "Absolute tolerance for GMRES convergence",
@@ -382,11 +383,14 @@ int main( int argc, char** argv )
         solver.setupOperator( n, csr_matrix.AI(), csr_matrix.AJ(), csr_matrix.AV() );
 
         // Setup ILU preconditioner if needed
+        ILUPreconditioner precond;
         if ( has_preconditioner )
         {
             std::cout << "Setting up ILU preconditioner..." << std::endl;
-            solver.setupILU( n, L_matrix.AI(), L_matrix.AJ(), L_matrix.AV(), // L factor
-                             U_matrix.AI(), U_matrix.AJ(), U_matrix.AV() ); // U factor
+            precond.setup( solver.getCusparseHandle(), n,
+                          L_matrix.AI(), L_matrix.AJ(), L_matrix.AV(), // L factor
+                          U_matrix.AI(), U_matrix.AJ(), U_matrix.AV() ); // U factor
+            solver.setPreconditioner( &precond );
         }
         auto start_time = std::chrono::high_resolution_clock::now();
         // Solve the system
