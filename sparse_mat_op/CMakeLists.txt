@@ -3,15 +3,14 @@ project(sparse_mat_op CXX)
 
 set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp permutation.cpp io.cpp sp_ops.cpp spgemm.cpp spadd.cpp ilum.cpp ruiz_scale.cpp scaling.cpp)
 
-# Add CUDA sources if CUDA is enabled
+set(DEPENDENCIES enums utils graph OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_market::fast_matrix_market TBB::tbb)
+
+# Add CUDA sublibrary if CUDA is enabled
 if(USE_CUDA)
     enable_language(CUDA)
-    list(APPEND SPARSE_MAT_OP_SRC cuda_gmres.cu cuda_gmres_device.cu)
-    set(CUDA_DEPENDENCIES CUDA::cusparse CUDA::cublas CUDA::cudart MKL::MKL)
+    add_subdirectory(cuda)
+    set(DEPENDENCIES ${DEPENDENCIES} sparse_mat_op_cuda)
 endif()
-
-
-set(DEPENDENCIES enums utils graph OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_market::fast_matrix_market ${CUDA_DEPENDENCIES})
 
 if(USE_METIS_LIB)
   set(DEPENDENCIES ${DEPENDENCIES} METIS::METIS)
@@ -24,14 +23,5 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   ${CMAKE_CURRENT_LIST_DIR}/spmv
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC ${DEPENDENCIES})
-
 target_enable_simd(${PROJECT_NAME})
 
-# Set CUDA properties if CUDA is enabled
-if(USE_CUDA)
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        CUDA_STANDARD ${CMAKE_CUDA_STANDARD}
-        CUDA_STANDARD_REQUIRED ON
-        CUDA_EXTENSIONS OFF
-    )
-endif()

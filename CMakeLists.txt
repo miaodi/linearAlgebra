@@ -42,6 +42,8 @@ option(USE_METIS_LIB "Use metis for matrix reordering" OFF)
 
 option(USE_BOOST_LIB "Use boost library" OFF)
 
+option(USE_MKL "Use Intel MKL for optimized linear algebra operations" ON)
+
 option(USE_CUDA "Use cuda" OFF)
 
 option(USE_CUDSS "Use cudss library for direct solver. Note that USE_CUDA must be ON" OFF)
@@ -49,11 +51,11 @@ option(USE_CUDSS "Use cudss library for direct solver. Note that USE_CUDA must b
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(ENABLE_TESTS "Enable building tests and downloading test data" ON)
 option(ENABLE_DATA_DOWNLOADS "Download SuiteSparse matrices into the build tree" ON)
-
 option(BUILD_DATA "Build data subdirectory" OFF)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH
+  "${CMAKE_SOURCE_DIR}/cmake"
+  "${CMAKE_SOURCE_DIR}/cmake/modules")
 
 include(FetchContent)
 include(cmake/SimdOptions.cmake)
@@ -108,20 +110,27 @@ FetchContent_Declare(
 
 # METIS declarations moved to cmake/SetupMETIS.cmake
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # using GCC
-  set(MKL_THREADING gnu_thread)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
-  # using Intel C++
-  set(MKL_THREADING intel_thread)
-endif()
+if(USE_MKL)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # using GCC
+    set(MKL_THREADING gnu_thread)
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+    # using Intel C++
+    set(MKL_THREADING intel_thread)
+  endif()
 
-set(MKL_ARCH intel64)
-set(MKL_INTERFACE lp64)
-set(MKL_LINK static)
-find_package(MKL CONFIG REQUIRED)
-find_package(TBB REQUIRED)
-find_package(OpenMP REQUIRED)
+  set(MKL_ARCH intel64)
+  set(MKL_INTERFACE lp64)
+  set(MKL_LINK static)
+  find_package(MKL CONFIG REQUIRED)
+  find_package(TBB REQUIRED)
+  find_package(OpenMP REQUIRED)
+  
+  # add_compile_definitions(USE_MKL)
+  message(STATUS "MKL enabled with interface: ${MKL_INTERFACE}, threading: ${MKL_THREADING}")
+else()
+  message(STATUS "MKL disabled - using standard LAPACK")
+endif()
 
 find_package(LAPACK REQUIRED)
 

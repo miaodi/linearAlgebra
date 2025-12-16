@@ -8,6 +8,7 @@
 #include <immintrin.h>
 #include <omp.h>
 #include "dot_kernel.hpp"
+#include "mkl_spmv.hpp"
 namespace matrix_utils {
 enum class WorkloadMode { ALBUS, CAMLB };
 
@@ -474,6 +475,8 @@ template <typename CSRMatrixType, typename SPMVType> struct SPMV {
                                           alpha, beta); }) {
       _spmv(_matrix->rows, _matrix->AI(), _matrix->AJ(), _matrix->AV(), b, x,
             alpha, beta);
+    } else if constexpr (requires { _spmv(b, x, alpha, beta); }) {
+      _spmv(b, x, alpha, beta);
     } else {
       static_assert(sizeof(SPMVType) == 0,
                     "SPMVType operator() signature not supported");

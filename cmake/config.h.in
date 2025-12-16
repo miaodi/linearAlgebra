@@ -13,3 +13,5 @@
 #cmakedefine USE_CUDA
 
 #cmakedefine USE_CUDSS
+
+#cmakedefine USE_MKL
