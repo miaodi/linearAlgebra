@@ -134,6 +134,14 @@ void writeSVG(const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,
   outstream << "</svg>\n";
 }
 
+template <typename T>
+void readMatrixMarketVec(std::istream &instream, std::vector<T> &vec,
+                         const fast_matrix_market::read_options &options) {
+  fast_matrix_market::matrix_market_header header;
+  fast_matrix_market::read_matrix_market_array(instream, header, vec, 
+                                               fast_matrix_market::row_major, options);
+}
+
 #define INSTANTIATE_READMATRIXMARKET(CSRMatrixType)                            \
   template void readMatrixMarket<CSRMatrixType>(                               \
       std::istream & instream, CSRMatrixType & csr_matrix,                     \
@@ -147,6 +155,10 @@ void writeSVG(const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,
   template void writeSVG<ROWTYPE, COLTYPE>(                                    \
       const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,               \
       const COLTYPE *aj, std::ostream &outstream, const COLTYPE max_display_size);
+#define INSTANTIATE_READMATRIXMARKETVEC(T)                                     \
+  template void readMatrixMarketVec<T>(                                        \
+      std::istream & instream, std::vector<T> & vec,                           \
+      const fast_matrix_market::read_options &options);
 
 using CSRMatrixTypeDouble = matrix_utils::CSRMatrix<int, int, double>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeDouble);
@@ -168,4 +180,8 @@ INSTANTIATE_WRITEMATRIXMARKET(int, int, float);
 INSTANTIATE_WRITEMATRIXMARKET(int, int, int);
 
 INSTANTIATE_WRITESVG(int, int);
+
+INSTANTIATE_READMATRIXMARKETVEC(double);
+INSTANTIATE_READMATRIXMARKETVEC(float);
+INSTANTIATE_READMATRIXMARKETVEC(int);
 } // namespace matrix_utils

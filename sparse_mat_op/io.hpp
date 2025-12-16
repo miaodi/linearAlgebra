@@ -7,6 +7,10 @@ template <typename CSRMatrixType>
 void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
                       const fast_matrix_market::read_options &options = {});
 
+template <typename T>
+void readMatrixMarketVec(std::istream &instream, std::vector<T> &vec,
+                         const fast_matrix_market::read_options &options = {});
+
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void writeMatrixMarket(const COLTYPE rows, const COLTYPE cols,
                        const ROWTYPE *ai, const COLTYPE *aj, const VALTYPE *av,
