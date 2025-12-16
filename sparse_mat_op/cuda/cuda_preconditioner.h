@@ -3,20 +3,10 @@
 #include <cusparse.h>
 #include <cuda_runtime.h>
 #include <memory>
+#include "cuda_memory.h"
 
 namespace cuda_iterative_solver
 {
-
-// Forward declarations
-template<typename T, typename Allocator>
-class Array;
-
-struct DeviceAllocator;
-
-template<typename T>
-using DeviceArray = Array<T, DeviceAllocator>;
-
-class DeviceVectorView;
 
 /**
  * @brief Abstract base class for preconditioners
@@ -64,6 +54,52 @@ public:
                    DeviceVectorView& d_output) override;
     
     bool isSetup() const override { return true; }
+};
+
+/**
+ * @brief Jacobi preconditioner using diagonal scaling
+ * 
+ * This preconditioner applies diagonal scaling: M^{-1} = D^{-1}
+ * where D is the diagonal of the matrix. Efficient for diagonally dominant matrices.
+ */
+class JacobiPreconditioner : public Preconditioner
+{
+public:
+    JacobiPreconditioner();
+    ~JacobiPreconditioner() override;
+    
+    /**
+     * @brief Setup Jacobi preconditioner with diagonal values from host
+     * 
+     * @param n Vector size
+     * @param h_diag Diagonal values (size n, host data)
+     */
+    void setup(size_t n, const double* h_diag);
+    
+    /**
+     * @brief Setup Jacobi preconditioner by extracting diagonal from CSR matrix
+     * 
+     * @param n Matrix size
+     * @param h_ia Row pointers (size n+1, host data)
+     * @param h_ja Column indices (host data)
+     * @param h_va Values (host data)
+     */
+    void setupFromMatrix(size_t n, const int* h_ia, const int* h_ja, const double* h_va);
+    
+    void operator()(cusparseHandle_t handle,
+                   const DeviceVectorView& d_input,
+                   DeviceVectorView& d_output) override;
+    
+    bool isSetup() const override { return _is_setup; }
+    
+private:
+    // Device memory for inverse diagonal
+    DeviceArray<double>* _d_inv_diag;
+    
+    size_t _n;
+    bool _is_setup;
+    
+    void cleanup();
 };
 
 /**

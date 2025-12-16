@@ -29,11 +29,117 @@ void NoPreconditioner::operator()(cusparseHandle_t handle,
                                   const DeviceVectorView& d_input,
                                   DeviceVectorView& d_output)
 {
-    // Simply copy input to output
+    // Simply copy input to output (would need a temporary DeviceArray)
+    // For now, keep cudaMemcpy as we don't have direct access to a DeviceArray here
     check_cuda_error(
         cudaMemcpy(d_output.data(), d_input.data(), 
                    d_input.size() * sizeof(double), cudaMemcpyDeviceToDevice),
         "Failed to copy input to output in NoPreconditioner");
+}
+
+// ============================================================================
+// JacobiPreconditioner Implementation
+// ============================================================================
+
+// CUDA kernel for element-wise division (Jacobi preconditioning)
+__global__ void jacobi_precond_kernel(const double* d_inv_diag, const double* d_input,
+                                      double* d_output, size_t n)
+{
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        d_output[idx] = d_inv_diag[idx] * d_input[idx];
+    }
+}
+
+JacobiPreconditioner::JacobiPreconditioner()
+    : _d_inv_diag(new DeviceArray<double>())
+    , _n(0)
+    , _is_setup(false)
+{
+}
+
+JacobiPreconditioner::~JacobiPreconditioner()
+{
+    cleanup();
+    delete _d_inv_diag;
+}
+
+void JacobiPreconditioner::cleanup()
+{
+    _d_inv_diag->release();
+    _is_setup = false;
+}
+
+void JacobiPreconditioner::setup(size_t n, const double* h_diag)
+{
+    cleanup();
+    
+    _n = n;
+    
+    // Allocate device memory and compute inverse diagonal
+    _d_inv_diag->resize(n);
+    
+    // Copy diagonal to host buffer, compute inverse, then copy to device
+    std::vector<double> inv_diag(n);
+    for (size_t i = 0; i < n; ++i) {
+        if (std::abs(h_diag[i]) < 1e-14) {
+            throw std::runtime_error("Jacobi preconditioner: zero or near-zero diagonal at position " + 
+                                    std::to_string(i));
+        }
+        inv_diag[i] = 1.0 / h_diag[i];
+    }
+    
+    _d_inv_diag->copy<MemoryLocation::Host>(inv_diag.data(), n);
+    
+    _is_setup = true;
+}
+
+void JacobiPreconditioner::setupFromMatrix(size_t n, const int* h_ia, const int* h_ja, const double* h_va)
+{
+    cleanup();
+    
+    _n = n;
+    
+    // Extract diagonal from CSR matrix
+    std::vector<double> diag(n, 0.0);
+    int index_base = h_ia[0];
+    
+    for (size_t i = 0; i < n; ++i) {
+        bool found_diag = false;
+        for (int j = h_ia[i] - index_base; j < h_ia[i + 1] - index_base; ++j) {
+            int col = h_ja[j] - index_base;
+            if (col == static_cast<int>(i)) {
+                diag[i] = h_va[j];
+                found_diag = true;
+                break;
+            }
+        }
+        if (!found_diag) {
+            throw std::runtime_error("Jacobi preconditioner: missing diagonal at row " + 
+                                    std::to_string(i));
+        }
+    }
+    
+    // Use the setup method with extracted diagonal
+    setup(n, diag.data());
+}
+
+void JacobiPreconditioner::operator()(cusparseHandle_t handle,
+                                      const DeviceVectorView& d_input,
+                                      DeviceVectorView& d_output)
+{
+    if (!_is_setup) {
+        throw std::runtime_error("JacobiPreconditioner::operator() called before setup");
+    }
+    
+    // Launch kernel for element-wise multiplication by inverse diagonal
+    const int block_size = 256;
+    const int num_blocks = (_n + block_size - 1) / block_size;
+    
+    jacobi_precond_kernel<<<num_blocks, block_size>>>(
+        _d_inv_diag->data(), d_input.data(), d_output.data(), _n);
+    
+    check_cuda_error(cudaGetLastError(), "Failed to launch Jacobi preconditioner kernel");
 }
 
 // ============================================================================
@@ -170,16 +276,16 @@ void ILUPreconditioner::setup(cusparseHandle_t handle, size_t n,
     
     // Copy L factor to device
     if (_nnz_L > 0) {
-        _d_ia_L->copyFromHost(h_ia_L, n + 1);
-        _d_ja_L->copyFromHost(h_ja_L, _nnz_L);
-        _d_va_L->copyFromHost(h_va_L, _nnz_L);
+        _d_ia_L->copy<MemoryLocation::Host>(h_ia_L, n + 1);
+        _d_ja_L->copy<MemoryLocation::Host>(h_ja_L, _nnz_L);
+        _d_va_L->copy<MemoryLocation::Host>(h_va_L, _nnz_L);
     }
     
     // Copy U factor to device
     if (_nnz_U > 0) {
-        _d_ia_U->copyFromHost(h_ia_U, n + 1);
-        _d_ja_U->copyFromHost(h_ja_U, _nnz_U);
-        _d_va_U->copyFromHost(h_va_U, _nnz_U);
+        _d_ia_U->copy<MemoryLocation::Host>(h_ia_U, n + 1);
+        _d_ja_U->copy<MemoryLocation::Host>(h_ja_U, _nnz_U);
+        _d_va_U->copy<MemoryLocation::Host>(h_va_U, _nnz_U);
     }
     
     // Allocate temporary storage
@@ -336,9 +442,9 @@ void GPUILU0Preconditioner::setup(cusparseHandle_t handle, size_t n,
     _nnz = h_ia[n] - h_ia[0];
     
     // Copy matrix to device
-    _d_ia->copyFromHost(h_ia, n + 1);
-    _d_ja->copyFromHost(h_ja, _nnz);
-    _d_va->copyFromHost(h_va, _nnz);
+    _d_ia->copy<MemoryLocation::Host>(h_ia, n + 1);
+    _d_ja->copy<MemoryLocation::Host>(h_ja, _nnz);
+    _d_va->copy<MemoryLocation::Host>(h_va, _nnz);
     
     // Allocate temporary storage
     _d_tmp->resize(n);
@@ -364,16 +470,9 @@ void GPUILU0Preconditioner::setupFromDevice(cusparseHandle_t handle, size_t n, s
     _index_base = index_base;
     
     // Copy matrix from device
-    _d_ia->resize(n + 1);
-    _d_ja->resize(nnz);
-    _d_va->resize(nnz);
-    
-    check_cuda_error(cudaMemcpy(_d_ia->data(), d_ia, (n + 1) * sizeof(int), cudaMemcpyDeviceToDevice),
-                     "Failed to copy IA array");
-    check_cuda_error(cudaMemcpy(_d_ja->data(), d_ja, nnz * sizeof(int), cudaMemcpyDeviceToDevice),
-                     "Failed to copy JA array");
-    check_cuda_error(cudaMemcpy(_d_va->data(), d_va, nnz * sizeof(double), cudaMemcpyDeviceToDevice),
-                     "Failed to copy VA array");
+    _d_ia->copy<MemoryLocation::Device>(d_ia, n + 1);
+    _d_ja->copy<MemoryLocation::Device>(d_ja, nnz);
+    _d_va->copy<MemoryLocation::Device>(d_va, nnz);
     
     // Allocate temporary storage
     _d_tmp->resize(n);

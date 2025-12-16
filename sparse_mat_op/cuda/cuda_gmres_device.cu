@@ -226,9 +226,9 @@ void DeviceCudaGMRES::setupOperator(size_t n,
     _matrix_n = n;
     _matrix_nnz = nnz;
 
-    _d_ia_A.copyFromHost(h_ia_A, n + 1);
-    _d_ja_A.copyFromHost(h_ja_A, nnz);
-    _d_va_A.copyFromHost(h_va_A, nnz);
+    _d_ia_A.copy<MemoryLocation::Host>(h_ia_A, n + 1);
+    _d_ja_A.copy<MemoryLocation::Host>(h_ja_A, nnz);
+    _d_va_A.copy<MemoryLocation::Host>(h_va_A, nnz);
 
     initialize_workspace(n);
     setup_matrix_descriptor();
@@ -250,17 +250,17 @@ void DeviceCudaGMRES::setupILU(size_t n,
     if (h_ia_L) {
         _index_base_L = h_ia_L[0];
         _ilu_nnz_L = h_ia_L[n] - h_ia_L[0];
-        _d_ia_L.copyFromHost(h_ia_L, n + 1);
-        _d_ja_L.copyFromHost(h_ja_L, _ilu_nnz_L);
-        _d_va_L.copyFromHost(h_va_L, _ilu_nnz_L);
+        _d_ia_L.copy<MemoryLocation::Host>(h_ia_L, n + 1);
+        _d_ja_L.copy<MemoryLocation::Host>(h_ja_L, _ilu_nnz_L);
+        _d_va_L.copy<MemoryLocation::Host>(h_va_L, _ilu_nnz_L);
     }
 
     if (h_ia_U) {
         _index_base_U = h_ia_U[0];
         _ilu_nnz_U = h_ia_U[n] - h_ia_U[0];
-        _d_ia_U.copyFromHost(h_ia_U, n + 1);
-        _d_ja_U.copyFromHost(h_ja_U, _ilu_nnz_U);
-        _d_va_U.copyFromHost(h_va_U, _ilu_nnz_U);
+        _d_ia_U.copy<MemoryLocation::Host>(h_ia_U, n + 1);
+        _d_ja_U.copy<MemoryLocation::Host>(h_ja_U, _ilu_nnz_U);
+        _d_va_U.copy<MemoryLocation::Host>(h_va_U, _ilu_nnz_U);
     }
 
     setup_ilu_descriptors();
@@ -406,8 +406,8 @@ State DeviceCudaGMRES::solve(const double* h_b, double* h_x)
         throw std::runtime_error("setupILU must be called before solve when using preconditioner");
     }
 
-    _d_b.copyFromHost(h_b, _matrix_n);
-    _d_x.copyFromHost(h_x, _matrix_n);
+    _d_b.copy<MemoryLocation::Host>(h_b, _matrix_n);
+    _d_x.copy<MemoryLocation::Host>(h_x, _matrix_n);
 
     State result = deviceSolve(_d_b.data(), _d_x.data());
 

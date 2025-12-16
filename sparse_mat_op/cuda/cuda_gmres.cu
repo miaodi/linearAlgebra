@@ -120,9 +120,9 @@ void CudaGMRES::setupOperator(size_t n,
     _matrix_nnz = nnz;
     
     // Copy matrix data from host to device
-    _d_ia_A.copyFromHost(h_ia_A, n + 1);
-    _d_ja_A.copyFromHost(h_ja_A, nnz);
-    _d_va_A.copyFromHost(h_va_A, nnz);
+    _d_ia_A.copy<MemoryLocation::Host>(h_ia_A, n + 1);
+    _d_ja_A.copy<MemoryLocation::Host>(h_ja_A, nnz);
+    _d_va_A.copy<MemoryLocation::Host>(h_va_A, nnz);
     
     // Initialize workspace for this problem size
     initialize_workspace(n);
@@ -204,8 +204,8 @@ State CudaGMRES::solve(const double* h_b, double* h_x)
     }
     
     // Copy host data to device
-    _d_b.copyFromHost(h_b, _matrix_n);
-    _d_x.copyFromHost(h_x, _matrix_n);
+    _d_b.copy<MemoryLocation::Host>(h_b, _matrix_n);
+    _d_x.copy<MemoryLocation::Host>(h_x, _matrix_n);
     
     // Set up DeviceVectorView wrappers
     _view_d_b.setData(_d_b.data());
@@ -272,8 +272,7 @@ double CudaGMRES::compute_initial_residual(const DeviceVectorView& d_b, const De
 {
     const double one = 1.0, neg_one = -1.0;
     // Copy b to first Krylov vector: Q[:, 0] = b
-    check_cuda_error(cudaMemcpy(_d_Q.data(), d_b.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
-                     "Failed to copy b to Q");
+    _d_Q.copy<MemoryLocation::Device>(d_b.data(), _n);
 
     // Set up _view_q_j to point to the first Krylov vector
     _view_q_j.setData(_d_Q.data());
@@ -336,15 +335,17 @@ void CudaGMRES::apply_operator_with_preconditioning(const DeviceVectorView& d_in
 
 void CudaGMRES::apply_preconditioner(const DeviceVectorView& d_input, DeviceVectorView& d_output)
 {
-    if (_prec_type == PreconditionerType::NONE || !_preconditioner) {
+    if (_prec_type == PreconditionerType::NONE || !_preconditioner)
+    {
         // No preconditioner, just copy if needed
-        if (d_input.data() != d_output.data()) {
+        if (d_input.data() != d_output.data())
+        {
             check_cuda_error(cudaMemcpy(d_output.data(), d_input.data(), _n * sizeof(double), cudaMemcpyDeviceToDevice),
                              "Failed to copy input to output");
         }
         return;
     }
-    
+
     // Apply the preconditioner using the operator() method
     (*_preconditioner)(_cusparse_handle, d_input, d_output);
 }
@@ -550,8 +551,7 @@ void CudaGMRES::update_solution(DeviceVectorView& d_x, int j)
     const double one = 1.0, zero = 0.0;
     
     // Copy g from pinned memory to device for GEMV operation
-    check_cuda_error(cudaMemcpy(_d_g.data(), _h_g.data(), j * sizeof(double), cudaMemcpyHostToDevice),
-                     "Failed to copy g vector to device");
+    _d_g.copy<MemoryLocation::Host>(_h_g.data(), j);
     
     // Compute solution update: delta_x = Q[:, 0:j] * g[0:j]
     check_cublas_error(
