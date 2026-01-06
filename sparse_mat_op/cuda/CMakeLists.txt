@@ -4,6 +4,7 @@ project(sparse_mat_op_cuda CUDA CXX)
 set(CUDA_SOURCES
     cuda_gmres.cu
     cuda_gmres_device.cu
+    cuda_bicgstab.cu
     cuda_spmv.cu
     cuda_preconditioner.cu
     cuda_kernels.cu

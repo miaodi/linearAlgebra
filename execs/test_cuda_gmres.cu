@@ -1,4 +1,5 @@
 #include "cuda_gmres.h"
+#include "cuda_bicgstab.h"
 #include "cuda_preconditioner.h"
 #include "cuda_spmv.h"
 #include "io.hpp"
@@ -390,7 +391,9 @@ int main( int argc, char** argv )
         "reorder", "Matrix reordering algorithm: none, rcm, rcm-par, nd",
         cxxopts::value<std::string>()->default_value( "none" ) )(
         "n,nthreads", "Number of threads for parallel operations",
-        cxxopts::value<int>()->default_value( "1" ) )( "h,help",
+        cxxopts::value<int>()->default_value( "1" ) )(
+        "method", "Solver method: gmres, bicgstab",
+        cxxopts::value<std::string>()->default_value( "gmres" ) )( "h,help",
                                                         "Print usage" );
 
     auto parsed_options = options.parse( argc, argv );
@@ -416,6 +419,7 @@ int main( int argc, char** argv )
     bool batch_ortho = parsed_options["batch-ortho"].as<bool>();
     std::string reorder_alg = parsed_options["reorder"].as<std::string>();
     int nthreads = parsed_options["nthreads"].as<int>();
+    std::string method_str = parsed_options["method"].as<std::string>();
 
     // Validate file options for L and U matrices
     bool has_lu_files = !l_file.empty() && !u_file.empty();
@@ -593,40 +597,77 @@ int main( int argc, char** argv )
         // Initialize solution vector with zeros
         std::vector<double> x_host( n, 0.0 );
 
-        // Create and configure GMRES solver
-        CudaGMRES solver;
-        solver.setMaxIter( maxiter );
-        solver.setRelTol( reltol );
-        solver.setAbsTol( abstol );
-        solver.setRestart( restart );
-        solver.setPreconditionerType( precond_type );
-        solver.setUseBatchOrthogonalization( batch_ortho );
-
-        std::cout << "\nStarting CUDA GMRES solver..." << std::endl;
-
-        // Create and setup SpMV operator using solver's cuSPARSE handle
-        // (use working_matrix which may be reordered)
-        std::cout << "Setting up matrix operator..." << std::endl;
-        CuSparseSPMV<int, int, double> spmv_operator(solver.getCusparseHandle());
-        spmv_operator.preprocess(n, working_matrix.AI(), working_matrix.AJ(), working_matrix.AV());
+        // Determine solver method
+        bool use_bicgstab = (method_str == "bicgstab" || method_str == "BiCGSTAB");
+        std::string solver_name = use_bicgstab ? "BiCGSTAB" : "GMRES";
         
-        // Setup solver with SpMV operator (size is obtained from operator)
-        solver.setupOperator(&spmv_operator);
+        std::cout << "\nStarting CUDA " << solver_name << " solver..." << std::endl;
 
-        // Setup preconditioner (use working_matrix which may be reordered)
-        std::unique_ptr<Preconditioner> precond = setupPreconditioner(
-            precond_impl,
-            solver.getCusparseHandle(),
-            n,
-            working_matrix,
-            parsed_options);
-        
-        solver.setPreconditioner( precond.get() );
-        
-        // Solve the system (use working_rhs which may be reordered)
-        std::cout << "Solving linear system..." << std::endl;
+        State result;
         auto start_time = std::chrono::high_resolution_clock::now();
-        State result = solver.solve<true>( working_rhs.data(), x_host.data() );
+        
+        if (use_bicgstab) {
+            // Create and configure BiCGSTAB solver
+            CudaBiCGSTAB solver;
+            solver.setMaxIter( maxiter );
+            solver.setRelTol( reltol );
+            solver.setAbsTol( abstol );
+            solver.setPreconditionerType( precond_type );
+            
+            // Create and setup SpMV operator using solver's cuSPARSE handle
+            std::cout << "Setting up matrix operator..." << std::endl;
+            CuSparseSPMV<int, int, double> spmv_operator(solver.getCusparseHandle());
+            spmv_operator.preprocess(n, working_matrix.AI(), working_matrix.AJ(), working_matrix.AV());
+            
+            // Setup solver with SpMV operator (size is obtained from operator)
+            solver.setupOperator(&spmv_operator);
+
+            // Setup preconditioner (use working_matrix which may be reordered)
+            std::unique_ptr<Preconditioner> precond = setupPreconditioner(
+                precond_impl,
+                solver.getCusparseHandle(),
+                n,
+                working_matrix,
+                parsed_options);
+            
+            solver.setPreconditioner( precond.get() );
+            
+            // Solve the system (use working_rhs which may be reordered)
+            std::cout << "Solving linear system..." << std::endl;
+            result = solver.solve<true>( working_rhs.data(), x_host.data() );
+        } else {
+            // Create and configure GMRES solver
+            CudaGMRES solver;
+            solver.setMaxIter( maxiter );
+            solver.setRelTol( reltol );
+            solver.setAbsTol( abstol );
+            solver.setRestart( restart );
+            solver.setPreconditionerType( precond_type );
+            solver.setUseBatchOrthogonalization( batch_ortho );
+            
+            // Create and setup SpMV operator using solver's cuSPARSE handle
+            std::cout << "Setting up matrix operator..." << std::endl;
+            CuSparseSPMV<int, int, double> spmv_operator(solver.getCusparseHandle());
+            spmv_operator.preprocess(n, working_matrix.AI(), working_matrix.AJ(), working_matrix.AV());
+            
+            // Setup solver with SpMV operator (size is obtained from operator)
+            solver.setupOperator(&spmv_operator);
+
+            // Setup preconditioner (use working_matrix which may be reordered)
+            std::unique_ptr<Preconditioner> precond = setupPreconditioner(
+                precond_impl,
+                solver.getCusparseHandle(),
+                n,
+                working_matrix,
+                parsed_options);
+            
+            solver.setPreconditioner( precond.get() );
+            
+            // Solve the system (use working_rhs which may be reordered)
+            std::cout << "Solving linear system..." << std::endl;
+            result = solver.solve<true>( working_rhs.data(), x_host.data() );
+        }
+        
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration =
             std::chrono::duration_cast<std::chrono::milliseconds>( end_time - start_time );

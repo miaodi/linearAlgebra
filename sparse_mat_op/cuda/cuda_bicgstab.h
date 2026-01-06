@@ -13,40 +13,43 @@
 
 namespace cuda_iterative_solver
 {
+
 /**
- * @brief CUDA-based GMRES solver for sparse matrices in CSR format
+ * @brief CUDA-based BiCGSTAB solver for sparse matrices
  * 
- * This class implements the GMRES iterative solver using CUDA libraries
- * (cuBLAS, cuSPARSE) for solving linear systems Ax = b.
+ * This class implements the BiCGSTAB (Biconjugate Gradient Stabilized) iterative solver
+ * using CUDA libraries (cuBLAS, cuSPARSE) for solving linear systems Ax = b.
  * 
  * Key features:
- * - Matrix and preconditioner in CSR format (ia, ja, va)
+ * - Uses SpMV operator interface for matrix-vector products
  * - Self-contained (only depends on cuBLAS/cuSPARSE/std libraries)
  * - Fixed double precision (no templates)
- * - Givens rotations performed on host
- * - Hessenberg matrix in unified memory for host/device access
- * - Forward/backward substitution using cuSPARSE SpSV
+ * - Supports left and right preconditioning
+ * - More memory efficient than GMRES (no restart needed)
+ * 
+ * Algorithm:
+ * - BiCGSTAB is a variant of the BiCG method that uses a two-term recurrence
+ * - Typically converges faster than GMRES for some problems
+ * - Requires 7 vectors: r0, r, p, v, s, t, and temporary storage
  */
-class CudaGMRES
+class CudaBiCGSTAB
 {
 public:
     /**
      * @brief Constructor
      */
-    CudaGMRES();
+    CudaBiCGSTAB();
 
     /**
      * @brief Destructor
      */
-    ~CudaGMRES();
+    ~CudaBiCGSTAB();
 
     // Configuration methods
     void setMaxIter(size_t max_iter) { _max_iter = max_iter; }
     void setAbsTol(double abs_tol) { _abs_tol = abs_tol; }
     void setRelTol(double rel_tol) { _rel_tol = rel_tol; }
-    void setRestart(size_t restart) { _restart = restart; }
     void setPreconditionerType(PreconditionerType prec_type) { _prec_type = prec_type; }
-    void setUseBatchOrthogonalization(bool enable) { _use_batch_orthogonalization = enable; }
     
     /**
      * @brief Get the number of iterations from the last solve
@@ -87,7 +90,7 @@ public:
     void setPreconditioner(Preconditioner* preconditioner);
 
     /**
-     * @brief Solve the linear system Ax = b using GMRES (host interface)
+     * @brief Solve the linear system Ax = b using BiCGSTAB (host interface)
      * 
      * This method provides a host-based interface for users without CUDA experience.
      * Data is automatically copied to/from device as needed.
@@ -117,32 +120,29 @@ private:
     
     // DeviceVectorView objects for cuSPARSE operations
     DeviceVectorView _view_prec_x, _view_prec_y, _view_prec_tmp;
-    DeviceVectorView _view_d_w;
-    DeviceVectorView _view_q_j, _view_q_j_plus_1;
     DeviceVectorView _view_d_b, _view_d_x;
     
     // Algorithm parameters
     size_t _max_iter;
     double _abs_tol;
     double _rel_tol;
-    size_t _restart;
     PreconditionerType _prec_type;
-    bool _use_batch_orthogonalization;
     int _last_iterations;
     
     // Setup state
     bool _is_operator_setup;
     int _n;
-    int _current_restart;
     
-    // Device memory arrays
+    // Device memory arrays for BiCGSTAB algorithm
+    // r0: initial residual (reference vector)
+    // r: current residual
+    // p: search direction
+    // v: A * p (with preconditioning)
+    // s: intermediate residual
+    // t: A * s (with preconditioning)
     DeviceArray<double> _d_b, _d_x;
-    DeviceArray<double> _d_Q, _d_tmp, _d_w, _d_prec_tmp;
-    DeviceArray<double> _d_g, _d_h_batch;
-    
-    // Host memory arrays
-    std::vector<double> _h_c, _h_s;
-    PinnedArray<double> _h_g, _h_H;
+    DeviceArray<double> _d_r0, _d_r, _d_p, _d_v, _d_s, _d_t;
+    DeviceArray<double> _d_tmp;  // Temporary storage
     
     /**
      * @brief Initialize CUDA handles and resources
@@ -159,14 +159,13 @@ private:
      */
     void initialize_workspace(size_t n);
 
-
     /**
-     * @brief Solve the linear system Ax = b using GMRES (device interface)
+     * @brief Solve the linear system Ax = b using BiCGSTAB (device interface)
      */
     State deviceSolve(const DeviceVectorView& d_b, DeviceVectorView& d_x);
     
     /**
-     * @brief Compute initial residual and setup first Krylov vector
+     * @brief Compute initial residual r = b - Ax
      */
     double compute_initial_residual(const DeviceVectorView& d_b, const DeviceVectorView& d_x);
 
@@ -174,45 +173,6 @@ private:
      * @brief Apply matrix-vector product with preconditioning
      */
     void apply_operator_with_preconditioning(const DeviceVectorView& d_input, DeviceVectorView& d_output);
-
-
-
-    /**
-     * @brief Perform one GMRES restart cycle
-     */
-    State perform_restart_cycle(const DeviceVectorView& d_b, DeviceVectorView& d_x, 
-                               double init_resid, int& iter, 
-                               double& resid);
-
-    /**
-     * @brief Arnoldi process: build Krylov subspace and Hessenberg matrix
-     */
-    double arnoldi_iteration(int j);
-
-    /**
-     * @brief Batch Modified Gram-Schmidt orthogonalization using GEMV operations
-     */
-    void batch_gram_schmidt(int j, double* d_q_j_plus_1);
-
-    /**
-     * @brief Modified Gram-Schmidt orthogonalization using individual dot products
-     */
-    void gram_schmidt(int j, double* d_q_j_plus_1);
-
-    /**
-     * @brief Apply Givens rotation to Hessenberg matrix and residual vector (host operation)
-     */
-    void givens_rotation(double beta, int j, double& resid);
-
-    /**
-     * @brief Solve least squares problem using triangular solve
-     */
-    void solve_least_squares(int j);
-
-    /**
-     * @brief Update solution vector
-     */
-    void update_solution(DeviceVectorView& d_x, int j);
 
     /**
      * @brief Check convergence criteria
@@ -233,3 +193,4 @@ private:
 };
 
 } // namespace cuda_iterative_solver
+
