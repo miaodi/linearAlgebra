@@ -7,7 +7,8 @@ namespace matrix_utils
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::CuSparseSPMV(cusparseHandle_t handle)
-    : _handle(handle)
+    : SpMVOperator<VALTYPE>()  // Initialize base class (_n = 0 by default)
+    , _handle(handle)
     , _mat_A(nullptr)
     , _vec_x(nullptr)
     , _vec_y(nullptr)
@@ -18,7 +19,6 @@ CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::CuSparseSPMV(cusparseHandle_t handle)
     , _d_y(nullptr)
     , _d_buffer(nullptr)
     , _buffer_size(0)
-    , _n(0)
     , _nnz(0)
     , _index_base(0)
     , _is_initialized(false)
@@ -33,7 +33,8 @@ CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::~CuSparseSPMV()
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::CuSparseSPMV(CuSparseSPMV&& other) noexcept
-    : _handle(other._handle)
+    : SpMVOperator<VALTYPE>(std::move(other))  // Move base class (_n)
+    , _handle(other._handle)
     , _mat_A(other._mat_A)
     , _vec_x(other._vec_x)
     , _vec_y(other._vec_y)
@@ -44,7 +45,6 @@ CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::CuSparseSPMV(CuSparseSPMV&& other) noex
     , _d_y(other._d_y)
     , _d_buffer(other._d_buffer)
     , _buffer_size(other._buffer_size)
-    , _n(other._n)
     , _nnz(other._nnz)
     , _index_base(other._index_base)
     , _is_initialized(other._is_initialized)
@@ -70,9 +70,10 @@ CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>& CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>
     if (this != &other) {
         // Clean up existing resources
         cleanup();
-        if (_handle) {
-            cusparseDestroy(_handle);
-        }
+        // Note: _handle is not owned by this class, so we don't destroy it
+        
+        // Move base class (_n)
+        SpMVOperator<VALTYPE>::operator=(std::move(other));
         
         // Move resources from other
         _handle = other._handle;
@@ -86,7 +87,6 @@ CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>& CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>
         _d_y = other._d_y;
         _d_buffer = other._d_buffer;
         _buffer_size = other._buffer_size;
-        _n = other._n;
         _nnz = other._nnz;
         _index_base = other._index_base;
         _is_initialized = other._is_initialized;
@@ -150,7 +150,7 @@ void CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::preprocess(COLTYPE n,
     }
     
     // Store matrix properties
-    _n = n;
+    this->_n = static_cast<size_t>(n);  // Set base class member
     _index_base = h_ia[0];
     _nnz = h_ia[n] - h_ia[0];
     

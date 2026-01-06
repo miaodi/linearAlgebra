@@ -1,5 +1,6 @@
 #include "cuda_gmres.h"
 #include "cuda_preconditioner.h"
+#include "cuda_spmv.h"
 #include "io.hpp"
 #include "matrix_utils.hpp"
 #include "precond.hpp"
@@ -18,6 +19,7 @@
 #include "spadd.hpp"
 #include "sp_ops.hpp"
 using namespace cuda_iterative_solver;
+using namespace matrix_utils;
 
 enum class PreconditionerImpl {
     NONE,
@@ -602,9 +604,14 @@ int main( int argc, char** argv )
 
         std::cout << "\nStarting CUDA GMRES solver..." << std::endl;
 
-        // Setup matrix operator (use working_matrix which may be reordered)
+        // Create and setup SpMV operator using solver's cuSPARSE handle
+        // (use working_matrix which may be reordered)
         std::cout << "Setting up matrix operator..." << std::endl;
-        solver.setupOperator( n, working_matrix.AI(), working_matrix.AJ(), working_matrix.AV() );
+        CuSparseSPMV<int, int, double> spmv_operator(solver.getCusparseHandle());
+        spmv_operator.preprocess(n, working_matrix.AI(), working_matrix.AJ(), working_matrix.AV());
+        
+        // Setup solver with SpMV operator (size is obtained from operator)
+        solver.setupOperator(&spmv_operator);
 
         // Setup preconditioner (use working_matrix which may be reordered)
         std::unique_ptr<Preconditioner> precond = setupPreconditioner(

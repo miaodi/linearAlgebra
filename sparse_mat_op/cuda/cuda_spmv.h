@@ -8,6 +8,43 @@ namespace matrix_utils
 {
 
 /**
+ * @brief Virtual interface for SpMV operations: y = alpha * A * x + beta * y
+ * 
+ * This interface allows decoupling SpMV implementations from solvers,
+ * enabling different SpMV backends to be used interchangeably.
+ */
+template <typename VALTYPE = double>
+class SpMVOperator
+{
+public:
+    virtual ~SpMVOperator() = default;
+    
+    /**
+     * @brief Perform SpMV: y = alpha * A * x + beta * y
+     * 
+     * @param d_x Input vector x (device memory)
+     * @param d_y Output vector y (device memory)
+     * @param alpha Scalar multiplier for A*x (default: 1.0)
+     * @param beta Scalar multiplier for y (default: 0.0)
+     */
+    virtual void operator()(const VALTYPE* d_x, VALTYPE* d_y, VALTYPE alpha = 1.0, VALTYPE beta = 0.0) = 0;
+    
+    /**
+     * @brief Get matrix size (number of rows/columns)
+     * 
+     * @return Matrix dimension
+     */
+    size_t size() const { return _n; }
+
+protected:
+    /**
+     * @brief Matrix dimension (number of rows/columns)
+     * Derived classes should set this during initialization/preprocessing
+     */
+    size_t _n = 0;
+};
+
+/**
  * @brief cuSPARSE-based SpMV for y = alpha * A * x + beta * y
  * 
  * This class provides a CUDA-accelerated sparse matrix-vector multiplication
@@ -28,7 +65,7 @@ namespace matrix_utils
  *   cusparseDestroy(handle);
  */
 template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
-class CuSparseSPMV
+class CuSparseSPMV : public SpMVOperator<VALTYPE>
 {
 public:
     explicit CuSparseSPMV(cusparseHandle_t handle);
@@ -62,13 +99,14 @@ public:
      * @brief Perform SpMV: y = alpha * A * x + beta * y
      * 
      * Expects device memory pointers for x and y.
+     * Implements the SpMVOperator interface.
      * 
      * @param d_x Input vector x (device memory, size n)
      * @param d_y Output vector y (device memory, size n)
      * @param alpha Scalar multiplier for A*x
      * @param beta Scalar multiplier for y
      */
-    void operator()(const VALTYPE* d_x, VALTYPE* d_y, VALTYPE alpha = 1.0, VALTYPE beta = 0.0);
+    void operator()(const VALTYPE* d_x, VALTYPE* d_y, VALTYPE alpha = 1.0, VALTYPE beta = 0.0) override;
 
     /**
      * @brief Get device memory pointers for vectors (for direct access)
@@ -77,11 +115,6 @@ public:
     VALTYPE* get_device_y() { return _d_y; }
     const VALTYPE* get_device_x() const { return _d_x; }
     const VALTYPE* get_device_y() const { return _d_y; }
-    
-    /**
-     * @brief Get matrix size
-     */
-    COLTYPE size() const { return _n; }
     
     using VALTYPE_ALIAS = VALTYPE;
 
@@ -110,7 +143,6 @@ private:
     size_t _buffer_size;
     
     // Matrix properties
-    COLTYPE _n;
     size_t _nnz;
     int _index_base;
     bool _is_initialized;

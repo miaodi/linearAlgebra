@@ -8,6 +8,7 @@
 #include <cmath>
 #include "cuda_memory.h"
 #include "cuda_preconditioner.h"
+#include "cuda_spmv.h"
 
 namespace cuda_iterative_solver
 {
@@ -83,18 +84,15 @@ public:
     /**
      * @brief Setup matrix operator for subsequent solve operations
      * 
-     * This method should be called to setup the matrix operator.
-     * Data is copied from host to device.
-     * The number of non-zeros is calculated as ia_A[n] - ia_A[0].
-     * The indexing base (0 or 1) is deduced from ia_A[0].
+     * This method sets the SpMV operator to be used by the solver.
+     * The operator must be already initialized/preprocessed before being passed.
+     * The solver does not take ownership - caller is responsible for keeping
+     * the operator alive for the duration of solver usage.
+     * The matrix size is obtained from the operator itself.
      * 
-     * @param n Matrix size
-     * @param h_ia_A Row pointers for matrix A (size n+1, host data)
-     * @param h_ja_A Column indices for matrix A (host data)
-     * @param h_va_A Values for matrix A (host data)
+     * @param spmv_operator Pointer to an SpMV operator object (does not take ownership)
      */
-    void setupOperator(size_t n,
-                      const int* h_ia_A, const int* h_ja_A, const double* h_va_A);
+    void setupOperator(matrix_utils::SpMVOperator<double>* spmv_operator);
     
     /**
      * @brief Set preconditioner for subsequent solve operations
@@ -131,8 +129,8 @@ private:
     cublasHandle_t _cublas_handle;
     cusparseHandle_t _cusparse_handle;
 
-    // Matrix and vector descriptors
-    cusparseSpMatDescr_t _mat_A;
+    // SpMV operator (not owned by solver)
+    matrix_utils::SpMVOperator<double>* _spmv_operator;
     
     // Preconditioner (not owned by solver, except for default NoPreconditioner)
     Preconditioner* _preconditioner;
@@ -158,17 +156,10 @@ private:
     int _n;
     int _current_restart;
     
-    // Matrix properties
-    size_t _matrix_n, _matrix_nnz;
-    int _index_base;
-    
     // Device memory arrays
-    DeviceArray<int> _d_ia_A, _d_ja_A;
-    DeviceArray<double> _d_va_A;
     DeviceArray<double> _d_b, _d_x;
     DeviceArray<double> _d_Q, _d_tmp, _d_w, _d_prec_tmp;
     DeviceArray<double> _d_g, _d_h_batch;
-    DeviceArray<char> _d_spmv_buffer;
     
     // Host memory arrays
     std::vector<double> _h_c, _h_s;
@@ -189,10 +180,6 @@ private:
      */
     void initialize_workspace(size_t n);
 
-    /**
-     * @brief Setup matrix A descriptor
-     */
-    void setup_matrix_descriptor();
 
     /**
      * @brief Solve the linear system Ax = b using GMRES (device interface)
