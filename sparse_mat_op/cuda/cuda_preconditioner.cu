@@ -1,5 +1,6 @@
 #include "cuda_preconditioner.h"
 #include "cuda_gmres.h"
+#include "cuda_kernels.h"
 #include <stdexcept>
 #include <cstring>
 
@@ -25,9 +26,8 @@ static void check_cuda_error(cudaError_t error, const char* message)
 // NoPreconditioner Implementation
 // ============================================================================
 
-void NoPreconditioner::operator()(cusparseHandle_t handle,
-                                  const DeviceVectorView& d_input,
-                                  DeviceVectorView& d_output)
+void NoPreconditioner::operator()(const DeviceVectorView& d_input,
+                            DeviceVectorView& d_output)
 {
     // Only copy if input and output point to different memory locations
     if (d_input.data() != d_output.data())
@@ -43,24 +43,8 @@ void NoPreconditioner::operator()(cusparseHandle_t handle,
 // JacobiPreconditioner Implementation
 // ============================================================================
 
-// CUDA kernel for element-wise division (Jacobi preconditioning)
-// Each thread processes items_per_thread elements with coalesced access pattern
-__global__ void jacobi_precond_kernel(const double* d_inv_diag, const double* d_input,
-                                      double* d_output, size_t n, int items_per_thread)
-{
-    size_t block_start = blockIdx.x * blockDim.x * items_per_thread;
-    
-    #pragma unroll
-    for (int i = 0; i < items_per_thread; ++i) {
-        size_t idx = block_start + threadIdx.x + i * blockDim.x;
-        if (idx < n) {
-            d_output[idx] = d_inv_diag[idx] * d_input[idx];
-        }
-    }
-}
-
 JacobiPreconditioner::JacobiPreconditioner()
-    : _d_inv_diag(new DeviceArray<double>())
+    : _d_inv_diag()
     , _n(0)
     , _is_setup(false)
 {
@@ -69,12 +53,11 @@ JacobiPreconditioner::JacobiPreconditioner()
 JacobiPreconditioner::~JacobiPreconditioner()
 {
     cleanup();
-    delete _d_inv_diag;
 }
 
 void JacobiPreconditioner::cleanup()
 {
-    _d_inv_diag->release();
+    _d_inv_diag.release();
     _is_setup = false;
 }
 
@@ -83,7 +66,7 @@ void JacobiPreconditioner::setup(size_t n, const double* h_diag)
     _n = n;
     
     // Allocate device memory and compute inverse diagonal
-    _d_inv_diag->resize(n);
+    _d_inv_diag.resize(n);
     
     // Copy diagonal to host buffer, compute inverse, then copy to device
     std::vector<double> inv_diag(n);
@@ -91,7 +74,7 @@ void JacobiPreconditioner::setup(size_t n, const double* h_diag)
         inv_diag[i] = (h_diag[i] == 0.0) ? 1.0 : (1.0 / h_diag[i]);
     }
     
-    _d_inv_diag->copy<MemoryLocation::Host>(inv_diag.data(), n);
+    _d_inv_diag.copy<MemoryLocation::Host>(inv_diag.data(), n);
     
     _is_setup = true;
 }
@@ -118,32 +101,27 @@ void JacobiPreconditioner::setupFromMatrix(size_t n, const int* h_ia, const int*
     setup(n, diag.data());
 }
 
-void JacobiPreconditioner::operator()(cusparseHandle_t handle,
-                                      const DeviceVectorView& d_input,
-                                      DeviceVectorView& d_output)
+void JacobiPreconditioner::operator()(const DeviceVectorView& d_input,
+                                DeviceVectorView& d_output)
 {
     if (!_is_setup) {
         throw std::runtime_error("JacobiPreconditioner::operator() called before setup");
     }
     
     // Launch kernel for element-wise multiplication by inverse diagonal
-    const int block_size = 256;
-    const int items_per_thread = 8;  // Each thread processes 8 elements
-    const int num_blocks = (_n + block_size * items_per_thread - 1) / (block_size * items_per_thread);
-    
-    jacobi_precond_kernel<<<num_blocks, block_size>>>(
-        _d_inv_diag->data(), d_input.data(), d_output.data(), _n, items_per_thread);
+    elementwiseMultiply<1>(_d_inv_diag.data(), d_input.data(), d_output.data(), _n);
     
     check_cuda_error(cudaGetLastError(), "Failed to launch Jacobi preconditioner kernel");
 }
 
 // ============================================================================
-// ILUPreconditionerBase Implementation
+// CuSparseILUPrecBase Implementation
 // ============================================================================
 
-ILUPreconditionerBase::ILUPreconditionerBase()
-    : _d_tmp(new DeviceArray<double>())
-    , _view_tmp(new DeviceVectorView())
+CuSparseILUPrecBase::CuSparseILUPrecBase(cusparseHandle_t handle)
+    : _d_tmp()
+    , _view_tmp()
+    , _cusparse_handle(handle)
     , _mat_L(nullptr)
     , _mat_U(nullptr)
     , _spv_descr_L(nullptr)
@@ -152,15 +130,12 @@ ILUPreconditionerBase::ILUPreconditionerBase()
 {
 }
 
-ILUPreconditionerBase::~ILUPreconditionerBase()
+CuSparseILUPrecBase::~CuSparseILUPrecBase()
 {
-    delete _d_tmp;
-    delete _view_tmp;
 }
 
-void ILUPreconditionerBase::operator()(cusparseHandle_t handle,
-                                       const DeviceVectorView& d_input,
-                                       DeviceVectorView& d_output)
+void CuSparseILUPrecBase::operator()(const DeviceVectorView& d_input,
+                                     DeviceVectorView& d_output)
 {
     if (!_is_setup) {
         throw std::runtime_error("ILU preconditioner operator() called before setup");
@@ -170,33 +145,33 @@ void ILUPreconditionerBase::operator()(cusparseHandle_t handle,
     
     // Solve L * tmp = input
     check_cusparse_error(
-        cusparseSpSV_solve(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
-                          _mat_L, d_input.descriptor(), _view_tmp->descriptor(),
+        cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+                          _mat_L, d_input.descriptor(), _view_tmp.descriptor(),
                           CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L),
         "Failed to solve L system in ILU preconditioner");
     
     // Solve U * output = tmp
     check_cusparse_error(
-        cusparseSpSV_solve(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
-                          _mat_U, _view_tmp->descriptor(), d_output.descriptor(),
+        cusparseSpSV_solve(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+                          _mat_U, _view_tmp.descriptor(), d_output.descriptor(),
                           CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U),
         "Failed to solve U system in ILU preconditioner");
 }
 
 // ============================================================================
-// ILUPreconditioner Implementation
+// CuSparseILUPrec Implementation
 // ============================================================================
 
-ILUPreconditioner::ILUPreconditioner()
-    : ILUPreconditionerBase()
-    , _d_ia_L(new DeviceArray<int>())
-    , _d_ja_L(new DeviceArray<int>())
-    , _d_va_L(new DeviceArray<double>())
-    , _d_ia_U(new DeviceArray<int>())
-    , _d_ja_U(new DeviceArray<int>())
-    , _d_va_U(new DeviceArray<double>())
-    , _d_buffer_L(new DeviceArray<char>())
-    , _d_buffer_U(new DeviceArray<char>())
+CuSparseILUPrec::CuSparseILUPrec(cusparseHandle_t handle)
+    : CuSparseILUPrecBase(handle)
+    , _d_ia_L()
+    , _d_ja_L()
+    , _d_va_L()
+    , _d_ia_U()
+    , _d_ja_U()
+    , _d_va_U()
+    , _d_buffer_L()
+    , _d_buffer_U()
     , _n(0)
     , _nnz_L(0)
     , _nnz_U(0)
@@ -205,30 +180,22 @@ ILUPreconditioner::ILUPreconditioner()
 {
 }
 
-ILUPreconditioner::~ILUPreconditioner()
+CuSparseILUPrec::~CuSparseILUPrec()
 {
     cleanup();
-    delete _d_ia_L;
-    delete _d_ja_L;
-    delete _d_va_L;
-    delete _d_ia_U;
-    delete _d_ja_U;
-    delete _d_va_U;
-    delete _d_buffer_L;
-    delete _d_buffer_U;
 }
 
-void ILUPreconditioner::cleanup()
+void CuSparseILUPrec::cleanup()
 {
-    _d_ia_L->release();
-    _d_ja_L->release();
-    _d_va_L->release();
-    _d_ia_U->release();
-    _d_ja_U->release();
-    _d_va_U->release();
-    _d_tmp->release();
-    _d_buffer_L->release();
-    _d_buffer_U->release();
+    _d_ia_L.release();
+    _d_ja_L.release();
+    _d_va_L.release();
+    _d_ia_U.release();
+    _d_ja_U.release();
+    _d_va_U.release();
+    _d_tmp.release();
+    _d_buffer_L.release();
+    _d_buffer_U.release();
     
     if (_mat_L) {
         cusparseDestroySpMat(_mat_L);
@@ -250,9 +217,9 @@ void ILUPreconditioner::cleanup()
     _is_setup = false;
 }
 
-void ILUPreconditioner::setup(cusparseHandle_t handle, size_t n,
-                              const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
-                              const int* h_ia_U, const int* h_ja_U, const double* h_va_U)
+void CuSparseILUPrec::setup(size_t n,
+                           const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
+                           const int* h_ia_U, const int* h_ja_U, const double* h_va_U)
 {
     cleanup();
     
@@ -271,27 +238,27 @@ void ILUPreconditioner::setup(cusparseHandle_t handle, size_t n,
     
     // Copy L factor to device
     if (_nnz_L > 0) {
-        _d_ia_L->copy<MemoryLocation::Host>(h_ia_L, n + 1);
-        _d_ja_L->copy<MemoryLocation::Host>(h_ja_L, _nnz_L);
-        _d_va_L->copy<MemoryLocation::Host>(h_va_L, _nnz_L);
+        _d_ia_L.copy<MemoryLocation::Host>(h_ia_L, n + 1);
+        _d_ja_L.copy<MemoryLocation::Host>(h_ja_L, _nnz_L);
+        _d_va_L.copy<MemoryLocation::Host>(h_va_L, _nnz_L);
     }
     
     // Copy U factor to device
     if (_nnz_U > 0) {
-        _d_ia_U->copy<MemoryLocation::Host>(h_ia_U, n + 1);
-        _d_ja_U->copy<MemoryLocation::Host>(h_ja_U, _nnz_U);
-        _d_va_U->copy<MemoryLocation::Host>(h_va_U, _nnz_U);
+        _d_ia_U.copy<MemoryLocation::Host>(h_ia_U, n + 1);
+        _d_ja_U.copy<MemoryLocation::Host>(h_ja_U, _nnz_U);
+        _d_va_U.copy<MemoryLocation::Host>(h_va_U, _nnz_U);
     }
     
     // Allocate temporary storage
-    _d_tmp->resize(n);
-    _view_tmp->create(n, _d_tmp->data());
+    _d_tmp.resize(n);
+    _view_tmp.create(n, _d_tmp.data());
     
     // Create L matrix descriptor (lower triangular with unit diagonal)
     cusparseIndexBase_t index_base_L = (_index_base_L == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE;
     check_cusparse_error(
         cusparseCreateCsr(&_mat_L, n, n, _nnz_L,
-                         _d_ia_L->data(), _d_ja_L->data(), _d_va_L->data(),
+                         _d_ia_L.data(), _d_ja_L.data(), _d_va_L.data(),
                          CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
                          index_base_L, CUDA_R_64F),
         "Failed to create L matrix descriptor");
@@ -305,7 +272,7 @@ void ILUPreconditioner::setup(cusparseHandle_t handle, size_t n,
     cusparseIndexBase_t index_base_U = (_index_base_U == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE;
     check_cusparse_error(
         cusparseCreateCsr(&_mat_U, n, n, _nnz_U,
-                         _d_ia_U->data(), _d_ja_U->data(), _d_va_U->data(),
+                         _d_ia_U.data(), _d_ja_U.data(), _d_va_U.data(),
                          CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
                          index_base_U, CUDA_R_64F),
         "Failed to create U matrix descriptor");
@@ -328,51 +295,48 @@ void ILUPreconditioner::setup(cusparseHandle_t handle, size_t n,
     dummy_output.create(n, nullptr);
     
     check_cusparse_error(
-        cusparseSpSV_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+        cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
                                _mat_L, dummy_input.descriptor(), dummy_output.descriptor(),
                                CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, &buffer_size_L),
         "Failed to get SpSV L buffer size");
-    _d_buffer_L->resize(buffer_size_L);
+    _d_buffer_L.resize(buffer_size_L);
     
     check_cusparse_error(
-        cusparseSpSV_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+        cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
                                _mat_U, dummy_input.descriptor(), dummy_output.descriptor(),
                                CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, &buffer_size_U),
         "Failed to get SpSV U buffer size");
-    _d_buffer_U->resize(buffer_size_U);
+    _d_buffer_U.resize(buffer_size_U);
     
     // Analyze phase
     check_cusparse_error(
-        cusparseSpSV_analysis(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+        cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
                              _mat_L, dummy_input.descriptor(), dummy_output.descriptor(),
-                             CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_buffer_L->data()),
+                             CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_buffer_L.data()),
         "Failed to analyze L solve");
     
     check_cusparse_error(
-        cusparseSpSV_analysis(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+        cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
                              _mat_U, dummy_input.descriptor(), dummy_output.descriptor(),
-                             CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_buffer_U->data()),
+                             CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_buffer_U.data()),
         "Failed to analyze U solve");
     
     _is_setup = true;
 }
 
 // ============================================================================
-// GPUILU0Preconditioner Implementation
+// CuSparseILU0Prec Implementation
 // ============================================================================
 
-GPUILU0Preconditioner::GPUILU0Preconditioner()
-    : ILUPreconditionerBase()
-    , _d_ia(new DeviceArray<int>())
-    , _d_ja(new DeviceArray<int>())
-    , _d_va(new DeviceArray<double>())
-    , _d_ilu0_buffer(new DeviceArray<char>())
-    , _d_buffer_L(new DeviceArray<char>())
-    , _d_buffer_U(new DeviceArray<char>())
+CuSparseILU0Prec::CuSparseILU0Prec(cusparseHandle_t handle)
+    : CuSparseILUPrecBase(handle)
+    , _d_ia()
+    , _d_ja()
+    , _d_va()
+    , _d_ilu0_buffer()
+    , _d_buffer_L()
+    , _d_buffer_U()
     , _ilu0_info(nullptr)
-    , _n(0)
-    , _nnz(0)
-    , _index_base(0)
 {
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -381,7 +345,7 @@ GPUILU0Preconditioner::GPUILU0Preconditioner()
     #pragma GCC diagnostic pop
 }
 
-GPUILU0Preconditioner::~GPUILU0Preconditioner()
+CuSparseILU0Prec::~CuSparseILU0Prec()
 {
     cleanup();
     
@@ -389,24 +353,17 @@ GPUILU0Preconditioner::~GPUILU0Preconditioner()
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     if (_ilu0_info) cusparseDestroyCsrilu02Info(_ilu0_info);
     #pragma GCC diagnostic pop
-    
-    delete _d_ia;
-    delete _d_ja;
-    delete _d_va;
-    delete _d_ilu0_buffer;
-    delete _d_buffer_L;
-    delete _d_buffer_U;
 }
 
-void GPUILU0Preconditioner::cleanup()
+void CuSparseILU0Prec::cleanup()
 {
-    _d_ia->release();
-    _d_ja->release();
-    _d_va->release();
-    _d_tmp->release();
-    _d_ilu0_buffer->release();
-    _d_buffer_L->release();
-    _d_buffer_U->release();
+    _d_ia.release();
+    _d_ja.release();
+    _d_va.release();
+    _d_tmp.release();
+    _d_ilu0_buffer.release();
+    _d_buffer_L.release();
+    _d_buffer_U.release();
     
     if (_mat_L) {
         cusparseDestroySpMat(_mat_L);
@@ -428,69 +385,65 @@ void GPUILU0Preconditioner::cleanup()
     _is_setup = false;
 }
 
-void GPUILU0Preconditioner::setup(cusparseHandle_t handle, size_t n,
-                                  const int* h_ia, const int* h_ja, const double* h_va)
+void CuSparseILU0Prec::setup(size_t n,
+                            const int* h_ia, const int* h_ja, const double* h_va)
 {
     cleanup();
     
-    _n = n;
-    _index_base = h_ia[0];
-    _nnz = h_ia[n] - h_ia[0];
+    int index_base = h_ia[0];
+    size_t nnz = h_ia[n] - h_ia[0];
     
     // Copy matrix to device
-    _d_ia->copy<MemoryLocation::Host>(h_ia, n + 1);
-    _d_ja->copy<MemoryLocation::Host>(h_ja, _nnz);
-    _d_va->copy<MemoryLocation::Host>(h_va, _nnz);
+    _d_ia.copy<MemoryLocation::Host>(h_ia, n + 1);
+    _d_ja.copy<MemoryLocation::Host>(h_ja, nnz);
+    _d_va.copy<MemoryLocation::Host>(h_va, nnz);
     
     // Allocate temporary storage
-    _d_tmp->resize(n);
-    _view_tmp->create(n, _d_tmp->data());
+    _d_tmp.resize(n);
+    _view_tmp.create(n, _d_tmp.data());
     
-    // Perform factorization
-    performFactorization(handle);
+    // Perform factorization (modifies _d_va in-place)
+    performFactorization(n, nnz, index_base, _d_ia.data(), _d_ja.data(), _d_va.data());
     
     // Setup SpSV descriptors
-    setupSpSVDescriptors(handle);
+    setupSpSVDescriptors(n, nnz, index_base, _d_ia.data(), _d_ja.data(), _d_va.data());
     
     _is_setup = true;
 }
 
-void GPUILU0Preconditioner::setupFromDevice(cusparseHandle_t handle, size_t n, size_t nnz,
-                                           const int* d_ia, const int* d_ja, const double* d_va,
-                                           int index_base)
+void CuSparseILU0Prec::setupFromDevice(size_t n, size_t nnz,
+                                      const int* d_ia, const int* d_ja, const double* d_va,
+                                      int index_base)
 {
     cleanup();
     
-    _n = n;
-    _nnz = nnz;
-    _index_base = index_base;
-    
-    // Copy matrix from device
-    _d_ia->copy<MemoryLocation::Device>(d_ia, n + 1);
-    _d_ja->copy<MemoryLocation::Device>(d_ja, nnz);
-    _d_va->copy<MemoryLocation::Device>(d_va, nnz);
+    // Copy matrix from device to our internal storage
+    _d_ia.copy<MemoryLocation::Device>(d_ia, n + 1);
+    _d_ja.copy<MemoryLocation::Device>(d_ja, nnz);
+    _d_va.copy<MemoryLocation::Device>(d_va, nnz);
     
     // Allocate temporary storage
-    _d_tmp->resize(n);
-    _view_tmp->create(n, _d_tmp->data());
+    _d_tmp.resize(n);
+    _view_tmp.create(n, _d_tmp.data());
     
-    // Perform factorization
-    performFactorization(handle);
+    // Perform factorization (modifies _d_va in-place)
+    performFactorization(n, nnz, index_base, _d_ia.data(), _d_ja.data(), _d_va.data());
     
     // Setup SpSV descriptors
-    setupSpSVDescriptors(handle);
+    setupSpSVDescriptors(n, nnz, index_base, _d_ia.data(), _d_ja.data(), _d_va.data());
     
     _is_setup = true;
 }
 
-void GPUILU0Preconditioner::performFactorization(cusparseHandle_t handle)
+void CuSparseILU0Prec::performFactorization(size_t n, size_t nnz, int index_base,
+                                           int* d_ia, int* d_ja, double* d_va)
 {
     // Create matrix descriptor for deprecated API
     cusparseMatDescr_t descr_A;
     check_cusparse_error(cusparseCreateMatDescr(&descr_A), "Failed to create matrix descriptor");
     check_cusparse_error(cusparseSetMatType(descr_A, CUSPARSE_MATRIX_TYPE_GENERAL), "Failed to set matrix type");
     check_cusparse_error(cusparseSetMatIndexBase(descr_A, 
-                        (_index_base == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE),
+                        (index_base == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE),
                         "Failed to set index base");
     
     #pragma GCC diagnostic push
@@ -499,24 +452,24 @@ void GPUILU0Preconditioner::performFactorization(cusparseHandle_t handle)
     // Get buffer size
     int buffer_size;
     check_cusparse_error(
-        cusparseDcsrilu02_bufferSize(handle, _n, _nnz,
-                                     descr_A, _d_va->data(), _d_ia->data(), _d_ja->data(),
+        cusparseDcsrilu02_bufferSize(_cusparse_handle, n, nnz,
+                                     descr_A, d_va, d_ia, d_ja,
                                      _ilu0_info, &buffer_size),
         "Failed to get ILU0 buffer size");
     
-    _d_ilu0_buffer->resize(buffer_size);
+    _d_ilu0_buffer.resize(buffer_size);
     
     // Analysis phase
     check_cusparse_error(
-        cusparseDcsrilu02_analysis(handle, _n, _nnz,
-                                   descr_A, _d_va->data(), _d_ia->data(), _d_ja->data(),
+        cusparseDcsrilu02_analysis(_cusparse_handle, n, nnz,
+                                   descr_A, d_va, d_ia, d_ja,
                                    _ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
-                                   _d_ilu0_buffer->data()),
+                                   _d_ilu0_buffer.data()),
         "Failed to analyze ILU0");
     
     // Check for structural singularity
     int structural_zero;
-    cusparseStatus_t status = cusparseXcsrilu02_zeroPivot(handle, _ilu0_info, &structural_zero);
+    cusparseStatus_t status = cusparseXcsrilu02_zeroPivot(_cusparse_handle, _ilu0_info, &structural_zero);
     if (status == CUSPARSE_STATUS_ZERO_PIVOT) {
         throw std::runtime_error("ILU0 factorization: structural zero at position " + 
                                 std::to_string(structural_zero));
@@ -524,15 +477,15 @@ void GPUILU0Preconditioner::performFactorization(cusparseHandle_t handle)
     
     // Factorization phase
     check_cusparse_error(
-        cusparseDcsrilu02(handle, _n, _nnz,
-                         descr_A, _d_va->data(), _d_ia->data(), _d_ja->data(),
+        cusparseDcsrilu02(_cusparse_handle, n, nnz,
+                         descr_A, d_va, d_ia, d_ja,
                          _ilu0_info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
-                         _d_ilu0_buffer->data()),
+                         _d_ilu0_buffer.data()),
         "Failed to perform ILU0 factorization");
     
     // Check for numerical singularity
     int numerical_zero;
-    status = cusparseXcsrilu02_zeroPivot(handle, _ilu0_info, &numerical_zero);
+    status = cusparseXcsrilu02_zeroPivot(_cusparse_handle, _ilu0_info, &numerical_zero);
     if (status == CUSPARSE_STATUS_ZERO_PIVOT) {
         throw std::runtime_error("ILU0 factorization: numerical zero at position " + 
                                 std::to_string(numerical_zero));
@@ -543,14 +496,15 @@ void GPUILU0Preconditioner::performFactorization(cusparseHandle_t handle)
     cusparseDestroyMatDescr(descr_A);
 }
 
-void GPUILU0Preconditioner::setupSpSVDescriptors(cusparseHandle_t handle)
+void CuSparseILU0Prec::setupSpSVDescriptors(size_t n, size_t nnz, int index_base_value,
+                                           const int* d_ia, const int* d_ja, const double* d_va)
 {
-    cusparseIndexBase_t index_base = (_index_base == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE;
+    cusparseIndexBase_t index_base = (index_base_value == 0) ? CUSPARSE_INDEX_BASE_ZERO : CUSPARSE_INDEX_BASE_ONE;
     
     // Create L matrix descriptor (lower triangular with unit diagonal)
     check_cusparse_error(
-        cusparseCreateCsr(&_mat_L, _n, _n, _nnz,
-                         _d_ia->data(), _d_ja->data(), _d_va->data(),
+        cusparseCreateCsr(&_mat_L, n, n, nnz,
+                         const_cast<int*>(d_ia), const_cast<int*>(d_ja), const_cast<double*>(d_va),
                          CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
                          index_base, CUDA_R_64F),
         "Failed to create ILU0 L matrix descriptor");
@@ -562,8 +516,8 @@ void GPUILU0Preconditioner::setupSpSVDescriptors(cusparseHandle_t handle)
     
     // Create U matrix descriptor (upper triangular with non-unit diagonal)
     check_cusparse_error(
-        cusparseCreateCsr(&_mat_U, _n, _n, _nnz,
-                         _d_ia->data(), _d_ja->data(), _d_va->data(),
+        cusparseCreateCsr(&_mat_U, n, n, nnz,
+                         const_cast<int*>(d_ia), const_cast<int*>(d_ja), const_cast<double*>(d_va),
                          CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
                          index_base, CUDA_R_64F),
         "Failed to create ILU0 U matrix descriptor");
@@ -581,37 +535,37 @@ void GPUILU0Preconditioner::setupSpSVDescriptors(cusparseHandle_t handle)
     size_t buffer_size_L, buffer_size_U;
     
     DeviceVectorView dummy_input, dummy_output;
-    dummy_input.create(_n, nullptr);
-    dummy_output.create(_n, nullptr);
+    dummy_input.create(n, nullptr);
+    dummy_output.create(n, nullptr);
     
     // Get buffer size for L solve
     check_cusparse_error(
-        cusparseSpSV_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+        cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
                                _mat_L, dummy_input.descriptor(), dummy_output.descriptor(),
                                CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, &buffer_size_L),
         "Failed to get SpSV L buffer size");
-    _d_buffer_L->resize(buffer_size_L);
+    _d_buffer_L.resize(buffer_size_L);
     
     // Get buffer size for U solve
     check_cusparse_error(
-        cusparseSpSV_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+        cusparseSpSV_bufferSize(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
                                _mat_U, dummy_input.descriptor(), dummy_output.descriptor(),
                                CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, &buffer_size_U),
         "Failed to get SpSV U buffer size");
-    _d_buffer_U->resize(buffer_size_U);
+    _d_buffer_U.resize(buffer_size_U);
     
     // Analyze L solve
     check_cusparse_error(
-        cusparseSpSV_analysis(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+        cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
                              _mat_L, dummy_input.descriptor(), dummy_output.descriptor(),
-                             CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_buffer_L->data()),
+                             CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_L, _d_buffer_L.data()),
         "Failed to analyze L solve");
     
     // Analyze U solve
     check_cusparse_error(
-        cusparseSpSV_analysis(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+        cusparseSpSV_analysis(_cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
                              _mat_U, dummy_input.descriptor(), dummy_output.descriptor(),
-                             CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_buffer_U->data()),
+                             CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, _spv_descr_U, _d_buffer_U.data()),
         "Failed to analyze U solve");
 }
 

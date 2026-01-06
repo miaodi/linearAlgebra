@@ -199,7 +199,7 @@ auto CAMLBSimd = [](benchmark::State &state, const auto &mat,
 
 #ifdef USE_CUDA
 template <typename VALTYPE>
-auto CudaSPMV_Bench = [](benchmark::State &state, const auto &mat,
+auto CuSparseSPMV_Bench = [](benchmark::State &state, const auto &mat,
                          const int threads, const int it) {
   // Allocate host memory
   std::vector<VALTYPE> x(mat.rows, 0.0);
@@ -215,8 +215,10 @@ auto CudaSPMV_Bench = [](benchmark::State &state, const auto &mat,
   cudaMemcpy(d_x, b.data(), mat.rows * sizeof(VALTYPE), cudaMemcpyHostToDevice);
   cudaMemcpy(d_y, x.data(), mat.rows * sizeof(VALTYPE), cudaMemcpyHostToDevice);
   
-  // Create and preprocess CUDA SpMV
-  matrix_utils::CudaSPMV<int, int, VALTYPE> cuda_spmv;
+  // Create cuSPARSE handle and preprocess CUDA SpMV
+  cusparseHandle_t handle;
+  cusparseCreate(&handle);
+  matrix_utils::CuSparseSPMV<int, int, VALTYPE> cuda_spmv(handle);
   cuda_spmv.preprocess(mat.rows, mat.ai.data(), mat.aj.data(), mat.av.data());
   
   // Warm-up run
@@ -235,6 +237,7 @@ auto CudaSPMV_Bench = [](benchmark::State &state, const auto &mat,
                           int64_t(it) * int64_t(mat.NNZ()));
   
   // Cleanup
+  cusparseDestroy(handle);
   cudaFree(d_x);
   cudaFree(d_y);
 };
@@ -313,7 +316,7 @@ int main(int argc, char **argv) {
                                iterations);
   
 #ifdef USE_CUDA
-  benchmark::RegisterBenchmark("CudaSPMV_double", CudaSPMV_Bench<double>, mat_double, num_threads,
+  benchmark::RegisterBenchmark("CuSparseSPMV_double", CuSparseSPMV_Bench<double>, mat_double, num_threads,
                                iterations);
 #endif
   
@@ -335,7 +338,7 @@ int main(int argc, char **argv) {
                                iterations);
   
 #ifdef USE_CUDA
-  benchmark::RegisterBenchmark("CudaSPMV_float", CudaSPMV_Bench<float>, mat_float, num_threads,
+  benchmark::RegisterBenchmark("CuSparseSPMV_float", CuSparseSPMV_Bench<float>, mat_float, num_threads,
                                iterations);
 #endif
   

@@ -53,6 +53,10 @@ if(USE_CUDA)
     CUDA::cublas 
     CUDA::cudart
     sparse_mat_op
+    reordering
+    solver
+    utils
+    fast_matrix_market::fast_matrix_market
     cxxopts
   )
   

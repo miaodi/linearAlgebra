@@ -25,13 +25,41 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
       continue()
    endif()
 
+   # Check if this is a CUDA benchmark
+   string(FIND ${ONE_BENCH_FILENAME} "cuda" CUDA_POS_LOWER)
+   string(FIND ${ONE_BENCH_FILENAME} "CUDA" CUDA_POS_UPPER)
+   set(IS_CUDA_BENCH FALSE)
+   if(NOT CUDA_POS_LOWER EQUAL -1 OR NOT CUDA_POS_UPPER EQUAL -1)
+      set(IS_CUDA_BENCH TRUE)
+   endif()
+
+   # Skip CUDA benchmarks if CUDA is not enabled
+   if(IS_CUDA_BENCH AND NOT USE_CUDA)
+      message(STATUS "Skipping CUDA benchmark: ${ONE_BENCH_FILENAME} (CUDA not enabled)")
+      continue()
+   endif()
+
    # Avoid name collision 
    set(TARGET_NAME Bench_${ONE_BENCH_EXEC})
 
    add_executable(${TARGET_NAME} ${ONE_BENCH_CPP})
    set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_BENCH_EXEC})
-   target_link_libraries(${TARGET_NAME} PRIVATE benchmark::benchmark reordering graph utils sparse_mat_op OpenMP::OpenMP_CXX cxxopts)
-   target_enable_simd(${TARGET_NAME})
+   
+   # CUDA benchmarks need different dependencies and settings
+   if(IS_CUDA_BENCH)
+      set_target_properties(${TARGET_NAME} PROPERTIES 
+         CUDA_STANDARD ${CMAKE_CUDA_STANDARD}
+         CUDA_STANDARD_REQUIRED ON
+      )
+      target_link_libraries(${TARGET_NAME} PRIVATE 
+         benchmark::benchmark 
+         sparse_mat_op_cuda
+         CUDA::cudart
+      )
+   else()
+      target_link_libraries(${TARGET_NAME} PRIVATE benchmark::benchmark reordering graph utils sparse_mat_op OpenMP::OpenMP_CXX cxxopts)
+      target_enable_simd(${TARGET_NAME})
+   endif()
 endforeach()
 
 # https://sparse.tamu.edu/VLSI/nv2

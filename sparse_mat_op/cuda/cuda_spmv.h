@@ -8,7 +8,7 @@ namespace matrix_utils
 {
 
 /**
- * @brief CUDA-based SpMV using cuSPARSE for y = alpha * A * x + beta * y
+ * @brief cuSPARSE-based SpMV for y = alpha * A * x + beta * y
  * 
  * This class provides a CUDA-accelerated sparse matrix-vector multiplication
  * that is compatible with the matrix_utils::SPMV wrapper interface.
@@ -20,24 +20,27 @@ namespace matrix_utils
  * - Compatible with CSR matrices in 0-based or 1-based indexing
  * 
  * Usage:
- *   CudaSPMV<int, int, double> spmv;
+ *   cusparseHandle_t handle;
+ *   cusparseCreate(&handle);
+ *   CuSparseSPMV<int, int, double> spmv(handle);
  *   spmv.preprocess(n, ia, ja, av);
- *   spmv(n, base, ia, ja, av, x, y, alpha, beta);
+ *   spmv(x, y, alpha, beta);
+ *   cusparseDestroy(handle);
  */
 template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
-class CudaSPMV
+class CuSparseSPMV
 {
 public:
-    CudaSPMV();
-    ~CudaSPMV();
+    explicit CuSparseSPMV(cusparseHandle_t handle);
+    ~CuSparseSPMV();
     
     // Delete copy constructor and copy assignment to prevent double-free
-    CudaSPMV(const CudaSPMV&) = delete;
-    CudaSPMV& operator=(const CudaSPMV&) = delete;
+    CuSparseSPMV(const CuSparseSPMV&) = delete;
+    CuSparseSPMV& operator=(const CuSparseSPMV&) = delete;
     
     // Move constructor and move assignment
-    CudaSPMV(CudaSPMV&& other) noexcept;
-    CudaSPMV& operator=(CudaSPMV&& other) noexcept;
+    CuSparseSPMV(CuSparseSPMV&& other) noexcept;
+    CuSparseSPMV& operator=(CuSparseSPMV&& other) noexcept;
 
     /**
      * @brief Preprocess the matrix structure for subsequent SpMV operations
@@ -65,11 +68,8 @@ public:
      * @param alpha Scalar multiplier for A*x
      * @param beta Scalar multiplier for y
      */
-    void operator()(const VALTYPE* d_x,
-                   VALTYPE* d_y,
-                   VALTYPE alpha = 1.0,
-                   VALTYPE beta = 0.0);
-    
+    void operator()(const VALTYPE* d_x, VALTYPE* d_y, VALTYPE alpha = 1.0, VALTYPE beta = 0.0);
+
     /**
      * @brief Get device memory pointers for vectors (for direct access)
      */

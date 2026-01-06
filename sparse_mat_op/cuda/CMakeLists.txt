@@ -6,6 +6,7 @@ set(CUDA_SOURCES
     cuda_gmres_device.cu
     cuda_spmv.cu
     cuda_preconditioner.cu
+    cuda_kernels.cu
 )
 
 add_library(${PROJECT_NAME} STATIC ${CUDA_SOURCES})

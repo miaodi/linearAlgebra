@@ -6,8 +6,8 @@ namespace matrix_utils
 {
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::CudaSPMV()
-    : _handle(nullptr)
+CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::CuSparseSPMV(cusparseHandle_t handle)
+    : _handle(handle)
     , _mat_A(nullptr)
     , _vec_x(nullptr)
     , _vec_y(nullptr)
@@ -23,21 +23,16 @@ CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::CudaSPMV()
     , _index_base(0)
     , _is_initialized(false)
 {
-    check_cusparse_error(cusparseCreate(&_handle), "Failed to create cuSPARSE handle");
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::~CudaSPMV()
+CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::~CuSparseSPMV()
 {
     cleanup();
-    if (_handle) {
-        cusparseDestroy(_handle);
-        _handle = nullptr;
-    }
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::CudaSPMV(CudaSPMV&& other) noexcept
+CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::CuSparseSPMV(CuSparseSPMV&& other) noexcept
     : _handle(other._handle)
     , _mat_A(other._mat_A)
     , _vec_x(other._vec_x)
@@ -70,7 +65,7 @@ CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::CudaSPMV(CudaSPMV&& other) noexcept
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>& CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator=(CudaSPMV&& other) noexcept
+CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>& CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator=(CuSparseSPMV&& other) noexcept
 {
     if (this != &other) {
         // Clean up existing resources
@@ -114,7 +109,7 @@ CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>& CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::operat
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::cleanup()
+void CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::cleanup()
 {
     // Destroy descriptors
     if (_mat_A) cusparseDestroySpMat(_mat_A);
@@ -144,7 +139,7 @@ void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::cleanup()
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::preprocess(COLTYPE n,
+void CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::preprocess(COLTYPE n,
                                                       const ROWTYPE* h_ia,
                                                       const COLTYPE* h_ja,
                                                       const VALTYPE* h_av)
@@ -220,13 +215,13 @@ void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::preprocess(COLTYPE n,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()(const VALTYPE* d_x,
-                                                      VALTYPE* d_y,
-                                                      VALTYPE alpha,
-                                                      VALTYPE beta)
+void CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()(const VALTYPE* d_x,
+                                                 VALTYPE* d_y,
+                                                 VALTYPE alpha,
+                                                 VALTYPE beta)
 {
     if (!_is_initialized) {
-        throw std::runtime_error("CudaSPMV: preprocess() must be called before operator()");
+        throw std::runtime_error("CuSparseSPMV: preprocess() must be called before operator()");
     }
     
     // Update vector descriptors to point to the provided device memory
@@ -248,31 +243,31 @@ void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()(const VALTYPE* d_x,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-cudaDataType CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::get_cuda_data_type()
+cudaDataType CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::get_cuda_data_type()
 {
     if constexpr (std::is_same_v<VALTYPE, double>) {
         return CUDA_R_64F;
     } else if constexpr (std::is_same_v<VALTYPE, float>) {
         return CUDA_R_32F;
     } else {
-        throw std::runtime_error("Unsupported value type for CudaSPMV");
+        throw std::runtime_error("Unsupported value type for CuSparseSPMV");
     }
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-cusparseIndexType_t CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::get_index_type()
+cusparseIndexType_t CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::get_index_type()
 {
     if constexpr (sizeof(ROWTYPE) == sizeof(int32_t)) {
         return CUSPARSE_INDEX_32I;
     } else if constexpr (sizeof(ROWTYPE) == sizeof(int64_t)) {
         return CUSPARSE_INDEX_64I;
     } else {
-        throw std::runtime_error("Unsupported index type for CudaSPMV");
+        throw std::runtime_error("Unsupported index type for CuSparseSPMV");
     }
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::check_cusparse_error(cusparseStatus_t status, const char* message)
+void CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::check_cusparse_error(cusparseStatus_t status, const char* message)
 {
     if (status != CUSPARSE_STATUS_SUCCESS) {
         throw std::runtime_error(std::string("cuSPARSE error: ") + message);
@@ -280,7 +275,7 @@ void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::check_cusparse_error(cusparseStatus_t 
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::check_cuda_error(cudaError_t error, const char* message)
+void CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::check_cuda_error(cudaError_t error, const char* message)
 {
     if (error != cudaSuccess) {
         throw std::runtime_error(std::string("CUDA error: ") + message + " - " + cudaGetErrorString(error));
@@ -288,9 +283,9 @@ void CudaSPMV<ROWTYPE, COLTYPE, VALTYPE>::check_cuda_error(cudaError_t error, co
 }
 
 // Explicit template instantiations for common types
-template class CudaSPMV<int, int, double>;
-template class CudaSPMV<int, int, float>;
-template class CudaSPMV<int64_t, int64_t, double>;
-template class CudaSPMV<int64_t, int64_t, float>;
+template class CuSparseSPMV<int, int, double>;
+template class CuSparseSPMV<int, int, float>;
+template class CuSparseSPMV<int64_t, int64_t, double>;
+template class CuSparseSPMV<int64_t, int64_t, float>;
 
 } // namespace matrix_utils

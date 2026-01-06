@@ -118,10 +118,12 @@ public:
      * Note: setupOperator() must be called before the first solve() call.
      * Multiple solve() calls can reuse the same matrix/preconditioner setup.
      * 
+     * @tparam ZeroInitialGuess If true, assumes h_x is zero and skips copy, directly initializes device memory to zero
      * @param h_b Right-hand side vector (host pointer, size n)
      * @param h_x Solution vector (host pointer, size n, input: initial guess, output: solution)
      * @return Convergence state
      */
+    template<bool ZeroInitialGuess = false>
     State solve(const double* h_b, double* h_x);
 
 private:

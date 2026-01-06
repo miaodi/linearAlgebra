@@ -42,6 +42,8 @@ option(USE_METIS_LIB "Use metis for matrix reordering" OFF)
 
 option(USE_BOOST_LIB "Use boost library" OFF)
 
+option(USE_SPECTRA_LIB "Use Spectra library for eigenvalue problems" OFF)
+
 option(USE_MKL "Use Intel MKL for optimized linear algebra operations" ON)
 
 option(USE_CUDA "Use cuda" OFF)
@@ -75,8 +77,6 @@ FetchContent_Declare(
   GIT_TAG master
   GIT_SHALLOW TRUE
 )
-
-FetchContent_MakeAvailable(Spectra)
 
 FetchContent_Declare(
   cxxopts
@@ -153,6 +153,10 @@ endif()
 
 if(USE_AMGCL_LIB)
   FetchContent_MakeAvailable(AMGCL)
+endif()
+
+if(USE_SPECTRA_LIB)
+  FetchContent_MakeAvailable(Spectra)
 endif()
 
 if(USE_MUMPS_LIB)
