@@ -75,7 +75,9 @@ int main( int argc, char** argv )
         "m,maxiter", "Maximum number of iterations",
         cxxopts::value<int>()->default_value( "10" ) )(
     "t,reltol", "Relative tolerance for convergence",
-    cxxopts::value<double>()->default_value( "1e-10" ) )( "h,help",
+    cxxopts::value<double>()->default_value( "1e-10" ) )(
+    "n,nthreads", "Number of threads for OpenMP parallelization (1=serial)",
+    cxxopts::value<int>()->default_value( "1" ) )( "h,help",
                                   "Print usage" );
     auto result = options.parse( argc, argv );
     if ( result.count( "help" ) )
@@ -92,6 +94,7 @@ int main( int argc, char** argv )
     int restart = result["restart"].as<int>();
     int maxiter = result["maxiter"].as<int>();
     double reltol = result["reltol"].as<double>();
+    int nthreads = result["nthreads"].as<int>();
 
     // Parse solver type
     std::string solver_lower = solver_type_str;
@@ -158,6 +161,7 @@ int main( int argc, char** argv )
     }
     std::cout << "  maxiter: " << maxiter << std::endl;
     std::cout << "  reltol: " << reltol << std::endl;
+    std::cout << "  nthreads: " << nthreads << std::endl;
 
     // Validate restart parameter for GMRES
     if ( solver_type == SolverType::GMRES && restart <= 0 )
@@ -265,7 +269,8 @@ int main( int argc, char** argv )
     // spmv operator
     std::cout << "spmv operator..." << std::endl;
     using CSRTYPE = typename matrix_utils::CSRMatrix<int, int, double>;
-    matrix_utils::SPMV<CSRTYPE, matrix_utils::SerialSPMV> spmv;
+    matrix_utils::SPMV<CSRTYPE, matrix_utils::ALBUSSPMV<int, int, double, matrix_utils::RowDotKernel::Scalar, matrix_utils::WorkloadMode::CAMLB>> spmv;
+    spmv._spmv.setNumThreads( nthreads );
     spmv.setMatrix( &csr_matrix );
     spmv.preprocess();
     std::cout << "spmv operator done." << std::endl;
@@ -304,6 +309,7 @@ int main( int argc, char** argv )
         gmres_solver.setRelTol( reltol );
         gmres_solver.setRestart( restart );
         gmres_solver.setPreconditionerType( precond_type );
+        gmres_solver.setNThreads( nthreads );
         state = gmres_solver( &spmv, &ilu_prec, b.data(), x.data() );
     }
     else // BiCGSTAB
@@ -313,6 +319,7 @@ int main( int argc, char** argv )
         bicgstab_solver.setMaxIter( maxiter );
         bicgstab_solver.setRelTol( reltol );
         bicgstab_solver.setPreconditionerType( precond_type );
+        bicgstab_solver.setNThreads( nthreads );
         state = bicgstab_solver( &spmv, &ilu_prec, b.data(), x.data() );
     }
 

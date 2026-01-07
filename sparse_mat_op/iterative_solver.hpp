@@ -87,6 +87,7 @@ public:
     void setRelTol(VALTYPE rel_tol) { _rel_tol = rel_tol; }
     void setRestart(size_t restart) { _restart = restart; }
     void setPreconditionerType(PreconditionerType prec_type) { _prec_type = prec_type; }
+    void setNThreads(int nthreads) { _nthreads = nthreads; }
 
     template <matrix_utils::SpmvOp Op, matrix_utils::PrecOp PrecOp>
     State operator()(Op const* const op, PrecOp const* const prec, VALTYPE const* b, VALTYPE* x)
@@ -154,7 +155,7 @@ private:
     template <matrix_utils::SpmvOp Op, matrix_utils::PrecOp PrecOp>
     VALTYPE compute_residual(Op const* op, PrecOp const* prec, VALTYPE const* b, VALTYPE const* x, size_t size)
     {
-        vec_ops::copy_vec(size, b, _tmp.data());
+        vec_ops::copy_vec(size, b, _tmp.data(), _nthreads);
         // Compute residual r = b - Ax
         (*op)(x, _tmp.data(), (VALTYPE)(-1), (VALTYPE)(1));
         if (_prec_type == PreconditionerType::LEFT)
@@ -163,7 +164,7 @@ private:
         }
         else
         {
-            vec_ops::copy_vec(size, _tmp.data(), _Q.col(0).data());
+            vec_ops::copy_vec(size, _tmp.data(), _Q.col(0).data(), _nthreads);
         }
         return _Q.col(0).norm();
     }
@@ -287,6 +288,7 @@ private:
     // VALTYPE _breakdown_tol{ 1e-14 };  // Tolerance for detecting happy breakdown
     size_t _restart{20};
     PreconditionerType _prec_type{PreconditionerType::LEFT};
+    int _nthreads{1};
     Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _H;
     Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor> _Q;
     Eigen::Matrix<VALTYPE, Eigen::Dynamic, 1> _g;
@@ -315,6 +317,7 @@ public:
     void setAbsTol(VALTYPE abs_tol) { _abs_tol = abs_tol; }
     void setRelTol(VALTYPE rel_tol) { _rel_tol = rel_tol; }
     void setPreconditionerType(PreconditionerType prec_type) { _prec_type = prec_type; }
+    void setNThreads(int nthreads) { _nthreads = nthreads; }
 
     template <matrix_utils::SpmvOp Op, matrix_utils::PrecOp PrecOp>
     State operator()(Op const* const op, PrecOp const* const prec, VALTYPE const* b, VALTYPE* x)
@@ -336,13 +339,13 @@ public:
         }
 
         // Choose arbitrary r_tilde (commonly r_tilde = r0)
-        vec_ops::copy_vec(size, _r.data(), _r_tilde.data());
+        vec_ops::copy_vec(size, _r.data(), _r_tilde.data(), _nthreads);
         // Initialize p0 = r0
-        vec_ops::copy_vec(size, _r.data(), _p.data());
+        vec_ops::copy_vec(size, _r.data(), _p.data(), _nthreads);
 
         std::fill(_x_hat.begin(), _x_hat.end(), static_cast<VALTYPE>(0));
 
-        VALTYPE rho = vec_ops::dot_product(size, _r_tilde.data(), _r.data());
+        VALTYPE rho = vec_ops::dot_product(size, _r_tilde.data(), _r.data(), _nthreads);
         // if (std::abs(rho) < _breakdown_tol)
         // {
         //     std::cout << "BiCGSTAB breakdown: initial rho = " << rho << std::endl;
@@ -359,7 +362,7 @@ public:
             // step 1.1: Compute A * p
             apply_operator_with_preconditioning(op, prec, _p.data(), _v.data());
             // step 1.2: alpha = rho / (r_tilde, v)
-            const VALTYPE rtilde_v = vec_ops::dot_product(size, _r_tilde.data(), _v.data());
+            const VALTYPE rtilde_v = vec_ops::dot_product(size, _r_tilde.data(), _v.data(), _nthreads);
             if (std::abs(rtilde_v) < _breakdown_tol)
             {
                 std::cout << "BiCGSTAB breakdown: r_tilde_v = " << rtilde_v << std::endl;
@@ -368,15 +371,15 @@ public:
             alpha = rho / rtilde_v;
 
             // step 2: Compute s = r - alpha * v
-            vec_ops::copy_vec(size, _r.data(), _s.data());
-            vec_ops::axpy(size, -alpha, _v.data(), _s.data());
+            vec_ops::copy_vec(size, _r.data(), _s.data(), _nthreads);
+            vec_ops::axpy(size, -alpha, _v.data(), _s.data(), _nthreads);
 
             // step 3: Compute omega
             // step 3.1: Compute t = A * s
             apply_operator_with_preconditioning(op, prec, _s.data(), _t.data());
             // step 3.2: omega = (t, s) / (t, t)
-            const VALTYPE t_s = vec_ops::dot_product(size, _t.data(), _s.data());
-            const VALTYPE t_t = vec_ops::dot_product(size, _t.data(), _t.data());
+            const VALTYPE t_s = vec_ops::dot_product(size, _t.data(), _s.data(), _nthreads);
+            const VALTYPE t_t = vec_ops::dot_product(size, _t.data(), _t.data(), _nthreads);
             // if (std::abs(t_t) < _breakdown_tol)
             // {
             //     std::cout << "BiCGSTAB breakdown: t_t = " << t_t << std::endl;
@@ -385,15 +388,15 @@ public:
             omega = t_s / t_t;
 
             // step 4: Update solution x_hat = x_hat + alpha * p + omega * s
-            vec_ops::axpy(size, alpha, _p.data(), _x_hat.data());
-            vec_ops::axpy(size, omega, _s.data(), _x_hat.data());
+            vec_ops::axpy(size, alpha, _p.data(), _x_hat.data(), _nthreads);
+            vec_ops::axpy(size, omega, _s.data(), _x_hat.data(), _nthreads);
 
             // step 5: Update residual r = s - omega * t
-            vec_ops::copy_vec(size, _s.data(), _r.data());
-            vec_ops::axpy(size, -omega, _t.data(), _r.data());
+            vec_ops::copy_vec(size, _s.data(), _r.data(), _nthreads);
+            vec_ops::axpy(size, -omega, _t.data(), _r.data(), _nthreads);
 
             // step 6: Check convergence
-            const VALTYPE resid = vec_ops::vec_l2_norm(size, _r.data());
+            const VALTYPE resid = vec_ops::vec_l2_norm(size, _r.data(), _nthreads);
             print_iteration_info(iter, resid, init_resid);
             if (check_convergence(resid, init_resid))
             {
@@ -401,17 +404,17 @@ public:
                 return State::CONVERGED;
             }
             // step 7: Compute beta
-            const VALTYPE rho_new = vec_ops::dot_product(size, _r_tilde.data(), _r.data());
-            if (std::abs(rho_new) < _breakdown_tol)
-            {
-                std::cout << "BiCGSTAB breakdown: rho_new = " << rho_new
-                            << std::endl;
-                return State::FAILED;
-            }
+            const VALTYPE rho_new = vec_ops::dot_product(size, _r_tilde.data(), _r.data(), _nthreads);
+            // if (std::abs(rho_new) < _breakdown_tol)
+            // {
+            //     std::cout << "BiCGSTAB breakdown: rho_new = " << rho_new
+            //                 << std::endl;
+            //     return State::FAILED;
+            // }
             const VALTYPE beta = (rho_new / rho) * (alpha / omega);
             rho = rho_new;
             // step 8: Update search direction p = r + beta * (p - omega * v)
-            vec_ops::xpay_pbw(size, _r.data(), beta, _p.data(), -omega, _v.data(), _p.data());
+            vec_ops::xpay_pbw(size, _r.data(), beta, _p.data(), -omega, _v.data(), _p.data(), _nthreads);
         }
 
         return State::MAX_ITER_REACHED;
@@ -433,15 +436,15 @@ private:
     template <matrix_utils::SpmvOp Op, matrix_utils::PrecOp PrecOp>
     VALTYPE compute_residual(Op const* op, PrecOp const* prec, VALTYPE const* b, VALTYPE const* x, size_t size)
     {
-        vec_ops::copy_vec(size, b, _r.data());
+        vec_ops::copy_vec(size, b, _r.data(), _nthreads);
         // Compute residual r = b - Ax
         (*op)(x, _r.data(), (VALTYPE)(-1), (VALTYPE)(1));
         if (_prec_type == PreconditionerType::LEFT)
         {
-            vec_ops::copy_vec(size, _r.data(), _tmp.data());
+            vec_ops::copy_vec(size, _r.data(), _tmp.data(), _nthreads);
             (*prec)(_tmp.data(), _r.data());
         }
-        return vec_ops::vec_l2_norm(size, _r.data());
+        return vec_ops::vec_l2_norm(size, _r.data(), _nthreads);
     }
 
     template <matrix_utils::SpmvOp Op, matrix_utils::PrecOp PrecOp>
@@ -469,11 +472,11 @@ private:
         if (_prec_type == PreconditionerType::RIGHT)
         {
             (*prec)(_x_hat.data(), _tmp.data());
-            vec_ops::axpy(size, 1.0, _tmp.data(), x);
+            vec_ops::axpy(size, 1.0, _tmp.data(), x, _nthreads);
         }
         else
         {
-            vec_ops::axpy(size, 1.0, _x_hat.data(), x);
+            vec_ops::axpy(size, 1.0, _x_hat.data(), x, _nthreads);
         }
     }
 
@@ -496,6 +499,7 @@ private:
     VALTYPE _rel_tol{1e-8};
     VALTYPE _breakdown_tol{1e-14}; // Tolerance for detecting breakdown
     PreconditionerType _prec_type{PreconditionerType::LEFT};
+    int _nthreads{1};
 
     // Working vectors
     std::vector<VALTYPE> _r;       // Current residual

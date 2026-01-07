@@ -52,6 +52,7 @@ void CudaBiCGSTAB::cleanup_cuda()
     _d_v.release();
     _d_s.release();
     _d_t.release();
+    _d_x_hat.release();
     _d_tmp.release();
     
     // Destroy handles
@@ -74,6 +75,7 @@ void CudaBiCGSTAB::initialize_workspace(size_t n)
     _d_v.resize(n);   // A * p (with preconditioning)
     _d_s.resize(n);   // Intermediate residual
     _d_t.resize(n);   // A * s (with preconditioning)
+    _d_x_hat.resize(n); // Accumulated solution updates
     _d_tmp.resize(n); // Temporary storage
 }
 
@@ -167,144 +169,126 @@ State CudaBiCGSTAB::deviceSolve(const DeviceVectorView& d_b, DeviceVectorView& d
     }
     
     // Initialize iteration counter
-    int iter = 0;
     _last_iterations = 0;
     
-    // Compute initial residual r = b - Ax
+    // Compute initial residual r = b - Ax (with preconditioning if LEFT)
     double init_resid = compute_initial_residual(d_b, d_x);
     if (init_resid < _abs_tol) {
         return State::CONVERGED;
     }
     
-    // Copy r to r0 (reference residual vector)
+    // Choose arbitrary r_tilde (commonly r_tilde = r0)
     _d_r0.copy<MemoryLocation::Device>(_d_r.data(), _n);
     
-    // Initialize p = r
+    // Initialize p0 = r0
     _d_p.copy<MemoryLocation::Device>(_d_r.data(), _n);
     
-    // Initialize scalars
-    double rho_old = 1.0;
-    double alpha = 1.0;
-    double omega = 1.0;
-    double resid = init_resid;
+    // Initialize _x_hat to zero
+    cudaMemset(_d_x_hat.data(), 0, static_cast<size_t>(_n) * sizeof(double));
     
-    // BiCGSTAB iteration
-    for (iter = 0; iter < _max_iter; ++iter)
+    // Initialize scalars
+    double rho, alpha = 1.0, omega = 1.0;
+    
+    // Compute initial rho = <r_tilde, r>
+    check_cublas_error(cublasDdot(_cublas_handle, _n, _d_r0.data(), 1, _d_r.data(), 1, &rho),
+                       "Failed to compute initial rho");
+    
+    // BiCGSTAB main iteration loop
+    for (size_t iter = 0; iter < _max_iter; ++iter)
     {
-        // Compute rho = <r0, r>
-        double rho;
-        check_cublas_error(cublasDdot(_cublas_handle, _n, _d_r0.data(), 1, _d_r.data(), 1, &rho),
-                           "Failed to compute rho");
-        
-        // Check for breakdown
-        if (std::abs(rho) < 1e-20) {
-            std::cerr << "BiCGSTAB: Breakdown detected (rho = " << rho << ")" << std::endl;
-            _last_iterations = iter;
-            return State::FAILED;
-        }
-        
-        // Compute beta = (rho / rho_old) * (alpha / omega)
-        double beta = (rho / rho_old) * (alpha / omega);
-        
-        // Update p: p = r + beta * (p - omega * v)
-        // First compute: p = p - omega * v
-        const double neg_omega = -omega;
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_omega, _d_v.data(), 1, _d_p.data(), 1),
-                           "Failed to update p (subtract omega*v)");
-        
-        // Then: p = r + beta * p
-        const double one = 1.0;
-        check_cublas_error(cublasDscal(_cublas_handle, _n, &beta, _d_p.data(), 1),
-                           "Failed to scale p by beta");
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_r.data(), 1, _d_p.data(), 1),
-                           "Failed to update p (add r)");
-        
-        // Compute v = A * p (with preconditioning)
+        // step 1: Compute alpha
+        // step 1.1: Compute v = A * p (with preconditioning)
         _view_prec_x.setData(_d_p.data());
         _view_prec_y.setData(_d_v.data());
         apply_operator_with_preconditioning(_view_prec_x, _view_prec_y);
         
-        // Compute alpha = rho / <r0, v>
-        double r0_dot_v;
-        check_cublas_error(cublasDdot(_cublas_handle, _n, _d_r0.data(), 1, _d_v.data(), 1, &r0_dot_v),
-                           "Failed to compute <r0, v>");
+        // step 1.2: alpha = rho / (r_tilde, v)
+        double rtilde_v;
+        check_cublas_error(cublasDdot(_cublas_handle, _n, _d_r0.data(), 1, _d_v.data(), 1, &rtilde_v),
+                           "Failed to compute <r_tilde, v>");
         
-        if (std::abs(r0_dot_v) < 1e-20) {
-            std::cerr << "BiCGSTAB: Breakdown detected (<r0, v> = " << r0_dot_v << ")" << std::endl;
-            _last_iterations = iter;
-            return State::FAILED;
-        }
+        // if (std::abs(rtilde_v) < 1e-14) {
+        //     std::cerr << "BiCGSTAB breakdown: r_tilde_v = " << rtilde_v << std::endl;
+        //     _last_iterations = iter;
+        //     return State::FAILED;
+        // }
+        alpha = rho / rtilde_v;
         
-        alpha = rho / r0_dot_v;
-        
-        // Compute s = r - alpha * v
+        // step 2: Compute s = r - alpha * v
         _d_s.copy<MemoryLocation::Device>(_d_r.data(), _n);
         const double neg_alpha = -alpha;
         check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_alpha, _d_v.data(), 1, _d_s.data(), 1),
                            "Failed to compute s");
         
-        // Check convergence on s
-        double s_norm;
-        check_cublas_error(cublasDnrm2(_cublas_handle, _n, _d_s.data(), 1, &s_norm),
-                           "Failed to compute ||s||");
-        
-        if (check_convergence(s_norm, init_resid)) {
-            // Update solution: x = x + alpha * p
-            check_cublas_error(cublasDaxpy(_cublas_handle, _n, &alpha, _d_p.data(), 1, d_x.data(), 1),
-                               "Failed to update solution");
-            _last_iterations = iter + 1;
-            return State::CONVERGED;
-        }
-        
-        // Compute t = A * s (with preconditioning)
+        // step 3: Compute omega
+        // step 3.1: Compute t = A * s (with preconditioning)
         _view_prec_x.setData(_d_s.data());
         _view_prec_y.setData(_d_t.data());
         apply_operator_with_preconditioning(_view_prec_x, _view_prec_y);
         
-        // Compute omega = <t, s> / <t, t>
-        double t_dot_s, t_dot_t;
-        check_cublas_error(cublasDdot(_cublas_handle, _n, _d_t.data(), 1, _d_s.data(), 1, &t_dot_s),
+        // step 3.2: omega = (t, s) / (t, t)
+        double t_s, t_t;
+        check_cublas_error(cublasDdot(_cublas_handle, _n, _d_t.data(), 1, _d_s.data(), 1, &t_s),
                            "Failed to compute <t, s>");
-        check_cublas_error(cublasDdot(_cublas_handle, _n, _d_t.data(), 1, _d_t.data(), 1, &t_dot_t),
+        check_cublas_error(cublasDdot(_cublas_handle, _n, _d_t.data(), 1, _d_t.data(), 1, &t_t),
                            "Failed to compute <t, t>");
+        omega = t_s / t_t;
         
-        if (std::abs(t_dot_t) < 1e-20) {
-            std::cerr << "BiCGSTAB: Breakdown detected (<t, t> = " << t_dot_t << ")" << std::endl;
-            _last_iterations = iter;
-            return State::FAILED;
-        }
+        // step 4: Update solution x_hat = x_hat + alpha * p + omega * s
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &alpha, _d_p.data(), 1, _d_x_hat.data(), 1),
+                           "Failed to update x_hat (alpha*p)");
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &omega, _d_s.data(), 1, _d_x_hat.data(), 1),
+                           "Failed to update x_hat (omega*s)");
         
-        omega = t_dot_s / t_dot_t;
-        
-        // Update solution: x = x + alpha * p + omega * s
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &alpha, _d_p.data(), 1, d_x.data(), 1),
-                           "Failed to update solution (alpha*p)");
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &omega, _d_s.data(), 1, d_x.data(), 1),
-                           "Failed to update solution (omega*s)");
-        
-        // Update residual: r = s - omega * t
+        // step 5: Update residual r = s - omega * t
         _d_r.copy<MemoryLocation::Device>(_d_s.data(), _n);
-        const double neg_omega2 = -omega;
-        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_omega2, _d_t.data(), 1, _d_r.data(), 1),
+        const double neg_omega = -omega;
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_omega, _d_t.data(), 1, _d_r.data(), 1),
                            "Failed to update residual");
         
-        // Compute residual norm
+        // step 6: Check convergence
+        double resid;
         check_cublas_error(cublasDnrm2(_cublas_handle, _n, _d_r.data(), 1, &resid),
                            "Failed to compute residual norm");
         
-        // Update rho_old for next iteration
-        rho_old = rho;
+        print_iteration_info(iter, resid, init_resid);
         
-        print_iteration_info(iter + 1, resid, init_resid);
-        
-        // Check convergence
         if (check_convergence(resid, init_resid)) {
             _last_iterations = iter + 1;
+            update_solution(d_x);
             return State::CONVERGED;
         }
+        
+        // step 7: Compute beta
+        double rho_new;
+        check_cublas_error(cublasDdot(_cublas_handle, _n, _d_r0.data(), 1, _d_r.data(), 1, &rho_new),
+                           "Failed to compute rho_new");
+        
+        // if (std::abs(rho_new) < 1e-14) {
+        //     std::cerr << "BiCGSTAB breakdown: rho_new = " << rho_new << std::endl;
+        //     _last_iterations = iter + 1;
+        //     return State::FAILED;
+        // }
+        
+        const double beta = (rho_new / rho) * (alpha / omega);
+        rho = rho_new;
+        
+        // step 8: Update search direction p = r + beta * (p - omega * v)
+        // This implements: p = r + beta * p - beta * omega * v
+        // First: p = p - omega * v
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &neg_omega, _d_v.data(), 1, _d_p.data(), 1),
+                           "Failed to update p (subtract omega*v)");
+        
+        // Then: p = r + beta * p
+        check_cublas_error(cublasDscal(_cublas_handle, _n, &beta, _d_p.data(), 1),
+                           "Failed to scale p by beta");
+        const double one = 1.0;
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_r.data(), 1, _d_p.data(), 1),
+                           "Failed to update p (add r)");
     }
     
-    _last_iterations = iter;
+    _last_iterations = _max_iter;
+    update_solution(d_x);
     return State::MAX_ITER_REACHED;
 }
 
@@ -353,6 +337,24 @@ void CudaBiCGSTAB::apply_operator_with_preconditioning(const DeviceVectorView& d
         // No preconditioning: A * input
         _spmv_operator->operator()(d_input.data(), d_output.data(), 1.0, 0.0);
         break;
+    }
+}
+
+void CudaBiCGSTAB::update_solution(DeviceVectorView& d_x)
+{
+    if (_prec_type == PreconditionerType::RIGHT) {
+        // Right preconditioning: x = x + M^{-1} * x_hat
+        _view_prec_x.setData(_d_x_hat.data());
+        _view_prec_y.setData(_d_tmp.data());
+        _preconditioner->operator()(_view_prec_x, _view_prec_y);
+        const double one = 1.0;
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_tmp.data(), 1, d_x.data(), 1),
+                           "Failed to update solution with preconditioned x_hat");
+    } else {
+        // Left or no preconditioning: x = x + x_hat
+        const double one = 1.0;
+        check_cublas_error(cublasDaxpy(_cublas_handle, _n, &one, _d_x_hat.data(), 1, d_x.data(), 1),
+                           "Failed to update solution with x_hat");
     }
 }
 

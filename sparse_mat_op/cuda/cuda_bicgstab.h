@@ -142,6 +142,7 @@ private:
     // t: A * s (with preconditioning)
     DeviceArray<double> _d_b, _d_x;
     DeviceArray<double> _d_r0, _d_r, _d_p, _d_v, _d_s, _d_t;
+    DeviceArray<double> _d_x_hat; // Accumulated solution updates
     DeviceArray<double> _d_tmp;  // Temporary storage
     
     /**
@@ -173,6 +174,11 @@ private:
      * @brief Apply matrix-vector product with preconditioning
      */
     void apply_operator_with_preconditioning(const DeviceVectorView& d_input, DeviceVectorView& d_output);
+
+    /**
+     * @brief Update solution x = x + (M^{-1})_x_hat
+     */
+    void update_solution(DeviceVectorView& d_x);
 
     /**
      * @brief Check convergence criteria
