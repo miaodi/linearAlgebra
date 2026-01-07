@@ -55,11 +55,13 @@ public:
 
 int main( int argc, char** argv )
 {
-    cxxopts::Options options( "GMRES Example",
-                              "Example of using GMRES with a CSR matrix" );
+    cxxopts::Options options( "Iterative Solver Example",
+                              "Example of using iterative solvers with a CSR matrix" );
     options.add_options()( "f,filename", "Matrix Market file to read",
                            cxxopts::value<std::string>()->default_value(
                                "../tests/data/ex5.mtx" ) )(
+        "s,solver", "Solver type: gmres or bicgstab",
+        cxxopts::value<std::string>()->default_value( "gmres" ) )(
         "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )(
         "F,factorization", "ILU variant: iluk or ilut",
         cxxopts::value<std::string>()->default_value( "iluk" ) )(
@@ -68,11 +70,11 @@ int main( int argc, char** argv )
         "Preconditioner type: none (no preconditioning), left (M^-1 A x = M^-1 "
         "b), right (A M^-1 y = b)",
         cxxopts::value<std::string>()->default_value( "none" ) )(
-        "r,restart", "GMRES restart parameter",
+        "r,restart", "GMRES restart parameter (ignored for BiCGSTAB)",
         cxxopts::value<int>()->default_value( "20" ) )(
-        "m,maxiter", "Maximum number of GMRES iterations",
+        "m,maxiter", "Maximum number of iterations",
         cxxopts::value<int>()->default_value( "10" ) )(
-    "t,reltol", "Relative tolerance for GMRES convergence",
+    "t,reltol", "Relative tolerance for convergence",
     cxxopts::value<double>()->default_value( "1e-10" ) )( "h,help",
                                   "Print usage" );
     auto result = options.parse( argc, argv );
@@ -82,6 +84,7 @@ int main( int argc, char** argv )
         return 0;
     }
     std::string filename = result["filename"].as<std::string>();
+    std::string solver_type_str = result["solver"].as<std::string>();
     int level = result["level"].as<int>();
     std::string precond_type_str = result["precond"].as<std::string>();
     std::string factorization_str = result["factorization"].as<std::string>();
@@ -89,6 +92,31 @@ int main( int argc, char** argv )
     int restart = result["restart"].as<int>();
     int maxiter = result["maxiter"].as<int>();
     double reltol = result["reltol"].as<double>();
+
+    // Parse solver type
+    std::string solver_lower = solver_type_str;
+    std::transform( solver_lower.begin(), solver_lower.end(),
+                    solver_lower.begin(), []( unsigned char c ) { return std::tolower( c ); } );
+    enum class SolverType
+    {
+        GMRES,
+        BICGSTAB
+    };
+    SolverType solver_type;
+    if ( solver_lower == "gmres" )
+    {
+        solver_type = SolverType::GMRES;
+    }
+    else if ( solver_lower == "bicgstab" )
+    {
+        solver_type = SolverType::BICGSTAB;
+    }
+    else
+    {
+        std::cerr << "Invalid solver type: " << solver_type_str
+                  << ". Valid options are: gmres, bicgstab" << std::endl;
+        return -1;
+    }
 
     std::string factorization_lower = factorization_str;
     std::transform( factorization_lower.begin(), factorization_lower.end(),
@@ -116,6 +144,7 @@ int main( int argc, char** argv )
 
     std::cout << "Options:" << std::endl;
     std::cout << "  filename: " << filename << std::endl;
+    std::cout << "  solver: " << solver_type_str << std::endl;
     std::cout << "  level: " << level << std::endl;
     std::cout << "  factorization: " << factorization_str << std::endl;
     if ( factorization == Factorization::ILUT )
@@ -123,12 +152,15 @@ int main( int argc, char** argv )
         std::cout << "  droptol: " << droptol << std::endl;
     }
     std::cout << "  precond: " << precond_type_str << std::endl;
-    std::cout << "  restart: " << restart << std::endl;
+    if ( solver_type == SolverType::GMRES )
+    {
+        std::cout << "  restart: " << restart << std::endl;
+    }
     std::cout << "  maxiter: " << maxiter << std::endl;
     std::cout << "  reltol: " << reltol << std::endl;
 
-    // Validate restart parameter
-    if ( restart <= 0 )
+    // Validate restart parameter for GMRES
+    if ( solver_type == SolverType::GMRES && restart <= 0 )
     {
         std::cerr << "Invalid restart parameter: " << restart
                   << ". Must be a positive integer." << std::endl;
@@ -157,7 +189,10 @@ int main( int argc, char** argv )
     }
 
     std::cout << "Using preconditioner type: " << precond_type_str << std::endl;
-    std::cout << "Using restart parameter: " << restart << std::endl;
+    if ( solver_type == SolverType::GMRES )
+    {
+        std::cout << "Using restart parameter: " << restart << std::endl;
+    }
 
     std::ifstream f( filename );
     f.clear();
@@ -257,18 +292,31 @@ int main( int argc, char** argv )
     //   x[i] = dis(gen);
     // }
 
-    std::cout
-        << "Generated random b and x vectors (uniform distribution [-1, 1])"
-        << std::endl;
-    std::cout << "GMRES..." << std::endl;
-    iterative_solver::GMRES<double> gmres_solver;
-    gmres_solver.setMaxIter( maxiter );
-    gmres_solver.setRelTol( reltol );
-    gmres_solver.setRestart( restart );
-    gmres_solver.setPreconditionerType( precond_type );
-    auto state = gmres_solver( &spmv, &ilu_prec, b.data(), x.data() );
+    std::cout << "Generated b and x vectors" << std::endl;
+    
+    iterative_solver::State state;
+    
+    if ( solver_type == SolverType::GMRES )
+    {
+        std::cout << "Running GMRES..." << std::endl;
+        iterative_solver::GMRES<double> gmres_solver;
+        gmres_solver.setMaxIter( maxiter );
+        gmres_solver.setRelTol( reltol );
+        gmres_solver.setRestart( restart );
+        gmres_solver.setPreconditionerType( precond_type );
+        state = gmres_solver( &spmv, &ilu_prec, b.data(), x.data() );
+    }
+    else // BiCGSTAB
+    {
+        std::cout << "Running BiCGSTAB..." << std::endl;
+        iterative_solver::BICGSTAB<double> bicgstab_solver;
+        bicgstab_solver.setMaxIter( maxiter );
+        bicgstab_solver.setRelTol( reltol );
+        bicgstab_solver.setPreconditionerType( precond_type );
+        state = bicgstab_solver( &spmv, &ilu_prec, b.data(), x.data() );
+    }
 
-    std::cout << "GMRES done. Final state: ";
+    std::cout << "Solver done. Final state: ";
     switch ( state )
     {
     case iterative_solver::State::CONVERGED:
