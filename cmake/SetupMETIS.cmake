@@ -29,6 +29,12 @@ message(STATUS "Fetching METIS and GKlib from GitHub...")
 
 include(FetchContent)
 
+# Set policy to allow FetchContent_Populate for patching purposes
+# We need to use Populate to patch files before building
+if(POLICY CMP0169)
+  cmake_policy(SET CMP0169 OLD)
+endif()
+
 # Declare METIS and GKlib
 FetchContent_Declare(
   METIS
@@ -47,7 +53,13 @@ FetchContent_Declare(
 # Fetch and build GKlib first (dependency of METIS)
 FetchContent_GetProperties(GKlib)
 if(NOT gklib_POPULATED)
-  FetchContent_Populate(GKlib)
+  # Patch GKlib CMakeLists.txt before making available
+  FetchContent_GetProperties(GKlib SOURCE_DIR gklib_SOURCE_DIR)
+  if(NOT gklib_SOURCE_DIR)
+    # Need to populate to get source dir for patching
+    FetchContent_Populate(GKlib)
+    FetchContent_GetProperties(GKlib SOURCE_DIR gklib_SOURCE_DIR BINARY_DIR gklib_BINARY_DIR)
+  endif()
   
   # Patch GKlib CMakeLists.txt to fix CMake version if needed
   file(READ "${gklib_SOURCE_DIR}/CMakeLists.txt" GKLIB_CMAKE_CONTENT)
@@ -58,12 +70,19 @@ if(NOT gklib_POPULATED)
   
   # Build GKlib
   add_subdirectory(${gklib_SOURCE_DIR} ${gklib_BINARY_DIR})
+  set(gklib_POPULATED TRUE)
 endif()
 
 # Now fetch and build METIS
 FetchContent_GetProperties(METIS)
 if(NOT metis_POPULATED)
-  FetchContent_Populate(METIS)
+  # Patch METIS before making available
+  FetchContent_GetProperties(METIS SOURCE_DIR metis_SOURCE_DIR)
+  if(NOT metis_SOURCE_DIR)
+    # Need to populate to get source dir for patching
+    FetchContent_Populate(METIS)
+    FetchContent_GetProperties(METIS SOURCE_DIR metis_SOURCE_DIR BINARY_DIR metis_BINARY_DIR)
+  endif()
   
   # Patch METIS CMakeLists.txt to fix CMake version requirement and remove build/xinclude subdirectory
   file(READ "${metis_SOURCE_DIR}/CMakeLists.txt" METIS_CMAKE_CONTENT)
@@ -117,6 +136,7 @@ if(NOT metis_POPULATED)
   
   # Add METIS to the build
   add_subdirectory(${metis_SOURCE_DIR} ${metis_BINARY_DIR})
+  set(metis_POPULATED TRUE)
 endif()
 
 # METIS doesn't export proper targets by default, so we create an alias
