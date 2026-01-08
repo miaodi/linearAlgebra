@@ -30,7 +30,7 @@ namespace cuda_iterative_solver
  * Algorithm:
  * - BiCGSTAB is a variant of the BiCG method that uses a two-term recurrence
  * - Typically converges faster than GMRES for some problems
- * - Requires 7 vectors: r0, r, p, v, s, t, and temporary storage
+ * - Requires 8 vectors: r0, r, p, v, s, t, x_hat and temporary storage
  */
 class CudaBiCGSTAB
 {
