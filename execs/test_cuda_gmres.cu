@@ -17,6 +17,7 @@
 #include <iostream>
 #include <random>
 #include <vector>
+#include <nvtx3/nvToolsExt.h>
 #include "spadd.hpp"
 #include "sp_ops.hpp"
 using namespace cuda_iterative_solver;
@@ -606,6 +607,11 @@ int main( int argc, char** argv )
         State result;
         auto start_time = std::chrono::high_resolution_clock::now();
         
+        // Create CUDA events for profiling
+        cudaEvent_t solve_start, solve_stop;
+        cudaEventCreate(&solve_start);
+        cudaEventCreate(&solve_stop);
+        
         if (use_bicgstab) {
             // Create and configure BiCGSTAB solver
             CudaBiCGSTAB solver;
@@ -634,7 +640,12 @@ int main( int argc, char** argv )
             
             // Solve the system (use working_rhs which may be reordered)
             std::cout << "Solving linear system..." << std::endl;
+            nvtxRangePush("BiCGSTAB_Solve");
+            cudaEventRecord(solve_start);
             result = solver.solve<true>( working_rhs.data(), x_host.data() );
+            cudaEventRecord(solve_stop);
+            cudaEventSynchronize(solve_stop);
+            nvtxRangePop();
         } else {
             // Create and configure GMRES solver
             CudaGMRES solver;
@@ -665,14 +676,28 @@ int main( int argc, char** argv )
             
             // Solve the system (use working_rhs which may be reordered)
             std::cout << "Solving linear system..." << std::endl;
+            nvtxRangePush("GMRES_Solve");
+            cudaEventRecord(solve_start);
             result = solver.solve<true>( working_rhs.data(), x_host.data() );
+            cudaEventRecord(solve_stop);
+            cudaEventSynchronize(solve_stop);
+            nvtxRangePop();
         }
+        
+        // Calculate solve time
+        float solve_time_ms = 0;
+        cudaEventElapsedTime(&solve_time_ms, solve_start, solve_stop);
         
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration =
             std::chrono::duration_cast<std::chrono::milliseconds>( end_time - start_time );
 
-        std::cout << "Solver completed in " << duration.count() << " ms" << std::endl;
+        std::cout << "Solver completed in " << duration.count() << " ms (total), "
+                  << solve_time_ms << " ms (GPU solve time)" << std::endl;
+        
+        // Clean up CUDA events
+        cudaEventDestroy(solve_start);
+        cudaEventDestroy(solve_stop);
 
         // Apply inverse permutation to solution if reordering was used
         if (perm)
