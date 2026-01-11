@@ -5,6 +5,7 @@
 #include "sparse_mat_traits.hpp"
 #include <deque>
 #include <forward_list>
+#include <limits>
 #include <map>
 #include <omp.h>
 #include <ranges>
@@ -138,6 +139,9 @@ private:
   std::deque<typename CSRMatrixType::COLTYPE> _q; // queue of pivot candidates < i
 };
 
+// GS-Urow ILU(k) symbolic factorization with parallel U-row construction
+// New sequential and scalable parallel algorithms for incomplete LU factor preconditioning
+// Hysom 2001
 template <ResizableDiagonal CSRMatrixType, bool keepdiag = false>
 class ILULevelSymbolicParallelU
 {
@@ -158,6 +162,36 @@ private:
     std::vector<std::vector<COLTYPE>> _Q;
     std::vector<std::vector<COLTYPE>> _Q_next;
     std::vector<std::vector<COLTYPE>> _Ui;
+};
+
+// GS-Lrow ILU(k) symbolic factorization with parallel L-row construction
+// Similar to ILULevelSymbolicParallelU but constructs L rows instead of U rows
+template <ResizableDiagonal CSRMatrixType, bool keepdiag = false>
+class ILULevelSymbolicParallelL
+{
+public:
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+    
+    struct NodeInfo {
+        COLTYPE index;
+        COLTYPE peak;
+    };
+    
+    ILULevelSymbolicParallelL(const int nthreads)
+        : _nthreads(nthreads), _visited(nthreads), _Q(nthreads), _Q_next(nthreads), _Li(nthreads)
+    {
+    }
+
+    bool operator()(const typename CSRMatrixType::COLTYPE size, typename CSRMatrixType::ROWTYPE const* ai,
+                    typename CSRMatrixType::COLTYPE const* aj, const int lvl, CSRMatrixType& L);
+
+private:
+    int _nthreads;
+    std::vector<std::vector<NodeInfo>> _visited;
+    std::vector<std::vector<NodeInfo>> _Q;
+    std::vector<std::vector<NodeInfo>> _Q_next;
+    std::vector<std::vector<COLTYPE>> _Li;
 };
 
 template <ResizableDiagonal CSRMatrixType>

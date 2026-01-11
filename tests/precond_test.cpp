@@ -14,7 +14,13 @@ using namespace matrix_utils;
 // The fixture for testing class Foo.
 class precond_Test : public testing::Test {
 protected:
-  std::vector<mkl_wrapper::mkl_sparse_mat> _mats;
+  struct MatrixInfo {
+    mkl_wrapper::mkl_sparse_mat mat;
+    bool is_spd;
+    std::string name;
+  };
+  
+  std::vector<MatrixInfo> _mats;
 
   const double _tol = 1e-14;
   const double _MKLtol = 1e-13;
@@ -29,9 +35,29 @@ protected:
     f.open("data/nos5.mtx");
     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
     f.close();
-    _mats.push_back(mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
+    _mats.push_back({mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
                                                 csr_rows.size() - 1, csr_rows,
-                                                csr_cols, csr_vals));
+                                                csr_cols, csr_vals), true, "nos5"});
+    
+    csr_rows.clear();
+    csr_cols.clear();
+    csr_vals.clear();
+    f.open("data/bcsstk17.mtx");
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    f.close();
+    _mats.push_back({mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
+                                                csr_rows.size() - 1, csr_rows,
+                                                csr_cols, csr_vals), true, "bcsstk17"});
+    
+    csr_rows.clear();
+    csr_cols.clear();
+    csr_vals.clear();
+    f.open("data/ex27.mtx");
+    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    f.close();
+    _mats.push_back({mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
+                                                csr_rows.size() - 1, csr_rows,
+                                                csr_cols, csr_vals), false, "ex27"});
   }
 
   ~precond_Test() override {
@@ -61,9 +87,14 @@ int main(int argc, char **argv) {
 }
 
 TEST_F(precond_Test, icc_level_symbolic_factorize) {
-  for (auto &mat : _mats) {
+  for (auto &mat_info : _mats) {
+    if (!mat_info.is_spd) {
+      std::cout << "Skipping " << mat_info.name << " (not SPD)" << std::endl;
+      continue;
+    }
+    auto &mat = mat_info.mat;
     const int lvl = 3;
-    std::cout << "size: " << mat.rows() << std::endl;
+    std::cout << "Testing " << mat_info.name << ", size: " << mat.rows() << std::endl;
     matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC0, ICC1, ICC2, ICC3;
     matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
         mat.rows(), mat.mkl_base(), mat.get_ai().get(), mat.get_aj().get(),
@@ -127,9 +158,14 @@ TEST_F(precond_Test, icc_level_symbolic_factorize) {
 }
 
 TEST_F(precond_Test, icc_level_numeric_factorize) {
-  for (auto &mat : _mats) {
+  for (auto &mat_info : _mats) {
+    if (!mat_info.is_spd) {
+      std::cout << "Skipping " << mat_info.name << " (not SPD)" << std::endl;
+      continue;
+    }
+    auto &mat = mat_info.mat;
     const int lvl = 3;
-    std::cout << "size: " << mat.rows() << std::endl;
+    std::cout << "Testing " << mat_info.name << ", size: " << mat.rows() << std::endl;
     matrix_utils::CSRMatrix<MKL_INT, MKL_INT, double> U, ICC0, ICC1, ICC2, ICC3;
     matrix_utils::SplitTriangle<matrix_utils::TriangularMatrix::U>(
         mat.rows(), mat.mkl_base(), mat.get_ai().get(), mat.get_aj().get(),
@@ -160,17 +196,19 @@ TEST_F(precond_Test, icc_level_numeric_factorize) {
       EXPECT_EQ(prec->get_aj()[i], ICC0.aj[i]);
     }
 
-    for (int i = 0; i < prec->nnz(); i++) {
-      if (prec->get_av()[i] != ICC0.av[i])
-        std::cout << std::setprecision(16) << i << " " << prec->get_av()[i]
-                  << " " << ICC0.av[i] << std::endl;
-      // EXPECT_EQ(prec->get_av()[i], ICC0.av[i]);
-    }
+    // for (int i = 0; i < prec->nnz(); i++) {
+    //   if (prec->get_av()[i] != ICC0.av[i])
+    //     std::cout << std::setprecision(16) << i << " " << prec->get_av()[i]
+    //               << " " << ICC0.av[i] << std::endl;
+    //   // EXPECT_EQ(prec->get_av()[i], ICC0.av[i]);
+    // }
   }
 }
 
 TEST_F(precond_Test, ilu_level_symbolic_parallel_matches_upper) {
-  for (auto &mat : _mats) {
+  for (auto &mat_info : _mats) {
+    auto &mat = mat_info.mat;
+    std::cout << "Testing " << mat_info.name << std::endl;
     const auto base = mat.mkl_base();
     const auto size = mat.rows();
     ILULevelSymbolic<CSRMatrix<MKL_INT, MKL_INT, double>> serial;
@@ -204,6 +242,54 @@ TEST_F(precond_Test, ilu_level_symbolic_parallel_matches_upper) {
       for (MKL_INT row = 0; row < size; ++row) {
         auto expected = upper_cols(ilu_serial, row);
         auto actual = upper_cols(ilu_parallel, row);
+        ASSERT_EQ(expected.size(), actual.size())
+            << "lvl=" << lvl << " row=" << row;
+        for (size_t i = 0; i < expected.size(); ++i) {
+          EXPECT_EQ(expected[i], actual[i])
+              << "lvl=" << lvl << " row=" << row << " idx=" << i;
+        }
+      }
+    }
+  }
+}
+
+TEST_F(precond_Test, ilu_level_symbolic_parallel_matches_lower) {
+  for (auto &mat_info : _mats) {
+    auto &mat = mat_info.mat;
+    std::cout << "Testing " << mat_info.name << std::endl;
+    const auto base = mat.mkl_base();
+    const auto size = mat.rows();
+    ILULevelSymbolic<CSRMatrix<MKL_INT, MKL_INT, double>> serial;
+    ILULevelSymbolicParallelL<CSRMatrix<MKL_INT, MKL_INT, double>> parallel(4);
+
+    auto lower_cols = [base](const CSRMatrix<MKL_INT, MKL_INT, double> &m,
+                             MKL_INT row) {
+      std::vector<MKL_INT> cols;
+      for (auto idx = m.ai[row] - base; idx < m.ai[row + 1] - base; ++idx) {
+        auto c = m.aj[idx] - base;
+        if (c < row)
+          cols.push_back(c);
+      }
+      return cols;
+    };
+
+    for (int lvl = 0; lvl <= 5; ++lvl) {
+      CSRMatrix<MKL_INT, MKL_INT, double> ilu_serial;
+      CSRMatrix<MKL_INT, MKL_INT, double> ilu_parallel;
+
+      ASSERT_TRUE(serial(size, mat.get_ai().get(), mat.get_aj().get(), lvl,
+                         ilu_serial));
+      const bool ok_parallel =
+          parallel(size, mat.get_ai().get(), mat.get_aj().get(), lvl,
+                   ilu_parallel);
+      if (!ok_parallel) {
+        GTEST_SKIP() << "ILULevelSymbolicParallelL not implemented for lvl="
+                     << lvl;
+      }
+
+      for (MKL_INT row = 0; row < size; ++row) {
+        auto expected = lower_cols(ilu_serial, row);
+        auto actual = lower_cols(ilu_parallel, row);
         ASSERT_EQ(expected.size(), actual.size())
             << "lvl=" << lvl << " row=" << row;
         for (size_t i = 0; i < expected.size(); ++i) {

@@ -77,3 +77,8 @@ download_sparse_matrix("rdist1" ${CMAKE_CURRENT_BINARY_DIR}/data)
 # 468
 # spd
 download_sparse_matrix("nos5" ${CMAKE_CURRENT_BINARY_DIR}/data)
+
+# https://sparse.tamu.edu/FIDAP/ex27
+# 974
+# not spd
+download_sparse_matrix("ex27" ${CMAKE_CURRENT_BINARY_DIR}/data)

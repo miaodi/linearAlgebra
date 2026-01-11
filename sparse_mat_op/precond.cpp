@@ -984,7 +984,7 @@ bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYP
             _Ui[i].clear();
             if constexpr (keepdiag)
             {
-                _Ui[i].push_back(i);
+                _Ui[i].push_back(i + base);
             }
             while (level <= lvl && Q_thread.size())
             {
@@ -1004,14 +1004,14 @@ bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYP
                         }
                         else if (col > i)
                         {
-                            _Ui[i].push_back(col);
+                            _Ui[i].push_back(col + base);
                         }
                     }
                 }
                 level++;
                 std::swap(Q_thread, Q_next_thread);
             }
-            std::sort(_Ui[i].begin(), _Ui[i].end());
+            std::sort(_Ui[i].begin() + keepdiag, _Ui[i].end());
             u_ai[i + 1] = static_cast<ROWTYPE>(_Ui[i].size());
         }
     }
@@ -1035,6 +1035,148 @@ bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYP
         }
     }
     
+    return true;
+}
+
+template <ResizableDiagonal CSRMatrixType, bool keepdiag>
+bool ILULevelSymbolicParallelL<CSRMatrixType, keepdiag>::operator()(const COLTYPE size,
+                                                                    ROWTYPE const* ai, COLTYPE const* aj,
+                                                                    const int lvl, CSRMatrixType& L)
+{
+    L.rows = size;
+    L.cols = size;
+    _Li.resize(size);
+    const auto base = ai[0];
+    L.ResizeAI(size + 1);
+    auto* l_ai = L.AI();
+    l_ai[0] = base;
+    const int reserve_size = 64;
+    const int chunk_size = 32;
+    const COLTYPE not_visited = std::numeric_limits<COLTYPE>::max();
+    const COLTYPE invalid_peak = std::numeric_limits<COLTYPE>::max();
+
+#pragma omp parallel num_threads(_nthreads)
+    {
+        const int tid = omp_get_thread_num();
+        auto& visited_thread = _visited[tid];
+        visited_thread.resize(size);
+
+        auto& Q_thread = _Q[tid];
+        auto& Q_next_thread = _Q_next[tid];
+        Q_thread.reserve(reserve_size);
+        Q_next_thread.reserve(reserve_size);
+
+        std::vector<COLTYPE> touched_indices;
+        touched_indices.reserve(reserve_size);
+
+        for (auto& node : visited_thread)
+        {
+            node.index = not_visited;
+            node.peak = invalid_peak;
+        }
+
+#pragma omp for schedule(dynamic, chunk_size)
+        for (COLTYPE i = 0; i < size; i++)
+        {
+            Q_thread.clear();
+            Q_next_thread.clear();
+            _Li[i].clear();
+            touched_indices.clear();
+
+            // Initialize Q with columns from row i where col < i
+            for (ROWTYPE row_idx = ai[i] - base; row_idx < ai[i + 1] - base; ++row_idx)
+            {
+                const COLTYPE col = aj[row_idx] - base;
+                if (col >= i)
+                    break;
+                Q_thread.push_back({col, col});
+                _Li[i].push_back(col + base);
+                visited_thread[col].index = i;
+                visited_thread[col].peak = col;
+                touched_indices.push_back(col);
+            }
+
+            int level = 0;
+            while (level < lvl && !Q_thread.empty())
+            {
+                for (const auto& node : Q_thread)
+                {
+                    const COLTYPE idx = node.index;
+                    const COLTYPE peak = node.peak;
+
+                    // Expand to neighbors: iterate over row idx where col < i
+                    for (ROWTYPE adj_idx = ai[idx] - base; adj_idx < ai[idx + 1] - base; ++adj_idx)
+                    {
+                        const COLTYPE k = aj[adj_idx] - base;
+                        if (k >= i)
+                            break;
+
+                        // Skip if we've already found a path with smaller or equal peak
+                        if (visited_thread[k].peak <= peak)
+                            continue;
+                        else if (visited_thread[k].peak == invalid_peak)
+                        {
+                            touched_indices.push_back(k);
+                        }
+
+                        // Update peak for this node
+                        visited_thread[k].peak = peak;
+                        const bool is_new = (visited_thread[k].index != i);
+
+                        // Add to result if this is a new node and k > peak (k is the max in path)
+                        if (is_new && k > peak)
+                        {
+                            visited_thread[k].index = i;
+                            _Li[i].push_back(k + base);
+                        }
+
+                        // Enqueue for next level with updated peak
+                        const COLTYPE new_peak = std::max(peak, k);
+                        Q_next_thread.push_back({k, new_peak});
+                    }
+                }
+
+                level++;
+                std::swap(Q_thread, Q_next_thread);
+                Q_next_thread.clear();
+            }
+
+            std::sort(_Li[i].begin(), _Li[i].end());
+            if constexpr (keepdiag)
+            {
+                _Li[i].push_back(i + base);
+            }
+
+            l_ai[i + 1] = static_cast<ROWTYPE>(_Li[i].size());
+
+            // Reset only the indices that were touched
+            for (COLTYPE idx : touched_indices)
+            {
+                visited_thread[idx].index = not_visited;
+                visited_thread[idx].peak = invalid_peak;
+            }
+        }
+    }
+
+    utils::ParallelPrefixSumInplace(_nthreads, l_ai, l_ai + size + 1);
+    const ROWTYPE nnz = l_ai[size] - base;
+    L.ResizeAJ(nnz);
+    L.ResizeAV(nnz);
+    auto* l_aj = L.AJ();
+
+    // Parallel copy _Li to l_aj using prefix-based load balancing
+#pragma omp parallel num_threads(_nthreads)
+    {
+        const int tid = omp_get_thread_num();
+        auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos(l_ai, l_ai + size, tid, _nthreads);
+
+        for (COLTYPE i = copy_start; i < copy_end; i++)
+        {
+            const ROWTYPE row_start = l_ai[i] - base;
+            const size_t num_bytes = _Li[i].size() * sizeof(COLTYPE);
+            std::memcpy(l_aj + row_start, _Li[i].data(), num_bytes);
+        }
+    }
     return true;
 }
 
@@ -1717,6 +1859,8 @@ template bool ILULevel0Symbolic<matrix_utils::CSRMatrix<int, int, double>>(
 template class ILULevelSymbolic<matrix_utils::CSRMatrix<int, int, double>>;
 template class ILULevelSymbolicParallelU<matrix_utils::CSRMatrix<int, int, double>, false>;
 template class ILULevelSymbolicParallelU<matrix_utils::CSRMatrix<int, int, double>, true>;
+template class ILULevelSymbolicParallelL<matrix_utils::CSRMatrix<int, int, double>, false>;
+template class ILULevelSymbolicParallelL<matrix_utils::CSRMatrix<int, int, double>, true>;
 template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>(
     const int size,
     int const* ai,
