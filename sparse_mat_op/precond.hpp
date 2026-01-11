@@ -179,7 +179,12 @@ public:
     };
     
     ILULevelSymbolicParallelL(const int nthreads)
-        : _nthreads(nthreads), _visited(nthreads), _Q(nthreads), _Q_next(nthreads), _Li(nthreads)
+        : _nthreads(nthreads),
+          _visited(nthreads),
+          _Q(nthreads),
+          _Q_next(nthreads),
+          _added(nthreads),
+          _Li(nthreads)
     {
     }
 
@@ -191,6 +196,7 @@ private:
     std::vector<std::vector<NodeInfo>> _visited;
     std::vector<std::vector<NodeInfo>> _Q;
     std::vector<std::vector<NodeInfo>> _Q_next;
+    std::vector<std::vector<COLTYPE>> _added;
     std::vector<std::vector<COLTYPE>> _Li;
 };
 

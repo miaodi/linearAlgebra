@@ -1011,7 +1011,8 @@ bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYP
                 level++;
                 std::swap(Q_thread, Q_next_thread);
             }
-            std::sort(_Ui[i].begin() + keepdiag, _Ui[i].end());
+            if (lvl > 0)
+                std::sort(_Ui[i].begin() + keepdiag, _Ui[i].end());
             u_ai[i + 1] = static_cast<ROWTYPE>(_Ui[i].size());
         }
     }
@@ -1034,7 +1035,6 @@ bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYP
             std::memcpy(u_aj + row_start, _Ui[i].data(), num_bytes);
         }
     }
-    
     return true;
 }
 
@@ -1061,19 +1061,20 @@ bool ILULevelSymbolicParallelL<CSRMatrixType, keepdiag>::operator()(const COLTYP
         auto& visited_thread = _visited[tid];
         visited_thread.resize(size);
 
+        auto& added_thread = _added[tid];
+        added_thread.resize(size);
+
         auto& Q_thread = _Q[tid];
         auto& Q_next_thread = _Q_next[tid];
         Q_thread.reserve(reserve_size);
         Q_next_thread.reserve(reserve_size);
-
-        std::vector<COLTYPE> touched_indices;
-        touched_indices.reserve(reserve_size);
 
         for (auto& node : visited_thread)
         {
             node.index = not_visited;
             node.peak = invalid_peak;
         }
+        std::fill(added_thread.begin(), added_thread.end(), not_visited);
 
 #pragma omp for schedule(dynamic, chunk_size)
         for (COLTYPE i = 0; i < size; i++)
@@ -1081,7 +1082,6 @@ bool ILULevelSymbolicParallelL<CSRMatrixType, keepdiag>::operator()(const COLTYP
             Q_thread.clear();
             Q_next_thread.clear();
             _Li[i].clear();
-            touched_indices.clear();
 
             // Initialize Q with columns from row i where col < i
             for (ROWTYPE row_idx = ai[i] - base; row_idx < ai[i + 1] - base; ++row_idx)
@@ -1091,9 +1091,10 @@ bool ILULevelSymbolicParallelL<CSRMatrixType, keepdiag>::operator()(const COLTYP
                     break;
                 Q_thread.push_back({col, col});
                 _Li[i].push_back(col + base);
-                visited_thread[col].index = i;
-                visited_thread[col].peak = col;
-                touched_indices.push_back(col);
+                auto& visited_col = visited_thread[col];
+                visited_col.index = i;
+                visited_col.peak = col;
+                added_thread[col] = i;
             }
 
             int level = 0;
@@ -1111,22 +1112,25 @@ bool ILULevelSymbolicParallelL<CSRMatrixType, keepdiag>::operator()(const COLTYP
                         if (k >= i)
                             break;
 
-                        // Skip if we've already found a path with smaller or equal peak
-                        if (visited_thread[k].peak <= peak)
-                            continue;
-                        else if (visited_thread[k].peak == invalid_peak)
+                        auto& visited_k = visited_thread[k];
+                        if (visited_k.index != i)
                         {
-                            touched_indices.push_back(k);
+                            visited_k.index = i;
+                            visited_k.peak = invalid_peak;
                         }
 
+                        // Skip if we've already found a path with smaller or equal peak
+                        if (visited_k.peak <= peak)
+                            continue;
+
                         // Update peak for this node
-                        visited_thread[k].peak = peak;
-                        const bool is_new = (visited_thread[k].index != i);
+                        visited_k.peak = peak;
+                        const bool is_new = (added_thread[k] != i);
 
                         // Add to result if this is a new node and k > peak (k is the max in path)
                         if (is_new && k > peak)
                         {
-                            visited_thread[k].index = i;
+                            added_thread[k] = i;
                             _Li[i].push_back(k + base);
                         }
 
@@ -1140,21 +1144,14 @@ bool ILULevelSymbolicParallelL<CSRMatrixType, keepdiag>::operator()(const COLTYP
                 std::swap(Q_thread, Q_next_thread);
                 Q_next_thread.clear();
             }
-
-            std::sort(_Li[i].begin(), _Li[i].end());
+            if (lvl > 0)
+                std::sort(_Li[i].begin(), _Li[i].end());
             if constexpr (keepdiag)
             {
                 _Li[i].push_back(i + base);
             }
 
             l_ai[i + 1] = static_cast<ROWTYPE>(_Li[i].size());
-
-            // Reset only the indices that were touched
-            for (COLTYPE idx : touched_indices)
-            {
-                visited_thread[idx].index = not_visited;
-                visited_thread[idx].peak = invalid_peak;
-            }
         }
     }
 
