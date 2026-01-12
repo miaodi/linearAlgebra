@@ -9,9 +9,7 @@
 #include "sparse_mat_traits.hpp"
 #include "spmv.hpp"
 #include "triangle_solve.hpp"
-#ifdef USE_METIS_LIB
 #include "Reordering.h"
-#endif
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -681,4 +679,3 @@ void precondExplore(const Options& opts, const matrix_utils::CSRMatrix<int, int,
     out_lpu.close();
     std::cout << "L+U sparsity pattern written to L_plus_U_pattern.svg" << std::endl;
 }
-

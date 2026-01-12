@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <vector>
 #include <nvtx3/nvToolsExt.h>
@@ -53,6 +54,7 @@ std::unique_ptr<Preconditioner> setupPreconditioner(
     std::string u_file = options["U-file"].as<std::string>();
     bool print_lu = options["print-lu"].as<bool>();
     bool has_lu_files = !l_file.empty() && !u_file.empty();
+    int nthreads = options["nthreads"].as<int>();
 
     // Perform ILU factorization if ILU-based preconditioner is requested
     matrix_utils::CSRMatrix<int, int, double> ilu_matrix;
@@ -115,20 +117,58 @@ std::unique_ptr<Preconditioner> setupPreconditioner(
 
             // Symbolic ILU factorization
             std::cout << "Symbolic ILU factorization..." << std::endl;
-            matrix_utils::ILULevelSymbolic<decltype(ilu_matrix)> ilu;
+            // auto ilu =
+            //     std::make_unique<matrix_utils::ILULevelSymbolicParallel<decltype(ilu_matrix), enums::matrix_utils::LU, true>>(
+            //         nthreads);
+            auto ilu = std::make_unique<matrix_utils::ILULevelSymbolic<decltype(ilu_matrix)>>();
             auto t1 = std::chrono::high_resolution_clock::now();
-            bool success = ilu(csr_matrix.rows, csr_matrix.AI(),
-                              csr_matrix.AJ(), level, ilu_matrix);
+            bool success = (*ilu)(csr_matrix.rows, csr_matrix.AI(),
+                                  csr_matrix.AJ(), level, ilu_matrix);
             auto t2 = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> elapsed = t2 - t1;
             std::cout << "Symbolic ILU factorization time: " << elapsed.count()
                       << " s" << std::endl;
-
+            {
+                bool diag_ok = true;
+                const auto *diag = ilu_matrix.Diagonal();
+                if (diag == nullptr)
+                {
+                    diag_ok = false;
+                }
+                else
+                {
+                    const auto *ai = ilu_matrix.AI();
+                    const auto *aj = ilu_matrix.AJ();
+                    const auto base = ai[0];
+                    for (int row = 0; row < ilu_matrix.rows; ++row)
+                    {
+                        const auto diag_idx = diag[row] - base;
+                        const auto row_start = ai[row] - base;
+                        const auto row_end = ai[row + 1] - base;
+                        if (diag_idx < row_start || diag_idx >= row_end ||
+                            aj[diag_idx] != row + base)
+                        {
+                            std::cerr << "Temporary check: invalid diagonal at row "
+                                      << row << std::endl;
+                            diag_ok = false;
+                            break;
+                        }
+                    }
+                }
+                if (diag_ok)
+                {
+                    std::cout
+                        << "Temporary check: diagonal positions are valid."
+                        << std::endl;
+                }
+            }
             if (!success)
             {
+                ilu.reset();
                 std::cerr << "Symbolic ILU factorization failed." << std::endl;
                 throw std::runtime_error("Symbolic ILU factorization failed");
             }
+            ilu.reset();
             std::cout << "Symbolic ILU factorization done. nnz: "
                       << ilu_matrix.NNZ() << std::endl;
 

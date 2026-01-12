@@ -260,7 +260,9 @@ TEST_F(precond_Test, ilu_level_symbolic_parallel_matches_lower) {
     const auto base = mat.mkl_base();
     const auto size = mat.rows();
     ILULevelSymbolic<CSRMatrix<MKL_INT, MKL_INT, double>> serial;
-    ILULevelSymbolicParallelL<CSRMatrix<MKL_INT, MKL_INT, double>> parallel(4);
+    ILULevelSymbolicParallel<CSRMatrix<MKL_INT, MKL_INT, double>,
+                             enums::matrix_utils::L>
+        parallel(4);
 
     auto lower_cols = [base](const CSRMatrix<MKL_INT, MKL_INT, double> &m,
                              MKL_INT row) {
@@ -283,11 +285,83 @@ TEST_F(precond_Test, ilu_level_symbolic_parallel_matches_lower) {
           parallel(size, mat.get_ai().get(), mat.get_aj().get(), lvl,
                    ilu_parallel);
       if (!ok_parallel) {
-        GTEST_SKIP() << "ILULevelSymbolicParallelL not implemented for lvl="
+        GTEST_SKIP() << "ILULevelSymbolicParallel not implemented for lvl="
                      << lvl;
       }
 
       for (MKL_INT row = 0; row < size; ++row) {
+        auto expected = lower_cols(ilu_serial, row);
+        auto actual = lower_cols(ilu_parallel, row);
+        ASSERT_EQ(expected.size(), actual.size())
+            << "lvl=" << lvl << " row=" << row;
+        for (size_t i = 0; i < expected.size(); ++i) {
+          EXPECT_EQ(expected[i], actual[i])
+              << "lvl=" << lvl << " row=" << row << " idx=" << i;
+        }
+      }
+    }
+  }
+}
+
+TEST_F(precond_Test, ilu_level_symbolic_parallel_lu_includes_diag) {
+  for (auto &mat_info : _mats) {
+    auto &mat = mat_info.mat;
+    std::cout << "Testing " << mat_info.name << std::endl;
+    const auto base = mat.mkl_base();
+    const auto size = mat.rows();
+    ILULevelSymbolic<CSRMatrix<MKL_INT, MKL_INT, double>> serial;
+    ILULevelSymbolicParallel<CSRMatrix<MKL_INT, MKL_INT, double>,
+                             enums::matrix_utils::LU,
+                             true>
+        parallel(4);
+
+    auto lower_cols = [base](const CSRMatrix<MKL_INT, MKL_INT, double> &m,
+                             MKL_INT row) {
+      std::vector<MKL_INT> cols;
+      for (auto idx = m.ai[row] - base; idx < m.ai[row + 1] - base; ++idx) {
+        auto c = m.aj[idx] - base;
+        if (c < row)
+          cols.push_back(c);
+      }
+      return cols;
+    };
+
+    auto has_diag = [base](const CSRMatrix<MKL_INT, MKL_INT, double> &m,
+                           MKL_INT row) {
+      for (auto idx = m.ai[row] - base; idx < m.ai[row + 1] - base; ++idx) {
+        auto c = m.aj[idx] - base;
+        if (c == row)
+          return true;
+      }
+      return false;
+    };
+
+    for (int lvl = 0; lvl <= 5; ++lvl) {
+      CSRMatrix<MKL_INT, MKL_INT, double> ilu_serial;
+      CSRMatrix<MKL_INT, MKL_INT, double> ilu_parallel;
+
+      ASSERT_TRUE(serial(size, mat.get_ai().get(), mat.get_aj().get(), lvl,
+                         ilu_serial));
+      ASSERT_TRUE(
+          parallel(size, mat.get_ai().get(), mat.get_aj().get(), lvl,
+                   ilu_parallel));
+
+      const auto *diag = ilu_parallel.Diagonal();
+      ASSERT_NE(diag, nullptr);
+
+      for (MKL_INT row = 0; row < size; ++row) {
+        const bool serial_has_diag = has_diag(ilu_serial, row);
+        const bool parallel_has_diag = has_diag(ilu_parallel, row);
+        EXPECT_TRUE(serial_has_diag) << "lvl=" << lvl << " row=" << row;
+        EXPECT_EQ(serial_has_diag, parallel_has_diag)
+            << "lvl=" << lvl << " row=" << row;
+        const auto row_start = ilu_parallel.AI()[row] - base;
+        const auto row_end = ilu_parallel.AI()[row + 1] - base;
+        const auto diag_idx = diag[row] - base;
+        EXPECT_GE(diag_idx, row_start) << "lvl=" << lvl << " row=" << row;
+        EXPECT_LT(diag_idx, row_end) << "lvl=" << lvl << " row=" << row;
+        EXPECT_EQ(ilu_parallel.AJ()[diag_idx], row + base)
+            << "lvl=" << lvl << " row=" << row;
         auto expected = lower_cols(ilu_serial, row);
         auto actual = lower_cols(ilu_parallel, row);
         ASSERT_EQ(expected.size(), actual.size())

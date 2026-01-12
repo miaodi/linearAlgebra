@@ -75,7 +75,7 @@ public:
 
   ICCLevelSymbolicParallel(const int num_threads)
       : _num_threads(num_threads), _Li_path_max(num_threads),
-        _visited(num_threads), _Li(num_threads), _Q(num_threads),
+        _visited(num_threads), _L(num_threads), _Q(num_threads),
         _Q_next(num_threads) {}
 
   bool operator()(const COLTYPE size, ROWTYPE const *ai, COLTYPE const *aj,
@@ -85,7 +85,7 @@ private:
   int _num_threads;
   std::vector<std::vector<COLTYPE>> _Li_path_max; //
   std::vector<std::vector<COLTYPE>> _visited;
-  std::vector<std::vector<COLTYPE>> _Li;
+  std::vector<std::vector<COLTYPE>> _L;
   std::vector<std::unordered_map<COLTYPE, COLTYPE>> _Q;
   std::vector<std::unordered_map<COLTYPE, COLTYPE>> _Q_next;
 };
@@ -149,7 +149,7 @@ public:
     using COLTYPE = typename CSRMatrixType::COLTYPE;
     using ROWTYPE = typename CSRMatrixType::ROWTYPE;
     ILULevelSymbolicParallelU(const int nthreads)
-        : _nthreads(nthreads), _visited(nthreads), _Q(nthreads), _Q_next(nthreads), _Ui(nthreads)
+        : _nthreads(nthreads), _visited(nthreads), _Q(nthreads), _Q_next(nthreads)
     {
     }
 
@@ -161,7 +161,7 @@ private:
     std::vector<std::vector<COLTYPE>> _visited;
     std::vector<std::vector<COLTYPE>> _Q;
     std::vector<std::vector<COLTYPE>> _Q_next;
-    std::vector<std::vector<COLTYPE>> _Ui;
+    std::vector<std::vector<COLTYPE>> _U;
 
     ROWTYPE BuildURow(const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl,
                       const COLTYPE base, std::vector<COLTYPE>& visited_thread,
@@ -169,9 +169,11 @@ private:
 };
 
 // GS-Lrow ILU(k) symbolic factorization with parallel L-row construction
-// Similar to ILULevelSymbolicParallelU but constructs L rows instead of U rows
-template <ResizableDiagonal CSRMatrixType, bool keepdiag = false>
-class ILULevelSymbolicParallelL
+// Supports L and LU variants via TriangularMatrix (LU requires keepdiag = true).
+template <ResizableDiagonal CSRMatrixType,
+          enums::matrix_utils::TriangularMatrix Triangular = enums::matrix_utils::L,
+          bool keepdiag = false>
+class ILULevelSymbolicParallel
 {
 public:
     using COLTYPE = typename CSRMatrixType::COLTYPE;
@@ -182,31 +184,36 @@ public:
         COLTYPE peak;
     };
     
-    ILULevelSymbolicParallelL(const int nthreads)
+    ILULevelSymbolicParallel(const int nthreads)
         : _nthreads(nthreads),
           _visited(nthreads),
           _Q(nthreads),
           _Q_next(nthreads),
-          _added(nthreads),
-          _Li(nthreads)
+          _added(nthreads)
     {
     }
 
     bool operator()(const typename CSRMatrixType::COLTYPE size, typename CSRMatrixType::ROWTYPE const* ai,
-                    typename CSRMatrixType::COLTYPE const* aj, const int lvl, CSRMatrixType& L);
+                    typename CSRMatrixType::COLTYPE const* aj, const int lvl, CSRMatrixType& ILU);
 
 private:
+    static_assert(Triangular == enums::matrix_utils::L || Triangular == enums::matrix_utils::LU,
+                  "ILULevelSymbolicParallel supports L and LU only");
+    static_assert(Triangular != enums::matrix_utils::LU || keepdiag,
+                  "ILULevelSymbolicParallel with LU requires keepdiag = true");
+
     int _nthreads;
     std::vector<std::vector<NodeInfo>> _visited;
     std::vector<std::vector<NodeInfo>> _Q;
     std::vector<std::vector<NodeInfo>> _Q_next;
     std::vector<std::vector<COLTYPE>> _added;
-    std::vector<std::vector<COLTYPE>> _Li;
+    std::vector<std::vector<COLTYPE>> _L;
+    std::vector<std::vector<COLTYPE>> _U;
 
-    ROWTYPE BuildLRow(const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl,
-                      const COLTYPE base, const COLTYPE invalid_peak,
-                      std::vector<NodeInfo>& visited_thread, std::vector<COLTYPE>& added_thread,
-                      std::vector<NodeInfo>& Q_thread, std::vector<NodeInfo>& Q_next_thread);
+    ROWTYPE BuildRow(const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl,
+                     const COLTYPE base, const COLTYPE invalid_peak,
+                     std::vector<NodeInfo>& visited_thread, std::vector<COLTYPE>& added_thread,
+                     std::vector<NodeInfo>& Q_thread, std::vector<NodeInfo>& Q_next_thread);
 };
 
 template <ResizableDiagonal CSRMatrixType>
