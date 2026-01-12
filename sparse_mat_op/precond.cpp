@@ -946,6 +946,54 @@ bool ILULevelSymbolic<CSRMatrixType>::operator()( const typename CSRMatrixType::
 }
 
 template <ResizableDiagonal CSRMatrixType, bool keepdiag>
+typename ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::ROWTYPE
+ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::BuildURow(
+    const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl, const COLTYPE base,
+    std::vector<COLTYPE>& visited_thread, std::vector<COLTYPE>& Q_thread,
+    std::vector<COLTYPE>& Q_next_thread)
+{
+    Q_thread.clear();
+    Q_next_thread.clear();
+    Q_thread.push_back(i);
+    int level = 0;
+    visited_thread[i] = i;
+    auto& Ui_row = _Ui[i];
+    Ui_row.clear();
+    if constexpr (keepdiag)
+    {
+        Ui_row.push_back(i + base);
+    }
+    while (level <= lvl && Q_thread.size())
+    {
+        for (const auto row : Q_thread)
+        {
+            const ROWTYPE row_start = ai[row] - base;
+            const ROWTYPE row_end = ai[row + 1] - base;
+            for (auto adj_idx = row_start; adj_idx < row_end; ++adj_idx)
+            {
+                const COLTYPE col = aj[adj_idx] - base;
+                if (visited_thread[col] == i)
+                    continue;
+                visited_thread[col] = i;
+                if (col < i)
+                {
+                    Q_next_thread.push_back(col);
+                }
+                else if (col > i)
+                {
+                    Ui_row.push_back(col + base);
+                }
+            }
+        }
+        level++;
+        std::swap(Q_thread, Q_next_thread);
+    }
+    if (lvl > 0)
+        std::sort(Ui_row.begin() + keepdiag, Ui_row.end());
+    return static_cast<ROWTYPE>(Ui_row.size());
+}
+
+template <ResizableDiagonal CSRMatrixType, bool keepdiag>
 bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYPE size, ROWTYPE const* ai,
                                                          COLTYPE const* aj, const int lvl, CSRMatrixType& U)
 {
@@ -976,44 +1024,9 @@ bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYP
 #pragma omp for schedule(dynamic, chunk_size)
         for (COLTYPE i = 0; i < size; i++)
         {
-            Q_thread.clear();
-            Q_next_thread.clear();
-            Q_thread.push_back(i);
-            int level = 0;
-            visited_thread[i] = i;
-            _Ui[i].clear();
-            if constexpr (keepdiag)
-            {
-                _Ui[i].push_back(i + base);
-            }
-            while (level <= lvl && Q_thread.size())
-            {
-                for (const auto row : Q_thread)
-                {
-                    const ROWTYPE row_start = ai[row] - base;
-                    const ROWTYPE row_end = ai[row + 1] - base;
-                    for (auto adj_idx = row_start; adj_idx < row_end; ++adj_idx)
-                    {
-                        const COLTYPE col = aj[adj_idx] - base;
-                        if (visited_thread[col] == i)
-                            continue;
-                        visited_thread[col] = i;
-                        if (col < i)
-                        {
-                            Q_next_thread.push_back(col);
-                        }
-                        else if (col > i)
-                        {
-                            _Ui[i].push_back(col + base);
-                        }
-                    }
-                }
-                level++;
-                std::swap(Q_thread, Q_next_thread);
-            }
-            if (lvl > 0)
-                std::sort(_Ui[i].begin() + keepdiag, _Ui[i].end());
-            u_ai[i + 1] = static_cast<ROWTYPE>(_Ui[i].size());
+            const ROWTYPE row_size =
+                BuildURow(i, ai, aj, lvl, base, visited_thread, Q_thread, Q_next_thread);
+            u_ai[i + 1] = row_size;
         }
     }
     utils::ParallelPrefixSumInplace(_nthreads, u_ai, u_ai + size + 1);
@@ -1036,6 +1049,90 @@ bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYP
         }
     }
     return true;
+}
+
+template <ResizableDiagonal CSRMatrixType, bool keepdiag>
+typename ILULevelSymbolicParallelL<CSRMatrixType, keepdiag>::ROWTYPE
+ILULevelSymbolicParallelL<CSRMatrixType, keepdiag>::BuildLRow(
+    const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl, const COLTYPE base,
+    const COLTYPE invalid_peak, std::vector<NodeInfo>& visited_thread,
+    std::vector<COLTYPE>& added_thread, std::vector<NodeInfo>& Q_thread,
+    std::vector<NodeInfo>& Q_next_thread)
+{
+    Q_thread.clear();
+    Q_next_thread.clear();
+    auto& Li_row = _Li[i];
+    Li_row.clear();
+
+    // Initialize Q with columns from row i where col < i
+    for (ROWTYPE row_idx = ai[i] - base; row_idx < ai[i + 1] - base; ++row_idx)
+    {
+        const COLTYPE col = aj[row_idx] - base;
+        if (col >= i)
+            break;
+        Q_thread.push_back({col, col});
+        Li_row.push_back(col + base);
+        auto& visited_col = visited_thread[col];
+        visited_col.index = i;
+        visited_col.peak = col;
+        added_thread[col] = i;
+    }
+
+    int level = 0;
+    while (level < lvl && !Q_thread.empty())
+    {
+        for (const auto& node : Q_thread)
+        {
+            const COLTYPE idx = node.index;
+            const COLTYPE peak = node.peak;
+
+            // Expand to neighbors: iterate over row idx where col < i
+            for (ROWTYPE adj_idx = ai[idx] - base; adj_idx < ai[idx + 1] - base; ++adj_idx)
+            {
+                const COLTYPE k = aj[adj_idx] - base;
+                if (k >= i)
+                    break;
+
+                auto& visited_k = visited_thread[k];
+                if (visited_k.index != i)
+                {
+                    visited_k.index = i;
+                    visited_k.peak = invalid_peak;
+                }
+
+                // Skip if we've already found a path with smaller or equal peak
+                if (visited_k.peak <= peak)
+                    continue;
+
+                // Update peak for this node
+                visited_k.peak = peak;
+                const bool is_new = (added_thread[k] != i);
+
+                // Add to result if this is a new node and k > peak (k is the max in path)
+                if (is_new && k > peak)
+                {
+                    added_thread[k] = i;
+                    Li_row.push_back(k + base);
+                }
+
+                // Enqueue for next level with updated peak
+                const COLTYPE new_peak = std::max(peak, k);
+                Q_next_thread.push_back({k, new_peak});
+            }
+        }
+
+        level++;
+        std::swap(Q_thread, Q_next_thread);
+        Q_next_thread.clear();
+    }
+    if (lvl > 0)
+        std::sort(Li_row.begin(), Li_row.end());
+    if constexpr (keepdiag)
+    {
+        Li_row.push_back(i + base);
+    }
+
+    return static_cast<ROWTYPE>(Li_row.size());
 }
 
 template <ResizableDiagonal CSRMatrixType, bool keepdiag>
@@ -1079,79 +1176,10 @@ bool ILULevelSymbolicParallelL<CSRMatrixType, keepdiag>::operator()(const COLTYP
 #pragma omp for schedule(dynamic, chunk_size)
         for (COLTYPE i = 0; i < size; i++)
         {
-            Q_thread.clear();
-            Q_next_thread.clear();
-            _Li[i].clear();
-
-            // Initialize Q with columns from row i where col < i
-            for (ROWTYPE row_idx = ai[i] - base; row_idx < ai[i + 1] - base; ++row_idx)
-            {
-                const COLTYPE col = aj[row_idx] - base;
-                if (col >= i)
-                    break;
-                Q_thread.push_back({col, col});
-                _Li[i].push_back(col + base);
-                auto& visited_col = visited_thread[col];
-                visited_col.index = i;
-                visited_col.peak = col;
-                added_thread[col] = i;
-            }
-
-            int level = 0;
-            while (level < lvl && !Q_thread.empty())
-            {
-                for (const auto& node : Q_thread)
-                {
-                    const COLTYPE idx = node.index;
-                    const COLTYPE peak = node.peak;
-
-                    // Expand to neighbors: iterate over row idx where col < i
-                    for (ROWTYPE adj_idx = ai[idx] - base; adj_idx < ai[idx + 1] - base; ++adj_idx)
-                    {
-                        const COLTYPE k = aj[adj_idx] - base;
-                        if (k >= i)
-                            break;
-
-                        auto& visited_k = visited_thread[k];
-                        if (visited_k.index != i)
-                        {
-                            visited_k.index = i;
-                            visited_k.peak = invalid_peak;
-                        }
-
-                        // Skip if we've already found a path with smaller or equal peak
-                        if (visited_k.peak <= peak)
-                            continue;
-
-                        // Update peak for this node
-                        visited_k.peak = peak;
-                        const bool is_new = (added_thread[k] != i);
-
-                        // Add to result if this is a new node and k > peak (k is the max in path)
-                        if (is_new && k > peak)
-                        {
-                            added_thread[k] = i;
-                            _Li[i].push_back(k + base);
-                        }
-
-                        // Enqueue for next level with updated peak
-                        const COLTYPE new_peak = std::max(peak, k);
-                        Q_next_thread.push_back({k, new_peak});
-                    }
-                }
-
-                level++;
-                std::swap(Q_thread, Q_next_thread);
-                Q_next_thread.clear();
-            }
-            if (lvl > 0)
-                std::sort(_Li[i].begin(), _Li[i].end());
-            if constexpr (keepdiag)
-            {
-                _Li[i].push_back(i + base);
-            }
-
-            l_ai[i + 1] = static_cast<ROWTYPE>(_Li[i].size());
+            const ROWTYPE row_size =
+                BuildLRow(i, ai, aj, lvl, base, invalid_peak, visited_thread, added_thread,
+                          Q_thread, Q_next_thread);
+            l_ai[i + 1] = row_size;
         }
     }
 

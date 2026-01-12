@@ -162,6 +162,10 @@ private:
     std::vector<std::vector<COLTYPE>> _Q;
     std::vector<std::vector<COLTYPE>> _Q_next;
     std::vector<std::vector<COLTYPE>> _Ui;
+
+    ROWTYPE BuildURow(const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl,
+                      const COLTYPE base, std::vector<COLTYPE>& visited_thread,
+                      std::vector<COLTYPE>& Q_thread, std::vector<COLTYPE>& Q_next_thread);
 };
 
 // GS-Lrow ILU(k) symbolic factorization with parallel L-row construction
@@ -198,6 +202,11 @@ private:
     std::vector<std::vector<NodeInfo>> _Q_next;
     std::vector<std::vector<COLTYPE>> _added;
     std::vector<std::vector<COLTYPE>> _Li;
+
+    ROWTYPE BuildLRow(const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl,
+                      const COLTYPE base, const COLTYPE invalid_peak,
+                      std::vector<NodeInfo>& visited_thread, std::vector<COLTYPE>& added_thread,
+                      std::vector<NodeInfo>& Q_thread, std::vector<NodeInfo>& Q_next_thread);
 };
 
 template <ResizableDiagonal CSRMatrixType>
