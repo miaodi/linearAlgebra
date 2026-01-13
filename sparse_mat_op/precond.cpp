@@ -1083,7 +1083,7 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
         for (; row_idx < ai[i + 1] - base; ++row_idx)
         {
             const COLTYPE col = aj[row_idx] - base;
-            auto& visited_col = visited_thread[i];
+            auto& visited_col = visited_thread[col];
             visited_col.index = i;
             _U[i].push_back(col + base);
         }
@@ -1103,9 +1103,7 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
                 const COLTYPE k = aj[adj_idx] - base;
                 if (k >= i)
                 {
-                    if constexpr (Triangular == enums::matrix_utils::TriangularMatrix::L)
-                        break;
-                    else if constexpr (Triangular == enums::matrix_utils::TriangularMatrix::LU)
+                    if constexpr (Triangular == enums::matrix_utils::TriangularMatrix::LU)
                     {
                         if (visited_thread[k].index != i)
                         {
@@ -1113,6 +1111,7 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
                             _U[i].push_back(k + base);
                         }
                     }
+                    continue;
                 }
 
                 auto& visited_k = visited_thread[k];

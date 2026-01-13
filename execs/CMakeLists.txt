@@ -22,6 +22,9 @@ target_link_libraries(ilu_graph_example PRIVATE ${libs})
 add_executable(print_matrix_svg print_matrix_svg.cpp)
 target_link_libraries(print_matrix_svg PRIVATE ${libs})
 
+add_executable(precond_debug precond_debug.cpp)
+target_link_libraries(precond_debug PRIVATE ${libs} OpenMP::OpenMP_CXX)
+
 add_executable(test_ilum test_ilum.cpp)
 target_link_libraries(test_ilum PRIVATE ${libs} OpenMP::OpenMP_CXX)
 
