@@ -256,7 +256,14 @@ static void BM_CuSparseSPMV_Reordering(benchmark::State& state, const std::strin
     cusparseHandle_t handle;
     cusparseCreate(&handle);
     matrix_utils::CuSparseSPMV<int, int, double> cuda_spmv(handle);
-    cuda_spmv.preprocess(matrix.rows, matrix.AI(), matrix.AJ(), matrix.AV());
+    int* d_ia = nullptr;
+    int* d_ja = nullptr;
+    double* d_av = nullptr;
+    const int base = matrix.AI()[0];
+    const int nnz = matrix.AI()[matrix.rows] - base;
+    matrix_utils::copy_csr_host_to_device<int, int, double>(
+        matrix.rows, matrix.AI(), matrix.AJ(), matrix.AV(), &d_ia, &d_ja, &d_av);
+    cuda_spmv.preprocess(matrix.rows, d_ia, d_ja, d_av, base, nnz);
 
     // Allocate host vectors
     std::vector<double> b(matrix.rows, 1.0);
@@ -290,19 +297,22 @@ static void BM_CuSparseSPMV_Reordering(benchmark::State& state, const std::strin
     // Cleanup
     cudaFree(d_b);
     cudaFree(d_x);
+    if (d_ia) cudaFree(d_ia);
+    if (d_ja) cudaFree(d_ja);
+    if (d_av) cudaFree(d_av);
     cusparseDestroy(handle);
 
     // Compute metrics
-    const double nnz = static_cast<double>(matrix.NNZ());
-    const double flops = 2.0 * nnz; // One multiply and one add per non-zero
+    const double nnz_count = static_cast<double>(matrix.NNZ());
+    const double flops = 2.0 * nnz_count; // One multiply and one add per non-zero
 
     state.counters["Rows"] = matrix.rows;
-    state.counters["NNZ"] = nnz;
-    state.counters["NNZ/Row"] = nnz / matrix.rows;
+    state.counters["NNZ"] = nnz_count;
+    state.counters["NNZ/Row"] = nnz_count / matrix.rows;
     state.counters["GFLOPS"] = benchmark::Counter(
         flops, benchmark::Counter::kIsIterationInvariantRate, benchmark::Counter::kIs1000);
     state.counters["GB/s"] =
-        benchmark::Counter(nnz * (sizeof(int) + sizeof(double)) + matrix.rows * sizeof(double) * 2,
+        benchmark::Counter(nnz_count * (sizeof(int) + sizeof(double)) + matrix.rows * sizeof(double) * 2,
                            benchmark::Counter::kIsIterationInvariantRate, benchmark::Counter::kIs1024);
 
     state.SetLabel("CuSparseSPMV/" + reorder_name);

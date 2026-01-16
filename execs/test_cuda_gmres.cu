@@ -117,10 +117,10 @@ std::unique_ptr<Preconditioner> setupPreconditioner(
 
             // Symbolic ILU factorization
             std::cout << "Symbolic ILU factorization..." << std::endl;
-            // auto ilu =
-            //     std::make_unique<matrix_utils::ILULevelSymbolicParallel<decltype(ilu_matrix), enums::matrix_utils::LU, true>>(
-            //         nthreads);
-            auto ilu = std::make_unique<matrix_utils::ILULevelSymbolic<decltype(ilu_matrix)>>();
+            auto ilu =
+                std::make_unique<matrix_utils::ILULevelSymbolicParallel<decltype(ilu_matrix), enums::matrix_utils::LU, true>>(
+                    nthreads);
+            // auto ilu = std::make_unique<matrix_utils::ILULevelSymbolic<decltype(ilu_matrix)>>();
             auto t1 = std::chrono::high_resolution_clock::now();
             bool success = (*ilu)(csr_matrix.rows, csr_matrix.AI(),
                                   csr_matrix.AJ(), level, ilu_matrix);
@@ -635,6 +635,16 @@ int main( int argc, char** argv )
             working_rhs = b_host;
         }
 
+        int* d_ia = nullptr;
+        int* d_ja = nullptr;
+        double* d_av = nullptr;
+        const int nrows = static_cast<int>(n);
+        const int base = working_matrix.AI()[0];
+        const int nnz = working_matrix.AI()[nrows] - base;
+        matrix_utils::copy_csr_host_to_device<int, int, double>(
+            nrows, working_matrix.AI(), working_matrix.AJ(), working_matrix.AV(),
+            &d_ia, &d_ja, &d_av);
+
         // Initialize solution vector with zeros
         std::vector<double> x_host( n, 0.0 );
 
@@ -663,7 +673,7 @@ int main( int argc, char** argv )
             // Create and setup SpMV operator using solver's cuSPARSE handle
             std::cout << "Setting up matrix operator..." << std::endl;
             CuSparseSPMV<int, int, double> spmv_operator(solver.getCusparseHandle());
-            spmv_operator.preprocess(n, working_matrix.AI(), working_matrix.AJ(), working_matrix.AV());
+            spmv_operator.preprocess(nrows, d_ia, d_ja, d_av, base, nnz);
             
             // Setup solver with SpMV operator (size is obtained from operator)
             solver.setupOperator(&spmv_operator);
@@ -699,7 +709,7 @@ int main( int argc, char** argv )
             // Create and setup SpMV operator using solver's cuSPARSE handle
             std::cout << "Setting up matrix operator..." << std::endl;
             CuSparseSPMV<int, int, double> spmv_operator(solver.getCusparseHandle());
-            spmv_operator.preprocess(n, working_matrix.AI(), working_matrix.AJ(), working_matrix.AV());
+            spmv_operator.preprocess(nrows, d_ia, d_ja, d_av, base, nnz);
             
             // Setup solver with SpMV operator (size is obtained from operator)
             solver.setupOperator(&spmv_operator);
@@ -727,7 +737,11 @@ int main( int argc, char** argv )
         // Calculate solve time
         float solve_time_ms = 0;
         cudaEventElapsedTime(&solve_time_ms, solve_start, solve_stop);
-        
+
+        if (d_ia) cudaFree(d_ia);
+        if (d_ja) cudaFree(d_ja);
+        if (d_av) cudaFree(d_av);
+
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration =
             std::chrono::duration_cast<std::chrono::milliseconds>( end_time - start_time );

@@ -45,6 +45,155 @@ protected:
 };
 
 /**
+ * @brief Allocate device CSR arrays and copy from host.
+ *
+ * Caller owns the returned device pointers and must cudaFree them.
+ */
+template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
+void copy_csr_host_to_device(COLTYPE n,
+                             const ROWTYPE* h_ia,
+                             const COLTYPE* h_ja,
+                             const VALTYPE* h_av,
+                             ROWTYPE** d_ia,
+                             COLTYPE** d_ja,
+                             VALTYPE** d_av,
+                             ROWTYPE* nnz_out = nullptr);
+
+/**
+ * @brief Copy CSR arrays from device to host.
+ *
+ * Caller must provide host buffers sized for (n + 1) row pointers and nnz entries.
+ */
+template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
+void copy_csr_device_to_host(COLTYPE n,
+                             const ROWTYPE* d_ia,
+                             const COLTYPE* d_ja,
+                             const VALTYPE* d_av,
+                             ROWTYPE* h_ia,
+                             COLTYPE* h_ja,
+                             VALTYPE* h_av,
+                             ROWTYPE nnz);
+
+/**
+ * @brief CSR-scalar SpMV: one thread per row on the GPU
+ *
+ * This kernel is a simple CSR implementation intended for correctness
+ * and baseline performance comparisons.
+ */
+template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
+class CSRScalarSPMV : public SpMVOperator<VALTYPE>
+{
+public:
+    CSRScalarSPMV();
+    ~CSRScalarSPMV();
+
+    CSRScalarSPMV(const CSRScalarSPMV&) = delete;
+    CSRScalarSPMV& operator=(const CSRScalarSPMV&) = delete;
+
+    CSRScalarSPMV(CSRScalarSPMV&& other) noexcept;
+    CSRScalarSPMV& operator=(CSRScalarSPMV&& other) noexcept;
+
+    /**
+     * @brief Preprocess the matrix structure for subsequent SpMV operations
+     *
+     * @param n Matrix dimension (number of rows)
+     * @param d_ia Row pointers (size n+1, device memory; non-owning)
+     * @param d_ja Column indices (device memory; non-owning)
+     * @param d_av Matrix values (device memory; non-owning)
+     * @param base CSR index base (0 or 1)
+     * @param nnz Number of non-zeros in the matrix
+     */
+    void preprocess(COLTYPE n,
+                    const ROWTYPE* d_ia,
+                    const COLTYPE* d_ja,
+                    const VALTYPE* d_av,
+                    ROWTYPE base,
+                    ROWTYPE nnz);
+
+    /**
+     * @brief Perform SpMV: y = alpha * A * x + beta * y
+     *
+     * Expects device memory pointers for x and y.
+     */
+    void operator()(const VALTYPE* d_x, VALTYPE* d_y,
+                    VALTYPE alpha = 1.0, VALTYPE beta = 0.0) override;
+
+    using VALTYPE_ALIAS = VALTYPE;
+
+private:
+    const ROWTYPE* _d_ia = nullptr;
+    const COLTYPE* _d_ja = nullptr;
+    const VALTYPE* _d_av = nullptr;
+    size_t _nnz = 0;
+    int _index_base = 0;
+    bool _is_initialized = false;
+    COLTYPE _rows = 0;
+
+    void cleanup();
+    void check_cuda_error(cudaError_t error, const char* message);
+};
+
+/**
+ * @brief CSR-vector SpMV: one warp per row on the GPU
+ *
+ * Based on "Efficient sparse matrix-vector multiplication on cache-based GPUs"
+ * (Bell and Garland). Each warp cooperatively processes a row and reduces
+ * the partial sums.
+ */
+template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
+class CSRVectorSPMV : public SpMVOperator<VALTYPE>
+{
+public:
+    CSRVectorSPMV();
+    ~CSRVectorSPMV();
+
+    CSRVectorSPMV(const CSRVectorSPMV&) = delete;
+    CSRVectorSPMV& operator=(const CSRVectorSPMV&) = delete;
+
+    CSRVectorSPMV(CSRVectorSPMV&& other) noexcept;
+    CSRVectorSPMV& operator=(CSRVectorSPMV&& other) noexcept;
+
+    /**
+     * @brief Preprocess the matrix structure for subsequent SpMV operations
+     *
+     * @param n Matrix dimension (number of rows)
+     * @param d_ia Row pointers (size n+1, device memory; non-owning)
+     * @param d_ja Column indices (device memory; non-owning)
+     * @param d_av Matrix values (device memory; non-owning)
+     * @param base CSR index base (0 or 1)
+     * @param nnz Number of non-zeros in the matrix
+     */
+    void preprocess(COLTYPE n,
+                    const ROWTYPE* d_ia,
+                    const COLTYPE* d_ja,
+                    const VALTYPE* d_av,
+                    ROWTYPE base,
+                    ROWTYPE nnz);
+
+    /**
+     * @brief Perform SpMV: y = alpha * A * x + beta * y
+     *
+     * Expects device memory pointers for x and y.
+     */
+    void operator()(const VALTYPE* d_x, VALTYPE* d_y,
+                    VALTYPE alpha = 1.0, VALTYPE beta = 0.0) override;
+
+    using VALTYPE_ALIAS = VALTYPE;
+
+private:
+    const ROWTYPE* _d_ia = nullptr;
+    const COLTYPE* _d_ja = nullptr;
+    const VALTYPE* _d_av = nullptr;
+    size_t _nnz = 0;
+    int _index_base = 0;
+    bool _is_initialized = false;
+    COLTYPE _rows = 0;
+
+    void cleanup();
+    void check_cuda_error(cudaError_t error, const char* message);
+};
+
+/**
  * @brief cuSPARSE-based SpMV for y = alpha * A * x + beta * y
  * 
  * This class provides a CUDA-accelerated sparse matrix-vector multiplication
@@ -52,15 +201,16 @@ protected:
  * 
  * Key features:
  * - Uses cuSPARSE SpMV for optimal GPU performance
- * - Automatic memory management with device arrays
+ * - Automatic management of cuSPARSE descriptors and buffers
  * - Support for alpha/beta scaling (y = alpha * A * x + beta * y)
  * - Compatible with CSR matrices in 0-based or 1-based indexing
  * 
  * Usage:
  *   cusparseHandle_t handle;
  *   cusparseCreate(&handle);
+ *   copy_csr_host_to_device(n, ia, ja, av, &d_ia, &d_ja, &d_av);
  *   CuSparseSPMV<int, int, double> spmv(handle);
- *   spmv.preprocess(n, ia, ja, av);
+ *   spmv.preprocess(n, d_ia, d_ja, d_av, ia[0], ia[n] - ia[0]);
  *   spmv(x, y, alpha, beta);
  *   cusparseDestroy(handle);
  */
@@ -82,18 +232,22 @@ public:
     /**
      * @brief Preprocess the matrix structure for subsequent SpMV operations
      * 
-     * This sets up cuSPARSE descriptors and allocates device memory.
+     * This sets up cuSPARSE descriptors and auxiliary buffers.
      * Must be called before the first SpMV operation.
      * 
      * @param n Matrix dimension (number of rows)
-     * @param h_ia Row pointers (size n+1, host memory)
-     * @param h_ja Column indices (host memory)
-     * @param h_av Matrix values (host memory)
+     * @param d_ia Row pointers (size n+1, device memory; non-owning)
+     * @param d_ja Column indices (device memory; non-owning)
+     * @param d_av Matrix values (device memory; non-owning)
+     * @param base CSR index base (0 or 1)
+     * @param nnz Number of non-zeros in the matrix
      */
     void preprocess(COLTYPE n,
-                   const ROWTYPE* h_ia,
-                   const COLTYPE* h_ja,
-                   const VALTYPE* h_av);
+                   const ROWTYPE* d_ia,
+                   const COLTYPE* d_ja,
+                   const VALTYPE* d_av,
+                   ROWTYPE base,
+                   ROWTYPE nnz);
 
     /**
      * @brief Perform SpMV: y = alpha * A * x + beta * y
@@ -108,14 +262,6 @@ public:
      */
     void operator()(const VALTYPE* d_x, VALTYPE* d_y, VALTYPE alpha = 1.0, VALTYPE beta = 0.0) override;
 
-    /**
-     * @brief Get device memory pointers for vectors (for direct access)
-     */
-    VALTYPE* get_device_x() { return _d_x; }
-    VALTYPE* get_device_y() { return _d_y; }
-    const VALTYPE* get_device_x() const { return _d_x; }
-    const VALTYPE* get_device_y() const { return _d_y; }
-    
     using VALTYPE_ALIAS = VALTYPE;
 
 private:
@@ -128,15 +274,15 @@ private:
     // Vector descriptors
     cusparseDnVecDescr_t _vec_x;
     cusparseDnVecDescr_t _vec_y;
-    
-    // Device memory for matrix
-    ROWTYPE* _d_ia;
-    COLTYPE* _d_ja;
-    VALTYPE* _d_av;
-    
-    // Device memory for vectors
+
+    // Device memory for vectors (descriptor placeholders)
     VALTYPE* _d_x;
     VALTYPE* _d_y;
+    
+    // Device memory for matrix
+    const ROWTYPE* _d_ia;
+    const COLTYPE* _d_ja;
+    const VALTYPE* _d_av;
     
     // cuSPARSE buffer for SpMV
     void* _d_buffer;
