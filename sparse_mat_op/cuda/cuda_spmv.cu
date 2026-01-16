@@ -3,6 +3,7 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace matrix_utils
 {
@@ -20,7 +21,9 @@ inline void cuda_check(cudaError_t error, const char* message)
 template <typename VALTYPE>
 __inline__ __device__ VALTYPE warp_reduce_sum(VALTYPE val)
 {
-    for (int offset = 16; offset > 0; offset >>= 1) {
+    constexpr int warp_size = 32;
+    #pragma unroll
+    for (int offset = warp_size / 2; offset > 0; offset >>= 1) {
         val += __shfl_down_sync(0xffffffff, val, offset);
     }
     return val;
@@ -139,6 +142,9 @@ __global__ void csr_scalar_spmv_kernel(const COLTYPE n,
 }
 
 // One warp per row CSR SpMV kernel: y = alpha * A * x + beta * y.
+// Based on "Efficient Sparse Matrix-Vector Multiplication on CUDA" by Bell & Garland
+// Each warp processes one row cooperatively using shuffle-based reduction
+// NOTE: blockDim.x MUST be a multiple of 32 (warp size)
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 __global__ void csr_vector_spmv_kernel(const COLTYPE n,
                                        ROWTYPE const* __restrict ia,
@@ -151,25 +157,38 @@ __global__ void csr_vector_spmv_kernel(const COLTYPE n,
                                        const int base)
 {
     constexpr int warp_size = 32;
-    const int warp_in_block = static_cast<int>(threadIdx.x) / warp_size;
-    const int lane = static_cast<int>(threadIdx.x) & (warp_size - 1);
-    const int warps_per_block = static_cast<int>(blockDim.x) / warp_size;
-    const COLTYPE row = static_cast<COLTYPE>(blockIdx.x * warps_per_block + warp_in_block);
 
-    if (row >= n) {
+    
+    // Compute warp ID and lane ID
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / warp_size;
+    const int lane = threadIdx.x & (warp_size - 1);
+    
+    if (warp_id >= n) {
         return;
     }
-
-    const ROWTYPE start = ia[row] - base;
-    const ROWTYPE end = ia[row + 1] - base;
+    
+    const COLTYPE row = static_cast<COLTYPE>(warp_id);
+    const ROWTYPE row_start = ia[row] - base;
+    const ROWTYPE row_end = ia[row + 1] - base;
+    const ROWTYPE row_nnz = row_end - row_start;
+    
+    // Compute partial sum for this lane
+    // Use coalesced access: threads access consecutive elements
     VALTYPE sum = static_cast<VALTYPE>(0);
-
-    for (ROWTYPE idx = start + lane; idx < end; idx += warp_size) {
-        const COLTYPE col = ja[idx] - base;
-        sum += av[idx] * x[col];
+    const ROWTYPE num_chunks = (row_nnz + warp_size - 1) / warp_size;
+    
+    for (ROWTYPE chunk = 0; chunk < num_chunks; ++chunk) {
+        const ROWTYPE j = row_start + chunk * warp_size + lane;
+        if (j < row_end) {
+            const COLTYPE col = ja[j] - base;
+            sum += av[j] * x[col];
+        }
     }
-
+    
+    // Warp-level reduction using shuffle instructions
     sum = warp_reduce_sum(sum);
+    
+    // First lane writes the result
     if (lane == 0) {
         const VALTYPE ax = alpha * sum;
         if (beta == static_cast<VALTYPE>(0)) {
@@ -279,8 +298,8 @@ void CSRScalarSPMV<ROWTYPE, COLTYPE, VALTYPE>::preprocess(COLTYPE n,
     if (nnz < static_cast<ROWTYPE>(0)) {
         throw std::runtime_error("CSRScalarSPMV: nnz cannot be negative");
     }
-    _index_base = static_cast<int>(base);
-    _nnz = static_cast<size_t>(nnz);
+    _index_base = base;
+    _nnz = nnz;
     if (_nnz > 0 && (!d_ja || !d_av)) {
         throw std::runtime_error("CSRScalarSPMV: d_ja and d_av cannot be nullptr when nnz > 0");
     }
@@ -419,8 +438,8 @@ void CSRVectorSPMV<ROWTYPE, COLTYPE, VALTYPE>::preprocess(COLTYPE n,
         throw std::runtime_error("CSRVectorSPMV: nnz cannot be negative");
     }
 
-    _index_base = static_cast<int>(base);
-    _nnz = static_cast<size_t>(nnz);
+    _index_base = base;
+    _nnz = nnz;
     if (_nnz > 0 && (!d_ja || !d_av)) {
         throw std::runtime_error("CSRVectorSPMV: d_ja and d_av cannot be nullptr when nnz > 0");
     }
@@ -443,14 +462,17 @@ void CSRVectorSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()(const VALTYPE* d_x,
         return;
     }
 
-    constexpr int block_size = 256;
+    // Launch configuration: one warp per row
+    constexpr int threads_per_block = 256;  // Must be multiple of 32
     constexpr int warp_size = 32;
-    const int warps_per_block = block_size / warp_size;
-    const int num_blocks = static_cast<int>((static_cast<size_t>(_rows) + warps_per_block - 1) /
-                                            warps_per_block);
+    
+    // Total number of warps needed (one per row)
+    const int num_warps = static_cast<int>(_rows);
+    const int warps_per_block = threads_per_block / warp_size;
+    const int num_blocks = (num_warps + warps_per_block - 1) / warps_per_block;
 
-    csr_vector_spmv_kernel<<<num_blocks, block_size>>>(_rows, _d_ia, _d_ja, _d_av,
-                                                       d_x, d_y, alpha, beta, _index_base);
+    csr_vector_spmv_kernel<<<num_blocks, threads_per_block>>>(_rows, _d_ia, _d_ja, _d_av,
+                                                              d_x, d_y, alpha, beta, _index_base);
     check_cuda_error(cudaGetLastError(), "CSRVectorSPMV kernel launch failed");
 }
 
@@ -619,8 +641,8 @@ void CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::preprocess(COLTYPE n,
     if (nnz < static_cast<ROWTYPE>(0)) {
         throw std::runtime_error("CuSparseSPMV: nnz cannot be negative");
     }
-    _index_base = static_cast<int>(base);
-    _nnz = static_cast<size_t>(nnz);
+    _index_base = base;
+    _nnz = nnz;
     if (_nnz > 0 && (!d_ja || !d_av)) {
         throw std::runtime_error("CuSparseSPMV: d_ja and d_av cannot be nullptr when nnz > 0");
     }
@@ -750,6 +772,391 @@ void CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::check_cuda_error(cudaError_t error
     }
 }
 
+// ============================================================================
+// Merge-based SpMV Implementation (Merrill & Garland 2016)
+// ============================================================================
+
+/**
+ * @brief Binary search to find merge path diagonal intersection
+ * 
+ * Given two sorted arrays A (rows) and B (nonzeros), find the coordinate
+ * (i,j) where diagonal 'diag' intersects the merge path.
+ * 
+ * @param diag Diagonal number to find
+ * @param a_len Length of array A (number of rows + 1)
+ * @param b_len Length of array B (number of nonzeros)
+ * @param a_data Row pointer array
+ * @param base Index base offset
+ * @return Row index where diagonal intersects
+ */
+template <typename ROWTYPE>
+__device__ __forceinline__ ROWTYPE merge_path_search(
+    ROWTYPE diag,
+    ROWTYPE a_len,
+    ROWTYPE b_len,
+    const ROWTYPE* a_data,
+    ROWTYPE base)
+{
+    ROWTYPE begin = diag > b_len ? diag - b_len : 0;
+    ROWTYPE end = diag < a_len ? diag : a_len;
+    
+    while (begin < end) {
+        ROWTYPE mid = (begin + end) >> 1;
+        ROWTYPE a_idx = mid;
+        ROWTYPE b_idx = diag - mid - 1;
+        
+        ROWTYPE a_val = (a_idx < a_len - 1) ? (a_data[a_idx + 1] - base) : b_len;
+        bool pred = (b_idx < 0) || (a_val > b_idx);
+        
+        if (pred) {
+            end = mid;
+        } else {
+            begin = mid + 1;
+        }
+    }
+    return begin;
+}
+
+/**
+ * @brief Merge-based CSR SpMV kernel
+ * 
+ * Uses precomputed merge path boundaries to partition work evenly across thread blocks.
+ * Each block processes a contiguous range of nonzeros, handling row boundaries
+ * cooperatively.
+ */
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+__global__ void csr_merge_spmv_kernel(
+    const COLTYPE n,
+    ROWTYPE const* __restrict ia,
+    COLTYPE const* __restrict ja,
+    VALTYPE const* __restrict av,
+    VALTYPE const* __restrict x,
+    VALTYPE* __restrict y,
+    const VALTYPE alpha,
+    const VALTYPE beta,
+    const int base,
+    const ROWTYPE nnz,
+    const ROWTYPE* __restrict merge_path_boundaries)
+{
+    constexpr int threads_per_block = 256;
+    constexpr int items_per_thread = 8;
+    constexpr int items_per_block = threads_per_block * items_per_thread;
+    
+    __shared__ struct {
+        ROWTYPE row_start;
+        ROWTYPE row_end;
+        VALTYPE sums[threads_per_block];
+    } shared;
+    
+    // Compute merge path range for this block
+    const ROWTYPE block_offset = static_cast<ROWTYPE>(blockIdx.x) * items_per_block;
+    const ROWTYPE block_end = min(block_offset + items_per_block, nnz);
+    
+    // Load precomputed row range
+    ROWTYPE row_start_idx = merge_path_boundaries[blockIdx.x];
+    ROWTYPE row_end_idx = merge_path_boundaries[blockIdx.x + 1];
+    
+    if (threadIdx.x == 0) {
+        shared.row_start = row_start_idx;
+        shared.row_end = row_end_idx;
+    }
+    __syncthreads();
+    
+    row_start_idx = shared.row_start;
+    row_end_idx = shared.row_end;
+    
+    // Process nonzeros in this block
+    ROWTYPE current_row = row_start_idx;
+    ROWTYPE row_begin = (current_row < n) ? (ia[current_row] - base) : nnz;
+    ROWTYPE row_end = (current_row < n) ? (ia[current_row + 1] - base) : nnz;
+    VALTYPE sum = static_cast<VALTYPE>(0);
+    
+    // Each thread processes items_per_thread nonzeros
+    for (int item = 0; item < items_per_thread; ++item) {
+        const ROWTYPE nz_idx = block_offset + threadIdx.x * items_per_thread + item;
+        
+        if (nz_idx < block_end) {
+            // Advance to correct row
+            while (nz_idx >= row_end && current_row < row_end_idx) {
+                // Write out previous row sum
+                if (nz_idx == row_end && current_row < n) {
+                    const VALTYPE ax = alpha * sum;
+                    if (beta == static_cast<VALTYPE>(0)) {
+                        y[current_row] = ax;
+                    } else if (beta == static_cast<VALTYPE>(1)) {
+                        atomicAdd(&y[current_row], ax);
+                    } else {
+                        VALTYPE old = y[current_row];
+                        VALTYPE val = ax + beta * old;
+                        y[current_row] = val;
+                    }
+                    sum = static_cast<VALTYPE>(0);
+                }
+                
+                current_row++;
+                row_begin = row_end;
+                row_end = (current_row < n) ? (ia[current_row + 1] - base) : nnz;
+            }
+            
+            // Accumulate for current row
+            if (current_row < n) {
+                const COLTYPE col = ja[nz_idx] - base;
+                sum += av[nz_idx] * x[col];
+            }
+        }
+    }
+    
+    // Store partial sums in shared memory
+    shared.sums[threadIdx.x] = sum;
+    __syncthreads();
+    
+    // Reduce partial sums for rows that span multiple threads
+    if (threadIdx.x == 0) {
+        for (ROWTYPE row = row_start_idx; row < row_end_idx; ++row) {
+            if (row >= n) break;
+            
+            const ROWTYPE row_nnz_start = ia[row] - base;
+            const ROWTYPE row_nnz_end = ia[row + 1] - base;
+            
+            // Check if this row spans multiple threads
+            if (row_nnz_start < block_end && row_nnz_end > block_offset) {
+                VALTYPE row_sum = static_cast<VALTYPE>(0);
+                
+                // Collect contributions from all threads
+                for (int tid = 0; tid < threads_per_block; ++tid) {
+                    const ROWTYPE tid_start = block_offset + tid * items_per_thread;
+                    const ROWTYPE tid_end = tid_start + items_per_thread;
+                    
+                    if (tid_start < row_nnz_end && tid_end > row_nnz_start) {
+                        row_sum += shared.sums[tid];
+                    }
+                }
+                
+                // Write result
+                const VALTYPE ax = alpha * row_sum;
+                if (beta == static_cast<VALTYPE>(0)) {
+                    y[row] = ax;
+                } else if (beta == static_cast<VALTYPE>(1)) {
+                    atomicAdd(&y[row], ax);
+                } else {
+                    VALTYPE old = y[row];
+                    VALTYPE val = ax + beta * old;
+                    y[row] = val;
+                }
+            }
+        }
+    }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::CSRMergeSPMV()
+    : SpMVOperator<VALTYPE>()
+    , _d_merge_path_boundaries(nullptr)
+    , _num_blocks(0)
+{
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::~CSRMergeSPMV()
+{
+    cleanup();
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::CSRMergeSPMV(CSRMergeSPMV&& other) noexcept
+    : SpMVOperator<VALTYPE>(std::move(other))
+    , _d_ia(other._d_ia)
+    , _d_ja(other._d_ja)
+    , _d_av(other._d_av)
+    , _nnz(other._nnz)
+    , _index_base(other._index_base)
+    , _is_initialized(other._is_initialized)
+    , _rows(other._rows)
+    , _d_merge_path_boundaries(other._d_merge_path_boundaries)
+    , _num_blocks(other._num_blocks)
+{
+    other._d_ia = nullptr;
+    other._d_ja = nullptr;
+    other._d_av = nullptr;
+    other._nnz = 0;
+    other._index_base = 0;
+    other._is_initialized = false;
+    other._rows = 0;
+    other._d_merge_path_boundaries = nullptr;
+    other._num_blocks = 0;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>&
+CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator=(CSRMergeSPMV&& other) noexcept
+{
+    if (this != &other) {
+        cleanup();
+
+        SpMVOperator<VALTYPE>::operator=(std::move(other));
+        _d_ia = other._d_ia;
+        _d_ja = other._d_ja;
+        _d_av = other._d_av;
+        _nnz = other._nnz;
+        _index_base = other._index_base;
+        _is_initialized = other._is_initialized;
+        _rows = other._rows;
+        _d_merge_path_boundaries = other._d_merge_path_boundaries;
+        _num_blocks = other._num_blocks;
+
+        other._d_ia = nullptr;
+        other._d_ja = nullptr;
+        other._d_av = nullptr;
+        other._nnz = 0;
+        other._index_base = 0;
+        other._is_initialized = false;
+        other._rows = 0;
+        other._d_merge_path_boundaries = nullptr;
+        other._num_blocks = 0;
+    }
+    return *this;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::cleanup()
+{
+    if (_d_merge_path_boundaries) {
+        cudaFree(_d_merge_path_boundaries);
+        _d_merge_path_boundaries = nullptr;
+    }
+    _d_ia = nullptr;
+    _d_ja = nullptr;
+    _d_av = nullptr;
+    _nnz = 0;
+    _index_base = 0;
+    _is_initialized = false;
+    _rows = 0;
+    _num_blocks = 0;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::preprocess(COLTYPE n,
+                                                          const ROWTYPE* d_ia,
+                                                          const COLTYPE* d_ja,
+                                                          const VALTYPE* d_av,
+                                                          ROWTYPE base,
+                                                          ROWTYPE nnz)
+{
+    if (_is_initialized) {
+        cleanup();
+    }
+
+    _rows = n;
+    this->_n = static_cast<size_t>(n);
+    if (n <= 0) {
+        _is_initialized = true;
+        return;
+    }
+    if (!d_ia) {
+        throw std::runtime_error("CSRMergeSPMV: d_ia cannot be nullptr");
+    }
+    if (nnz < static_cast<ROWTYPE>(0)) {
+        throw std::runtime_error("CSRMergeSPMV: nnz cannot be negative");
+    }
+
+    _index_base = base;
+    _nnz = nnz;
+    if (_nnz > 0 && (!d_ja || !d_av)) {
+        throw std::runtime_error("CSRMergeSPMV: d_ja and d_av cannot be nullptr when nnz > 0");
+    }
+    _d_ia = d_ia;
+    _d_ja = d_ja;
+    _d_av = d_av;
+    
+    // Compute merge path boundaries
+    compute_merge_path_boundaries();
+    
+    _is_initialized = true;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()(const VALTYPE* d_x,
+                                                          VALTYPE* d_y,
+                                                          VALTYPE alpha,
+                                                          VALTYPE beta)
+{
+    if (!_is_initialized) {
+        throw std::runtime_error("CSRMergeSPMV: preprocess() must be called before operator()");
+    }
+    if (_rows <= 0) {
+        return;
+    }
+
+    // Launch configuration
+    constexpr int threads_per_block = 256;
+
+    csr_merge_spmv_kernel<<<_num_blocks, threads_per_block>>>(_rows, _d_ia, _d_ja, _d_av,
+                                                              d_x, d_y, alpha, beta, _index_base, _nnz,
+                                                              _d_merge_path_boundaries);
+    check_cuda_error(cudaGetLastError(), "CSRMergeSPMV kernel launch failed");
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::check_cuda_error(cudaError_t error,
+                                                                const char* message)
+{
+    if (error != cudaSuccess) {
+        throw std::runtime_error(std::string("CUDA error: ") + message + " - " +
+                                 cudaGetErrorString(error));
+    }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::compute_merge_path_boundaries()
+{
+    constexpr int threads_per_block = 256;
+    constexpr int items_per_thread = 8;
+    constexpr int items_per_block = threads_per_block * items_per_thread;
+    
+    _num_blocks = (_nnz + items_per_block - 1) / items_per_block;
+    
+    // Allocate host array for boundaries
+    std::vector<ROWTYPE> h_boundaries(_num_blocks + 1);
+    
+    // Copy row pointers to host for merge path computation
+    std::vector<ROWTYPE> h_ia(_rows + 1);
+    check_cuda_error(cudaMemcpy(h_ia.data(), _d_ia, (_rows + 1) * sizeof(ROWTYPE), cudaMemcpyDeviceToHost),
+                    "Failed to copy row pointers to host");
+    
+    // Compute merge path boundaries on host
+    const ROWTYPE n_rows = static_cast<ROWTYPE>(_rows) + static_cast<ROWTYPE>(1);
+    for (int block = 0; block <= _num_blocks; ++block) {
+        const ROWTYPE diag = static_cast<ROWTYPE>(block) * items_per_block;
+        
+        // Binary search for merge path diagonal
+        ROWTYPE begin = diag > _nnz ? diag - _nnz : 0;
+        ROWTYPE end = diag < n_rows ? diag : n_rows;
+        
+        while (begin < end) {
+            ROWTYPE mid = (begin + end) >> 1;
+            ROWTYPE a_idx = mid;
+            ROWTYPE b_idx = diag - mid - 1;
+            
+            ROWTYPE a_val = (a_idx < n_rows - 1) ? (h_ia[a_idx + 1] - _index_base) : _nnz;
+            bool pred = (b_idx < 0) || (a_val > b_idx);
+            
+            if (pred) {
+                end = mid;
+            } else {
+                begin = mid + 1;
+            }
+        }
+        h_boundaries[block] = begin;
+    }
+    
+    // Allocate and copy boundaries to device
+    check_cuda_error(cudaMalloc(&_d_merge_path_boundaries, (_num_blocks + 1) * sizeof(ROWTYPE)),
+                    "Failed to allocate merge path boundaries");
+    check_cuda_error(cudaMemcpy(_d_merge_path_boundaries, h_boundaries.data(), 
+                                (_num_blocks + 1) * sizeof(ROWTYPE), cudaMemcpyHostToDevice),
+                    "Failed to copy merge path boundaries to device");
+}
+
 // Explicit template instantiations for common types
 template void copy_csr_host_to_device<int, int, double>(int, const int*, const int*, const double*, int**, int**, double**, int*);
 template void copy_csr_host_to_device<int, int, float>(int, const int*, const int*, const float*, int**, int**, float**, int*);
@@ -779,5 +1186,10 @@ template class CSRVectorSPMV<int, int, double>;
 template class CSRVectorSPMV<int, int, float>;
 template class CSRVectorSPMV<int64_t, int64_t, double>;
 template class CSRVectorSPMV<int64_t, int64_t, float>;
+
+template class CSRMergeSPMV<int, int, double>;
+template class CSRMergeSPMV<int, int, float>;
+template class CSRMergeSPMV<int64_t, int64_t, double>;
+template class CSRMergeSPMV<int64_t, int64_t, float>;
 
 } // namespace matrix_utils

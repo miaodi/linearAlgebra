@@ -359,6 +359,59 @@ auto CSRVectorSPMV_Bench = [](benchmark::State &state, const auto &mat,
   if (d_ja) cudaFree(d_ja);
   if (d_av) cudaFree(d_av);
 };
+
+template <typename VALTYPE>
+auto CSRMergeSPMV_Bench = [](benchmark::State &state, const auto &mat,
+                          const int threads, const int it) {
+  // Allocate host memory
+  std::vector<VALTYPE> x(mat.rows, 0.0);
+  std::vector<VALTYPE> b(mat.rows, 1.0);
+
+  // Allocate device memory for vectors
+  VALTYPE* d_x;
+  VALTYPE* d_y;
+  cudaMalloc(&d_x, mat.rows * sizeof(VALTYPE));
+  cudaMalloc(&d_y, mat.rows * sizeof(VALTYPE));
+
+  // Copy CSR matrix to device
+  int* d_ia = nullptr;
+  int* d_ja = nullptr;
+  VALTYPE* d_av = nullptr;
+  const int base = mat.ai.empty() ? 0 : mat.ai[0];
+  const int nnz = mat.ai.empty() ? 0 : (mat.ai[mat.rows] - base);
+  matrix_utils::copy_csr_host_to_device<int, int, VALTYPE>(
+      mat.rows, mat.ai.data(), mat.aj.data(), mat.av.data(), &d_ia, &d_ja, &d_av);
+
+  // Copy input vector to device
+  cudaMemcpy(d_x, b.data(), mat.rows * sizeof(VALTYPE), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_y, x.data(), mat.rows * sizeof(VALTYPE), cudaMemcpyHostToDevice);
+
+  // Preprocess CSR merge SpMV
+  matrix_utils::CSRMergeSPMV<int, int, VALTYPE> cuda_spmv;
+  cuda_spmv.preprocess(mat.rows, d_ia, d_ja, d_av, base, nnz);
+
+  // Warm-up run
+  cuda_spmv(d_x, d_y);
+  cudaDeviceSynchronize();
+
+  // Benchmark
+  for (auto _ : state) {
+    for (int i = 0; i < it; i++) {
+      cuda_spmv(d_x, d_y);
+    }
+    cudaDeviceSynchronize();
+  }
+
+  state.SetBytesProcessed(2 * sizeof(VALTYPE) * int64_t(state.iterations()) *
+                          int64_t(it) * int64_t(mat.NNZ()));
+
+  // Cleanup
+  cudaFree(d_x);
+  cudaFree(d_y);
+  if (d_ia) cudaFree(d_ia);
+  if (d_ja) cudaFree(d_ja);
+  if (d_av) cudaFree(d_av);
+};
 #endif
 
 int main(int argc, char **argv) {
@@ -440,6 +493,8 @@ int main(int argc, char **argv) {
                                iterations);
   benchmark::RegisterBenchmark("CSRVectorSPMV_double", CSRVectorSPMV_Bench<double>, mat_double, num_threads,
                                iterations);
+  benchmark::RegisterBenchmark("CSRMergeSPMV_double", CSRMergeSPMV_Bench<double>, mat_double, num_threads,
+                               iterations);
 #endif
   
   // Float precision benchmarks
@@ -465,6 +520,8 @@ int main(int argc, char **argv) {
   benchmark::RegisterBenchmark("CSRScalarSPMV_float", CSRScalarSPMV_Bench<float>, mat_float, num_threads,
                                iterations);
   benchmark::RegisterBenchmark("CSRVectorSPMV_float", CSRVectorSPMV_Bench<float>, mat_float, num_threads,
+                               iterations);
+  benchmark::RegisterBenchmark("CSRMergeSPMV_float", CSRMergeSPMV_Bench<float>, mat_float, num_threads,
                                iterations);
 #endif
   

@@ -124,8 +124,8 @@ private:
     const ROWTYPE* _d_ia = nullptr;
     const COLTYPE* _d_ja = nullptr;
     const VALTYPE* _d_av = nullptr;
-    size_t _nnz = 0;
-    int _index_base = 0;
+    ROWTYPE _nnz = 0;
+    ROWTYPE _index_base = 0;
     bool _is_initialized = false;
     COLTYPE _rows = 0;
 
@@ -184,8 +184,8 @@ private:
     const ROWTYPE* _d_ia = nullptr;
     const COLTYPE* _d_ja = nullptr;
     const VALTYPE* _d_av = nullptr;
-    size_t _nnz = 0;
-    int _index_base = 0;
+    ROWTYPE _nnz = 0;
+    ROWTYPE _index_base = 0;
     bool _is_initialized = false;
     COLTYPE _rows = 0;
 
@@ -289,8 +289,8 @@ private:
     size_t _buffer_size;
     
     // Matrix properties
-    size_t _nnz;
-    int _index_base;
+    ROWTYPE _nnz;
+    ROWTYPE _index_base;
     bool _is_initialized;
     
     // Helper functions
@@ -301,6 +301,63 @@ private:
     // Get cuSPARSE data type
     cudaDataType get_cuda_data_type();
     cusparseIndexType_t get_index_type();
+};
+
+/**
+ * @brief Merge-based CSR SpMV implementation
+ * 
+ * Based on "Merge-Based Parallel Sparse Matrix-Vector Multiplication" 
+ * by Merrill & Garland (2016). Uses merge path partitioning for load balancing.
+ * 
+ * Key features:
+ * - Merge path decomposition for balanced workload distribution
+ * - Better performance on irregular sparsity patterns
+ * - Cooperative thread block processing
+ * 
+ * Algorithm overview:
+ * 1. Treat matrix as linearized array of (row_id, col_id, value) tuples
+ * 2. Use merge path to partition work among thread blocks
+ * 3. Each block cooperatively processes its assigned nonzeros
+ * 4. Use shared memory for partial sums and atomic reduction
+ */
+template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
+class CSRMergeSPMV : public SpMVOperator<VALTYPE>
+{
+public:
+    CSRMergeSPMV();
+    ~CSRMergeSPMV();
+
+    CSRMergeSPMV(const CSRMergeSPMV&) = delete;
+    CSRMergeSPMV& operator=(const CSRMergeSPMV&) = delete;
+
+    CSRMergeSPMV(CSRMergeSPMV&& other) noexcept;
+    CSRMergeSPMV& operator=(CSRMergeSPMV&& other) noexcept;
+
+    void preprocess(COLTYPE n,
+                   const ROWTYPE* d_ia,
+                   const COLTYPE* d_ja,
+                   const VALTYPE* d_av,
+                   ROWTYPE base,
+                   ROWTYPE nnz);
+
+    void operator()(const VALTYPE* d_x, VALTYPE* d_y, VALTYPE alpha = 1.0, VALTYPE beta = 0.0) override;
+
+private:
+    const ROWTYPE* _d_ia;
+    const COLTYPE* _d_ja;
+    const VALTYPE* _d_av;
+    ROWTYPE _nnz;
+    ROWTYPE _index_base;
+    bool _is_initialized;
+    COLTYPE _rows;
+    
+    // Precomputed merge path boundaries for each block
+    ROWTYPE* _d_merge_path_boundaries;
+    int _num_blocks;
+
+    void cleanup();
+    void check_cuda_error(cudaError_t error, const char* message);
+    void compute_merge_path_boundaries();
 };
 
 } // namespace matrix_utils

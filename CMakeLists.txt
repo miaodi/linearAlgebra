@@ -205,6 +205,10 @@ if(USE_CUDA)
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
   endif()
   
+  # Add forward compatibility for older drivers
+  # This allows code compiled with newer CUDA toolkit to run on older drivers
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --forward-unknown-to-host-compiler")
+  
   # CUDSS support
   if(USE_CUDSS)
     add_compile_definitions(USE_CUDSS)
