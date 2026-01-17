@@ -16,6 +16,11 @@ set(EXCLUDED_TESTS
    #  "reordering_test.cpp"
 )
 
+# Conditionally exclude CUDA tests if CUDA is not enabled
+if(NOT USE_CUDA)
+   list(APPEND EXCLUDED_TESTS "cuda_ilu_symbolic_test.cpp")
+endif()
+
 foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
    get_filename_component(ONE_TEST_EXEC ${ONE_TEST_CPP} NAME_WE)
    get_filename_component(ONE_TEST_FILENAME ${ONE_TEST_CPP} NAME)
@@ -27,12 +32,23 @@ foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
       continue()
    endif()
 
+   # Check if this is a CUDA test
+   string(FIND ${ONE_TEST_FILENAME} "cuda" IS_CUDA_TEST)
+   
    # Avoid name collision 
    set(TARGET_NAME TEST_${ONE_TEST_EXEC})
 
    add_executable(${TARGET_NAME} ${ONE_TEST_CPP})
    set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_TEST_EXEC})
+   
+   # Link standard libraries
    target_link_libraries(${TARGET_NAME} PRIVATE GTest::gtest_main GTest::gmock_main solver mkl_wrapper utils reordering OpenMP::OpenMP_CXX ${LAPACK_LIBRARIES})
+   
+   # Add CUDA-specific dependencies if this is a CUDA test
+   if(IS_CUDA_TEST GREATER -1 AND USE_CUDA)
+      target_link_libraries(${TARGET_NAME} PRIVATE sparse_mat_op_cuda CUDA::cudart)
+      set_target_properties(${TARGET_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+   endif()
 
    # Use add_test instead of gtest_discover_tests for better compatibility
    add_test(NAME ${ONE_TEST_EXEC} COMMAND ${TARGET_NAME})
