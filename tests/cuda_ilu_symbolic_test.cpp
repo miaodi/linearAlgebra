@@ -2,6 +2,7 @@
 #include "cuda_ilu_symbolic.h"
 #include "precond.hpp"
 #include "matrix_utils.hpp"
+#include "io.hpp"
 #include "utils.h"
 #include <cuda_runtime.h>
 #include <vector>
@@ -64,12 +65,18 @@ TEST(CudaILUSymbolic, SmallMatrix_Level0)
               << ", NNZ: " << nnz << std::endl;
     
     // CPU reference computation
-    ILULevelSymbolicParallelU<CSRMatrix<int, int, double>, false> cpu_symbolic(1);
+    ILULevelSymbolicParallelU<CSRMatrix<int, int, double>, true> cpu_symbolic(1);
     CSRMatrix<int, int, double> U_cpu;
     bool cpu_success = cpu_symbolic(n, csr_rows.data(), csr_cols.data(), 0, U_cpu);
     ASSERT_TRUE(cpu_success);
     
     std::cout << "CPU result: U has " << U_cpu.NNZ() << " nonzeros" << std::endl;
+    
+    // Write CPU U pattern to SVG
+    std::ofstream cpu_svg("U_cpu_level0.svg");
+    matrix_utils::writeSVG(U_cpu.rows, U_cpu.cols, U_cpu.AI(), U_cpu.AJ(), cpu_svg);
+    cpu_svg.close();
+    std::cout << "CPU U pattern written to U_cpu_level0.svg" << std::endl;
     
     // Copy matrix to GPU
     int* d_ai;
@@ -87,7 +94,7 @@ TEST(CudaILUSymbolic, SmallMatrix_Level0)
     
     // Run CUDA version
     bool cuda_success = ILUSymbolicU_CUDA<int, int>(
-        n, d_ai, d_aj, 0, base, false, d_u_ai, &d_u_aj, &u_nnz);
+        n, d_ai, d_aj, 0, base, true, d_u_ai, &d_u_aj, &u_nnz);
     ASSERT_TRUE(cuda_success);
     
     std::cout << "CUDA result: U has " << u_nnz << " nonzeros" << std::endl;
@@ -97,6 +104,12 @@ TEST(CudaILUSymbolic, SmallMatrix_Level0)
     std::vector<int> u_aj_host(u_nnz);
     cudaMemcpy(u_ai_host.data(), d_u_ai, (n + 1) * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(u_aj_host.data(), d_u_aj, u_nnz * sizeof(int), cudaMemcpyDeviceToHost);
+    
+    // Write CUDA U pattern to SVG
+    std::ofstream cuda_svg("U_cuda_level0.svg");
+    matrix_utils::writeSVG(n, n, u_ai_host.data(), u_aj_host.data(), cuda_svg);
+    cuda_svg.close();
+    std::cout << "CUDA U pattern written to U_cuda_level0.svg" << std::endl;
     
     // Compare structures
     bool match = compare_csr_structure(n, 
@@ -126,12 +139,18 @@ TEST(CudaILUSymbolic, SmallMatrix_Level1)
     int base = 0;
     
     // CPU reference
-    ILULevelSymbolicParallelU<CSRMatrix<int, int, double>, false> cpu_symbolic(1);
+    ILULevelSymbolicParallelU<CSRMatrix<int, int, double>, true> cpu_symbolic(1);
     CSRMatrix<int, int, double> U_cpu;
     bool cpu_success = cpu_symbolic(n, csr_rows.data(), csr_cols.data(), 1, U_cpu);
     ASSERT_TRUE(cpu_success);
     
-    std::cout << "CPU result (level 1): U has " << U_cpu.NNZ() << " nonzeros" << std::endl;
+    std::cout << "CPU result (level 1): U has" << U_cpu.NNZ() << " nonzeros" << std::endl;
+    
+    // Write CPU U pattern to SVG
+    std::ofstream cpu_svg("U_cpu_level1.svg");
+    matrix_utils::writeSVG(U_cpu.rows, U_cpu.cols, U_cpu.AI(), U_cpu.AJ(), cpu_svg);
+    cpu_svg.close();
+    std::cout << "CPU U pattern written to U_cpu_level1.svg" << std::endl;
     
     // Copy to GPU
     int* d_ai;
@@ -148,7 +167,7 @@ TEST(CudaILUSymbolic, SmallMatrix_Level1)
     cudaMalloc(&d_u_ai, (n + 1) * sizeof(int));
     
     bool cuda_success = ILUSymbolicU_CUDA<int, int>(
-        n, d_ai, d_aj, 1, base, false, d_u_ai, &d_u_aj, &u_nnz);
+        n, d_ai, d_aj, 1, base, true, d_u_ai, &d_u_aj, &u_nnz);
     ASSERT_TRUE(cuda_success);
     
     std::cout << "CUDA result (level 1): U has " << u_nnz << " nonzeros" << std::endl;
@@ -158,6 +177,12 @@ TEST(CudaILUSymbolic, SmallMatrix_Level1)
     std::vector<int> u_aj_host(u_nnz);
     cudaMemcpy(u_ai_host.data(), d_u_ai, (n + 1) * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(u_aj_host.data(), d_u_aj, u_nnz * sizeof(int), cudaMemcpyDeviceToHost);
+    
+    // Write CUDA U pattern to SVG
+    std::ofstream cuda_svg("U_cuda_level1.svg");
+    matrix_utils::writeSVG(n, n, u_ai_host.data(), u_aj_host.data(), cuda_svg);
+    cuda_svg.close();
+    std::cout << "CUDA U pattern written to U_cuda_level1.svg" << std::endl;
     
     bool match = compare_csr_structure(n,
                                        U_cpu.AI(), U_cpu.AJ(),
@@ -171,8 +196,9 @@ TEST(CudaILUSymbolic, SmallMatrix_Level1)
     cudaFree(d_u_aj);
 }
 
-TEST(CudaILUSymbolic, MediumMatrix_Level2)
+TEST(CudaILUSymbolic, MediumMatrix_Level10)
 {
+    const int level = 100;
     std::vector<int> csr_rows;
     std::vector<int> csr_cols;
     std::vector<double> csr_vals;
@@ -189,17 +215,23 @@ TEST(CudaILUSymbolic, MediumMatrix_Level2)
               << ", NNZ: " << nnz << std::endl;
     
     // CPU reference
-    ILULevelSymbolicParallelU<CSRMatrix<int, int, double>, false> cpu_symbolic(4);
+    ILULevelSymbolicParallelU<CSRMatrix<int, int, double>, true> cpu_symbolic(4);
     CSRMatrix<int, int, double> U_cpu;
     
     auto cpu_start = std::chrono::high_resolution_clock::now();
-    bool cpu_success = cpu_symbolic(n, csr_rows.data(), csr_cols.data(), 2, U_cpu);
+    bool cpu_success = cpu_symbolic(n, csr_rows.data(), csr_cols.data(), level, U_cpu);
     auto cpu_end = std::chrono::high_resolution_clock::now();
     auto cpu_time = std::chrono::duration<double>(cpu_end - cpu_start).count();
     
     ASSERT_TRUE(cpu_success);
     std::cout << "CPU time: " << cpu_time << " seconds, "
               << "U has " << U_cpu.NNZ() << " nonzeros" << std::endl;
+    
+    // Write CPU U pattern to SVG
+    std::ofstream cpu_svg("U_cpu_level2.svg");
+    matrix_utils::writeSVG(U_cpu.rows, U_cpu.cols, U_cpu.AI(), U_cpu.AJ(), cpu_svg);
+    cpu_svg.close();
+    std::cout << "CPU U pattern written to U_cpu_level2.svg" << std::endl;
     
     // Copy to GPU
     int* d_ai;
@@ -217,7 +249,7 @@ TEST(CudaILUSymbolic, MediumMatrix_Level2)
     
     auto cuda_start = std::chrono::high_resolution_clock::now();
     bool cuda_success = ILUSymbolicU_CUDA<int, int>(
-        n, d_ai, d_aj, 2, base, false, d_u_ai, &d_u_aj, &u_nnz);
+        n, d_ai, d_aj, level, base, true, d_u_ai, &d_u_aj, &u_nnz);
     cudaDeviceSynchronize();
     auto cuda_end = std::chrono::high_resolution_clock::now();
     auto cuda_time = std::chrono::duration<double>(cuda_end - cuda_start).count();
@@ -232,6 +264,12 @@ TEST(CudaILUSymbolic, MediumMatrix_Level2)
     std::vector<int> u_aj_host(u_nnz);
     cudaMemcpy(u_ai_host.data(), d_u_ai, (n + 1) * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(u_aj_host.data(), d_u_aj, u_nnz * sizeof(int), cudaMemcpyDeviceToHost);
+    
+    // Write CUDA U pattern to SVG
+    std::ofstream cuda_svg("U_cuda_level2.svg");
+    matrix_utils::writeSVG(n, n, u_ai_host.data(), u_aj_host.data(), cuda_svg);
+    cuda_svg.close();
+    std::cout << "CUDA U pattern written to U_cuda_level2.svg" << std::endl;
     
     bool match = compare_csr_structure(n,
                                        U_cpu.AI(), U_cpu.AJ(),

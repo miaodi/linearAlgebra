@@ -7,9 +7,15 @@
 #include <thrust/remove.h>
 #include <thrust/scan.h>
 #include <thrust/copy.h>
+#include <thrust/transform.h>
+#include <thrust/functional.h>
+#include <thrust/scatter.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
 #include <thrust/execution_policy.h>
+#include <thrust/binary_search.h>
 #include <cub/cub.cuh>
+#include <cuda/std/iterator>
 #include <iostream>
 #include <limits>
 
@@ -34,6 +40,26 @@ struct Pair
     }
 };
 
+template <typename COLTYPE>
+struct PairSrc
+{
+    __host__ __device__ COLTYPE operator()(const Pair<COLTYPE>& p) const
+    {
+        return p.src;
+    }
+};
+
+template <typename COLTYPE>
+struct PairCurPlusBase
+{
+    COLTYPE base;
+    __host__ __device__ explicit PairCurPlusBase(COLTYPE base_in) : base(base_in) {}
+    __host__ __device__ COLTYPE operator()(const Pair<COLTYPE>& p) const
+    {
+        return p.cur + base;
+    }
+};
+
 // Hash function for pair (source, current)
 template <typename COLTYPE>
 __device__ __host__ unsigned long long hash_pair(COLTYPE src, COLTYPE cur)
@@ -54,17 +80,30 @@ __global__ void init_frontier_kernel(Pair<COLTYPE>* frontier, COLTYPE n)
     }
 }
 
-// Kernel: Expand frontier by exploring neighbors
-// For each (i, j) in current frontier, add (i, adj[j]) to next frontier
+// Kernel: Compute degree for all nodes (pre-computation)
 template <typename ROWTYPE, typename COLTYPE>
-__global__ void expand_frontier_kernel(
+__global__ void compute_all_degrees_kernel(
+    const ROWTYPE* d_ai,
+    COLTYPE n,
+    COLTYPE base,
+    int* degrees)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n)
+        return;
+    
+    ROWTYPE row_start = d_ai[idx] - base;
+    ROWTYPE row_end = d_ai[idx + 1] - base;
+    degrees[idx] = row_end - row_start;
+}
+
+// Kernel: Look up degrees for each node in current frontier
+template <typename COLTYPE>
+__global__ void lookup_frontier_degrees_kernel(
     const Pair<COLTYPE>* current_frontier,
     int current_size,
-    const ROWTYPE* d_ai,
-    const COLTYPE* d_aj,
-    COLTYPE base,
-    Pair<COLTYPE>* next_frontier,
-    int* next_frontier_sizes)
+    const int* all_degrees,
+    int* frontier_degrees)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= current_size)
@@ -72,23 +111,48 @@ __global__ void expand_frontier_kernel(
     
     Pair<COLTYPE> p = current_frontier[idx];
     COLTYPE j = p.cur;
+    frontier_degrees[idx] = all_degrees[j];
+}
+
+
+
+// Kernel: Build next frontier using inclusive scan (Step 2)
+// Each thread handles one element in the next frontier
+template <typename ROWTYPE, typename COLTYPE>
+__global__ void build_next_frontier_kernel(
+    const Pair<COLTYPE>* current_frontier,
+    int current_size,
+    const int* inclusive_sum,
+    const ROWTYPE* d_ai,
+    const COLTYPE* d_aj,
+    COLTYPE base,
+    int next_frontier_size,
+    Pair<COLTYPE>* next_frontier)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= next_frontier_size)
+        return;
+    
+    // Use thrust::upper_bound to find which frontier node this output belongs to
+    const int* upper = thrust::upper_bound(thrust::seq, inclusive_sum, inclusive_sum + current_size, idx);
+    int frontier_idx = upper - inclusive_sum;
+    
+    // Local index within this frontier node's neighbors
+    // For inclusive scan: need to subtract the previous cumulative sum
+    int prev_sum = (frontier_idx > 0) ? inclusive_sum[frontier_idx - 1] : 0;
+    int local_idx = idx - prev_sum;
+    
+    Pair<COLTYPE> p = current_frontier[frontier_idx];
     COLTYPE i = p.src;
+    COLTYPE j = p.cur;
     
+    // Get the neighbor at local_idx
     ROWTYPE row_start = d_ai[j] - base;
-    ROWTYPE row_end = d_ai[j + 1] - base;
-    int degree = row_end - row_start;
+    COLTYPE neighbor = d_aj[row_start + local_idx] - base;
     
-    // Allocate space in next frontier for this node's neighbors
-    int write_pos = atomicAdd(next_frontier_sizes, degree);
-    
-    // Write all (i, adj[j]) pairs
-    for (ROWTYPE k = row_start; k < row_end; ++k)
-    {
-        COLTYPE neighbor = d_aj[k] - base;
-        next_frontier[write_pos].src = i;
-        next_frontier[write_pos].cur = neighbor;
-        write_pos++;
-    }
+    // Write to next frontier
+    next_frontier[idx].src = i;
+    next_frontier[idx].cur = neighbor;
 }
 
 // Kernel: Remove duplicate pairs (assumes sorted input)
@@ -183,27 +247,27 @@ __global__ void mark_visited_kernel(
     // Hash table full - should not happen with proper sizing
 }
 
-// Functor: Filter pairs where i > j (for U pattern without diagonal)
+// Functor: Filter pairs where i < j (for U pattern without diagonal)
 template <typename COLTYPE>
-struct FilterU_gt {
+struct FilterU_lt {
     __device__ bool operator()(const Pair<COLTYPE>& p) const {
-        return p.src > p.cur;
+        return p.src < p.cur;
     }
 };
 
-// Functor: Filter pairs where i >= j (for U pattern with diagonal)
+// Functor: Filter pairs where i <= j (for U pattern with diagonal)
 template <typename COLTYPE>
-struct FilterU_gte {
+struct FilterU_lte {
     __device__ bool operator()(const Pair<COLTYPE>& p) const {
-        return p.src >= p.cur;
+        return p.src <= p.cur;
     }
 };
 
-// Functor: Filter pairs where i < j (for next frontier)
+// Functor: Filter pairs where i > j (for next frontier)
 template <typename COLTYPE>
 struct FilterNext {
     __device__ bool operator()(const Pair<COLTYPE>& p) const {
-        return p.src < p.cur;
+        return p.src > p.cur;
     }
 };
 
@@ -311,11 +375,33 @@ bool ILUSymbolicU_CUDA(
     
     thrust::device_vector<unsigned long long> hash_table(hash_table_size, ULLONG_MAX);
     
-    // Temporary storage for row counts
-    thrust::device_vector<ROWTYPE> row_counts(n, ROWTYPE(0));
+    // Mark initial frontier (i, i) as visited
+    blocks = (n + threads - 1) / threads;
+    mark_visited_kernel<<<blocks, threads>>>(
+        thrust::raw_pointer_cast(current_frontier.data()),
+        n,
+        thrust::raw_pointer_cast(hash_table.data()),
+        hash_table_size);
+    cudaDeviceSynchronize();
     
     // Storage for U pattern accumulation
     thrust::device_vector<Pair<COLTYPE>> u_pattern;
+    
+    // Add initial diagonal pairs to U pattern if keeping diagonal
+    if (keepdiag)
+    {
+        u_pattern.insert(u_pattern.end(), current_frontier.begin(), current_frontier.end());
+    }
+    
+    // Pre-compute degrees for all nodes before BFS
+    thrust::device_vector<int> all_degrees(n);
+    blocks = (n + threads - 1) / threads;
+    compute_all_degrees_kernel<<<blocks, threads>>>(
+        d_ai,
+        n,
+        base,
+        thrust::raw_pointer_cast(all_degrees.data()));
+    cudaDeviceSynchronize();
     
     // BFS for k levels
     for (int level = 0; level <= lvl; ++level)
@@ -323,115 +409,93 @@ bool ILUSymbolicU_CUDA(
         int current_size = current_frontier.size();
         if (current_size == 0)
             break;
-        
-        if (level < lvl)
+
+        // Step 1: Look up degrees for nodes in current frontier
+        thrust::device_vector<int> degrees(current_size);
+        blocks = (current_size + threads - 1) / threads;
+        lookup_frontier_degrees_kernel<<<blocks, threads>>>(
+            thrust::raw_pointer_cast(current_frontier.data()), current_size,
+            thrust::raw_pointer_cast(all_degrees.data()), thrust::raw_pointer_cast(degrees.data()));
+        cudaDeviceSynchronize();
+
+        // Step 2: Compute inclusive scan to get cumulative sums
+        thrust::device_vector<int> inclusive_sum(current_size);
+        thrust::inclusive_scan(degrees.begin(), degrees.end(), inclusive_sum.begin());
+
+        // Get total size from last element of inclusive scan
+        int actual_next_size = 0;
+        if (current_size > 0)
         {
-            // Use NNZ as upper bound for next frontier size
-            next_frontier.resize(nnz);
-            
-            thrust::device_vector<int> next_frontier_size_dev(1, 0);
-            
-            // Expand frontier
-            blocks = (current_size + threads - 1) / threads;
-            expand_frontier_kernel<<<blocks, threads>>>(
-                thrust::raw_pointer_cast(current_frontier.data()),
-                current_size,
-                d_ai,
-                d_aj,
-                base,
-                thrust::raw_pointer_cast(next_frontier.data()),
-                thrust::raw_pointer_cast(next_frontier_size_dev.data()));
-            cudaDeviceSynchronize();
-            
-            // Get actual size
-            int actual_next_size;
-            cudaMemcpy(&actual_next_size, 
-                      thrust::raw_pointer_cast(next_frontier_size_dev.data()),
-                      sizeof(int), cudaMemcpyDeviceToHost);
-            next_frontier.resize(actual_next_size);
-            
-            if (actual_next_size == 0)
-                break;
-            
-            // Sort pairs
-            thrust::sort(next_frontier.begin(), next_frontier.end());
-            
-            // Remove duplicates
-            auto new_end = thrust::unique(next_frontier.begin(), next_frontier.end());
-            next_frontier.erase(new_end, next_frontier.end());
-            
-            int unique_size = next_frontier.size();
-            
-            // Check which pairs are already visited
-            thrust::device_vector<bool> is_visited(unique_size);
-            blocks = (unique_size + threads - 1) / threads;
-            check_visited_kernel<<<blocks, threads>>>(
-                thrust::raw_pointer_cast(next_frontier.data()),
-                unique_size,
-                thrust::raw_pointer_cast(hash_table.data()),
-                hash_table_size,
-                thrust::raw_pointer_cast(is_visited.data()));
-            cudaDeviceSynchronize();
-            
-            // Filter unvisited pairs using stencil
-            thrust::device_vector<Pair<COLTYPE>> unvisited(unique_size);
-            auto new_end_unvisited = thrust::copy_if(next_frontier.begin(), next_frontier.end(),
-                           is_visited.begin(),
-                           unvisited.begin(),
-                           thrust::logical_not<bool>());
-            unvisited.resize(thrust::distance(unvisited.begin(), new_end_unvisited));
-            
-            int unvisited_size = unvisited.size();
-            if (unvisited_size == 0)
-                break;
-            
-            // Mark as visited
-            blocks = (unvisited_size + threads - 1) / threads;
-            mark_visited_kernel<<<blocks, threads>>>(
-                thrust::raw_pointer_cast(unvisited.data()),
-                unvisited_size,
-                thrust::raw_pointer_cast(hash_table.data()),
-                hash_table_size);
-            cudaDeviceSynchronize();
-            
-            // Extract pairs where i >= j to U pattern
-            thrust::device_vector<Pair<COLTYPE>> u_pairs(unvisited_size);
-            auto new_end_u = keepdiag ? 
-                thrust::copy_if(unvisited.begin(), unvisited.end(),
-                               u_pairs.begin(),
-                               FilterU_gte<COLTYPE>()) :
-                thrust::copy_if(unvisited.begin(), unvisited.end(),
-                               u_pairs.begin(),
-                               FilterU_gt<COLTYPE>());
-            u_pairs.resize(thrust::distance(u_pairs.begin(), new_end_u));
-            
-            // Append to global U pattern
-            u_pattern.insert(u_pattern.end(), u_pairs.begin(), u_pairs.end());
-            
-            // Keep only i < j for next iteration
-            thrust::device_vector<Pair<COLTYPE>> next_frontier_filtered(unvisited_size);
-            auto new_end_next = thrust::copy_if(unvisited.begin(), unvisited.end(),
-                           next_frontier_filtered.begin(),
-                           FilterNext<COLTYPE>());
-            next_frontier_filtered.resize(thrust::distance(next_frontier_filtered.begin(), new_end_next));
-            
-            current_frontier = next_frontier_filtered;
+            cudaMemcpy(&actual_next_size, thrust::raw_pointer_cast(inclusive_sum.data()) + current_size - 1,
+                       sizeof(int), cudaMemcpyDeviceToHost);
         }
-        else
-        {
-            // Last level: extract all remaining pairs where i >= j
-            int current_sz = current_frontier.size();
-            thrust::device_vector<Pair<COLTYPE>> u_pairs(current_sz);
-            auto new_end_final = keepdiag ? 
-                thrust::copy_if(current_frontier.begin(), current_frontier.end(),
-                               u_pairs.begin(),
-                               FilterU_gte<COLTYPE>()) :
-                thrust::copy_if(current_frontier.begin(), current_frontier.end(),
-                               u_pairs.begin(),
-                               FilterU_gt<COLTYPE>());
-            u_pairs.resize(thrust::distance(u_pairs.begin(), new_end_final));
-            u_pattern.insert(u_pattern.end(), u_pairs.begin(), u_pairs.end());
-        }
+
+        // Allocate next frontier
+        next_frontier.resize(actual_next_size);
+
+        if (actual_next_size == 0)
+            break;
+
+        // Step 3: Build next frontier using inclusive scan
+        blocks = (actual_next_size + threads - 1) / threads;
+        build_next_frontier_kernel<<<blocks, threads>>>(
+            thrust::raw_pointer_cast(current_frontier.data()), current_size,
+            thrust::raw_pointer_cast(inclusive_sum.data()), d_ai, d_aj, base, actual_next_size,
+            thrust::raw_pointer_cast(next_frontier.data()));
+        cudaDeviceSynchronize();
+
+        // Sort pairs
+        thrust::sort(next_frontier.begin(), next_frontier.end());
+
+        // Remove duplicates
+        auto new_end = thrust::unique(next_frontier.begin(), next_frontier.end());
+        next_frontier.erase(new_end, next_frontier.end());
+
+        int unique_size = next_frontier.size();
+
+        // Check which pairs are already visited
+        thrust::device_vector<bool> is_visited(unique_size);
+        blocks = (unique_size + threads - 1) / threads;
+        check_visited_kernel<<<blocks, threads>>>(thrust::raw_pointer_cast(next_frontier.data()), unique_size,
+                                                  thrust::raw_pointer_cast(hash_table.data()), hash_table_size,
+                                                  thrust::raw_pointer_cast(is_visited.data()));
+        cudaDeviceSynchronize();
+
+        // Filter unvisited pairs using stencil
+        thrust::device_vector<Pair<COLTYPE>> unvisited(unique_size);
+        auto new_end_unvisited =
+            thrust::copy_if(next_frontier.begin(), next_frontier.end(), is_visited.begin(),
+                            unvisited.begin(), thrust::logical_not<bool>());
+        unvisited.resize(cuda::std::distance(unvisited.begin(), new_end_unvisited));
+
+        int unvisited_size = unvisited.size();
+        if (unvisited_size == 0)
+            break;
+
+        // Mark as visited
+        blocks = (unvisited_size + threads - 1) / threads;
+        mark_visited_kernel<<<blocks, threads>>>(thrust::raw_pointer_cast(unvisited.data()), unvisited_size,
+                                                 thrust::raw_pointer_cast(hash_table.data()), hash_table_size);
+        cudaDeviceSynchronize();
+
+        // Extract pairs where i <= j to U pattern (upper triangular)
+        thrust::device_vector<Pair<COLTYPE>> u_pairs(unvisited_size);
+        auto new_end_u = keepdiag ? thrust::copy_if(unvisited.begin(), unvisited.end(),
+                                                    u_pairs.begin(), FilterU_lte<COLTYPE>())
+                                  : thrust::copy_if(unvisited.begin(), unvisited.end(),
+                                                    u_pairs.begin(), FilterU_lt<COLTYPE>());
+        u_pairs.resize(cuda::std::distance(u_pairs.begin(), new_end_u));
+
+        // Append to global U pattern
+        u_pattern.insert(u_pattern.end(), u_pairs.begin(), u_pairs.end());
+
+        // Keep only i > j for next iteration
+        thrust::device_vector<Pair<COLTYPE>> next_frontier_filtered(unvisited_size);
+        auto new_end_next = thrust::copy_if(unvisited.begin(), unvisited.end(),
+                                            next_frontier_filtered.begin(), FilterNext<COLTYPE>());
+        next_frontier_filtered.resize(cuda::std::distance(next_frontier_filtered.begin(), new_end_next));
+
+        current_frontier = next_frontier_filtered;
     }
     
     // Now build CSR structure from collected pairs
@@ -444,48 +508,41 @@ bool ILUSymbolicU_CUDA(
     
     // Build row pointers
     thrust::device_vector<ROWTYPE> u_ai_dev(n + 1, ROWTYPE(0));
-    
-    // Copy pattern to host for row counting (simpler than device-side)
-    std::vector<Pair<COLTYPE>> u_pattern_host(u_pattern.size());
-    thrust::copy(u_pattern.begin(), u_pattern.end(), u_pattern_host.begin());
-    
-    // Count entries per row on host
-    std::vector<ROWTYPE> u_ai_host(n + 1, ROWTYPE(0));
-    for (size_t i = 0; i < u_pattern_host.size(); ++i)
+    thrust::device_vector<ROWTYPE> row_counts(n, ROWTYPE(0));
+
+    auto row_it = thrust::make_transform_iterator(u_pattern.begin(), PairSrc<COLTYPE>());
+    auto row_it_end = thrust::make_transform_iterator(u_pattern.end(), PairSrc<COLTYPE>());
+    thrust::device_vector<COLTYPE> unique_rows(u_pattern.size());
+    thrust::device_vector<ROWTYPE> unique_counts(u_pattern.size());
+
+    auto reduce_end = thrust::reduce_by_key(
+        row_it, row_it_end,
+        thrust::make_constant_iterator<ROWTYPE>(1),
+        unique_rows.begin(), unique_counts.begin());
+    size_t unique_size = reduce_end.first - unique_rows.begin();
+    unique_rows.resize(unique_size);
+    unique_counts.resize(unique_size);
+
+    thrust::scatter(unique_counts.begin(), unique_counts.end(), unique_rows.begin(), row_counts.begin());
+
+    thrust::inclusive_scan(row_counts.begin(), row_counts.end(), u_ai_dev.begin() + 1);
+    if (base != 0)
     {
-        COLTYPE row = u_pattern_host[i].src;
-        u_ai_host[row + 1]++;
+        thrust::transform(u_ai_dev.begin() + 1, u_ai_dev.end(),
+                          thrust::make_constant_iterator(ROWTYPE(base)),
+                          u_ai_dev.begin() + 1, thrust::plus<ROWTYPE>());
     }
-    
-    // Prefix sum to get row pointers on host
-    for (int i = 0; i < n; ++i)
-    {
-        u_ai_host[i + 1] += u_ai_host[i];
-    }
-    
-    // Adjust for base indexing
-    for (int i = 0; i <= n; ++i)
-    {
-        u_ai_host[i] += base;
-    }
-    
-    // Copy to output
-    cudaMemcpy(d_u_ai, u_ai_host.data(),
-              (n + 1) * sizeof(ROWTYPE), cudaMemcpyHostToDevice);
+    u_ai_dev[0] = ROWTYPE(base);
+
+    cudaMemcpy(d_u_ai, thrust::raw_pointer_cast(u_ai_dev.data()),
+               (n + 1) * sizeof(ROWTYPE), cudaMemcpyDeviceToDevice);
     
     // Build column indices
-    *u_nnz = u_pattern_host.size();
+    *u_nnz = u_pattern.size();
     cudaMalloc(d_u_aj, *u_nnz * sizeof(COLTYPE));
-    
-    // Extract columns and adjust for base on host
-    std::vector<COLTYPE> u_aj_host(*u_nnz);
-    for (size_t i = 0; i < u_pattern_host.size(); ++i)
-    {
-        u_aj_host[i] = u_pattern_host[i].cur + base;
-    }
-    
-    cudaMemcpy(*d_u_aj, u_aj_host.data(),
-              *u_nnz * sizeof(COLTYPE), cudaMemcpyHostToDevice);
+
+    auto u_aj_ptr = thrust::device_pointer_cast(*d_u_aj);
+    thrust::transform(u_pattern.begin(), u_pattern.end(), u_aj_ptr, PairCurPlusBase<COLTYPE>(base));
     
     return true;
 }
