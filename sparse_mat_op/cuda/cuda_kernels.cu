@@ -1,4 +1,4 @@
-#include "cuda_kernels.h"
+#include "cuda_kernels.cuh"
 #include <cuda_runtime.h>
 
 namespace cuda_iterative_solver

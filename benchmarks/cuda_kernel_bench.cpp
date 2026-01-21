@@ -1,4 +1,4 @@
-#include "cuda_kernels.h"
+#include "cuda_kernels.cuh"
 #include <benchmark/benchmark.h>
 #include <cuda_runtime.h>
 #include <vector>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cuda_memory.h"
+#include "cuda_memory.cuh"
 #include <cuda_runtime.h>
 #include <cusparse.h>
 #include <memory>

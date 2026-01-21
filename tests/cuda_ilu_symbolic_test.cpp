@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "cuda_ilu_symbolic.h"
+#include "cuda_ilu_symbolic.cuh"
 #include "precond.hpp"
 #include "matrix_utils.hpp"
 #include "io.hpp"

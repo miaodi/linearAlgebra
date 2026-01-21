@@ -1,6 +1,6 @@
-#include "cuda_preconditioner.h"
-#include "cuda_gmres.h"
-#include "cuda_kernels.h"
+#include "cuda_preconditioner.cuh"
+#include "cuda_gmres.cuh"
+#include "cuda_kernels.cuh"
 #include <stdexcept>
 #include <cstring>
 

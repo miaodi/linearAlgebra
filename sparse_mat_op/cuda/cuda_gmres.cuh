@@ -6,10 +6,10 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
-#include "cuda_memory.h"
-#include "cuda_preconditioner.h"
-#include "cuda_spmv.h"
-#include "cuda_solver_types.h"
+#include "cuda_memory.cuh"
+#include "cuda_preconditioner.cuh"
+#include "cuda_spmv.cuh"
+#include "cuda_solver_types.cuh"
 
 namespace cuda_iterative_solver
 {

@@ -1,5 +1,5 @@
-#include "cuda_ilu_symbolic.h"
-#include "cuda_memory.h"
+#include "cuda_ilu_symbolic.cuh"
+#include "cuda_memory.cuh"
 #include <cuda_runtime.h>
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>

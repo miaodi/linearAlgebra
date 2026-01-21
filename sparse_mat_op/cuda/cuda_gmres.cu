@@ -1,4 +1,4 @@
-#include "cuda_gmres.h"
+#include "cuda_gmres.cuh"
 #include <cstring>
 #include <algorithm>
 #include <iomanip>

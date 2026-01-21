@@ -1,4 +1,4 @@
-#include "cuda_bicgstab.h"
+#include "cuda_bicgstab.cuh"
 #include <cstring>
 #include <algorithm>
 #include <iomanip>

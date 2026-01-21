@@ -11,7 +11,7 @@
 #include <vector>
 
 #ifdef USE_CUDA
-#include "cuda_spmv.h"
+#include "cuda_spmv.cuh"
 #include <cuda_runtime.h>
 #endif
 
