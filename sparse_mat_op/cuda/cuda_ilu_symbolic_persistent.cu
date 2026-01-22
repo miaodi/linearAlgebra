@@ -1,5 +1,6 @@
 #include "cuda_ilu_symbolic.cuh"
 #include <cuda_runtime.h>
+#include <cub/cub.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>
@@ -57,7 +58,33 @@ struct PairCurPlusBase
     }
 };
 
+template <typename T>
+struct LessThan
+{
+    __device__ bool operator()(const T& a, const T& b) const
+    {
+        return a < b;
+    }
+};
+
 __device__ int g_ilu_row_counter;
+
+// Kernel: Precompute degree (neighbor count) for all nodes
+template <typename ROWTYPE, typename COLTYPE>
+__global__ void compute_all_degrees_kernel(
+    const ROWTYPE* d_ai,
+    COLTYPE n,
+    COLTYPE base,
+    int* degrees)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n)
+        return;
+    
+    ROWTYPE row_start = d_ai[idx] - base;
+    ROWTYPE row_end = d_ai[idx + 1] - base;
+    degrees[idx] = static_cast<int>(row_end - row_start);
+}
 
 template <typename COLTYPE>
 __device__ __forceinline__ unsigned int hash_node(COLTYPE v)
@@ -148,6 +175,41 @@ __device__ __forceinline__ int unique_in_place(T* data, int count)
     return out;
 }
 
+/**
+ * @brief Process a single row for ILU(k) symbolic factorization using warp-level parallelism
+ * 
+ * This function computes the symbolic pattern for one row of the ILU(k) upper triangular factor.
+ * It performs a BFS starting from the diagonal element, exploring neighbors up to k levels.
+ * The algorithm maintains:
+ * - A frontier of nodes to explore (nodes reachable at current level)
+ * - A hash table to track visited nodes
+ * - A temporary buffer for output pairs where column >= row
+ * 
+ * Key invariant: Only explore neighbors through intermediate nodes smaller than the current row.
+ * This ensures we only capture fill-in from previously processed rows.
+ * 
+ * @tparam ROWTYPE Row pointer type (int or int64_t)
+ * @tparam COLTYPE Column index type
+ * @param row Current row index being processed
+ * @param d_ai CSR row pointers
+ * @param d_aj CSR column indices
+ * @param lvl Fill level k (0 = ILU(0), 1 = ILU(1), etc.)
+ * @param base Index base (0 or 1)
+ * @param keepdiag If true, include diagonal element in output
+ * @param frontier Warp-local buffer for current BFS frontier
+ * @param next_frontier Warp-local buffer for next BFS level
+ * @param temp Warp-local buffer for output pairs (columns >= row)
+ * @param frontier_cap Capacity of frontier buffers
+ * @param temp_cap Capacity of temp buffer
+ * @param hash Warp-local hash table for visited tracking
+ * @param hash_cap Hash table capacity (must be power of 2)
+ * @param out_pairs Global output buffer for all pairs
+ * @param out_count Global counter for output pairs
+ * @param out_cap Maximum capacity of out_pairs
+ * @param lane Warp lane ID (0-31)
+ * @param overflow_flag Global flag to signal buffer overflow
+ * @param degrees Precomputed degree array for all nodes
+ */
 template <typename ROWTYPE, typename COLTYPE>
 __device__ void ProcessNode(
     COLTYPE row,
@@ -167,11 +229,13 @@ __device__ void ProcessNode(
     unsigned long long* out_count,
     unsigned long long out_cap,
     int lane,
-    int* overflow_flag)
+    int* overflow_flag,
+    const int* degrees)
 {
     constexpr int warp_size = 32;
     const unsigned int mask = 0xffffffffu;
 
+    // Check if overflow already occurred in another warp
     int overflow = 0;
     if (lane == 0)
     {
@@ -183,22 +247,26 @@ __device__ void ProcessNode(
         return;
     }
 
+    // Initialize hash table with sentinel value -1 (parallel across warp)
     for (int idx = lane; idx < hash_cap; idx += warp_size)
     {
         hash[idx] = static_cast<COLTYPE>(-1);
     }
     __syncwarp(mask);
 
+    // Initialize frontier with the diagonal element (row, row)
+    // Only lane 0 performs initialization, others wait
     int frontier_size = 0;
     int temp_count = 0;
     if (lane == 0)
     {
         frontier[0] = row;
         frontier_size = 1;
-        if (!hash_insert_if_absent(hash, hash_cap, row))
-        {
-            atomicExch(overflow_flag, 1);
-        }
+        
+        // Mark diagonal as visited (should always succeed on first insert)
+        hash_insert_if_absent(hash, hash_cap, row);
+        
+        // If keeping diagonal, add (row, row) to output immediately
         if (keepdiag)
         {
             if (temp_count < temp_cap)
@@ -207,13 +275,16 @@ __device__ void ProcessNode(
             }
             else
             {
-                atomicExch(overflow_flag, 1);
+                atomicExch(overflow_flag, 2); // Overflow code 2: temp buffer
             }
         }
     }
 
+    // Broadcast frontier_size and temp_count to all lanes
     frontier_size = __shfl_sync(mask, frontier_size, 0);
     temp_count = __shfl_sync(mask, temp_count, 0);
+    
+    // Check overflow after initialization
     if (lane == 0)
     {
         overflow = *overflow_flag;
@@ -224,6 +295,7 @@ __device__ void ProcessNode(
         return;
     }
 
+    // BFS loop: iterate through k levels
     for (int level = 0; level <= lvl; ++level)
     {
         if (frontier_size == 0)
@@ -231,70 +303,123 @@ __device__ void ProcessNode(
             break;
         }
 
-        int adj_count = 0;
-        if (lane == 0)
+        // Expand frontier using 3-step parallel approach within the warp:
+        // Step 1: Each thread looks up precomputed degrees for assigned frontier nodes
+        // Step 2: Prefix sum to determine write positions (process in chunks)
+        // Step 3: Each thread writes neighbors to allocated positions in next_frontier
+        
+        int total_neighbors = 0;
+        
+        // Process frontier in chunks of warp_size to avoid memory conflicts
+        typedef cub::WarpScan<int> WarpScan;
+        __shared__ typename WarpScan::TempStorage temp_storage[8]; // Support up to 8 warps per block
+        int warp_in_block = threadIdx.x / warp_size;
+        
+        for (int chunk_start = 0; chunk_start < frontier_size; chunk_start += warp_size)
         {
-            for (int f = 0; f < frontier_size; ++f)
+            int f = chunk_start + lane;
+            
+            // Step 1: Lookup degree for this thread's frontier node
+            int degree = 0;
+            COLTYPE node = -1;
+            if (f < frontier_size)
             {
-                COLTYPE node = frontier[f];
+                node = frontier[f];
+                degree = degrees[node];
+            }
+            
+            // Step 2: Compute exclusive prefix sum for write offsets
+            int my_offset;
+            WarpScan(temp_storage[warp_in_block]).ExclusiveSum(degree, my_offset);
+            my_offset += total_neighbors; // Add base offset from previous chunks
+            
+            // Update total for next chunk
+            int chunk_total = __shfl_sync(mask, my_offset + degree, warp_size - 1);
+            total_neighbors = chunk_total;
+            
+            __syncwarp(mask);
+            
+            // Step 3: Copy neighbors to next_frontier
+            if (f < frontier_size && node != static_cast<COLTYPE>(-1))
+            {
                 ROWTYPE row_start = d_ai[node] - base;
                 ROWTYPE row_end = d_ai[node + 1] - base;
+                int write_offset = my_offset;
+                
+                // Copy all neighbors of this node
                 for (ROWTYPE jj = row_start; jj < row_end; ++jj)
                 {
                     COLTYPE neighbor = d_aj[jj] - base;
-                    if (adj_count < frontier_cap)
-                    {
-                        next_frontier[adj_count++] = neighbor;
-                    }
-                    else
-                    {
-                        atomicExch(overflow_flag, 1);
-                        break;
-                    }
-                }
-                if (*overflow_flag != 0)
-                {
-                    break;
+                    next_frontier[write_offset++] = neighbor;
                 }
             }
-
+            
+            __syncwarp(mask);
+        }
+        
+        // Check if we have enough space
+        if (lane == 0 && total_neighbors > frontier_cap)
+        {
+            atomicExch(overflow_flag, 1); // Overflow code 1: frontier buffer
+        }
+        
+        int adj_count = total_neighbors;
+        
+        // Now process the expanded frontier (only lane 0)
+        // Sort and deduplicate must be done serially since insertion_sort is sequential
+        if (lane == 0)
+        {
             if (*overflow_flag == 0)
             {
+                // Sort the entire expanded frontier
                 insertion_sort(next_frontier, adj_count);
+                // Deduplicate the sorted frontier
                 int unique_count = unique_in_place(next_frontier, adj_count);
 
+                // Process each unique neighbor
                 int new_frontier_size = 0;
                 for (int idx = 0; idx < unique_count; ++idx)
                 {
                     COLTYPE v = next_frontier[idx];
+                    
+                    // Skip if already visited
                     if (!hash_contains(hash, hash_cap, v))
                     {
-                        if (!hash_insert_if_absent(hash, hash_cap, v))
+                        // Mark as visited
+                        bool inserted = hash_insert_if_absent(hash, hash_cap, v);
+                        if (!inserted)
                         {
-                            atomicExch(overflow_flag, 1);
+                            // Hash table is full - this is a critical error
+                            atomicExch(overflow_flag, 3); // Overflow code 3: hash table
                             break;
                         }
+                        
+                        // Key decision: partition based on column index vs row
                         if (v < row)
                         {
+                            // v < row: Keep in frontier for next BFS level
+                            // These represent intermediate nodes in the fill path
                             if (new_frontier_size < frontier_cap)
                             {
                                 frontier[new_frontier_size++] = v;
                             }
                             else
                             {
-                                atomicExch(overflow_flag, 1);
+                                atomicExch(overflow_flag, 1); // Overflow code 1: frontier buffer
                                 break;
                             }
                         }
                         else
                         {
+                            // v >= row: Add to output (part of U pattern)
+                            // These are the actual nonzeros in the ILU(k) pattern
                             if (temp_count < temp_cap)
                             {
                                 temp[temp_count++] = v;
                             }
                             else
                             {
-                                atomicExch(overflow_flag, 1);
+                                atomicExch(overflow_flag, 2); // Overflow code 2: temp buffer
                                 break;
                             }
                         }
@@ -304,8 +429,11 @@ __device__ void ProcessNode(
             }
         }
 
+        // Broadcast updated sizes to all lanes
         frontier_size = __shfl_sync(mask, frontier_size, 0);
         temp_count = __shfl_sync(mask, temp_count, 0);
+        
+        // Check overflow after each level
         if (lane == 0)
         {
             overflow = *overflow_flag;
@@ -317,16 +445,19 @@ __device__ void ProcessNode(
         }
     }
 
+    // Atomically allocate space in global output buffer
     unsigned long long base_offset = 0;
     if (lane == 0)
     {
         base_offset = atomicAdd(out_count, static_cast<unsigned long long>(temp_count));
         if (base_offset + static_cast<unsigned long long>(temp_count) > out_cap)
         {
-            atomicExch(overflow_flag, 1);
+            atomicExch(overflow_flag, 4); // Overflow code 4: global pairs buffer
         }
     }
     base_offset = __shfl_sync(mask, base_offset, 0);
+    
+    // Final overflow check
     if (lane == 0)
     {
         overflow = *overflow_flag;
@@ -337,6 +468,8 @@ __device__ void ProcessNode(
         return;
     }
 
+    // Write output pairs to global memory (parallel across warp)
+    // Each pair (row, col) represents a nonzero in the ILU(k) upper triangular factor
     for (int idx = lane; idx < temp_count; idx += warp_size)
     {
         out_pairs[base_offset + idx].src = row;
@@ -363,7 +496,8 @@ __global__ void ilu_symbolic_u_persistent_kernel(
     unsigned long long out_cap,
     unsigned long long* out_count,
     int* overflow_flag,
-    int total_warps)
+    int total_warps,
+    const int* degrees)
 {
     constexpr int warp_size = 32;
     const int global_thread = blockIdx.x * blockDim.x + threadIdx.x;
@@ -412,7 +546,8 @@ __global__ void ilu_symbolic_u_persistent_kernel(
             out_count,
             out_cap,
             lane,
-            overflow_flag);
+            overflow_flag,
+            degrees);
 
         int overflow = 0;
         if (lane == 0)
@@ -449,8 +584,10 @@ bool ILUSymbolicU_CUDA_Persistent(
     COLTYPE** d_u_aj,
     ROWTYPE* u_nnz)
 {
+    std::cout << "[DEBUG] ILUSymbolicU_CUDA_Persistent called: n=" << n << ", lvl=" << lvl << std::endl;
     if (n <= 0 || lvl < 0)
     {
+        std::cout << "[DEBUG] Invalid parameters" << std::endl;
         return false;
     }
 
@@ -491,13 +628,30 @@ bool ILUSymbolicU_CUDA_Persistent(
     const int avg_degree = (n > 0) ? static_cast<int>(nnz / n) : 0;
     const int base_degree = std::max(1, std::max(static_cast<int>(max_degree), avg_degree));
 
-    int frontier_per_warp = std::max(64, std::min(1024, base_degree * 2));
-    int temp_per_warp = std::max(64, std::min(4096, base_degree * (lvl + 1) + 1));
-    int hash_per_warp = next_pow2(frontier_per_warp * 1024);
+    // Buffer sizing: scale with level and degree
+    // For higher ILU levels, the frontier can grow exponentially
+    // Use more aggressive sizing for medium/large matrices
+    int level_multiplier = 1;
+    for (int i = 0; i <= lvl; ++i) {
+        level_multiplier *= 4; // Exponential growth: 4^(lvl+1)
+    }
+    
+    // Increase frontier capacity significantly - it's the bottleneck
+    int frontier_per_warp = std::max(512, std::min(32768, base_degree * level_multiplier * 2));
+    int temp_per_warp = std::max(512, std::min(65536, base_degree * level_multiplier * 4));
+    // Hash table needs to be MUCH larger than frontier to avoid collisions
+    // Aim for load factor < 0.25 for excellent performance and correctness
+    // For n=10974, this will be around 4M entries per warp
+    int hash_per_warp = next_pow2(std::min(16777216, frontier_per_warp * 512)); // Cap at 16M
     if (hash_per_warp < 32)
     {
         hash_per_warp = 32;
     }
+    
+    std::cout << "[DEBUG] Buffer sizing: max_degree=" << max_degree << ", avg_degree=" << avg_degree << std::endl;
+    std::cout << "[DEBUG] level_multiplier=" << level_multiplier << ", base_degree=" << base_degree << std::endl;
+    std::cout << "[DEBUG] frontier_per_warp=" << frontier_per_warp << ", temp_per_warp=" << temp_per_warp << ", hash_per_warp=" << hash_per_warp << std::endl;
+    std::cout << "[DEBUG] total_warps=" << total_warps << ", num_blocks=" << num_blocks << std::endl;
 
     const size_t max_size = std::numeric_limits<size_t>::max();
     if (static_cast<size_t>(total_warps) > max_size / static_cast<size_t>(frontier_per_warp) ||
@@ -510,6 +664,11 @@ bool ILUSymbolicU_CUDA_Persistent(
     const size_t total_frontier = static_cast<size_t>(total_warps) * frontier_per_warp;
     const size_t total_temp = static_cast<size_t>(total_warps) * temp_per_warp;
     const size_t total_hash = static_cast<size_t>(total_warps) * hash_per_warp;
+    
+    std::cout << "[DEBUG] Memory allocation sizes:" << std::endl;
+    std::cout << "  total_frontier: " << total_frontier * sizeof(COLTYPE) / (1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "  total_temp: " << total_temp * sizeof(COLTYPE) / (1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "  total_hash: " << total_hash * sizeof(COLTYPE) / (1024.0 * 1024.0) << " MB" << std::endl;
 
     COLTYPE* d_frontier = nullptr;
     COLTYPE* d_next_frontier = nullptr;
@@ -518,6 +677,7 @@ bool ILUSymbolicU_CUDA_Persistent(
     Pair<COLTYPE>* d_pairs = nullptr;
     unsigned long long* d_pair_count = nullptr;
     int* d_overflow = nullptr;
+    int* d_degrees = nullptr;
 
     if (static_cast<size_t>(n) > std::numeric_limits<size_t>::max() / static_cast<size_t>(temp_per_warp))
     {
@@ -526,14 +686,18 @@ bool ILUSymbolicU_CUDA_Persistent(
     const size_t max_pairs = static_cast<size_t>(n) * static_cast<size_t>(temp_per_warp);
     const unsigned long long out_cap = static_cast<unsigned long long>(max_pairs);
 
-    if (cudaMalloc(&d_frontier, total_frontier * sizeof(COLTYPE)) != cudaSuccess ||
-        cudaMalloc(&d_next_frontier, total_frontier * sizeof(COLTYPE)) != cudaSuccess ||
-        cudaMalloc(&d_temp, total_temp * sizeof(COLTYPE)) != cudaSuccess ||
-        cudaMalloc(&d_hash, total_hash * sizeof(COLTYPE)) != cudaSuccess ||
-        cudaMalloc(&d_pairs, max_pairs * sizeof(Pair<COLTYPE>)) != cudaSuccess ||
-        cudaMalloc(&d_pair_count, sizeof(unsigned long long)) != cudaSuccess ||
-        cudaMalloc(&d_overflow, sizeof(int)) != cudaSuccess)
+    cudaError_t err;
+    if ((err = cudaMalloc(&d_frontier, total_frontier * sizeof(COLTYPE))) != cudaSuccess ||
+        (err = cudaMalloc(&d_next_frontier, total_frontier * sizeof(COLTYPE))) != cudaSuccess ||
+        (err = cudaMalloc(&d_temp, total_temp * sizeof(COLTYPE))) != cudaSuccess ||
+        (err = cudaMalloc(&d_hash, total_hash * sizeof(COLTYPE))) != cudaSuccess ||
+        (err = cudaMalloc(&d_pairs, max_pairs * sizeof(Pair<COLTYPE>))) != cudaSuccess ||
+        (err = cudaMalloc(&d_pair_count, sizeof(unsigned long long))) != cudaSuccess ||
+        (err = cudaMalloc(&d_overflow, sizeof(int))) != cudaSuccess ||
+        (err = cudaMalloc(&d_degrees, static_cast<size_t>(n) * sizeof(int))) != cudaSuccess)
     {
+        std::cout << "[DEBUG] cudaMalloc failed: " << cudaGetErrorString(err) << std::endl;
+        std::cout << "[DEBUG] max_pairs size: " << max_pairs * sizeof(Pair<COLTYPE>) / (1024.0 * 1024.0) << " MB" << std::endl;
         if (d_frontier)
             cudaFree(d_frontier);
         if (d_next_frontier)
@@ -548,8 +712,16 @@ bool ILUSymbolicU_CUDA_Persistent(
             cudaFree(d_pair_count);
         if (d_overflow)
             cudaFree(d_overflow);
+        if (d_degrees)
+            cudaFree(d_degrees);
         return false;
     }
+
+    // Precompute degrees for all nodes (only once)
+    int degree_threads = 256;
+    int degree_blocks = (n + degree_threads - 1) / degree_threads;
+    compute_all_degrees_kernel<<<degree_blocks, degree_threads>>>(d_ai, n, base, d_degrees);
+    cudaDeviceSynchronize();
 
     unsigned long long zero_u64 = 0;
     int zero_i32 = 0;
@@ -575,12 +747,34 @@ bool ILUSymbolicU_CUDA_Persistent(
         out_cap,
         d_pair_count,
         d_overflow,
-        total_warps);
+        total_warps,
+        d_degrees);
 
     int overflow = 0;
     cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost);
     if (overflow != 0)
     {
+        std::cout << "[DEBUG] Overflow detected! Overflow code: " << overflow << std::endl;
+        switch (overflow) {
+            case 1:
+                std::cout << "[DEBUG] FRONTIER buffer overflow: frontier_per_warp=" << frontier_per_warp << " is too small" << std::endl;
+                std::cout << "[DEBUG] Try: Increase frontier size or reduce number of warps" << std::endl;
+                break;
+            case 2:
+                std::cout << "[DEBUG] TEMP buffer overflow: temp_per_warp=" << temp_per_warp << " is too small" << std::endl;
+                std::cout << "[DEBUG] Try: Increase temp_per_warp (currently for " << (out_cap / n) << " entries per row)" << std::endl;
+                break;
+            case 3:
+                std::cout << "[DEBUG] HASH TABLE overflow: hash_per_warp=" << hash_per_warp << " is too small" << std::endl;
+                std::cout << "[DEBUG] Try: Increase hash table size (must be power of 2)" << std::endl;
+                break;
+            case 4:
+                std::cout << "[DEBUG] GLOBAL PAIRS buffer overflow: out_cap=" << out_cap << " is too small" << std::endl;
+                std::cout << "[DEBUG] Total pairs generated exceeds maximum capacity" << std::endl;
+                break;
+            default:
+                std::cout << "[DEBUG] Unknown overflow type" << std::endl;
+        }
         cudaFree(d_frontier);
         cudaFree(d_next_frontier);
         cudaFree(d_temp);
@@ -588,11 +782,14 @@ bool ILUSymbolicU_CUDA_Persistent(
         cudaFree(d_pairs);
         cudaFree(d_pair_count);
         cudaFree(d_overflow);
+        cudaFree(d_degrees);
         return false;
     }
 
     unsigned long long pair_count_u64 = 0;
     cudaMemcpy(&pair_count_u64, d_pair_count, sizeof(unsigned long long), cudaMemcpyDeviceToHost);
+    
+    std::cout << "[DEBUG] Generated " << pair_count_u64 << " pairs total" << std::endl;
 
     if (pair_count_u64 > static_cast<unsigned long long>(std::numeric_limits<size_t>::max()))
     {
@@ -603,6 +800,7 @@ bool ILUSymbolicU_CUDA_Persistent(
         cudaFree(d_pairs);
         cudaFree(d_pair_count);
         cudaFree(d_overflow);
+        cudaFree(d_degrees);
         return false;
     }
 
@@ -624,6 +822,7 @@ bool ILUSymbolicU_CUDA_Persistent(
         cudaFree(d_pairs);
         cudaFree(d_pair_count);
         cudaFree(d_overflow);
+        cudaFree(d_degrees);
         return true;
     }
 
@@ -670,6 +869,7 @@ bool ILUSymbolicU_CUDA_Persistent(
         cudaFree(d_pairs);
         cudaFree(d_pair_count);
         cudaFree(d_overflow);
+        cudaFree(d_degrees);
         return false;
     }
 
@@ -693,6 +893,9 @@ bool ILUSymbolicU_CUDA_Persistent(
     cudaFree(d_pairs);
     cudaFree(d_pair_count);
     cudaFree(d_overflow);
+    cudaFree(d_degrees);
+    
+    std::cout << "[DEBUG] ILUSymbolicU_CUDA_Persistent completed successfully. u_nnz=" << *u_nnz << std::endl;
 
     return true;
 }
