@@ -8,6 +8,7 @@ set(CUDA_SOURCES
     cuda_preconditioner.cu
     cuda_kernels.cu
     cuda_ilu_symbolic.cu
+    cuda_ilu_symbolic_persistent.cu
 )
 
 add_library(${PROJECT_NAME} STATIC ${CUDA_SOURCES})

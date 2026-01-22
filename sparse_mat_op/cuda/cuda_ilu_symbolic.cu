@@ -61,11 +61,28 @@ struct PairCurPlusBase
 };
 
 // Hash function for pair (source, current)
+// Uses MurmurHash-inspired mixing for better distribution
 template <typename COLTYPE>
 __device__ __host__ unsigned long long hash_pair(COLTYPE src, COLTYPE cur)
 {
-    // Simple hash combining two integers
-    return (static_cast<unsigned long long>(src) << 32) | static_cast<unsigned long long>(cur);
+    unsigned long long a = static_cast<unsigned long long>(src);
+    unsigned long long b = static_cast<unsigned long long>(cur);
+    
+    // Mix bits using prime multiplication and XOR shifts
+    a ^= a >> 33;
+    a *= 0xff51afd7ed558ccdULL;
+    a ^= a >> 33;
+    a *= 0xc4ceb9fe1a85ec53ULL;
+    a ^= a >> 33;
+    
+    b ^= b >> 33;
+    b *= 0xff51afd7ed558ccdULL;
+    b ^= b >> 33;
+    b *= 0xc4ceb9fe1a85ec53ULL;
+    b ^= b >> 33;
+    
+    // Combine the two hashes
+    return a ^ (b + 0x9e3779b97f4a7c15ULL + (a << 6) + (a >> 2));
 }
 
 // Kernel: Initialize frontier with (i, i) for all i
@@ -194,7 +211,7 @@ __global__ void check_visited_kernel(
     unsigned long long pos = hash % hash_table_size;
     
     // Linear probing
-    const int max_probe = 128;
+    const int max_probe = 256;
     for (int probe = 0; probe < max_probe; ++probe)
     {
         unsigned long long stored = hash_table[pos];
@@ -233,7 +250,7 @@ __global__ void mark_visited_kernel(
     unsigned long long pos = hash % hash_table_size;
     
     // Linear probing with atomic operations
-    const int max_probe = 128;
+    const int max_probe = 256;
     for (int probe = 0; probe < max_probe; ++probe)
     {
         unsigned long long old = atomicCAS(&hash_table[pos], ULLONG_MAX, hash);
@@ -367,9 +384,9 @@ bool ILUSymbolicU_CUDA(
     init_frontier_kernel<<<blocks, threads>>>(
         thrust::raw_pointer_cast(current_frontier.data()), n);
     cudaDeviceSynchronize();
-    
-    // Hash table for visited tracking (load factor ~0.5 for good performance)
-    size_t hash_table_size = size_t(n) * n / 2 * 2; // Adjust based on expected fill
+
+    // Hash table for visited tracking: 256 slots per node
+    size_t hash_table_size = size_t(n) * 1024* 32;
     if (hash_table_size > 1e9)
         hash_table_size = 1e9; // Cap to avoid excessive memory
     
