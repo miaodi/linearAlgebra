@@ -121,27 +121,6 @@ __device__ __forceinline__ bool hash_insert_if_absent(COLTYPE* table, int size, 
 }
 
 template <typename COLTYPE>
-__device__ __forceinline__ bool hash_contains(const COLTYPE* table, int size, COLTYPE key)
-{
-    const unsigned int mask = static_cast<unsigned int>(size - 1);
-    unsigned int pos = hash_node(key) & mask;
-    for (int probe = 0; probe < size; ++probe)
-    {
-        COLTYPE val = table[pos];
-        if (val == key)
-        {
-            return true;
-        }
-        if (val == static_cast<COLTYPE>(-1))
-        {
-            return false;
-        }
-        pos = (pos + 1) & mask;
-    }
-    return false;
-}
-
-template <typename COLTYPE>
 __device__ __forceinline__ int hash_insert_or_find_atomic(COLTYPE* table, int size, COLTYPE key)
 {
     // Lock-free linear-probing insert/find:
@@ -174,40 +153,6 @@ __device__ __forceinline__ int hash_insert_or_find_atomic(COLTYPE* table, int si
         pos = (pos + 1) & mask;
     }
     return -1;
-}
-
-template <typename T>
-__device__ __forceinline__ void insertion_sort(T* data, int count)
-{
-    for (int i = 1; i < count; ++i)
-    {
-        T key = data[i];
-        int j = i - 1;
-        while (j >= 0 && data[j] > key)
-        {
-            data[j + 1] = data[j];
-            --j;
-        }
-        data[j + 1] = key;
-    }
-}
-
-template <typename T>
-__device__ __forceinline__ int unique_in_place(T* data, int count)
-{
-    if (count == 0)
-    {
-        return 0;
-    }
-    int out = 1;
-    for (int i = 1; i < count; ++i)
-    {
-        if (data[i] != data[out - 1])
-        {
-            data[out++] = data[i];
-        }
-    }
-    return out;
 }
 
 /**
@@ -665,20 +610,6 @@ bool ILUSymbolicU_CUDA_Persistent(
     cudaMemcpy(&nnz, &d_ai[n], sizeof(ROWTYPE), cudaMemcpyDeviceToHost);
     nnz -= base;
 
-    std::vector<ROWTYPE> h_ai(static_cast<size_t>(n) + 1);
-    cudaMemcpy(h_ai.data(), d_ai, (static_cast<size_t>(n) + 1) * sizeof(ROWTYPE),
-               cudaMemcpyDeviceToHost);
-
-    ROWTYPE max_degree = 0;
-    for (COLTYPE i = 0; i < n; ++i)
-    {
-        ROWTYPE deg = h_ai[static_cast<size_t>(i) + 1] - h_ai[static_cast<size_t>(i)];
-        if (deg > max_degree)
-        {
-            max_degree = deg;
-        }
-    }
-
     constexpr int threads_per_block = 256;
     constexpr int warp_size = 32;
     const int warps_per_block = threads_per_block / warp_size;
@@ -695,8 +626,35 @@ bool ILUSymbolicU_CUDA_Persistent(
     const int total_warps = std::max(1, std::min(static_cast<int>(n), max_warps));
     const int num_blocks = (total_warps + warps_per_block - 1) / warps_per_block;
 
+    COLTYPE* d_frontier = nullptr;
+    COLTYPE* d_next_frontier = nullptr;
+    COLTYPE* d_temp = nullptr;
+    COLTYPE* d_hash = nullptr;
+    Pair<COLTYPE>* d_pairs = nullptr;
+    unsigned long long* d_pair_count = nullptr;
+    int* d_overflow = nullptr;
+    int* d_degrees = nullptr;
+
+    // Allocate device memory for degrees first
+    cudaError_t err = cudaMalloc(&d_degrees, static_cast<size_t>(n) * sizeof(int));
+    if (err != cudaSuccess)
+    {
+        std::cout << "[DEBUG] cudaMalloc for d_degrees failed: " << cudaGetErrorString(err) << std::endl;
+        return false;
+    }
+
+    // Precompute degrees for all nodes
+    int degree_threads = 256;
+    int degree_blocks = (n + degree_threads - 1) / degree_threads;
+    compute_all_degrees_kernel<<<degree_blocks, degree_threads>>>(d_ai, n, base, d_degrees);
+    cudaDeviceSynchronize();
+
+    // Find maximum degree using Thrust
+    thrust::device_ptr<int> d_degrees_ptr(d_degrees);
+    int max_degree = *thrust::max_element(d_degrees_ptr, d_degrees_ptr + n);
+    
     const int avg_degree = (n > 0) ? static_cast<int>(nnz / n) : 0;
-    const int base_degree = std::max(1, std::max(static_cast<int>(max_degree), avg_degree));
+    const int base_degree = std::max(1, std::max(max_degree, avg_degree));
 
     // Buffer sizing: scale with level and degree
     // For higher ILU levels, the frontier can grow exponentially
@@ -739,31 +697,21 @@ bool ILUSymbolicU_CUDA_Persistent(
     std::cout << "  total_temp: " << total_temp * sizeof(COLTYPE) / (1024.0 * 1024.0) << " MB" << std::endl;
     std::cout << "  total_hash: " << total_hash * sizeof(COLTYPE) / (1024.0 * 1024.0) << " MB" << std::endl;
 
-    COLTYPE* d_frontier = nullptr;
-    COLTYPE* d_next_frontier = nullptr;
-    COLTYPE* d_temp = nullptr;
-    COLTYPE* d_hash = nullptr;
-    Pair<COLTYPE>* d_pairs = nullptr;
-    unsigned long long* d_pair_count = nullptr;
-    int* d_overflow = nullptr;
-    int* d_degrees = nullptr;
-
     if (static_cast<size_t>(n) > std::numeric_limits<size_t>::max() / static_cast<size_t>(temp_per_warp))
     {
+        cudaFree(d_degrees);
         return false;
     }
     const size_t max_pairs = static_cast<size_t>(n) * static_cast<size_t>(temp_per_warp);
     const unsigned long long out_cap = static_cast<unsigned long long>(max_pairs);
 
-    cudaError_t err;
     if ((err = cudaMalloc(&d_frontier, total_frontier * sizeof(COLTYPE))) != cudaSuccess ||
         (err = cudaMalloc(&d_next_frontier, total_frontier * sizeof(COLTYPE))) != cudaSuccess ||
         (err = cudaMalloc(&d_temp, total_temp * sizeof(COLTYPE))) != cudaSuccess ||
         (err = cudaMalloc(&d_hash, total_hash * sizeof(COLTYPE))) != cudaSuccess ||
         (err = cudaMalloc(&d_pairs, max_pairs * sizeof(Pair<COLTYPE>))) != cudaSuccess ||
         (err = cudaMalloc(&d_pair_count, sizeof(unsigned long long))) != cudaSuccess ||
-        (err = cudaMalloc(&d_overflow, sizeof(int))) != cudaSuccess ||
-        (err = cudaMalloc(&d_degrees, static_cast<size_t>(n) * sizeof(int))) != cudaSuccess)
+        (err = cudaMalloc(&d_overflow, sizeof(int))) != cudaSuccess)
     {
         std::cout << "[DEBUG] cudaMalloc failed: " << cudaGetErrorString(err) << std::endl;
         std::cout << "[DEBUG] max_pairs size: " << max_pairs * sizeof(Pair<COLTYPE>) / (1024.0 * 1024.0) << " MB" << std::endl;
@@ -785,12 +733,6 @@ bool ILUSymbolicU_CUDA_Persistent(
             cudaFree(d_degrees);
         return false;
     }
-
-    // Precompute degrees for all nodes (only once)
-    int degree_threads = 256;
-    int degree_blocks = (n + degree_threads - 1) / degree_threads;
-    compute_all_degrees_kernel<<<degree_blocks, degree_threads>>>(d_ai, n, base, d_degrees);
-    cudaDeviceSynchronize();
 
     unsigned long long zero_u64 = 0;
     int zero_i32 = 0;
