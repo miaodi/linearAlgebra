@@ -198,7 +198,7 @@ TEST(CudaILUSymbolic, SmallMatrix_Level1)
 
 TEST(CudaILUSymbolic, MediumMatrix_Level10)
 {
-    const int level = 100;
+    const int level =10;
     std::vector<int> csr_rows;
     std::vector<int> csr_cols;
     std::vector<double> csr_vals;
@@ -248,7 +248,7 @@ TEST(CudaILUSymbolic, MediumMatrix_Level10)
     cudaMalloc(&d_u_ai, (n + 1) * sizeof(int));
     
     auto cuda_start = std::chrono::high_resolution_clock::now();
-    bool cuda_success = ILUSymbolicU_CUDA<int, int>(
+    bool cuda_success = ILUSymbolicU_CUDA_Persistent<int, int>(
         n, d_ai, d_aj, level, base, true, d_u_ai, &d_u_aj, &u_nnz);
     cudaDeviceSynchronize();
     auto cuda_end = std::chrono::high_resolution_clock::now();

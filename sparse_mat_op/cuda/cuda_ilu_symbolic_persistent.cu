@@ -141,6 +141,41 @@ __device__ __forceinline__ bool hash_contains(const COLTYPE* table, int size, CO
     return false;
 }
 
+template <typename COLTYPE>
+__device__ __forceinline__ int hash_insert_or_find_atomic(COLTYPE* table, int size, COLTYPE key)
+{
+    // Lock-free linear-probing insert/find:
+    // returns 1 if this thread inserted key, 0 if key already present, -1 if table is full.
+    // Uses -1 sentinel in the table and atomicCAS so multiple lanes can race safely.
+    static_assert(sizeof(COLTYPE) == sizeof(int), "hash_insert_or_find_atomic expects 32-bit COLTYPE");
+    const unsigned int mask = static_cast<unsigned int>(size - 1);
+    unsigned int pos = hash_node(key) & mask;
+    for (int probe = 0; probe < size; ++probe)
+    {
+        COLTYPE val = table[pos];
+        if (val == key)
+        {
+            return 0;
+        }
+        if (val == static_cast<COLTYPE>(-1))
+        {
+            int old = atomicCAS(reinterpret_cast<int*>(&table[pos]),
+                                static_cast<int>(-1),
+                                static_cast<int>(key));
+            if (old == static_cast<int>(-1))
+            {
+                return 1;
+            }
+            if (static_cast<COLTYPE>(old) == key)
+            {
+                return 0;
+            }
+        }
+        pos = (pos + 1) & mask;
+    }
+    return -1;
+}
+
 template <typename T>
 __device__ __forceinline__ void insertion_sort(T* data, int count)
 {
@@ -364,69 +399,104 @@ __device__ void ProcessNode(
         }
         
         int adj_count = total_neighbors;
-        
-        // Now process the expanded frontier (only lane 0)
-        // Sort and deduplicate must be done serially since insertion_sort is sequential
+
+        // Warp-parallel dedupe + partition without a full sort:
+        // each lane probes/inserts into the hash table and then uses ballots to compact
+        // new frontier (v < row) and temp (v >= row) outputs.
+        int new_frontier_size = 0;
+        int new_temp_count = temp_count;
+        for (int chunk_start = 0; chunk_start < adj_count; chunk_start += warp_size)
+        {
+            int idx = chunk_start + lane;
+            bool in_range = idx < adj_count;
+            COLTYPE v = in_range ? next_frontier[idx] : static_cast<COLTYPE>(-1);
+
+            int status = 0;
+            if (in_range)
+            {
+                // Atomic insert ensures only the first lane inserting v "owns" it.
+                status = hash_insert_or_find_atomic(hash, hash_cap, v);
+            }
+
+            // Any lane reporting -1 means the hash table is saturated; abort this row.
+            int overflow = __any_sync(mask, status < 0) ? 3 : 0;
+            if (overflow != 0)
+            {
+                if (lane == 0)
+                {
+                    atomicExch(overflow_flag, overflow); // Overflow code 3: hash table
+                }
+                break;
+            }
+
+            // Only newly inserted nodes are allowed to emit output or be revisited.
+            bool inserted = status > 0;
+            bool to_frontier = in_range && inserted && (v < row);
+            bool to_temp = in_range && inserted && (v >= row);
+
+            // Compact frontier writes in-lane order using ballot/popcount.
+            unsigned int front_mask = __ballot_sync(mask, to_frontier);
+            int front_count = __popc(front_mask);
+            int front_rank = __popc(front_mask & ((1u << lane) - 1));
+            int front_base = __shfl_sync(mask, new_frontier_size, 0);
+            if (lane == 0 && front_base + front_count > frontier_cap)
+            {
+                atomicExch(overflow_flag, 1); // Overflow code 1: frontier buffer
+            }
+            overflow = 0;
+            if (lane == 0)
+            {
+                overflow = *overflow_flag;
+            }
+            overflow = __shfl_sync(mask, overflow, 0);
+            if (overflow != 0)
+            {
+                break;
+            }
+            if (to_frontier)
+            {
+                frontier[front_base + front_rank] = v;
+            }
+            if (lane == 0)
+            {
+                new_frontier_size = front_base + front_count;
+            }
+            new_frontier_size = __shfl_sync(mask, new_frontier_size, 0);
+
+            // Compact temp writes (U-pattern columns) similarly.
+            unsigned int temp_mask = __ballot_sync(mask, to_temp);
+            int temp_count_chunk = __popc(temp_mask);
+            int temp_rank = __popc(temp_mask & ((1u << lane) - 1));
+            int temp_base = __shfl_sync(mask, new_temp_count, 0);
+            if (lane == 0 && temp_base + temp_count_chunk > temp_cap)
+            {
+                atomicExch(overflow_flag, 2); // Overflow code 2: temp buffer
+            }
+            overflow = 0;
+            if (lane == 0)
+            {
+                overflow = *overflow_flag;
+            }
+            overflow = __shfl_sync(mask, overflow, 0);
+            if (overflow != 0)
+            {
+                break;
+            }
+            if (to_temp)
+            {
+                temp[temp_base + temp_rank] = v;
+            }
+            if (lane == 0)
+            {
+                new_temp_count = temp_base + temp_count_chunk;
+            }
+            new_temp_count = __shfl_sync(mask, new_temp_count, 0);
+        }
+
         if (lane == 0)
         {
-            if (*overflow_flag == 0)
-            {
-                // Sort the entire expanded frontier
-                insertion_sort(next_frontier, adj_count);
-                // Deduplicate the sorted frontier
-                int unique_count = unique_in_place(next_frontier, adj_count);
-
-                // Process each unique neighbor
-                int new_frontier_size = 0;
-                for (int idx = 0; idx < unique_count; ++idx)
-                {
-                    COLTYPE v = next_frontier[idx];
-                    
-                    // Skip if already visited
-                    if (!hash_contains(hash, hash_cap, v))
-                    {
-                        // Mark as visited
-                        bool inserted = hash_insert_if_absent(hash, hash_cap, v);
-                        if (!inserted)
-                        {
-                            // Hash table is full - this is a critical error
-                            atomicExch(overflow_flag, 3); // Overflow code 3: hash table
-                            break;
-                        }
-                        
-                        // Key decision: partition based on column index vs row
-                        if (v < row)
-                        {
-                            // v < row: Keep in frontier for next BFS level
-                            // These represent intermediate nodes in the fill path
-                            if (new_frontier_size < frontier_cap)
-                            {
-                                frontier[new_frontier_size++] = v;
-                            }
-                            else
-                            {
-                                atomicExch(overflow_flag, 1); // Overflow code 1: frontier buffer
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            // v >= row: Add to output (part of U pattern)
-                            // These are the actual nonzeros in the ILU(k) pattern
-                            if (temp_count < temp_cap)
-                            {
-                                temp[temp_count++] = v;
-                            }
-                            else
-                            {
-                                atomicExch(overflow_flag, 2); // Overflow code 2: temp buffer
-                                break;
-                            }
-                        }
-                    }
-                }
-                frontier_size = new_frontier_size;
-            }
+            frontier_size = new_frontier_size;
+            temp_count = new_temp_count;
         }
 
         // Broadcast updated sizes to all lanes
@@ -637,12 +707,11 @@ bool ILUSymbolicU_CUDA_Persistent(
     }
     
     // Increase frontier capacity significantly - it's the bottleneck
-    int frontier_per_warp = std::max(512, std::min(32768, base_degree * level_multiplier * 2));
-    int temp_per_warp = std::max(512, std::min(65536, base_degree * level_multiplier * 4));
-    // Hash table needs to be MUCH larger than frontier to avoid collisions
-    // Aim for load factor < 0.25 for excellent performance and correctness
-    // For n=10974, this will be around 4M entries per warp
-    int hash_per_warp = next_pow2(std::min(16777216, frontier_per_warp * 512)); // Cap at 16M
+    int frontier_per_warp = std::max(2048, std::min(32768, base_degree * level_multiplier * 2));
+    int temp_per_warp = std::max(4096, std::min(65536, base_degree * level_multiplier * 4));
+    // Hash table sized for a modest load factor without extreme memory use.
+    // Smaller than before to reduce footprint; may increase collisions on dense/fill-heavy cases.
+    int hash_per_warp = next_pow2(std::min(4194304, frontier_per_warp * 32)); // Cap at 4M
     if (hash_per_warp < 32)
     {
         hash_per_warp = 32;
