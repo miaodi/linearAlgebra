@@ -1,8 +1,0 @@
-# Ignore all files in this directory by default
-*
-
-# But track these files
-!.gitignore
-!CMakeLists.txt
-!test.cpp
-!README.md
