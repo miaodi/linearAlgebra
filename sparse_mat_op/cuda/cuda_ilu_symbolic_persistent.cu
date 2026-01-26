@@ -201,10 +201,10 @@ __device__ void ProcessNode(
     COLTYPE* frontier,
     COLTYPE* next_frontier,
     COLTYPE* temp,
-    int frontier_cap,
-    int temp_cap,
+    size_t frontier_cap,
+    size_t temp_cap,
     COLTYPE* hash,
-    int hash_cap,
+    size_t hash_cap,
     Pair<COLTYPE>* out_pairs,
     unsigned long long* out_count,
     unsigned long long out_cap,
@@ -504,9 +504,9 @@ __global__ void ilu_symbolic_u_persistent_kernel(
     COLTYPE* next_frontier,
     COLTYPE* temp,
     COLTYPE* hash,
-    int frontier_cap,
-    int temp_cap,
-    int hash_cap,
+    size_t frontier_cap,
+    size_t temp_cap,
+    size_t hash_cap,
     Pair<COLTYPE>* out_pairs,
     unsigned long long out_cap,
     unsigned long long* out_count,
@@ -577,6 +577,59 @@ __global__ void ilu_symbolic_u_persistent_kernel(
     }
 }
 
+template <typename ROWTYPE, typename COLTYPE>
+static int compute_total_warps(
+    COLTYPE n,
+    int threads_per_block,
+    size_t per_warp_bytes)
+{
+    // Pick a warp count based on occupancy and then cap by estimated memory footprint.
+    if (n <= 0)
+    {
+        return 0;
+    }
+
+    constexpr int warp_size = 32;
+    int max_warps = static_cast<int>(n);
+    cudaDeviceProp prop{};
+    int device = 0;
+    if (cudaGetDevice(&device) == cudaSuccess &&
+        cudaGetDeviceProperties(&prop, device) == cudaSuccess)
+    {
+        int warps_per_sm = 4;
+        int max_blocks_per_sm = 0;
+        // Use occupancy to estimate max active blocks/SM for this kernel and block size.
+        const cudaError_t occ_err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+            &max_blocks_per_sm,
+            ilu_symbolic_u_persistent_kernel<ROWTYPE, COLTYPE>,
+            threads_per_block,
+            0);
+        if (occ_err == cudaSuccess && max_blocks_per_sm > 0)
+        {
+            warps_per_sm = max_blocks_per_sm * (threads_per_block / warp_size);
+        }
+        max_warps = prop.multiProcessorCount * warps_per_sm;
+
+        if (per_warp_bytes > 0)
+        {
+            size_t free_bytes = 0;
+            size_t total_bytes = 0;
+            // Cap by a conservative fraction of free memory to reduce allocation risk.
+            if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess)
+            {
+                const size_t usable_bytes = static_cast<size_t>(free_bytes * 0.8);
+                const int mem_cap = static_cast<int>(usable_bytes / per_warp_bytes);
+                if (mem_cap > 0)
+                {
+                    max_warps = std::min(max_warps, mem_cap);
+                }
+            }
+        }
+    }
+
+    return std::max(1, std::min(static_cast<int>(n), max_warps));
+}
+
 static int next_pow2(int v)
 {
     int p = 1;
@@ -614,18 +667,6 @@ bool ILUSymbolicU_CUDA_Persistent(
     constexpr int warp_size = 32;
     const int warps_per_block = threads_per_block / warp_size;
 
-    cudaDeviceProp prop{};
-    int device = 0;
-    cudaGetDevice(&device);
-    int max_warps = static_cast<int>(n);
-    if (cudaGetDeviceProperties(&prop, device) == cudaSuccess)
-    {
-        const int warps_per_sm = 4;
-        max_warps = prop.multiProcessorCount * warps_per_sm;
-    }
-    const int total_warps = std::max(1, std::min(static_cast<int>(n), max_warps));
-    const int num_blocks = (total_warps + warps_per_block - 1) / warps_per_block;
-
     COLTYPE* d_frontier = nullptr;
     COLTYPE* d_next_frontier = nullptr;
     COLTYPE* d_temp = nullptr;
@@ -659,21 +700,47 @@ bool ILUSymbolicU_CUDA_Persistent(
     // Buffer sizing: scale with level and degree
     // For higher ILU levels, the frontier can grow exponentially
     // Use more aggressive sizing for medium/large matrices
-    int level_multiplier = 1;
-    for (int i = 0; i <= lvl; ++i) {
-        level_multiplier *= 4; // Exponential growth: 4^(lvl+1)
+    auto mul_saturate = [](size_t a, size_t b) -> size_t
+    {
+        if (a == 0 || b == 0)
+        {
+            return 0;
+        }
+        const size_t max_size = std::numeric_limits<size_t>::max();
+        if (a > max_size / b)
+        {
+            return max_size;
+        }
+        return a * b;
+    };
+
+    size_t level_multiplier = 1;
+    for (int i = 0; i <= lvl; ++i)
+    {
+        level_multiplier = mul_saturate(level_multiplier, 4u); // Exponential growth: 4^(lvl+1)
     }
-    
+
     // Increase frontier capacity significantly - it's the bottleneck
-    int frontier_per_warp = std::max(2048, std::min(32768, base_degree * level_multiplier * 2));
-    int temp_per_warp = std::max(4096, std::min(65536, base_degree * level_multiplier * 4));
+    const size_t frontier_scaled =
+        mul_saturate(mul_saturate(static_cast<size_t>(base_degree), level_multiplier), 2u);
+    const size_t temp_scaled =
+        mul_saturate(mul_saturate(static_cast<size_t>(base_degree), level_multiplier), 4u);
+    size_t frontier_per_warp =
+        std::min<size_t>(static_cast<size_t>(32768u), std::max<size_t>(2048u, frontier_scaled));
+    size_t temp_per_warp =
+        std::min<size_t>(static_cast<size_t>(65536u), std::max<size_t>(4096u, temp_scaled));
     // Hash table sized for a modest load factor without extreme memory use.
     // Smaller than before to reduce footprint; may increase collisions on dense/fill-heavy cases.
-    int hash_per_warp = next_pow2(std::min(4194304, frontier_per_warp * 32)); // Cap at 4M
-    if (hash_per_warp < 32)
-    {
-        hash_per_warp = 32;
-    }
+    size_t hash_per_warp =
+        std::max<size_t>(static_cast<size_t>(4096),
+                         next_pow2(std::min(static_cast<size_t>(4194304), frontier_per_warp * 32))); // Cap at 4M
+
+    // Estimate per-warp memory so warp count can be capped by available device memory.
+    const size_t per_warp_bytes = (frontier_per_warp * 2u + temp_per_warp + hash_per_warp) * sizeof(COLTYPE);
+    const int total_warps = compute_total_warps<ROWTYPE, COLTYPE>(
+        n / 50, // Use a fraction of n to avoid excessive memory use on large matrices
+        threads_per_block, per_warp_bytes);
+    const int num_blocks = (total_warps + warps_per_block - 1) / warps_per_block;
     
     std::cout << "[DEBUG] Buffer sizing: max_degree=" << max_degree << ", avg_degree=" << avg_degree << std::endl;
     std::cout << "[DEBUG] level_multiplier=" << level_multiplier << ", base_degree=" << base_degree << std::endl;
