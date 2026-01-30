@@ -6,6 +6,10 @@ include(../cmake/GoogleBenchmark.cmake)
 include(../cmake/DownloadFile.cmake)
 
 file(GLOB_RECURSE ALL_BENCH_CPP *.cpp)
+if(USE_CUDA)
+   file(GLOB_RECURSE ALL_BENCH_CU *.cu)
+   list(APPEND ALL_BENCH_CPP ${ALL_BENCH_CU})
+endif()
 
 # List of benchmarks to exclude due to compilation issues
 set(EXCLUDED_BENCHMARKS 
@@ -25,11 +29,12 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
       continue()
    endif()
 
-   # Check if this is a CUDA benchmark
+   # Check if this is a CUDA benchmark (by filename or extension)
    string(FIND ${ONE_BENCH_FILENAME} "cuda" CUDA_POS_LOWER)
    string(FIND ${ONE_BENCH_FILENAME} "CUDA" CUDA_POS_UPPER)
+   get_filename_component(BENCH_EXT ${ONE_BENCH_CPP} EXT)
    set(IS_CUDA_BENCH FALSE)
-   if(NOT CUDA_POS_LOWER EQUAL -1 OR NOT CUDA_POS_UPPER EQUAL -1)
+   if(NOT CUDA_POS_LOWER EQUAL -1 OR NOT CUDA_POS_UPPER EQUAL -1 OR BENCH_EXT STREQUAL ".cu")
       set(IS_CUDA_BENCH TRUE)
    endif()
 
@@ -50,11 +55,15 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
       set_target_properties(${TARGET_NAME} PROPERTIES 
          CUDA_STANDARD ${CMAKE_CUDA_STANDARD}
          CUDA_STANDARD_REQUIRED ON
+         CUDA_SEPARABLE_COMPILATION ON
       )
       target_link_libraries(${TARGET_NAME} PRIVATE 
          benchmark::benchmark 
          sparse_mat_op_cuda
+         sparse_mat_op
+         utils
          CUDA::cudart
+         cxxopts
       )
    else()
       target_link_libraries(${TARGET_NAME} PRIVATE benchmark::benchmark reordering graph utils sparse_mat_op OpenMP::OpenMP_CXX cxxopts)

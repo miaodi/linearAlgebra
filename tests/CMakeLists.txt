@@ -10,6 +10,10 @@ include(../cmake/ssget.cmake)
 include(GoogleTest)
 
 file(GLOB_RECURSE ALL_TEST_CPP *.cpp)
+if(USE_CUDA)
+   file(GLOB_RECURSE ALL_TEST_CU *.cu)
+   list(APPEND ALL_TEST_CPP ${ALL_TEST_CU})
+endif()
 
 # List of tests to exclude
 set(EXCLUDED_TESTS 
@@ -18,7 +22,7 @@ set(EXCLUDED_TESTS
 
 # Conditionally exclude CUDA tests if CUDA is not enabled
 if(NOT USE_CUDA)
-   list(APPEND EXCLUDED_TESTS "cuda_ilu_symbolic_test.cpp")
+   list(APPEND EXCLUDED_TESTS "cuda_ilu_symbolic_test.cpp" "cuda_csr_utils_test.cu")
 endif()
 
 foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
