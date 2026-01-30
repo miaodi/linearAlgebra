@@ -3,6 +3,7 @@
 #include <cub/cub.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
+#include <thrust/count.h>
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 #include <thrust/scan.h>
@@ -15,6 +16,7 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/execution_policy.h>
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <vector>
 
@@ -68,6 +70,33 @@ struct LessThan
 };
 
 __device__ int g_ilu_row_counter;
+
+enum class OverflowCode : int
+{
+    None = 0,
+    FrontierBuffer = 1,
+    TempBuffer = 2,
+    HashTable = 3,
+    GlobalPairs = 4
+};
+
+__host__ __device__ constexpr int overflow_to_int(OverflowCode code)
+{
+    return static_cast<int>(code);
+}
+
+__host__ __device__ constexpr OverflowCode overflow_from_int(int value)
+{
+    return static_cast<OverflowCode>(value);
+}
+
+struct OverflowPositive
+{
+    __host__ __device__ bool operator()(int code) const
+    {
+        return code > 0;
+    }
+};
 
 // Kernel: Precompute degree (neighbor count) for all nodes
 template <typename ROWTYPE, typename COLTYPE>
@@ -187,7 +216,7 @@ __device__ __forceinline__ int hash_insert_or_find_atomic(COLTYPE* table, int si
  * @param out_count Global counter for output pairs
  * @param out_cap Maximum capacity of out_pairs
  * @param lane Warp lane ID (0-31)
- * @param overflow_flag Global flag to signal buffer overflow
+ * @param overflow_vec Per-row overflow codes (size >= n)
  * @param degrees Precomputed degree array for all nodes
  */
 template <typename ROWTYPE, typename COLTYPE>
@@ -209,20 +238,43 @@ __device__ void ProcessNode(
     unsigned long long* out_count,
     unsigned long long out_cap,
     int lane,
-    int* overflow_flag,
+    int* overflow_vec,
     const int* degrees)
 {
     constexpr int warp_size = 32;
     const unsigned int mask = 0xffffffffu;
+    const size_t row_index = static_cast<size_t>(row);
+    int overflow_int = 0;
 
-    // Check if overflow already occurred in another warp
-    int overflow = 0;
-    if (lane == 0)
+    auto sync_overflow = [&]() -> int
     {
-        overflow = *overflow_flag;
-    }
-    overflow = __shfl_sync(mask, overflow, 0);
-    if (overflow != 0)
+        overflow_int = __shfl_sync(mask, overflow_int, 0);
+        return overflow_int;
+    };
+
+    auto set_overflow = [&](OverflowCode code)
+    {
+        if (lane == 0 && overflow_int == 0)
+        {
+            overflow_int = overflow_to_int(code);
+        }
+    };
+
+    auto finalize_if_overflow = [&]() -> bool
+    {
+        if (sync_overflow() != 0)
+        {
+            if (lane == 0)
+            {
+                overflow_vec[row_index] = overflow_int;
+            }
+            return true;
+        }
+        return false;
+    };
+
+    // Fast exit if overflow already flagged (should be zero for fresh rows)
+    if (finalize_if_overflow())
     {
         return;
     }
@@ -255,25 +307,19 @@ __device__ void ProcessNode(
             }
             else
             {
-                atomicExch(overflow_flag, 2); // Overflow code 2: temp buffer
+                set_overflow(OverflowCode::TempBuffer);
             }
         }
+    }
+
+    if (finalize_if_overflow())
+    {
+        return;
     }
 
     // Broadcast frontier_size and temp_count to all lanes
     frontier_size = __shfl_sync(mask, frontier_size, 0);
     temp_count = __shfl_sync(mask, temp_count, 0);
-    
-    // Check overflow after initialization
-    if (lane == 0)
-    {
-        overflow = *overflow_flag;
-    }
-    overflow = __shfl_sync(mask, overflow, 0);
-    if (overflow != 0)
-    {
-        return;
-    }
 
     // BFS loop: iterate through k levels
     for (int level = 0; level <= lvl; ++level)
@@ -340,7 +386,11 @@ __device__ void ProcessNode(
         // Check if we have enough space
         if (lane == 0 && total_neighbors > frontier_cap)
         {
-            atomicExch(overflow_flag, 1); // Overflow code 1: frontier buffer
+            set_overflow(OverflowCode::FrontierBuffer);
+        }
+        if (finalize_if_overflow())
+        {
+            return;
         }
         
         int adj_count = total_neighbors;
@@ -364,14 +414,15 @@ __device__ void ProcessNode(
             }
 
             // Any lane reporting -1 means the hash table is saturated; abort this row.
-            int overflow = __any_sync(mask, status < 0) ? 3 : 0;
-            if (overflow != 0)
+            int overflow = __any_sync(mask, status < 0) ? overflow_to_int(OverflowCode::HashTable)
+                                                        : overflow_to_int(OverflowCode::None);
+            if (overflow != overflow_to_int(OverflowCode::None))
             {
-                if (lane == 0)
+                set_overflow(OverflowCode::HashTable);
+                if (finalize_if_overflow())
                 {
-                    atomicExch(overflow_flag, overflow); // Overflow code 3: hash table
+                    return;
                 }
-                break;
             }
 
             // Only newly inserted nodes are allowed to emit output or be revisited.
@@ -386,17 +437,11 @@ __device__ void ProcessNode(
             int front_base = __shfl_sync(mask, new_frontier_size, 0);
             if (lane == 0 && front_base + front_count > frontier_cap)
             {
-                atomicExch(overflow_flag, 1); // Overflow code 1: frontier buffer
+                set_overflow(OverflowCode::FrontierBuffer);
             }
-            overflow = 0;
-            if (lane == 0)
+            if (finalize_if_overflow())
             {
-                overflow = *overflow_flag;
-            }
-            overflow = __shfl_sync(mask, overflow, 0);
-            if (overflow != 0)
-            {
-                break;
+                return;
             }
             if (to_frontier)
             {
@@ -415,17 +460,11 @@ __device__ void ProcessNode(
             int temp_base = __shfl_sync(mask, new_temp_count, 0);
             if (lane == 0 && temp_base + temp_count_chunk > temp_cap)
             {
-                atomicExch(overflow_flag, 2); // Overflow code 2: temp buffer
+                set_overflow(OverflowCode::TempBuffer);
             }
-            overflow = 0;
-            if (lane == 0)
+            if (finalize_if_overflow())
             {
-                overflow = *overflow_flag;
-            }
-            overflow = __shfl_sync(mask, overflow, 0);
-            if (overflow != 0)
-            {
-                break;
+                return;
             }
             if (to_temp)
             {
@@ -449,12 +488,7 @@ __device__ void ProcessNode(
         temp_count = __shfl_sync(mask, temp_count, 0);
         
         // Check overflow after each level
-        if (lane == 0)
-        {
-            overflow = *overflow_flag;
-        }
-        overflow = __shfl_sync(mask, overflow, 0);
-        if (overflow != 0)
+        if (finalize_if_overflow())
         {
             return;
         }
@@ -467,18 +501,12 @@ __device__ void ProcessNode(
         base_offset = atomicAdd(out_count, static_cast<unsigned long long>(temp_count));
         if (base_offset + static_cast<unsigned long long>(temp_count) > out_cap)
         {
-            atomicExch(overflow_flag, 4); // Overflow code 4: global pairs buffer
+            set_overflow(OverflowCode::GlobalPairs);
         }
     }
     base_offset = __shfl_sync(mask, base_offset, 0);
     
-    // Final overflow check
-    if (lane == 0)
-    {
-        overflow = *overflow_flag;
-    }
-    overflow = __shfl_sync(mask, overflow, 0);
-    if (overflow != 0)
+    if (finalize_if_overflow())
     {
         return;
     }
@@ -510,7 +538,7 @@ __global__ void ilu_symbolic_u_persistent_kernel(
     Pair<COLTYPE>* out_pairs,
     unsigned long long out_cap,
     unsigned long long* out_count,
-    int* overflow_flag,
+    int* overflow_vec,
     int total_warps,
     const int* degrees)
 {
@@ -561,19 +589,8 @@ __global__ void ilu_symbolic_u_persistent_kernel(
             out_count,
             out_cap,
             lane,
-            overflow_flag,
+            overflow_vec,
             degrees);
-
-        int overflow = 0;
-        if (lane == 0)
-        {
-            overflow = *overflow_flag;
-        }
-        overflow = __shfl_sync(0xffffffffu, overflow, 0);
-        if (overflow != 0)
-        {
-            return;
-        }
     }
 }
 
@@ -673,7 +690,7 @@ bool ILUSymbolicU_CUDA_Persistent(
     COLTYPE* d_hash = nullptr;
     Pair<COLTYPE>* d_pairs = nullptr;
     unsigned long long* d_pair_count = nullptr;
-    int* d_overflow = nullptr;
+    int* d_overflow_vec = nullptr;
     int* d_degrees = nullptr;
 
     // Allocate device memory for degrees first
@@ -738,10 +755,48 @@ bool ILUSymbolicU_CUDA_Persistent(
     // Estimate per-warp memory so warp count can be capped by available device memory.
     const size_t per_warp_bytes = (frontier_per_warp * 2u + temp_per_warp + hash_per_warp) * sizeof(COLTYPE);
     const int total_warps = compute_total_warps<ROWTYPE, COLTYPE>(
-        n / 50, // Use a fraction of n to avoid excessive memory use on large matrices
+        n, // Use a fraction of n to avoid excessive memory use on large matrices
         threads_per_block, per_warp_bytes);
     const int num_blocks = (total_warps + warps_per_block - 1) / warps_per_block;
     
+    const size_t bytes_per_gb = 1024ull * 1024ull * 1024ull;
+    const size_t frontier_cap_bytes = 5ull * bytes_per_gb;
+    const size_t temp_cap_bytes = 5ull * bytes_per_gb;
+    const size_t hash_cap_bytes = 40ull * bytes_per_gb;
+
+    auto clamp_total_bytes = [&](const char* label, size_t cap_bytes, size_t& per_warp) {
+        if (total_warps <= 0 || cap_bytes == 0)
+        {
+            return;
+        }
+        const size_t cap_entries = cap_bytes / sizeof(COLTYPE);
+        if (cap_entries == 0)
+        {
+            per_warp = 0;
+            return;
+        }
+        const size_t total_entries = static_cast<size_t>(total_warps) * per_warp;
+        if (total_entries <= cap_entries)
+        {
+            return;
+        }
+        const size_t max_per_warp = cap_entries / static_cast<size_t>(total_warps);
+        if (max_per_warp == 0)
+        {
+            per_warp = 1;
+        }
+        else
+        {
+            per_warp = std::max<size_t>(1u, max_per_warp);
+        }
+        std::cout << "[DEBUG] Clamped " << label << " per warp to " << per_warp
+                  << " to satisfy global memory cap of " << (cap_bytes / bytes_per_gb) << " GB" << std::endl;
+    };
+
+    clamp_total_bytes("frontier", frontier_cap_bytes, frontier_per_warp);
+    clamp_total_bytes("temp", temp_cap_bytes, temp_per_warp);
+    clamp_total_bytes("hash", hash_cap_bytes, hash_per_warp);
+
     std::cout << "[DEBUG] Buffer sizing: max_degree=" << max_degree << ", avg_degree=" << avg_degree << std::endl;
     std::cout << "[DEBUG] level_multiplier=" << level_multiplier << ", base_degree=" << base_degree << std::endl;
     std::cout << "[DEBUG] frontier_per_warp=" << frontier_per_warp << ", temp_per_warp=" << temp_per_warp << ", hash_per_warp=" << hash_per_warp << std::endl;
@@ -778,7 +833,7 @@ bool ILUSymbolicU_CUDA_Persistent(
         (err = cudaMalloc(&d_hash, total_hash * sizeof(COLTYPE))) != cudaSuccess ||
         (err = cudaMalloc(&d_pairs, max_pairs * sizeof(Pair<COLTYPE>))) != cudaSuccess ||
         (err = cudaMalloc(&d_pair_count, sizeof(unsigned long long))) != cudaSuccess ||
-        (err = cudaMalloc(&d_overflow, sizeof(int))) != cudaSuccess)
+        (err = cudaMalloc(&d_overflow_vec, static_cast<size_t>(n) * sizeof(int))) != cudaSuccess)
     {
         std::cout << "[DEBUG] cudaMalloc failed: " << cudaGetErrorString(err) << std::endl;
         std::cout << "[DEBUG] max_pairs size: " << max_pairs * sizeof(Pair<COLTYPE>) / (1024.0 * 1024.0) << " MB" << std::endl;
@@ -794,8 +849,8 @@ bool ILUSymbolicU_CUDA_Persistent(
             cudaFree(d_pairs);
         if (d_pair_count)
             cudaFree(d_pair_count);
-        if (d_overflow)
-            cudaFree(d_overflow);
+        if (d_overflow_vec)
+            cudaFree(d_overflow_vec);
         if (d_degrees)
             cudaFree(d_degrees);
         return false;
@@ -804,7 +859,7 @@ bool ILUSymbolicU_CUDA_Persistent(
     unsigned long long zero_u64 = 0;
     int zero_i32 = 0;
     cudaMemcpy(d_pair_count, &zero_u64, sizeof(unsigned long long), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_overflow, &zero_i32, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemset(d_overflow_vec, 0, static_cast<size_t>(n) * sizeof(int));
     cudaMemcpyToSymbol(g_ilu_row_counter, &zero_i32, sizeof(int));
 
     ilu_symbolic_u_persistent_kernel<<<num_blocks, threads_per_block>>>(
@@ -824,44 +879,91 @@ bool ILUSymbolicU_CUDA_Persistent(
         d_pairs,
         out_cap,
         d_pair_count,
-        d_overflow,
+        d_overflow_vec,
         total_warps,
         d_degrees);
 
-    int overflow = 0;
-    cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost);
-    if (overflow != 0)
+    thrust::device_ptr<int> overflow_begin(d_overflow_vec);
+    const size_t overflow_rows = static_cast<size_t>(
+        thrust::count_if(
+            thrust::device,
+            overflow_begin,
+            overflow_begin + n,
+            OverflowPositive()));
+
+    if (overflow_rows > 0)
     {
-        std::cout << "[DEBUG] Overflow detected! Overflow code: " << overflow << std::endl;
-        switch (overflow) {
-            case 1:
-                std::cout << "[DEBUG] FRONTIER buffer overflow: frontier_per_warp=" << frontier_per_warp << " is too small" << std::endl;
-                std::cout << "[DEBUG] Try: Increase frontier size or reduce number of warps" << std::endl;
-                break;
-            case 2:
-                std::cout << "[DEBUG] TEMP buffer overflow: temp_per_warp=" << temp_per_warp << " is too small" << std::endl;
-                std::cout << "[DEBUG] Try: Increase temp_per_warp (currently for " << (out_cap / n) << " entries per row)" << std::endl;
-                break;
-            case 3:
-                std::cout << "[DEBUG] HASH TABLE overflow: hash_per_warp=" << hash_per_warp << " is too small" << std::endl;
-                std::cout << "[DEBUG] Try: Increase hash table size (must be power of 2)" << std::endl;
-                break;
-            case 4:
-                std::cout << "[DEBUG] GLOBAL PAIRS buffer overflow: out_cap=" << out_cap << " is too small" << std::endl;
-                std::cout << "[DEBUG] Total pairs generated exceeds maximum capacity" << std::endl;
-                break;
-            default:
-                std::cout << "[DEBUG] Unknown overflow type" << std::endl;
+        std::vector<int> h_overflow(static_cast<size_t>(n));
+        cudaMemcpy(h_overflow.data(), d_overflow_vec, static_cast<size_t>(n) * sizeof(int), cudaMemcpyDeviceToHost);
+
+        std::array<size_t, 5> overflow_hist{};
+        size_t unknown_overflow = 0;
+        size_t overflow_total = 0;
+        for (size_t idx = 0; idx < static_cast<size_t>(n); ++idx)
+        {
+            int code = h_overflow[idx];
+            if (code <= 0)
+            {
+                continue;
+            }
+            ++overflow_total;
+            if (static_cast<size_t>(code) < overflow_hist.size())
+            {
+                overflow_hist[static_cast<size_t>(code)]++;
+            }
+            else
+            {
+                ++unknown_overflow;
+            }
         }
-        cudaFree(d_frontier);
-        cudaFree(d_next_frontier);
-        cudaFree(d_temp);
-        cudaFree(d_hash);
-        cudaFree(d_pairs);
-        cudaFree(d_pair_count);
-        cudaFree(d_overflow);
-        cudaFree(d_degrees);
-        return false;
+
+        if (overflow_total > 0)
+        {
+            std::cout << "[DEBUG] Overflow detected on " << overflow_total << " rows" << std::endl;
+            const auto frontier_idx = overflow_to_int(OverflowCode::FrontierBuffer);
+            const auto temp_idx = overflow_to_int(OverflowCode::TempBuffer);
+            const auto hash_idx = overflow_to_int(OverflowCode::HashTable);
+            const auto global_idx = overflow_to_int(OverflowCode::GlobalPairs);
+
+            if (overflow_hist[frontier_idx] > 0)
+            {
+                std::cout << "[DEBUG] FRONTIER buffer overflow in " << overflow_hist[frontier_idx]
+                          << " rows: frontier_per_warp=" << frontier_per_warp
+                          << ". Try increasing frontier size or reducing active warps." << std::endl;
+            }
+            if (overflow_hist[temp_idx] > 0)
+            {
+                std::cout << "[DEBUG] TEMP buffer overflow in " << overflow_hist[temp_idx]
+                          << " rows: temp_per_warp=" << temp_per_warp
+                          << " (currently sized for " << (out_cap / n)
+                          << " entries per row). Consider enlarging temp storage." << std::endl;
+            }
+            if (overflow_hist[hash_idx] > 0)
+            {
+                std::cout << "[DEBUG] HASH TABLE overflow in " << overflow_hist[hash_idx]
+                          << " rows: hash_per_warp=" << hash_per_warp
+                          << ". Increase hash capacity (power of two)." << std::endl;
+            }
+            if (overflow_hist[global_idx] > 0)
+            {
+                std::cout << "[DEBUG] GLOBAL PAIRS buffer overflow in " << overflow_hist[global_idx]
+                          << " rows: out_cap=" << out_cap
+                          << " is insufficient for generated entries." << std::endl;
+            }
+            if (unknown_overflow > 0)
+            {
+                std::cout << "[DEBUG] Unknown overflow codes encountered: " << unknown_overflow << std::endl;
+            }
+            cudaFree(d_frontier);
+            cudaFree(d_next_frontier);
+            cudaFree(d_temp);
+            cudaFree(d_hash);
+            cudaFree(d_pairs);
+            cudaFree(d_pair_count);
+            cudaFree(d_overflow_vec);
+            cudaFree(d_degrees);
+            return false;
+        }
     }
 
     unsigned long long pair_count_u64 = 0;
@@ -877,7 +979,7 @@ bool ILUSymbolicU_CUDA_Persistent(
         cudaFree(d_hash);
         cudaFree(d_pairs);
         cudaFree(d_pair_count);
-        cudaFree(d_overflow);
+        cudaFree(d_overflow_vec);
         cudaFree(d_degrees);
         return false;
     }
@@ -899,7 +1001,7 @@ bool ILUSymbolicU_CUDA_Persistent(
         cudaFree(d_hash);
         cudaFree(d_pairs);
         cudaFree(d_pair_count);
-        cudaFree(d_overflow);
+        cudaFree(d_overflow_vec);
         cudaFree(d_degrees);
         return true;
     }
@@ -946,7 +1048,7 @@ bool ILUSymbolicU_CUDA_Persistent(
         cudaFree(d_hash);
         cudaFree(d_pairs);
         cudaFree(d_pair_count);
-        cudaFree(d_overflow);
+        cudaFree(d_overflow_vec);
         cudaFree(d_degrees);
         return false;
     }
@@ -970,7 +1072,7 @@ bool ILUSymbolicU_CUDA_Persistent(
     cudaFree(d_hash);
     cudaFree(d_pairs);
     cudaFree(d_pair_count);
-    cudaFree(d_overflow);
+    cudaFree(d_overflow_vec);
     cudaFree(d_degrees);
     
     std::cout << "[DEBUG] ILUSymbolicU_CUDA_Persistent completed successfully. u_nnz=" << *u_nnz << std::endl;
