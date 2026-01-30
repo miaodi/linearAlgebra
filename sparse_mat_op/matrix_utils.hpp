@@ -982,7 +982,7 @@ ROWTYPE Prune( const COLTYPE rows,
 /// @param av Matrix values (modified in-place)
 /// @param threshold Threshold multiplier
 /// @return Number of pruned (removed) entries
-/// @note Removes entries where |a_{i,j}| < |a_{i,i}| * |a_{j,j}| * threshold. Diagonal entries are preserved.
+/// @note Removes entries where |a_{i,j}|^2 < |a_{i,i}| * |a_{j,j}| * threshold. Diagonal entries are preserved.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 ROWTYPE DiagonalScaledPrune( const COLTYPE rows,
                               ROWTYPE* ai,

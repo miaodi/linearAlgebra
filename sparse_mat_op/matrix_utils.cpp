@@ -213,7 +213,7 @@ ROWTYPE DiagonalScaledPrune(const COLTYPE rows, ROWTYPE* ai, COLTYPE* aj, VALTYP
         }
     }
 
-    // Step 2: Zero out entries where |a_ii| * |a_jj| * threshold < |a_ij|
+    // Step 2: Zero out entries where |a_ii| * |a_jj| * threshold < |a_ij|^2
 #pragma omp parallel for
     for (COLTYPE i = 0; i < rows; ++i)
     {
