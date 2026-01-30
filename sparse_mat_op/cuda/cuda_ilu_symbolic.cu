@@ -19,6 +19,7 @@
 #include <cuco/pair.cuh>
 #include <cuco/static_set.cuh>
 #include <cuco/static_set_ref.cuh>
+#include <cuco/static_map.cuh>
 #include <cstdint>
 #include <iostream>
 #include <limits>
@@ -419,6 +420,404 @@ bool ILUSymbolicU_CUDA(
     return true;
 }
 
+//==============================================================================
+// ILUSymbolic_CUDA: Full L+U symbolic factorization using (src, cur, max_cur)
+//==============================================================================
+
+// Triplet type for full ILU BFS: ((src, cur), max_cur)
+// Using cuco::pair for compatibility with cuco hash maps
+template <typename COLTYPE>
+using Triplet = cuco::pair<Pair<COLTYPE>, COLTYPE>;
+
+// Helper functions to access Triplet fields
+template <typename COLTYPE>
+__host__ __device__ inline COLTYPE triplet_src(const Triplet<COLTYPE>& t) { return t.first.first; }
+
+template <typename COLTYPE>
+__host__ __device__ inline COLTYPE triplet_cur(const Triplet<COLTYPE>& t) { return t.first.second; }
+
+template <typename COLTYPE>
+__host__ __device__ inline COLTYPE triplet_path_max(const Triplet<COLTYPE>& t) { return t.second; }
+
+template <typename COLTYPE>
+__host__ __device__ inline Triplet<COLTYPE> make_triplet(COLTYPE src, COLTYPE cur, COLTYPE path_max)
+{
+    return Triplet<COLTYPE>{Pair<COLTYPE>{src, cur}, path_max};
+}
+
+template <typename COLTYPE>
+struct TripletLess
+{
+    __host__ __device__ bool operator()(const Triplet<COLTYPE>& a, const Triplet<COLTYPE>& b) const
+    {
+        if (triplet_src(a) != triplet_src(b)) return triplet_src(a) < triplet_src(b);
+        return triplet_cur(a) < triplet_cur(b);
+    }
+};
+
+template <typename COLTYPE>
+struct TripletSrc
+{
+    __host__ __device__ COLTYPE operator()(const Triplet<COLTYPE>& t) const
+    {
+        return triplet_src(t);
+    }
+};
+
+template <typename COLTYPE>
+struct TripletToPair
+{
+    COLTYPE base;
+    __host__ __device__ explicit TripletToPair(COLTYPE base_in) : base(base_in) {}
+    __host__ __device__ Pair<COLTYPE> operator()(const Triplet<COLTYPE>& t) const
+    {
+        return Pair<COLTYPE>{triplet_src(t), triplet_cur(t) + base};
+    }
+};
+
+// Kernel: Initialize frontier with ((i, i), 0) for all i
+template <typename COLTYPE>
+__global__ void init_triplet_frontier_kernel(Triplet<COLTYPE>* frontier, COLTYPE n)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n)
+    {
+        frontier[idx] = make_triplet<COLTYPE>(idx, idx, 0);  // Initial path_max is 0 (no intermediate nodes yet)
+    }
+}
+
+// Kernel: Look up degrees for each node in triplet frontier
+template <typename COLTYPE>
+__global__ void lookup_triplet_frontier_degrees_kernel(
+    const Triplet<COLTYPE>* current_frontier,
+    int current_size,
+    const int* all_degrees,
+    int* frontier_degrees)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= current_size)
+        return;
+    
+    COLTYPE j = triplet_cur(current_frontier[idx]);
+    frontier_degrees[idx] = all_degrees[j];
+}
+
+// Kernel: Build next triplet frontier using inclusive scan
+template <typename ROWTYPE, typename COLTYPE>
+__global__ void build_next_triplet_frontier_kernel(
+    const Triplet<COLTYPE>* current_frontier,
+    int current_size,
+    const int* inclusive_sum,
+    const ROWTYPE* d_ai,
+    const COLTYPE* d_aj,
+    COLTYPE base,
+    int next_frontier_size,
+    Triplet<COLTYPE>* next_frontier)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= next_frontier_size)
+        return;
+    
+    // Find which frontier node this output belongs to
+    const int* upper = thrust::upper_bound(thrust::seq, inclusive_sum, inclusive_sum + current_size, idx);
+    int frontier_idx = upper - inclusive_sum;
+    
+    int prev_sum = (frontier_idx > 0) ? inclusive_sum[frontier_idx - 1] : 0;
+    int local_idx = idx - prev_sum;
+    
+    Triplet<COLTYPE> t = current_frontier[frontier_idx];
+    COLTYPE src = triplet_src(t);
+    COLTYPE cur = triplet_cur(t);
+    COLTYPE path_max = triplet_path_max(t);
+    
+    // Get the neighbor at local_idx
+    ROWTYPE row_start = d_ai[cur] - base;
+    COLTYPE neighbor = d_aj[row_start + local_idx] - base;
+    
+    // Write to next frontier: ((src, neighbor), max(path_max, neighbor))
+    COLTYPE new_path_max = (neighbor > path_max) ? neighbor : path_max;
+    next_frontier[idx] = make_triplet(src, neighbor, new_path_max);
+}
+
+// Kernel: Try to insert/update in map and determine which elements to keep
+template <typename COLTYPE, typename MapRef>
+__global__ void check_and_insert_triplet_kernel(
+    const Triplet<COLTYPE>* triplets,
+    int n,
+    MapRef map_ref,
+    bool* keep,           // Whether to keep in next frontier  
+    bool* add_to_fill)    // Whether to add to factorization pattern
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n)
+        return;
+    
+    const Triplet<COLTYPE>& triplet = triplets[idx];
+    COLTYPE src = triplet_src(triplet);
+    COLTYPE cur = triplet_cur(triplet);
+    COLTYPE path_max = triplet_path_max(triplet);
+    
+    // Early exit: cur >= src means we won't keep this for next frontier
+    // and it can't be a valid fill entry (fill requires cur > path_max which implies cur contributes)
+    bool dominated = (cur >= src);
+    
+    keep[idx] = false;
+    add_to_fill[idx] = false;
+    
+    // Try to insert using insert_and_find which returns (iterator, bool)
+    auto [slot, is_new_key] = map_ref.insert_and_find(triplet);
+    
+    // Determine if this is a valid fill entry: cur == path_max means cur is the largest
+    // node on the path from src, making (src, cur) a fill-in entry
+    bool is_fill = (cur == path_max);
+    
+    if (is_new_key)
+    {
+        // New key: add to fill if condition met, keep if cur < src
+        add_to_fill[idx] = is_fill;
+        keep[idx] = !dominated;
+    }
+    else if (!dominated)
+    {
+        const COLTYPE stored_max = slot->second;
+        if ( path_max < stored_max )
+        {
+            // Key exists and cur < src: try to improve stored path_max
+            if (path_max < atomicMin(const_cast<COLTYPE*>(&(slot->second)), path_max))
+            {
+                keep[idx] = true;
+                // If we improved and cur == path_max, this becomes a fill entry
+                add_to_fill[idx] = is_fill;
+            }
+        }
+    }
+}
+
+// Functor: Filter triplets where cur != src (skip diagonal for next frontier)
+template <typename COLTYPE>
+struct FilterTripletNonDiag {
+    __device__ bool operator()(const Triplet<COLTYPE>& t) const {
+        return triplet_cur(t) != triplet_src(t);
+    }
+};
+
+// Main function implementing full ILU(k) symbolic factorization (L + U)
+template <typename ROWTYPE, typename COLTYPE>
+bool ILUSymbolic_CUDA(
+    COLTYPE n,
+    const ROWTYPE* d_ai,
+    const COLTYPE* d_aj,
+    int lvl,
+    COLTYPE base,
+    bool keepdiag,
+    ROWTYPE* d_lu_ai,
+    COLTYPE** d_lu_aj,
+    ROWTYPE* lu_nnz)
+{
+    if (n <= 0 || lvl < 0)
+        return false;
+    
+    // Get NNZ from input matrix
+    ROWTYPE nnz;
+    cudaMemcpy(&nnz, &d_ai[n], sizeof(ROWTYPE), cudaMemcpyDeviceToHost);
+    nnz -= base;
+    
+    int threads = 256;
+    int blocks = (n + threads - 1) / threads;
+
+    // cuco::static_map for visited tracking with path_max values
+    size_t map_capacity = static_cast<size_t>(n) * 1024u * 16u;
+    if (map_capacity > static_cast<size_t>(1e10))
+        map_capacity = static_cast<size_t>(1e10);
+    if (map_capacity == 0)
+        map_capacity = 1;
+
+    using map_key_t = Pair<COLTYPE>;
+    using map_value_t = COLTYPE;
+    constexpr map_key_t empty_key{std::numeric_limits<COLTYPE>::max(), std::numeric_limits<COLTYPE>::max()};
+    constexpr map_value_t empty_value = std::numeric_limits<COLTYPE>::max();
+    
+    using probing_scheme_t = cuco::linear_probing<1, cuco::default_hash_function<map_key_t>>;
+    using visited_map_t = cuco::static_map<map_key_t, map_value_t, cuco::extent<std::size_t>, 
+                                            cuda::thread_scope_device,
+                                            cuda::std::equal_to<map_key_t>, probing_scheme_t>;
+    visited_map_t visited_map(map_capacity, 
+                               cuco::empty_key<map_key_t>{empty_key},
+                               cuco::empty_value<map_value_t>{empty_value});
+
+    // Storage for combined LU pattern accumulation
+    thrust::device_vector<Pair<COLTYPE>> lu_pattern;
+    lu_pattern.reserve(nnz * (lvl + 2));  // Reserve estimated capacity
+
+    // Add diagonal to pattern if keeping diagonal
+    if (keepdiag)
+    {
+        lu_pattern.resize(n);
+        thrust::tabulate(lu_pattern.begin(), lu_pattern.end(), 
+            [=] __device__ (int i) { return Pair<COLTYPE>{i, i}; });
+    }
+
+    // Insert initial diagonal entries into map with path_max = 0
+    {
+        thrust::device_vector<cuco::pair<map_key_t, map_value_t>> init_pairs(n);
+        thrust::tabulate(init_pairs.begin(), init_pairs.end(),
+            [=] __device__ (int i) { 
+                return cuco::pair<map_key_t, map_value_t>{Pair<COLTYPE>{i, i}, COLTYPE(0)}; 
+            });
+        visited_map.insert(init_pairs.begin(), init_pairs.end());
+    }
+
+    // Pre-compute degrees for all nodes
+    thrust::device_vector<int> all_degrees(n);
+    blocks = (n + threads - 1) / threads;
+    compute_all_degrees_kernel<<<blocks, threads>>>(d_ai, n, base,
+                                                    thrust::raw_pointer_cast(all_degrees.data()));
+
+    // Allocate frontier buffers once and reuse
+    thrust::device_vector<Triplet<COLTYPE>> current_frontier(n);
+    thrust::device_vector<Triplet<COLTYPE>> next_frontier;
+    thrust::device_vector<int> degrees;
+    thrust::device_vector<int> inclusive_sum;
+    thrust::device_vector<bool> keep;
+    thrust::device_vector<bool> add_to_fill;
+    thrust::device_vector<Pair<COLTYPE>> fill_pairs;
+    thrust::device_vector<Triplet<COLTYPE>> temp_triplets;
+
+    // Initialize frontier with ((i, i), 0) for all i
+    blocks = (n + threads - 1) / threads;
+    init_triplet_frontier_kernel<<<blocks, threads>>>(
+        thrust::raw_pointer_cast(current_frontier.data()), n);
+    cudaDeviceSynchronize();
+
+    // BFS for k levels
+    for (int level = 0; level <= lvl; ++level)
+    {
+        int current_size = current_frontier.size();
+        if (current_size == 0)
+            break;
+
+        // Step 1: Look up degrees for nodes in current frontier
+        degrees.resize(current_size);
+        blocks = (current_size + threads - 1) / threads;
+        lookup_triplet_frontier_degrees_kernel<<<blocks, threads>>>(
+            thrust::raw_pointer_cast(current_frontier.data()), current_size,
+            thrust::raw_pointer_cast(all_degrees.data()), thrust::raw_pointer_cast(degrees.data()));
+
+        // Step 2: Compute inclusive scan
+        inclusive_sum.resize(current_size);
+        thrust::inclusive_scan(degrees.begin(), degrees.end(), inclusive_sum.begin());
+
+        int actual_next_size = 0;
+        if (current_size > 0)
+        {
+            cudaMemcpy(&actual_next_size, thrust::raw_pointer_cast(inclusive_sum.data()) + current_size - 1,
+                       sizeof(int), cudaMemcpyDeviceToHost);
+        }
+
+        if (actual_next_size == 0)
+            break;
+
+        // Step 3: Build next frontier
+        next_frontier.resize(actual_next_size);
+        blocks = (actual_next_size + threads - 1) / threads;
+        build_next_triplet_frontier_kernel<<<blocks, threads>>>(
+            thrust::raw_pointer_cast(current_frontier.data()), current_size,
+            thrust::raw_pointer_cast(inclusive_sum.data()), d_ai, d_aj, base, actual_next_size,
+            thrust::raw_pointer_cast(next_frontier.data()));
+
+        // Step 4: Check and insert into map, determine which to keep and add to fill
+        keep.resize(actual_next_size);
+        add_to_fill.resize(actual_next_size);
+        
+        auto map_ref = visited_map.ref(cuco::op::insert_and_find);
+        blocks = (actual_next_size + threads - 1) / threads;
+        check_and_insert_triplet_kernel<<<blocks, threads>>>(
+            thrust::raw_pointer_cast(next_frontier.data()),
+            actual_next_size,
+            map_ref,
+            thrust::raw_pointer_cast(keep.data()),
+            thrust::raw_pointer_cast(add_to_fill.data()));
+        cudaDeviceSynchronize();
+
+        // Step 5: Extract fill entries and transform to pairs
+        // First filter triplets where add_to_fill is true
+        temp_triplets.resize(actual_next_size);
+        auto fill_triplet_end = thrust::copy_if(next_frontier.begin(), next_frontier.end(),
+                                                 add_to_fill.begin(), temp_triplets.begin(),
+                                                 [] __device__(bool b) { return b; });
+        size_t fill_count = fill_triplet_end - temp_triplets.begin();
+        
+        // Transform to pairs and filter out diagonals, append directly to lu_pattern
+        if (fill_count > 0)
+        {
+            size_t old_size = lu_pattern.size();
+            lu_pattern.resize(old_size + fill_count);
+            
+            // Transform triplets to pairs
+            fill_pairs.resize(fill_count);
+            thrust::transform(temp_triplets.begin(), temp_triplets.begin() + fill_count, 
+                              fill_pairs.begin(),
+                              [] __device__(const Triplet<COLTYPE>& t) { return t.first; });
+            
+            // Filter out diagonals and append
+            auto lu_end = thrust::copy_if(fill_pairs.begin(), fill_pairs.end(),
+                                           lu_pattern.begin() + old_size,
+                                           [] __device__(const Pair<COLTYPE>& p) { return p.first != p.second; });
+            lu_pattern.resize(lu_end - lu_pattern.begin());
+        }
+
+        // Step 6: Extract kept triplets with cur < src (already encoded in keep)
+        auto kept_end = thrust::copy_if(next_frontier.begin(), next_frontier.end(),
+                                         keep.begin(), temp_triplets.begin(),
+                                         [] __device__(bool b) { return b; });
+        temp_triplets.resize(kept_end - temp_triplets.begin());
+
+        // Swap to current_frontier for next iteration
+        current_frontier.swap(temp_triplets);
+    }
+
+    // Build combined LU CSR structure
+    thrust::sort(lu_pattern.begin(), lu_pattern.end(), PairLess<COLTYPE>());
+    auto lu_unique_end = thrust::unique(lu_pattern.begin(), lu_pattern.end());
+    lu_pattern.erase(lu_unique_end, lu_pattern.end());
+
+    // Build LU row pointers using lower_bound for efficiency
+    thrust::device_vector<ROWTYPE> lu_ai_dev(n + 1);
+    
+    // Count elements per row using adjacent_difference on sorted data
+    auto row_it = thrust::make_transform_iterator(lu_pattern.begin(), PairSrc<COLTYPE>());
+    
+    // Use lower_bound to find row boundaries directly
+    thrust::device_vector<COLTYPE> row_indices(n);
+    thrust::sequence(row_indices.begin(), row_indices.end());
+    
+    thrust::lower_bound(row_it, row_it + lu_pattern.size(),
+                        row_indices.begin(), row_indices.end(),
+                        lu_ai_dev.begin());
+    
+    // Last element is total size
+    lu_ai_dev[n] = lu_pattern.size();
+    
+    // Add base if needed
+    if (base != 0)
+    {
+        thrust::transform(lu_ai_dev.begin(), lu_ai_dev.end(), 
+                          thrust::make_constant_iterator(ROWTYPE(base)),
+                          lu_ai_dev.begin(), thrust::plus<ROWTYPE>());
+    }
+
+    cudaMemcpy(d_lu_ai, thrust::raw_pointer_cast(lu_ai_dev.data()), 
+               (n + 1) * sizeof(ROWTYPE), cudaMemcpyDeviceToDevice);
+
+    *lu_nnz = lu_pattern.size();
+    cudaMalloc(d_lu_aj, *lu_nnz * sizeof(COLTYPE));
+
+    auto lu_aj_ptr = thrust::device_pointer_cast(*d_lu_aj);
+    thrust::transform(lu_pattern.begin(), lu_pattern.end(), lu_aj_ptr, PairCurPlusBase<COLTYPE>(base));
+
+    return true;
+}
+
 // Explicit template instantiations
 template bool ILUSymbolicU_CUDA<int, int>(
     int n, const int* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
@@ -427,5 +826,13 @@ template bool ILUSymbolicU_CUDA<int, int>(
 template bool ILUSymbolicU_CUDA<int64_t, int>(
     int n, const int64_t* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
     int64_t* d_u_ai, int** d_u_aj, int64_t* u_nnz);
+
+template bool ILUSymbolic_CUDA<int, int>(
+    int n, const int* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
+    int* d_lu_ai, int** d_lu_aj, int* lu_nnz);
+
+template bool ILUSymbolic_CUDA<int64_t, int>(
+    int n, const int64_t* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
+    int64_t* d_lu_ai, int** d_lu_aj, int64_t* lu_nnz);
 
 } // namespace cuda_iterative_solver

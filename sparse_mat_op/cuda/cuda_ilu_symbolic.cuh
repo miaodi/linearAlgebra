@@ -86,4 +86,54 @@ extern template bool ILUSymbolicU_CUDA_Persistent<int64_t, int>(
     int n, const int64_t* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
     int64_t* d_u_ai, int** d_u_aj, int64_t* u_nnz);
 
+/**
+ * @brief CUDA implementation of full ILU(k) symbolic factorization (combined LU)
+ * 
+ * This algorithm computes the combined LU sparsity pattern using a modified BFS
+ * approach with triplets ((src, cur), max_cur).
+ * 
+ * Algorithm Overview:
+ * - Maintains triplets ((src, cur), max_cur) where max_cur tracks the maximum
+ *   intermediate node visited on the path from src to cur
+ * - Frontier expansion: ((src, cur), max_cur) -> ((src, neighbor), max(max_cur, neighbor))
+ * - A triplet is kept if max_cur < src (valid ILU path condition)
+ * - An entry (src, cur) is added to factorization if cur > max_cur
+ * - Uses static_map to track visited (src, cur) pairs with their max_cur values
+ * 
+ * @tparam ROWTYPE Row pointer type (int or int64_t)
+ * @tparam COLTYPE Column index type
+ * 
+ * @param n Matrix size
+ * @param d_ai Device row pointers (CSR format)
+ * @param d_aj Device column indices (CSR format)
+ * @param lvl Fill level k
+ * @param base Index base (0 or 1)
+ * @param keepdiag If true, include diagonal in LU pattern
+ * @param d_lu_ai Output: LU row pointers (allocated by caller, size n+1)
+ * @param d_lu_aj Output: LU column indices (allocated and returned)
+ * @param lu_nnz Output: Number of nonzeros in LU
+ * 
+ * @return True if successful, false on error
+ */
+template <typename ROWTYPE, typename COLTYPE>
+bool ILUSymbolic_CUDA(
+    COLTYPE n,
+    const ROWTYPE* d_ai,
+    const COLTYPE* d_aj,
+    int lvl,
+    COLTYPE base,
+    bool keepdiag,
+    ROWTYPE* d_lu_ai,
+    COLTYPE** d_lu_aj,
+    ROWTYPE* lu_nnz
+);
+
+extern template bool ILUSymbolic_CUDA<int, int>(
+    int n, const int* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
+    int* d_lu_ai, int** d_lu_aj, int* lu_nnz);
+
+extern template bool ILUSymbolic_CUDA<int64_t, int>(
+    int n, const int64_t* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
+    int64_t* d_lu_ai, int** d_lu_aj, int64_t* lu_nnz);
+
 } // namespace cuda_iterative_solver
