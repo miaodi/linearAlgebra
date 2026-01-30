@@ -16,6 +16,10 @@
 #include <thrust/binary_search.h>
 #include <cub/cub.cuh>
 #include <cuda/std/iterator>
+#include <cuco/pair.cuh>
+#include <cuco/static_set.cuh>
+#include <cuco/static_set_ref.cuh>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 
@@ -24,19 +28,14 @@ namespace cuda_iterative_solver
 
 // Pair structure for BFS frontier: (source_node, current_node)
 template <typename COLTYPE>
-struct Pair
+using Pair = cuco::pair<COLTYPE, COLTYPE>;
+
+template <typename COLTYPE>
+struct PairLess
 {
-    COLTYPE src;
-    COLTYPE cur;
-    
-    __host__ __device__ bool operator==(const Pair& other) const
+    __host__ __device__ bool operator()(const Pair<COLTYPE>& a, const Pair<COLTYPE>& b) const
     {
-        return src == other.src && cur == other.cur;
-    }
-    
-    __host__ __device__ bool operator<(const Pair& other) const
-    {
-        return src < other.src || (src == other.src && cur < other.cur);
+        return (a.first < b.first) || (a.first == b.first && a.second < b.second);
     }
 };
 
@@ -45,7 +44,7 @@ struct PairSrc
 {
     __host__ __device__ COLTYPE operator()(const Pair<COLTYPE>& p) const
     {
-        return p.src;
+        return p.first;
     }
 };
 
@@ -56,34 +55,9 @@ struct PairCurPlusBase
     __host__ __device__ explicit PairCurPlusBase(COLTYPE base_in) : base(base_in) {}
     __host__ __device__ COLTYPE operator()(const Pair<COLTYPE>& p) const
     {
-        return p.cur + base;
+        return p.second + base;
     }
 };
-
-// Hash function for pair (source, current)
-// Uses MurmurHash-inspired mixing for better distribution
-template <typename COLTYPE>
-__device__ __host__ unsigned long long hash_pair(COLTYPE src, COLTYPE cur)
-{
-    unsigned long long a = static_cast<unsigned long long>(src);
-    unsigned long long b = static_cast<unsigned long long>(cur);
-    
-    // Mix bits using prime multiplication and XOR shifts
-    a ^= a >> 33;
-    a *= 0xff51afd7ed558ccdULL;
-    a ^= a >> 33;
-    a *= 0xc4ceb9fe1a85ec53ULL;
-    a ^= a >> 33;
-    
-    b ^= b >> 33;
-    b *= 0xff51afd7ed558ccdULL;
-    b ^= b >> 33;
-    b *= 0xc4ceb9fe1a85ec53ULL;
-    b ^= b >> 33;
-    
-    // Combine the two hashes
-    return a ^ (b + 0x9e3779b97f4a7c15ULL + (a << 6) + (a >> 2));
-}
 
 // Kernel: Initialize frontier with (i, i) for all i
 template <typename COLTYPE>
@@ -92,8 +66,8 @@ __global__ void init_frontier_kernel(Pair<COLTYPE>* frontier, COLTYPE n)
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n)
     {
-        frontier[idx].src = idx;
-        frontier[idx].cur = idx;
+        frontier[idx].first = idx;
+        frontier[idx].second = idx;
     }
 }
 
@@ -127,8 +101,25 @@ __global__ void lookup_frontier_degrees_kernel(
         return;
     
     Pair<COLTYPE> p = current_frontier[idx];
-    COLTYPE j = p.cur;
+    COLTYPE j = p.second;
     frontier_degrees[idx] = all_degrees[j];
+}
+
+// Kernel: Try to insert each element into the set and record success
+// Returns true if the element was newly inserted (not a duplicate or already visited)
+template <typename COLTYPE, typename Ref>
+__global__ void insert_and_check_kernel(
+    const Pair<COLTYPE>* pairs,
+    int n,
+    Ref ref,
+    bool* inserted)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n)
+        return;
+    
+    // insert() returns true if the element was inserted (new), false if already present
+    inserted[idx] = ref.insert(pairs[idx]);
 }
 
 
@@ -160,115 +151,23 @@ __global__ void build_next_frontier_kernel(
     int local_idx = idx - prev_sum;
     
     Pair<COLTYPE> p = current_frontier[frontier_idx];
-    COLTYPE i = p.src;
-    COLTYPE j = p.cur;
+    COLTYPE i = p.first;
+    COLTYPE j = p.second;
     
     // Get the neighbor at local_idx
     ROWTYPE row_start = d_ai[j] - base;
     COLTYPE neighbor = d_aj[row_start + local_idx] - base;
     
     // Write to next frontier
-    next_frontier[idx].src = i;
-    next_frontier[idx].cur = neighbor;
-}
-
-// Kernel: Remove duplicate pairs (assumes sorted input)
-template <typename COLTYPE>
-__global__ void mark_unique_kernel(
-    const Pair<COLTYPE>* pairs,
-    int n,
-    bool* is_unique)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n)
-        return;
-    
-    if (idx == 0)
-    {
-        is_unique[0] = true;
-    }
-    else
-    {
-        is_unique[idx] = !(pairs[idx] == pairs[idx - 1]);
-    }
-}
-
-// Kernel: Check if pair (i,j) is visited using hash table
-template <typename COLTYPE>
-__global__ void check_visited_kernel(
-    const Pair<COLTYPE>* pairs,
-    int n,
-    unsigned long long* hash_table,
-    unsigned long long hash_table_size,
-    bool* is_visited)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n)
-        return;
-    
-    Pair<COLTYPE> p = pairs[idx];
-    unsigned long long hash = hash_pair(p.src, p.cur);
-    unsigned long long pos = hash % hash_table_size;
-    
-    // Linear probing
-    const int max_probe = 256;
-    for (int probe = 0; probe < max_probe; ++probe)
-    {
-        unsigned long long stored = hash_table[pos];
-        if (stored == hash)
-        {
-            // Already visited
-            is_visited[idx] = true;
-            return;
-        }
-        if (stored == ULLONG_MAX)
-        {
-            // Not visited
-            is_visited[idx] = false;
-            return;
-        }
-        pos = (pos + 1) % hash_table_size;
-    }
-    // If we reach here, hash table is too full
-    is_visited[idx] = false;
-}
-
-// Kernel: Mark pairs as visited in hash table
-template <typename COLTYPE>
-__global__ void mark_visited_kernel(
-    const Pair<COLTYPE>* pairs,
-    int n,
-    unsigned long long* hash_table,
-    unsigned long long hash_table_size)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n)
-        return;
-    
-    Pair<COLTYPE> p = pairs[idx];
-    unsigned long long hash = hash_pair(p.src, p.cur);
-    unsigned long long pos = hash % hash_table_size;
-    
-    // Linear probing with atomic operations
-    const int max_probe = 256;
-    for (int probe = 0; probe < max_probe; ++probe)
-    {
-        unsigned long long old = atomicCAS(&hash_table[pos], ULLONG_MAX, hash);
-        if (old == ULLONG_MAX || old == hash)
-        {
-            // Successfully inserted or already present
-            return;
-        }
-        pos = (pos + 1) % hash_table_size;
-    }
-    // Hash table full - should not happen with proper sizing
+    next_frontier[idx].first = i;
+    next_frontier[idx].second = neighbor;
 }
 
 // Functor: Filter pairs where i < j (for U pattern without diagonal)
 template <typename COLTYPE>
 struct FilterU_lt {
     __device__ bool operator()(const Pair<COLTYPE>& p) const {
-        return p.src < p.cur;
+        return p.first < p.second;
     }
 };
 
@@ -276,7 +175,7 @@ struct FilterU_lt {
 template <typename COLTYPE>
 struct FilterU_lte {
     __device__ bool operator()(const Pair<COLTYPE>& p) const {
-        return p.src <= p.cur;
+        return p.first <= p.second;
     }
 };
 
@@ -284,39 +183,9 @@ struct FilterU_lte {
 template <typename COLTYPE>
 struct FilterNext {
     __device__ bool operator()(const Pair<COLTYPE>& p) const {
-        return p.src > p.cur;
+        return p.first > p.second;
     }
 };
-
-// Kernel: Filter pairs based on condition (i >= j for output, i < j for next frontier)
-template <typename COLTYPE>
-__global__ void filter_pairs_kernel(
-    const Pair<COLTYPE>* pairs,
-    int n,
-    const bool* keep_mask,
-    bool filter_gte,  // true: keep i >= j, false: keep i < j
-    bool* result_mask)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n)
-        return;
-    
-    if (!keep_mask[idx])
-    {
-        result_mask[idx] = false;
-        return;
-    }
-    
-    Pair<COLTYPE> p = pairs[idx];
-    if (filter_gte)
-    {
-        result_mask[idx] = (p.src >= p.cur);
-    }
-    else
-    {
-        result_mask[idx] = (p.src < p.cur);
-    }
-}
 
 // Kernel: Extract U pattern by atomically appending (i,j) where i <= j
 template <typename ROWTYPE, typename COLTYPE>
@@ -334,8 +203,8 @@ __global__ void extract_u_pattern_kernel(
         return;
     
     Pair<COLTYPE> p = pairs[idx];
-    COLTYPE i = p.src;
-    COLTYPE j = p.cur;
+    COLTYPE i = p.first;
+    COLTYPE j = p.second;
     
     // Keep only i <= j
     if (i > j)
@@ -385,41 +254,41 @@ bool ILUSymbolicU_CUDA(
         thrust::raw_pointer_cast(current_frontier.data()), n);
     cudaDeviceSynchronize();
 
-    // Hash table for visited tracking: 256 slots per node
-    size_t hash_table_size = size_t(n) * 1024* 32;
-    if (hash_table_size > 1e9)
-        hash_table_size = 1e9; // Cap to avoid excessive memory
-    
-    thrust::device_vector<unsigned long long> hash_table(hash_table_size, ULLONG_MAX);
-    
-    // Mark initial frontier (i, i) as visited
-    blocks = (n + threads - 1) / threads;
-    mark_visited_kernel<<<blocks, threads>>>(
-        thrust::raw_pointer_cast(current_frontier.data()),
-        n,
-        thrust::raw_pointer_cast(hash_table.data()),
-        hash_table_size);
-    cudaDeviceSynchronize();
-    
+    // cuco::static_set for visited tracking
+    size_t visited_capacity = static_cast<size_t>(n) * 1024u * 32u;
+    if (visited_capacity > static_cast<size_t>(1e9))
+        visited_capacity = static_cast<size_t>(1e9); // Cap to avoid excessive memory
+    if (visited_capacity == 0)
+        visited_capacity = 1;
+
+    // Use Pair directly as key - it's bitwise comparable
+    using visited_key_t = Pair<COLTYPE>;
+    constexpr visited_key_t empty_key{std::numeric_limits<COLTYPE>::max(), std::numeric_limits<COLTYPE>::max()};
+    // Use linear_probing with cg_size=1 for single-thread insert operations
+    using probing_scheme_t = cuco::linear_probing<1, cuco::default_hash_function<visited_key_t>>;
+    using visited_set_t = cuco::static_set<visited_key_t, cuco::extent<std::size_t>, cuda::thread_scope_device,
+                                           cuda::std::equal_to<visited_key_t>, probing_scheme_t>;
+    visited_set_t visited_set(visited_capacity, cuco::empty_key<visited_key_t>{empty_key});
+
+    // Mark initial frontier (i, i) as visited using host-side bulk insert
+    visited_set.insert(current_frontier.begin(), current_frontier.end());
+
     // Storage for U pattern accumulation
     thrust::device_vector<Pair<COLTYPE>> u_pattern;
-    
+
     // Add initial diagonal pairs to U pattern if keeping diagonal
     if (keepdiag)
     {
         u_pattern.insert(u_pattern.end(), current_frontier.begin(), current_frontier.end());
     }
-    
+
     // Pre-compute degrees for all nodes before BFS
     thrust::device_vector<int> all_degrees(n);
     blocks = (n + threads - 1) / threads;
-    compute_all_degrees_kernel<<<blocks, threads>>>(
-        d_ai,
-        n,
-        base,
-        thrust::raw_pointer_cast(all_degrees.data()));
+    compute_all_degrees_kernel<<<blocks, threads>>>(d_ai, n, base,
+                                                    thrust::raw_pointer_cast(all_degrees.data()));
     cudaDeviceSynchronize();
-    
+
     // BFS for k levels
     for (int level = 0; level <= lvl; ++level)
     {
@@ -447,11 +316,11 @@ bool ILUSymbolicU_CUDA(
                        sizeof(int), cudaMemcpyDeviceToHost);
         }
 
-        // Allocate next frontier
-        next_frontier.resize(actual_next_size);
-
         if (actual_next_size == 0)
             break;
+
+        // Allocate next frontier
+        next_frontier.resize(actual_next_size);
 
         // Step 3: Build next frontier using inclusive scan
         blocks = (actual_next_size + threads - 1) / threads;
@@ -461,39 +330,29 @@ bool ILUSymbolicU_CUDA(
             thrust::raw_pointer_cast(next_frontier.data()));
         cudaDeviceSynchronize();
 
-        // Sort pairs
-        thrust::sort(next_frontier.begin(), next_frontier.end());
-
-        // Remove duplicates
-        auto new_end = thrust::unique(next_frontier.begin(), next_frontier.end());
-        next_frontier.erase(new_end, next_frontier.end());
-
-        int unique_size = next_frontier.size();
-
-        // Check which pairs are already visited
-        thrust::device_vector<bool> is_visited(unique_size);
-        blocks = (unique_size + threads - 1) / threads;
-        check_visited_kernel<<<blocks, threads>>>(thrust::raw_pointer_cast(next_frontier.data()), unique_size,
-                                                  thrust::raw_pointer_cast(hash_table.data()), hash_table_size,
-                                                  thrust::raw_pointer_cast(is_visited.data()));
+        // Insert all elements into visited_set and record which insertions succeeded
+        // This replaces: sort + unique + contains + filter + insert
+        // Elements that are duplicates (within next_frontier) or already visited will fail to insert
+        thrust::device_vector<bool> is_new(actual_next_size);
+        auto insert_ref = visited_set.ref(cuco::op::insert);
+        blocks = (actual_next_size + threads - 1) / threads;
+        insert_and_check_kernel<<<blocks, threads>>>(
+            thrust::raw_pointer_cast(next_frontier.data()),
+            actual_next_size,
+            insert_ref,
+            thrust::raw_pointer_cast(is_new.data()));
         cudaDeviceSynchronize();
 
-        // Filter unvisited pairs using stencil
-        thrust::device_vector<Pair<COLTYPE>> unvisited(unique_size);
+        // Filter to get only newly inserted (unvisited, unique) elements
+        thrust::device_vector<Pair<COLTYPE>> unvisited(actual_next_size);
         auto new_end_unvisited =
-            thrust::copy_if(next_frontier.begin(), next_frontier.end(), is_visited.begin(),
-                            unvisited.begin(), thrust::logical_not<bool>());
-        unvisited.resize(cuda::std::distance(unvisited.begin(), new_end_unvisited));
+            thrust::copy_if(next_frontier.begin(), next_frontier.end(), is_new.begin(),
+                            unvisited.begin(), [] __device__(bool b) { return b; });
+        unvisited.resize(new_end_unvisited - unvisited.begin());
 
         int unvisited_size = unvisited.size();
         if (unvisited_size == 0)
             break;
-
-        // Mark as visited
-        blocks = (unvisited_size + threads - 1) / threads;
-        mark_visited_kernel<<<blocks, threads>>>(thrust::raw_pointer_cast(unvisited.data()), unvisited_size,
-                                                 thrust::raw_pointer_cast(hash_table.data()), hash_table_size);
-        cudaDeviceSynchronize();
 
         // Extract pairs where i <= j to U pattern (upper triangular)
         thrust::device_vector<Pair<COLTYPE>> u_pairs(unvisited_size);
@@ -514,15 +373,15 @@ bool ILUSymbolicU_CUDA(
 
         current_frontier = next_frontier_filtered;
     }
-    
+
     // Now build CSR structure from collected pairs
     // Sort by row then column
-    thrust::sort(u_pattern.begin(), u_pattern.end());
-    
+    thrust::sort(u_pattern.begin(), u_pattern.end(), PairLess<COLTYPE>());
+
     // Remove any duplicates that might have accumulated
     auto new_end = thrust::unique(u_pattern.begin(), u_pattern.end());
     u_pattern.erase(new_end, u_pattern.end());
-    
+
     // Build row pointers
     thrust::device_vector<ROWTYPE> u_ai_dev(n + 1, ROWTYPE(0));
     thrust::device_vector<ROWTYPE> row_counts(n, ROWTYPE(0));
@@ -532,10 +391,8 @@ bool ILUSymbolicU_CUDA(
     thrust::device_vector<COLTYPE> unique_rows(u_pattern.size());
     thrust::device_vector<ROWTYPE> unique_counts(u_pattern.size());
 
-    auto reduce_end = thrust::reduce_by_key(
-        row_it, row_it_end,
-        thrust::make_constant_iterator<ROWTYPE>(1),
-        unique_rows.begin(), unique_counts.begin());
+    auto reduce_end = thrust::reduce_by_key(row_it, row_it_end, thrust::make_constant_iterator<ROWTYPE>(1),
+                                            unique_rows.begin(), unique_counts.begin());
     size_t unique_size = reduce_end.first - unique_rows.begin();
     unique_rows.resize(unique_size);
     unique_counts.resize(unique_size);
@@ -545,22 +402,20 @@ bool ILUSymbolicU_CUDA(
     thrust::inclusive_scan(row_counts.begin(), row_counts.end(), u_ai_dev.begin() + 1);
     if (base != 0)
     {
-        thrust::transform(u_ai_dev.begin() + 1, u_ai_dev.end(),
-                          thrust::make_constant_iterator(ROWTYPE(base)),
+        thrust::transform(u_ai_dev.begin() + 1, u_ai_dev.end(), thrust::make_constant_iterator(ROWTYPE(base)),
                           u_ai_dev.begin() + 1, thrust::plus<ROWTYPE>());
     }
     u_ai_dev[0] = ROWTYPE(base);
 
-    cudaMemcpy(d_u_ai, thrust::raw_pointer_cast(u_ai_dev.data()),
-               (n + 1) * sizeof(ROWTYPE), cudaMemcpyDeviceToDevice);
-    
+    cudaMemcpy(d_u_ai, thrust::raw_pointer_cast(u_ai_dev.data()), (n + 1) * sizeof(ROWTYPE), cudaMemcpyDeviceToDevice);
+
     // Build column indices
     *u_nnz = u_pattern.size();
     cudaMalloc(d_u_aj, *u_nnz * sizeof(COLTYPE));
 
     auto u_aj_ptr = thrust::device_pointer_cast(*d_u_aj);
     thrust::transform(u_pattern.begin(), u_pattern.end(), u_aj_ptr, PairCurPlusBase<COLTYPE>(base));
-    
+
     return true;
 }
 

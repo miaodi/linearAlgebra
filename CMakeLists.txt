@@ -209,6 +209,9 @@ if(USE_CUDA)
   # This allows code compiled with newer CUDA toolkit to run on older drivers
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --forward-unknown-to-host-compiler")
   
+  # Enable extended device lambdas (required by cuco)
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-extended-lambda")
+  
   # CUDSS support
   if(USE_CUDSS)
     add_compile_definitions(USE_CUDSS)
@@ -218,6 +221,29 @@ if(USE_CUDA)
   message(STATUS "CUDA enabled with architectures: ${CMAKE_CUDA_ARCHITECTURES}")
   message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER}")
   message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
+
+  # Download CPM.cmake for package management
+  set(CPM_DOWNLOAD_VERSION 0.40.2)
+  set(CPM_DOWNLOAD_LOCATION "${CMAKE_BINARY_DIR}/cmake/CPM_${CPM_DOWNLOAD_VERSION}.cmake")
+  if(NOT EXISTS ${CPM_DOWNLOAD_LOCATION})
+    message(STATUS "Downloading CPM.cmake v${CPM_DOWNLOAD_VERSION}")
+    file(DOWNLOAD
+      https://github.com/cpm-cmake/CPM.cmake/releases/download/v${CPM_DOWNLOAD_VERSION}/CPM.cmake
+      ${CPM_DOWNLOAD_LOCATION}
+    )
+  endif()
+  include(${CPM_DOWNLOAD_LOCATION})
+
+  # cuCollections (cuco) for GPU hash set support
+  CPMAddPackage(
+    NAME cuco
+    GITHUB_REPOSITORY NVIDIA/cuCollections
+    GIT_TAG dev
+    OPTIONS
+      "BUILD_TESTS OFF"
+      "BUILD_BENCHMARKS OFF"
+      "BUILD_EXAMPLES OFF"
+  )
 endif()
 
 configure_file(

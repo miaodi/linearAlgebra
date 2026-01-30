@@ -17,12 +17,12 @@ add_library(${PROJECT_NAME} STATIC ${CUDA_SOURCES})
 target_include_directories(${PROJECT_NAME} PUBLIC 
   ${CMAKE_CURRENT_LIST_DIR}
 )
-
 target_link_libraries(${PROJECT_NAME} PUBLIC 
     CUDA::cusparse 
     CUDA::cublas 
     CUDA::cudart 
     LAPACK::LAPACK
+    cuco
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
