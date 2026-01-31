@@ -465,6 +465,15 @@ struct TripletSrc
 };
 
 template <typename COLTYPE>
+struct TripletKey
+{
+    __host__ __device__ Pair<COLTYPE> operator()(const Triplet<COLTYPE>& t) const
+    {
+        return t.first;
+    }
+};
+
+template <typename COLTYPE>
 struct TripletToPair
 {
     COLTYPE base;
@@ -472,6 +481,25 @@ struct TripletToPair
     __host__ __device__ Pair<COLTYPE> operator()(const Triplet<COLTYPE>& t) const
     {
         return Pair<COLTYPE>{triplet_src(t), triplet_cur(t) + base};
+    }
+};
+
+struct Count2
+{
+    int keep;
+    int fill;
+};
+
+__host__ __device__ inline Count2 operator+(const Count2& a, const Count2& b)
+{
+    return Count2{a.keep + b.keep, a.fill + b.fill};
+}
+
+struct Count2Plus
+{
+    __host__ __device__ Count2 operator()(const Count2& a, const Count2& b) const
+    {
+        return a + b;
     }
 };
 
@@ -545,8 +573,7 @@ __global__ void check_and_insert_triplet_kernel(
     const Triplet<COLTYPE>* triplets,
     int n,
     MapRef map_ref,
-    bool* keep,           // Whether to keep in next frontier  
-    bool* add_to_fill)    // Whether to add to factorization pattern
+    unsigned char* flags) // bit 0: keep, bit 1: add_to_fill
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n)
@@ -561,8 +588,7 @@ __global__ void check_and_insert_triplet_kernel(
     // and it can't be a valid fill entry (fill requires cur > path_max which implies cur contributes)
     bool dominated = (cur >= src);
     
-    keep[idx] = false;
-    add_to_fill[idx] = false;
+    unsigned char out = 0;
     
     // Try to insert using insert_and_find which returns (iterator, bool)
     auto [slot, is_new_key] = map_ref.insert_and_find(triplet);
@@ -574,8 +600,8 @@ __global__ void check_and_insert_triplet_kernel(
     if (is_new_key)
     {
         // New key: add to fill if condition met, keep if cur < src
-        add_to_fill[idx] = is_fill;
-        keep[idx] = !dominated;
+        if (is_fill) out |= 2u;
+        if (!dominated) out |= 1u;
     }
     else if (!dominated)
     {
@@ -585,12 +611,13 @@ __global__ void check_and_insert_triplet_kernel(
             // Key exists and cur < src: try to improve stored path_max
             if (path_max < atomicMin(const_cast<COLTYPE*>(&(slot->second)), path_max))
             {
-                keep[idx] = true;
+                out |= 1u;
                 // If we improved and cur == path_max, this becomes a fill entry
-                add_to_fill[idx] = is_fill;
+                if (is_fill) out |= 2u;
             }
         }
     }
+    flags[idx] = out;
 }
 
 // Functor: Filter triplets where cur != src (skip diagonal for next frontier)
@@ -601,6 +628,63 @@ struct FilterTripletNonDiag {
     }
 };
 
+template <typename COLTYPE, int BLOCK>
+__global__ void scatter_keep_fill_kernel(
+    const Triplet<COLTYPE>* next_frontier,
+    const unsigned char* flags,
+    int n,
+    int* counts,
+    Triplet<COLTYPE>* keep_out,
+    Pair<COLTYPE>* fill_out)
+{
+    using BlockScan = cub::BlockScan<Count2, BLOCK>;
+    __shared__ typename BlockScan::TempStorage temp_storage;
+    __shared__ Count2 block_base;
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned char f = 0;
+    if (idx < n)
+        f = flags[idx];
+    Count2 item{(f & 1u) ? 1 : 0, (f & 2u) ? 1 : 0};
+    Count2 prefix{};
+    Count2 block_total{};
+
+    BlockScan(temp_storage).ExclusiveSum(item, prefix, block_total);
+    if (threadIdx.x == 0)
+    {
+        block_base.keep = atomicAdd(&counts[0], block_total.keep);
+        block_base.fill = atomicAdd(&counts[1], block_total.fill);
+    }
+    __syncthreads();
+
+    if (idx < n)
+    {
+        if (f & 1u)
+            keep_out[block_base.keep + prefix.keep] = next_frontier[idx];
+        if (f & 2u)
+            fill_out[block_base.fill + prefix.fill] = next_frontier[idx].first;
+    }
+}
+
+template <int BLOCK>
+__global__ void count_flags_kernel(const unsigned char* flags, int n, int* counts)
+{
+    using BlockReduce = cub::BlockReduce<Count2, BLOCK>;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned char f = 0;
+    if (idx < n)
+        f = flags[idx];
+    Count2 item{(f & 1u) ? 1 : 0, (f & 2u) ? 1 : 0};
+    Count2 block_sum = BlockReduce(temp_storage).Reduce(item, Count2Plus());
+    if (threadIdx.x == 0)
+    {
+        atomicAdd(&counts[0], block_sum.keep);
+        atomicAdd(&counts[1], block_sum.fill);
+    }
+}
+
 // Main function implementing full ILU(k) symbolic factorization (L + U)
 template <typename ROWTYPE, typename COLTYPE>
 bool ILUSymbolic_CUDA(
@@ -609,7 +693,6 @@ bool ILUSymbolic_CUDA(
     const COLTYPE* d_aj,
     int lvl,
     COLTYPE base,
-    bool keepdiag,
     ROWTYPE* d_lu_ai,
     COLTYPE** d_lu_aj,
     ROWTYPE* lu_nnz)
@@ -649,13 +732,10 @@ bool ILUSymbolic_CUDA(
     thrust::device_vector<Pair<COLTYPE>> lu_pattern;
     lu_pattern.reserve(nnz * (lvl + 2));  // Reserve estimated capacity
 
-    // Add diagonal to pattern if keeping diagonal
-    if (keepdiag)
-    {
-        lu_pattern.resize(n);
-        thrust::tabulate(lu_pattern.begin(), lu_pattern.end(), 
-            [=] __device__ (int i) { return Pair<COLTYPE>{i, i}; });
-    }
+    // Always include diagonal in pattern
+    lu_pattern.resize(n);
+    thrust::tabulate(lu_pattern.begin(), lu_pattern.end(),
+        [=] __device__ (int i) { return Pair<COLTYPE>{i, i}; });
 
     // Insert initial diagonal entries into map with path_max = 0
     {
@@ -678,9 +758,8 @@ bool ILUSymbolic_CUDA(
     thrust::device_vector<Triplet<COLTYPE>> next_frontier;
     thrust::device_vector<int> degrees;
     thrust::device_vector<int> inclusive_sum;
-    thrust::device_vector<bool> keep;
-    thrust::device_vector<bool> add_to_fill;
-    thrust::device_vector<Pair<COLTYPE>> fill_pairs;
+    thrust::device_vector<unsigned char> flags;
+    thrust::device_vector<int> counts(2);
     thrust::device_vector<Triplet<COLTYPE>> temp_triplets;
 
     // Initialize frontier with ((i, i), 0) for all i
@@ -699,7 +778,6 @@ bool ILUSymbolic_CUDA(
     float time_build_frontier = 0.0f, total_build_frontier = 0.0f;
     float time_hash_insert = 0.0f, total_hash_insert = 0.0f;
     float time_extract_fill = 0.0f, total_extract_fill = 0.0f;
-    float time_extract_keep = 0.0f, total_extract_keep = 0.0f;
 
     // BFS for k levels
     for (int level = 0; level <= lvl; ++level)
@@ -754,8 +832,7 @@ bool ILUSymbolic_CUDA(
 
         // Step 4: Check and insert into map, determine which to keep and add to fill
         cudaEventRecord(start);
-        keep.resize(actual_next_size);
-        add_to_fill.resize(actual_next_size);
+        flags.resize(actual_next_size);
         
         auto map_ref = visited_map.ref(cuco::op::insert_and_find);
         blocks = (actual_next_size + threads - 1) / threads;
@@ -763,58 +840,59 @@ bool ILUSymbolic_CUDA(
             thrust::raw_pointer_cast(next_frontier.data()),
             actual_next_size,
             map_ref,
-            thrust::raw_pointer_cast(keep.data()),
-            thrust::raw_pointer_cast(add_to_fill.data()));
+            thrust::raw_pointer_cast(flags.data()));
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&time_hash_insert, start, stop);
         total_hash_insert += time_hash_insert;
 
-        // Step 5: Extract fill entries and transform to pairs
+        // Step 5: Scan flags and scatter keep/fill in one pass
         cudaEventRecord(start);
-        // First filter triplets where add_to_fill is true
-        temp_triplets.resize(actual_next_size);
-        auto fill_triplet_end = thrust::copy_if(next_frontier.begin(), next_frontier.end(),
-                                                 add_to_fill.begin(), temp_triplets.begin(),
-                                                 [] __device__(bool b) { return b; });
-        size_t fill_count = fill_triplet_end - temp_triplets.begin();
-        
-        // Transform to pairs and filter out diagonals, append directly to lu_pattern
-        if (fill_count > 0)
+        cudaMemset(thrust::raw_pointer_cast(counts.data()), 0, 2 * sizeof(int));
+
+        blocks = (actual_next_size + threads - 1) / threads;
+        count_flags_kernel<256><<<blocks, threads>>>(
+            thrust::raw_pointer_cast(flags.data()), actual_next_size,
+            thrust::raw_pointer_cast(counts.data()));
+        int keep_count = 0;
+        int fill_count = 0;
+        if (actual_next_size > 0)
         {
-            size_t old_size = lu_pattern.size();
-            lu_pattern.resize(old_size + fill_count);
-            
-            // Transform triplets to pairs
-            fill_pairs.resize(fill_count);
-            thrust::transform(temp_triplets.begin(), temp_triplets.begin() + fill_count, 
-                              fill_pairs.begin(),
-                              [] __device__(const Triplet<COLTYPE>& t) { return t.first; });
-            
-            // Filter out diagonals and append
-            auto lu_end = thrust::copy_if(fill_pairs.begin(), fill_pairs.end(),
-                                           lu_pattern.begin() + old_size,
-                                           [] __device__(const Pair<COLTYPE>& p) { return p.first != p.second; });
-            lu_pattern.resize(lu_end - lu_pattern.begin());
+            int h_counts[2] = {0, 0};
+            cudaMemcpy(h_counts, thrust::raw_pointer_cast(counts.data()), sizeof(h_counts), cudaMemcpyDeviceToHost);
+            keep_count = h_counts[0];
+            fill_count = h_counts[1];
         }
+
+        size_t old_size = lu_pattern.size();
+        size_t needed = old_size + static_cast<size_t>(fill_count);
+        if (lu_pattern.capacity() < needed)
+        {
+            size_t new_cap = lu_pattern.capacity();
+            if (new_cap == 0)
+                new_cap = 1;
+            while (new_cap < needed)
+                new_cap *= 2;
+            lu_pattern.reserve(new_cap);
+        }
+        lu_pattern.resize(needed);
+        temp_triplets.resize(keep_count);
+
+        cudaMemset(thrust::raw_pointer_cast(counts.data()), 0, 2 * sizeof(int));
+        scatter_keep_fill_kernel<COLTYPE, 256><<<blocks, threads>>>(
+            thrust::raw_pointer_cast(next_frontier.data()),
+            thrust::raw_pointer_cast(flags.data()),
+            actual_next_size,
+            thrust::raw_pointer_cast(counts.data()),
+            thrust::raw_pointer_cast(temp_triplets.data()),
+            thrust::raw_pointer_cast(lu_pattern.data()) + old_size);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&time_extract_fill, start, stop);
         total_extract_fill += time_extract_fill;
 
-        // Step 6: Extract kept triplets with cur < src (already encoded in keep)
-        cudaEventRecord(start);
-        auto kept_end = thrust::copy_if(next_frontier.begin(), next_frontier.end(),
-                                         keep.begin(), temp_triplets.begin(),
-                                         [] __device__(bool b) { return b; });
-        temp_triplets.resize(kept_end - temp_triplets.begin());
-
-        // Swap to current_frontier for next iteration
+        // Step 6: Swap to current_frontier for next iteration
         current_frontier.swap(temp_triplets);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&time_extract_keep, start, stop);
-        total_extract_keep += time_extract_keep;
 
         // Print per-level timing
         std::cout << "Level " << level 
@@ -824,8 +902,7 @@ bool ILUSymbolic_CUDA(
                   << " scan=" << time_scan << "ms"
                   << " build=" << time_build_frontier << "ms"
                   << " hash=" << time_hash_insert << "ms"
-                  << " fill=" << time_extract_fill << "ms"
-                  << " keep=" << time_extract_keep << "ms"
+                  << " scatter=" << time_extract_fill << "ms"
                   << std::endl;
     }
 
@@ -835,10 +912,9 @@ bool ILUSymbolic_CUDA(
     std::cout << "Scan + memcpy:   " << total_scan << " ms" << std::endl;
     std::cout << "Build frontier:  " << total_build_frontier << " ms" << std::endl;
     std::cout << "Hash insert:     " << total_hash_insert << " ms" << std::endl;
-    std::cout << "Extract fill:    " << total_extract_fill << " ms" << std::endl;
-    std::cout << "Extract keep:    " << total_extract_keep << " ms" << std::endl;
+    std::cout << "Scatter:         " << total_extract_fill << " ms" << std::endl;
     std::cout << "Total BFS time:  " << (total_degree_lookup + total_scan + total_build_frontier + 
-                                          total_hash_insert + total_extract_fill + total_extract_keep) << " ms" << std::endl;
+                                          total_hash_insert + total_extract_fill) << " ms" << std::endl;
     std::cout << "=========================\n" << std::endl;
 
     cudaEventDestroy(start);
@@ -896,11 +972,11 @@ template bool ILUSymbolicU_CUDA<int64_t, int>(
     int64_t* d_u_ai, int** d_u_aj, int64_t* u_nnz);
 
 template bool ILUSymbolic_CUDA<int, int>(
-    int n, const int* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
+    int n, const int* d_ai, const int* d_aj, int lvl, int base,
     int* d_lu_ai, int** d_lu_aj, int* lu_nnz);
 
 template bool ILUSymbolic_CUDA<int64_t, int>(
-    int n, const int64_t* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
+    int n, const int64_t* d_ai, const int* d_aj, int lvl, int base,
     int64_t* d_lu_ai, int** d_lu_aj, int64_t* lu_nnz);
 
 } // namespace cuda_iterative_solver

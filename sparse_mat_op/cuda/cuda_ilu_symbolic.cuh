@@ -108,7 +108,7 @@ extern template bool ILUSymbolicU_CUDA_Persistent<int64_t, int>(
  * @param d_aj Device column indices (CSR format)
  * @param lvl Fill level k
  * @param base Index base (0 or 1)
- * @param keepdiag If true, include diagonal in LU pattern
+ * @note Diagonal is always included in LU pattern
  * @param d_lu_ai Output: LU row pointers (allocated by caller, size n+1)
  * @param d_lu_aj Output: LU column indices (allocated and returned)
  * @param lu_nnz Output: Number of nonzeros in LU
@@ -122,18 +122,17 @@ bool ILUSymbolic_CUDA(
     const COLTYPE* d_aj,
     int lvl,
     COLTYPE base,
-    bool keepdiag,
     ROWTYPE* d_lu_ai,
     COLTYPE** d_lu_aj,
     ROWTYPE* lu_nnz
 );
 
 extern template bool ILUSymbolic_CUDA<int, int>(
-    int n, const int* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
+    int n, const int* d_ai, const int* d_aj, int lvl, int base,
     int* d_lu_ai, int** d_lu_aj, int* lu_nnz);
 
 extern template bool ILUSymbolic_CUDA<int64_t, int>(
-    int n, const int64_t* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
+    int n, const int64_t* d_ai, const int* d_aj, int lvl, int base,
     int64_t* d_lu_ai, int** d_lu_aj, int64_t* lu_nnz);
 
 } // namespace cuda_iterative_solver

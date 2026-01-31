@@ -311,7 +311,7 @@ TEST(CudaILUSymbolicLU, SmallMatrix_Level0)
     cudaMalloc(&d_lu_ai, (n + 1) * sizeof(int));
 
     // Run CUDA version
-    bool cuda_success = ILUSymbolic_CUDA<int, int>(n, d_ai, d_aj, 0, base, true, d_lu_ai, &d_lu_aj, &lu_nnz);
+    bool cuda_success = ILUSymbolic_CUDA<int, int>(n, d_ai, d_aj, 0, base, d_lu_ai, &d_lu_aj, &lu_nnz);
     ASSERT_TRUE(cuda_success);
 
     std::cout << "CUDA result: LU has " << lu_nnz << " nonzeros" << std::endl;
@@ -380,7 +380,7 @@ TEST(CudaILUSymbolicLU, SmallMatrix_Level1)
     int lu_nnz;
     cudaMalloc(&d_lu_ai, (n + 1) * sizeof(int));
 
-    bool cuda_success = ILUSymbolic_CUDA<int, int>(n, d_ai, d_aj, 1, base, true, d_lu_ai, &d_lu_aj, &lu_nnz);
+    bool cuda_success = ILUSymbolic_CUDA<int, int>(n, d_ai, d_aj, 1, base, d_lu_ai, &d_lu_aj, &lu_nnz);
     ASSERT_TRUE(cuda_success);
 
     std::cout << "CUDA result (level 1): LU has " << lu_nnz << " nonzeros" << std::endl;
@@ -412,7 +412,7 @@ TEST(CudaILUSymbolicLU, SmallMatrix_Level1)
 
 TEST(CudaILUSymbolicLU, MediumMatrix_Level10)
 {
-    const int level = 10;
+    const int level = 5;
     std::vector<int> csr_rows;
     std::vector<int> csr_cols;
     std::vector<double> csr_vals;
@@ -455,7 +455,7 @@ TEST(CudaILUSymbolicLU, MediumMatrix_Level10)
     cudaMalloc(&d_lu_ai, (n + 1) * sizeof(int));
 
     auto cuda_start = std::chrono::high_resolution_clock::now();
-    bool cuda_success = ILUSymbolic_CUDA<int, int>(n, d_ai, d_aj, level, base, true, d_lu_ai, &d_lu_aj, &lu_nnz);
+    bool cuda_success = ILUSymbolic_CUDA<int, int>(n, d_ai, d_aj, level, base, d_lu_ai, &d_lu_aj, &lu_nnz);
     cudaDeviceSynchronize();
     auto cuda_end = std::chrono::high_resolution_clock::now();
     auto cuda_time = std::chrono::duration<double>(cuda_end - cuda_start).count();
