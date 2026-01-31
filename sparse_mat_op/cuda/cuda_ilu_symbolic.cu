@@ -689,6 +689,18 @@ bool ILUSymbolic_CUDA(
         thrust::raw_pointer_cast(current_frontier.data()), n);
     cudaDeviceSynchronize();
 
+    // Timing infrastructure
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    
+    float time_degree_lookup = 0.0f, total_degree_lookup = 0.0f;
+    float time_scan = 0.0f, total_scan = 0.0f;
+    float time_build_frontier = 0.0f, total_build_frontier = 0.0f;
+    float time_hash_insert = 0.0f, total_hash_insert = 0.0f;
+    float time_extract_fill = 0.0f, total_extract_fill = 0.0f;
+    float time_extract_keep = 0.0f, total_extract_keep = 0.0f;
+
     // BFS for k levels
     for (int level = 0; level <= lvl; ++level)
     {
@@ -697,13 +709,19 @@ bool ILUSymbolic_CUDA(
             break;
 
         // Step 1: Look up degrees for nodes in current frontier
+        cudaEventRecord(start);
         degrees.resize(current_size);
         blocks = (current_size + threads - 1) / threads;
         lookup_triplet_frontier_degrees_kernel<<<blocks, threads>>>(
             thrust::raw_pointer_cast(current_frontier.data()), current_size,
             thrust::raw_pointer_cast(all_degrees.data()), thrust::raw_pointer_cast(degrees.data()));
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&time_degree_lookup, start, stop);
+        total_degree_lookup += time_degree_lookup;
 
         // Step 2: Compute inclusive scan
+        cudaEventRecord(start);
         inclusive_sum.resize(current_size);
         thrust::inclusive_scan(degrees.begin(), degrees.end(), inclusive_sum.begin());
 
@@ -713,19 +731,29 @@ bool ILUSymbolic_CUDA(
             cudaMemcpy(&actual_next_size, thrust::raw_pointer_cast(inclusive_sum.data()) + current_size - 1,
                        sizeof(int), cudaMemcpyDeviceToHost);
         }
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&time_scan, start, stop);
+        total_scan += time_scan;
 
         if (actual_next_size == 0)
             break;
 
         // Step 3: Build next frontier
+        cudaEventRecord(start);
         next_frontier.resize(actual_next_size);
         blocks = (actual_next_size + threads - 1) / threads;
         build_next_triplet_frontier_kernel<<<blocks, threads>>>(
             thrust::raw_pointer_cast(current_frontier.data()), current_size,
             thrust::raw_pointer_cast(inclusive_sum.data()), d_ai, d_aj, base, actual_next_size,
             thrust::raw_pointer_cast(next_frontier.data()));
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&time_build_frontier, start, stop);
+        total_build_frontier += time_build_frontier;
 
         // Step 4: Check and insert into map, determine which to keep and add to fill
+        cudaEventRecord(start);
         keep.resize(actual_next_size);
         add_to_fill.resize(actual_next_size);
         
@@ -737,9 +765,13 @@ bool ILUSymbolic_CUDA(
             map_ref,
             thrust::raw_pointer_cast(keep.data()),
             thrust::raw_pointer_cast(add_to_fill.data()));
-        cudaDeviceSynchronize();
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&time_hash_insert, start, stop);
+        total_hash_insert += time_hash_insert;
 
         // Step 5: Extract fill entries and transform to pairs
+        cudaEventRecord(start);
         // First filter triplets where add_to_fill is true
         temp_triplets.resize(actual_next_size);
         auto fill_triplet_end = thrust::copy_if(next_frontier.begin(), next_frontier.end(),
@@ -765,8 +797,13 @@ bool ILUSymbolic_CUDA(
                                            [] __device__(const Pair<COLTYPE>& p) { return p.first != p.second; });
             lu_pattern.resize(lu_end - lu_pattern.begin());
         }
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&time_extract_fill, start, stop);
+        total_extract_fill += time_extract_fill;
 
         // Step 6: Extract kept triplets with cur < src (already encoded in keep)
+        cudaEventRecord(start);
         auto kept_end = thrust::copy_if(next_frontier.begin(), next_frontier.end(),
                                          keep.begin(), temp_triplets.begin(),
                                          [] __device__(bool b) { return b; });
@@ -774,7 +811,38 @@ bool ILUSymbolic_CUDA(
 
         // Swap to current_frontier for next iteration
         current_frontier.swap(temp_triplets);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&time_extract_keep, start, stop);
+        total_extract_keep += time_extract_keep;
+
+        // Print per-level timing
+        std::cout << "Level " << level 
+                  << " | frontier=" << current_size 
+                  << " next_size=" << actual_next_size
+                  << " | degree=" << time_degree_lookup << "ms"
+                  << " scan=" << time_scan << "ms"
+                  << " build=" << time_build_frontier << "ms"
+                  << " hash=" << time_hash_insert << "ms"
+                  << " fill=" << time_extract_fill << "ms"
+                  << " keep=" << time_extract_keep << "ms"
+                  << std::endl;
     }
+
+    // Print accumulated totals
+    std::cout << "\n=== BFS Timing Totals ===" << std::endl;
+    std::cout << "Degree lookup:   " << total_degree_lookup << " ms" << std::endl;
+    std::cout << "Scan + memcpy:   " << total_scan << " ms" << std::endl;
+    std::cout << "Build frontier:  " << total_build_frontier << " ms" << std::endl;
+    std::cout << "Hash insert:     " << total_hash_insert << " ms" << std::endl;
+    std::cout << "Extract fill:    " << total_extract_fill << " ms" << std::endl;
+    std::cout << "Extract keep:    " << total_extract_keep << " ms" << std::endl;
+    std::cout << "Total BFS time:  " << (total_degree_lookup + total_scan + total_build_frontier + 
+                                          total_hash_insert + total_extract_fill + total_extract_keep) << " ms" << std::endl;
+    std::cout << "=========================\n" << std::endl;
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     // Build combined LU CSR structure
     thrust::sort(lu_pattern.begin(), lu_pattern.end(), PairLess<COLTYPE>());
