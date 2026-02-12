@@ -194,7 +194,7 @@ if(USE_CUDA)
   
   # Set CUDA architectures if not already set
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES "60;70;75;80;86")  # Common architectures
+    set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89")  # Turing and newer (cuCo requires sm_70+, but some features need sm_75+)
   endif()
   
   # Set CUDA compiler flags for different build types

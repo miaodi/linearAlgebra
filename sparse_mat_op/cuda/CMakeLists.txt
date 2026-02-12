@@ -10,6 +10,7 @@ set(CUDA_SOURCES
     cuda_ilu_symbolic.cu
     cuda_ilu_symbolic_persistent.cu
     cuda_csr_utils.cu
+    cuda_spmm.cu
 )
 
 add_library(${PROJECT_NAME} STATIC ${CUDA_SOURCES})
@@ -29,4 +30,5 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     CUDA_STANDARD ${CMAKE_CUDA_STANDARD}
     CUDA_STANDARD_REQUIRED ON
     CUDA_EXTENSIONS OFF
+    CUDA_ARCHITECTURES "75;80;86;89"
 )
