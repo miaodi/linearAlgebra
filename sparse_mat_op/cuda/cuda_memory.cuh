@@ -59,6 +59,28 @@ public:
     
     ~Array() { release(); }
     
+    // Move constructor
+    Array(Array&& other) noexcept 
+        : _data(other._data), _size(other._size), _capacity(other._capacity) {
+        other._data = nullptr;
+        other._size = 0;
+        other._capacity = 0;
+    }
+    
+    // Move assignment operator
+    Array& operator=(Array&& other) noexcept {
+        if (this != &other) {
+            release();
+            _data = other._data;
+            _size = other._size;
+            _capacity = other._capacity;
+            other._data = nullptr;
+            other._size = 0;
+            other._capacity = 0;
+        }
+        return *this;
+    }
+    
     void resize(size_t new_size) {
         if (new_size > _capacity) {
             if (_data) {
@@ -85,6 +107,13 @@ public:
     
     void copyFromDevice(const T* device_data, size_t count) {
         copy<MemoryLocation::Device>(device_data, count);
+    }
+    
+    void copyToHost(T* host_data) const {
+        if (_size > 0 && host_data != nullptr) {
+            constexpr cudaMemcpyKind kind = getCopyKind<Allocator::location, MemoryLocation::Host>();
+            cudaMemcpy(host_data, _data, _size * sizeof(T), kind);
+        }
     }
     
 private:
