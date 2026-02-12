@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-using namespace cuda_iterative_solver;
+using namespace matrix_utils::sparse_cuda;
 using namespace matrix_utils;
 
 class CudaSpMM : public ::testing::TestWithParam<const char*>

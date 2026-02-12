@@ -255,13 +255,13 @@ static void BM_CuSparseSPMV_Reordering(benchmark::State& state, const std::strin
     // Setup CUDA SPMV - create handle
     cusparseHandle_t handle;
     cusparseCreate(&handle);
-    matrix_utils::CuSparseSPMV<int, int, double> cuda_spmv(handle);
+    matrix_utils::sparse_cuda::CuSparseSPMV<int, int, double> cuda_spmv(handle);
     int* d_ia = nullptr;
     int* d_ja = nullptr;
     double* d_av = nullptr;
     const int base = matrix.AI()[0];
     const int nnz = matrix.AI()[matrix.rows] - base;
-    matrix_utils::copy_csr_host_to_device<int, int, double>(
+    matrix_utils::sparse_cuda::copy_csr_host_to_device<int, int, double>(
         matrix.rows, matrix.AI(), matrix.AJ(), matrix.AV(), &d_ia, &d_ja, &d_av);
     cuda_spmv.preprocess(matrix.rows, d_ia, d_ja, d_av, base, nnz);
 

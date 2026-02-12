@@ -20,7 +20,7 @@
 #include <limits>
 #include <vector>
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 
 template <typename COLTYPE>
@@ -1088,4 +1088,4 @@ template bool ILUSymbolicU_CUDA_Persistent<int64_t, int>(
     int n, const int64_t* d_ai, const int* d_aj, int lvl, int base, bool keepdiag,
     int64_t* d_u_ai, int** d_u_aj, int64_t* u_nnz);
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

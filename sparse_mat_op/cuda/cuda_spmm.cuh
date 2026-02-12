@@ -4,20 +4,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cuda/std/utility>
+#include "cuda_csr_utils.cuh"
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
-/**
- * @brief Device CSR matrix structure using DeviceArray for automatic memory management
- */
-template <typename ROWTYPE, typename COLTYPE>
-struct DeviceCSRMatrix
-{
-    COLTYPE n_rows = 0;
-    ROWTYPE base = 0;
-    DeviceArray<ROWTYPE> ai; // row pointers (size n_rows + 1)
-    DeviceArray<COLTYPE> aj; // column indices (size nnz)
-};
 /**
  * @brief Step 1: Compute workload prefix sum and memory requirements for outer products
  *
@@ -90,4 +80,4 @@ template <typename ROWTYPE, typename COLTYPE>
 bool PackedCOOtoCSR(const uint64_t* d_keys, ROWTYPE unique_nnz, COLTYPE n_rows, ROWTYPE base,
                     DeviceCSRMatrix<ROWTYPE, COLTYPE>& output);
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

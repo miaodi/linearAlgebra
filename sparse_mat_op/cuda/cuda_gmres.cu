@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <mkl_cblas.h>  // Include MKL CBLAS for CPU BLAS routines
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 
 CudaGMRES::CudaGMRES()
@@ -100,7 +100,7 @@ void CudaGMRES::initialize_workspace(size_t n)
     std::fill(_h_g.data(), _h_g.data() + _h_g.size(), 0.0);
 }
 
-void CudaGMRES::setupOperator(matrix_utils::SpMVOperator<double>* spmv_operator)
+void CudaGMRES::setupOperator(SpMVOperator<double>* spmv_operator)
 {
     if (!spmv_operator) {
         throw std::runtime_error("setupOperator: spmv_operator cannot be nullptr");
@@ -546,4 +546,4 @@ void CudaGMRES::check_cusparse_error(cusparseStatus_t status, const char* messag
     }
 }
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

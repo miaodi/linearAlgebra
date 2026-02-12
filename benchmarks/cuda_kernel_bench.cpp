@@ -4,7 +4,7 @@
 #include <vector>
 #include <random>
 
-using namespace cuda_iterative_solver;
+using namespace matrix_utils::sparse_cuda;
 
 // Helper function to check CUDA errors
 static void checkCudaError(cudaError_t error, const char* message) {

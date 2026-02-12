@@ -3,7 +3,7 @@
 #include "../../sparse_mat_op/cuda/cuda_memory.cuh"
 #include "../../sparse_mat_op/cuda/cuda_spmm.cuh"
 
-using namespace cuda_iterative_solver;
+using namespace matrix_utils::sparse_cuda;
 
 int main(int argc, char** argv) {
     // Test parameters

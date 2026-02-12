@@ -1,6 +1,6 @@
 #pragma once
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 
 /**
@@ -27,5 +27,5 @@ enum class State : int
     FAILED = 3
 };
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda
 

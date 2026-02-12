@@ -21,7 +21,7 @@
 #include <nvtx3/nvToolsExt.h>
 #include "spadd.hpp"
 #include "sp_ops.hpp"
-using namespace cuda_iterative_solver;
+using namespace matrix_utils::sparse_cuda;
 using namespace matrix_utils;
 
 enum class PreconditionerImpl {
@@ -641,7 +641,7 @@ int main( int argc, char** argv )
         const int nrows = static_cast<int>(n);
         const int base = working_matrix.AI()[0];
         const int nnz = working_matrix.AI()[nrows] - base;
-        matrix_utils::copy_csr_host_to_device<int, int, double>(
+        matrix_utils::sparse_cuda::copy_csr_host_to_device<int, int, double>(
             nrows, working_matrix.AI(), working_matrix.AJ(), working_matrix.AV(),
             &d_ia, &d_ja, &d_av);
 

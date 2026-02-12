@@ -2,9 +2,21 @@
 
 #include <cuda_runtime.h>
 #include <cstdint>
+#include "cuda_memory.cuh"
 
-namespace matrix_utils::cuda
+namespace matrix_utils::sparse_cuda
 {
+/**
+ * @brief Device CSR matrix structure using DeviceArray for automatic memory management
+ */
+ template <typename ROWTYPE, typename COLTYPE>
+ struct DeviceCSRMatrix
+ {
+     COLTYPE n_rows = 0;
+     ROWTYPE base = 0;
+     DeviceArray<ROWTYPE> ai; // row pointers (size n_rows + 1)
+     DeviceArray<COLTYPE> aj; // column indices (size nnz)
+ };
 
 //==============================================================================
 // Public API declarations
@@ -96,4 +108,4 @@ extern template void CSRGenDiagScaledPruneMask<int, int, double, int>(int, const
 extern template void CSRGenDiagScaledPruneMask<std::int64_t, int, float, int>(int, const std::int64_t*, const int*, const float*, float, int*, cudaStream_t);
 extern template void CSRGenDiagScaledPruneMask<std::int64_t, int, double, int>(int, const std::int64_t*, const int*, const double*, double, int*, cudaStream_t);
 
-} // namespace matrix_utils::cuda
+} // namespace matrix_utils::sparse_cuda

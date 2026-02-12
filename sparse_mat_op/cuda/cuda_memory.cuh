@@ -3,7 +3,7 @@
 #include <cusparse.h>
 #include <cuda_runtime.h>
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 
 /**
@@ -209,4 +209,4 @@ private:
     DeviceVectorView& operator=(const DeviceVectorView&) = delete;
 };
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

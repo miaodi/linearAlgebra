@@ -217,7 +217,7 @@ auto CuSparseSPMV_Bench = [](benchmark::State &state, const auto &mat,
   VALTYPE* d_av = nullptr;
   const int base = mat.ai.empty() ? 0 : mat.ai[0];
   const int nnz = mat.ai.empty() ? 0 : (mat.ai[mat.rows] - base);
-  matrix_utils::copy_csr_host_to_device<int, int, VALTYPE>(
+  matrix_utils::sparse_cuda::copy_csr_host_to_device<int, int, VALTYPE>(
       mat.rows, mat.ai.data(), mat.aj.data(), mat.av.data(), &d_ia, &d_ja, &d_av);
   
   // Copy input vector to device
@@ -227,7 +227,7 @@ auto CuSparseSPMV_Bench = [](benchmark::State &state, const auto &mat,
   // Create cuSPARSE handle and preprocess CUDA SpMV
   cusparseHandle_t handle;
   cusparseCreate(&handle);
-  matrix_utils::CuSparseSPMV<int, int, VALTYPE> cuda_spmv(handle);
+  matrix_utils::sparse_cuda::CuSparseSPMV<int, int, VALTYPE> cuda_spmv(handle);
   cuda_spmv.preprocess(mat.rows, d_ia, d_ja, d_av, base, nnz);
   
   // Warm-up run
@@ -273,7 +273,7 @@ auto CSRScalarSPMV_Bench = [](benchmark::State &state, const auto &mat,
   VALTYPE* d_av = nullptr;
   const int base = mat.ai.empty() ? 0 : mat.ai[0];
   const int nnz = mat.ai.empty() ? 0 : (mat.ai[mat.rows] - base);
-  matrix_utils::copy_csr_host_to_device<int, int, VALTYPE>(
+  matrix_utils::sparse_cuda::copy_csr_host_to_device<int, int, VALTYPE>(
       mat.rows, mat.ai.data(), mat.aj.data(), mat.av.data(), &d_ia, &d_ja, &d_av);
 
   // Copy input vector to device
@@ -281,7 +281,7 @@ auto CSRScalarSPMV_Bench = [](benchmark::State &state, const auto &mat,
   cudaMemcpy(d_y, x.data(), mat.rows * sizeof(VALTYPE), cudaMemcpyHostToDevice);
 
   // Preprocess CSR scalar SpMV
-  matrix_utils::CSRScalarSPMV<int, int, VALTYPE> cuda_spmv;
+  matrix_utils::sparse_cuda::CSRScalarSPMV<int, int, VALTYPE> cuda_spmv;
   cuda_spmv.preprocess(mat.rows, d_ia, d_ja, d_av, base, nnz);
 
   // Warm-up run
@@ -326,7 +326,7 @@ auto CSRVectorSPMV_Bench = [](benchmark::State &state, const auto &mat,
   VALTYPE* d_av = nullptr;
   const int base = mat.ai.empty() ? 0 : mat.ai[0];
   const int nnz = mat.ai.empty() ? 0 : (mat.ai[mat.rows] - base);
-  matrix_utils::copy_csr_host_to_device<int, int, VALTYPE>(
+  matrix_utils::sparse_cuda::copy_csr_host_to_device<int, int, VALTYPE>(
       mat.rows, mat.ai.data(), mat.aj.data(), mat.av.data(), &d_ia, &d_ja, &d_av);
 
   // Copy input vector to device
@@ -334,7 +334,7 @@ auto CSRVectorSPMV_Bench = [](benchmark::State &state, const auto &mat,
   cudaMemcpy(d_y, x.data(), mat.rows * sizeof(VALTYPE), cudaMemcpyHostToDevice);
 
   // Preprocess CSR vector SpMV
-  matrix_utils::CSRVectorSPMV<int, int, VALTYPE> cuda_spmv;
+  matrix_utils::sparse_cuda::CSRVectorSPMV<int, int, VALTYPE> cuda_spmv;
   cuda_spmv.preprocess(mat.rows, d_ia, d_ja, d_av, base, nnz);
 
   // Warm-up run
@@ -379,7 +379,7 @@ auto CSRMergeSPMV_Bench = [](benchmark::State &state, const auto &mat,
   VALTYPE* d_av = nullptr;
   const int base = mat.ai.empty() ? 0 : mat.ai[0];
   const int nnz = mat.ai.empty() ? 0 : (mat.ai[mat.rows] - base);
-  matrix_utils::copy_csr_host_to_device<int, int, VALTYPE>(
+  matrix_utils::sparse_cuda::copy_csr_host_to_device<int, int, VALTYPE>(
       mat.rows, mat.ai.data(), mat.aj.data(), mat.av.data(), &d_ia, &d_ja, &d_av);
 
   // Copy input vector to device
@@ -387,7 +387,7 @@ auto CSRMergeSPMV_Bench = [](benchmark::State &state, const auto &mat,
   cudaMemcpy(d_y, x.data(), mat.rows * sizeof(VALTYPE), cudaMemcpyHostToDevice);
 
   // Preprocess CSR merge SpMV
-  matrix_utils::CSRMergeSPMV<int, int, VALTYPE> cuda_spmv;
+  matrix_utils::sparse_cuda::CSRMergeSPMV<int, int, VALTYPE> cuda_spmv;
   cuda_spmv.preprocess(mat.rows, d_ia, d_ja, d_av, base, nnz);
 
   // Warm-up run

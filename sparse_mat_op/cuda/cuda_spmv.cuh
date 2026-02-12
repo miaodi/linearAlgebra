@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <stdexcept>
 
-namespace matrix_utils
+namespace matrix_utils::sparse_cuda
 {
 
 /**
@@ -360,4 +360,4 @@ private:
     void compute_merge_path_boundaries();
 };
 
-} // namespace matrix_utils
+} // namespace matrix_utils::sparse_cuda

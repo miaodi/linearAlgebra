@@ -11,7 +11,7 @@
 #include "cuda_spmv.cuh"
 #include "cuda_solver_types.cuh"
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 /**
  * @brief CUDA-based GMRES solver for sparse matrices in CSR format
@@ -71,7 +71,7 @@ public:
      * 
      * @param spmv_operator Pointer to an SpMV operator object (does not take ownership)
      */
-    void setupOperator(matrix_utils::SpMVOperator<double>* spmv_operator);
+    void setupOperator(SpMVOperator<double>* spmv_operator);
     
     /**
      * @brief Set preconditioner for subsequent solve operations
@@ -109,7 +109,7 @@ private:
     cusparseHandle_t _cusparse_handle;
 
     // SpMV operator (not owned by solver)
-    matrix_utils::SpMVOperator<double>* _spmv_operator;
+    SpMVOperator<double>* _spmv_operator;
     
     // Preconditioner (not owned by solver, except for default NoPreconditioner)
     Preconditioner* _preconditioner;
@@ -232,4 +232,4 @@ private:
     void check_cusparse_error(cusparseStatus_t status, const char* message);
 };
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

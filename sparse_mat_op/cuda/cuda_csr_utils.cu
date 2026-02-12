@@ -16,7 +16,7 @@
 #include <string>
 #include <type_traits>
 
-namespace matrix_utils::cuda
+namespace matrix_utils::sparse_cuda
 {
 
 //==============================================================================
@@ -319,4 +319,4 @@ template void CSRGenDiagScaledPruneMask<int, int, double, int>(int, const int*, 
 template void CSRGenDiagScaledPruneMask<std::int64_t, int, float, int>(int, const std::int64_t*, const int*, const float*, float, int*, cudaStream_t);
 template void CSRGenDiagScaledPruneMask<std::int64_t, int, double, int>(int, const std::int64_t*, const int*, const double*, double, int*, cudaStream_t);
 
-} // namespace matrix_utils::cuda
+} // namespace matrix_utils::sparse_cuda

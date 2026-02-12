@@ -1,7 +1,7 @@
 #include "cuda_kernels.cuh"
 #include <cuda_runtime.h>
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 
 // CUDA kernel for element-wise multiplication
@@ -42,4 +42,4 @@ template void elementwiseMultiply<8>(const double*, const double*, double*, size
 template void elementwiseMultiply<16>(const double*, const double*, double*, size_t);
 template void elementwiseMultiply<32>(const double*, const double*, double*, size_t);
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

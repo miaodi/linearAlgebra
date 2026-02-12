@@ -10,7 +10,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-using namespace cuda_iterative_solver;
+using namespace matrix_utils::sparse_cuda;
 using namespace matrix_utils;
 
 // Helper function to compare CSR structures

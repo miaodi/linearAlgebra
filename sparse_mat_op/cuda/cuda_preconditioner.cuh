@@ -5,7 +5,7 @@
 #include <cusparse.h>
 #include <memory>
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 /**
  * @brief Abstract base class for preconditioners
@@ -234,4 +234,4 @@ private:
                               const int* d_ja, const double* d_va);
 };
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

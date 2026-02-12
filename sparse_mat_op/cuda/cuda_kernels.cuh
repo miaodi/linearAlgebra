@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 
 /**
@@ -23,4 +23,4 @@ void elementwiseMultiply(const double* d_a, const double* d_b,
 
 // Additional CUDA kernels for iterative solvers can be added here
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

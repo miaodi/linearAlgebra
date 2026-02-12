@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <cstring>
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 
 // Helper function for error checking
@@ -569,4 +569,4 @@ void CuSparseILU0Prec::setupSpSVDescriptors(size_t n, size_t nnz, int index_base
         "Failed to analyze U solve");
 }
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

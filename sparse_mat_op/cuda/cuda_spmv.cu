@@ -20,7 +20,7 @@ __device__ inline double atomicAdd(double* address, double val)
 }
 #endif
 
-namespace matrix_utils
+namespace matrix_utils::sparse_cuda    
 {
 
 namespace {
@@ -1207,4 +1207,4 @@ template class CSRMergeSPMV<int, int, float>;
 template class CSRMergeSPMV<int64_t, int64_t, double>;
 template class CSRMergeSPMV<int64_t, int64_t, float>;
 
-} // namespace matrix_utils
+} // namespace matrix_utils::sparse_cuda

@@ -24,7 +24,7 @@
 #include <iostream>
 #include <limits>
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 
 // Pair structure for BFS frontier: (source_node, current_node)
@@ -268,7 +268,7 @@ bool ILUSymbolicU_CUDA(
     // Use linear_probing with cg_size=1 for single-thread insert operations
     using probing_scheme_t = cuco::linear_probing<1, cuco::default_hash_function<visited_key_t>>;
     using visited_set_t = cuco::static_set<visited_key_t, cuco::extent<std::size_t>, cuda::thread_scope_device,
-                                           cuda::std::equal_to<visited_key_t>, probing_scheme_t>;
+                                           ::cuda::std::equal_to<visited_key_t>, probing_scheme_t>;
     visited_set_t visited_set(visited_capacity, cuco::empty_key<visited_key_t>{empty_key});
 
     // Mark initial frontier (i, i) as visited using host-side bulk insert
@@ -361,7 +361,7 @@ bool ILUSymbolicU_CUDA(
                                                     u_pairs.begin(), FilterU_lte<COLTYPE>())
                                   : thrust::copy_if(unvisited.begin(), unvisited.end(),
                                                     u_pairs.begin(), FilterU_lt<COLTYPE>());
-        u_pairs.resize(cuda::std::distance(u_pairs.begin(), new_end_u));
+        u_pairs.resize(::cuda::std::distance(u_pairs.begin(), new_end_u));
 
         // Append to global U pattern
         u_pattern.insert(u_pattern.end(), u_pairs.begin(), u_pairs.end());
@@ -370,7 +370,7 @@ bool ILUSymbolicU_CUDA(
         thrust::device_vector<Pair<COLTYPE>> next_frontier_filtered(unvisited_size);
         auto new_end_next = thrust::copy_if(unvisited.begin(), unvisited.end(),
                                             next_frontier_filtered.begin(), FilterNext<COLTYPE>());
-        next_frontier_filtered.resize(cuda::std::distance(next_frontier_filtered.begin(), new_end_next));
+        next_frontier_filtered.resize(::cuda::std::distance(next_frontier_filtered.begin(), new_end_next));
 
         current_frontier = next_frontier_filtered;
     }
@@ -723,7 +723,7 @@ bool ILUSymbolic_CUDA(
     using probing_scheme_t = cuco::linear_probing<1, cuco::default_hash_function<map_key_t>>;
     using visited_map_t = cuco::static_map<map_key_t, map_value_t, cuco::extent<std::size_t>, 
                                             cuda::thread_scope_device,
-                                            cuda::std::equal_to<map_key_t>, probing_scheme_t>;
+                                            ::cuda::std::equal_to<map_key_t>, probing_scheme_t>;
     visited_map_t visited_map(map_capacity, 
                                cuco::empty_key<map_key_t>{empty_key},
                                cuco::empty_value<map_value_t>{empty_value});
@@ -979,4 +979,4 @@ template bool ILUSymbolic_CUDA<int64_t, int>(
     int n, const int64_t* d_ai, const int* d_aj, int lvl, int base,
     int64_t* d_lu_ai, int** d_lu_aj, int64_t* lu_nnz);
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

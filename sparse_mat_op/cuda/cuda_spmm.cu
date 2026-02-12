@@ -6,7 +6,7 @@
 #include <limits>
 #include <thrust/functional.h>
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 // ============================================================================
 // STEP 1: Compute workload prefix sum and memory requirements
@@ -55,11 +55,11 @@ bool SpMMAnalyze(COLTYPE n_rows, const ROWTYPE* d_ai_A, const ROWTYPE* d_ai_B, R
     size_t temp_storage_bytes = 0;
 
     cub::DeviceScan::ExclusiveScan(d_temp_storage, temp_storage_bytes, d_workloads,
-                                   d_workload_prefix, cuda::std::plus<ROWTYPE>(), base, n_rows + 1);
+                                   d_workload_prefix, ::cuda::std::plus<ROWTYPE>(), base, n_rows + 1);
 
     cudaMalloc(&d_temp_storage, temp_storage_bytes);
     cub::DeviceScan::ExclusiveScan(d_temp_storage, temp_storage_bytes, d_workloads,
-                                   d_workload_prefix, cuda::std::plus<ROWTYPE>(), base, n_rows + 1);
+                                   d_workload_prefix, ::cuda::std::plus<ROWTYPE>(), base, n_rows + 1);
     ROWTYPE last_prefix = 0;
     cudaMemcpy(&last_prefix, d_workload_prefix + n_rows, sizeof(ROWTYPE), cudaMemcpyDeviceToHost);
     *required_array_size = last_prefix - base;
@@ -227,11 +227,11 @@ bool PackedCOOtoCSR(const uint64_t* d_keys, ROWTYPE unique_nnz, COLTYPE n_rows, 
     void* d_scan_temp = nullptr;
     size_t scan_temp_bytes = 0;
     cub::DeviceScan::ExclusiveScan(d_scan_temp, scan_temp_bytes, d_row_count.data(), output.ai.data(),
-                                   cuda::std::plus<ROWTYPE>(), static_cast<ROWTYPE>(base), n_rows + 1);
+                                   ::cuda::std::plus<ROWTYPE>(), static_cast<ROWTYPE>(base), n_rows + 1);
     DeviceArray<uint8_t> d_scan_storage;
     d_scan_storage.resize(scan_temp_bytes);
     cub::DeviceScan::ExclusiveScan(d_scan_storage.data(), scan_temp_bytes, d_row_count.data(),
-                                   output.ai.data(), cuda::std::plus<ROWTYPE>(),
+                                   output.ai.data(), ::cuda::std::plus<ROWTYPE>(),
                                    static_cast<ROWTYPE>(base), n_rows + 1);
 
     cudaDeviceSynchronize();
@@ -339,4 +339,4 @@ template __global__ void scatter_counts<int, int>(const int* d_unique_rows, cons
 template __global__ void scatter_counts<int64_t, int>(const int* d_unique_rows, const int64_t* d_counts,
                                                       int num_runs, int64_t base, int64_t* d_row_count);
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda

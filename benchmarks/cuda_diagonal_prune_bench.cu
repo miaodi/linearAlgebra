@@ -13,7 +13,7 @@
 #include <vector>
 
 using namespace matrix_utils;
-namespace cuda_utils = matrix_utils::cuda;
+namespace cuda_utils = matrix_utils::sparse_cuda;
 
 // Global variables to hold the matrix data
 static std::string g_matrix_file = "data/nv2.mtx";

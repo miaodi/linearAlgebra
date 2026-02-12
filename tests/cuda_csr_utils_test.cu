@@ -11,7 +11,7 @@
 #include <fstream>
 
 using namespace matrix_utils;
-namespace cuda_utils = matrix_utils::cuda;
+namespace cuda_utils = matrix_utils::sparse_cuda;
 
 // Helper function to create a test matrix with known diagonal values
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>

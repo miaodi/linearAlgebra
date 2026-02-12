@@ -4,7 +4,7 @@
 #include <iomanip>
 #include <stdexcept>
 
-namespace cuda_iterative_solver
+namespace matrix_utils::sparse_cuda
 {
 
 CudaBiCGSTAB::CudaBiCGSTAB()
@@ -79,7 +79,7 @@ void CudaBiCGSTAB::initialize_workspace(size_t n)
     _d_tmp.resize(n); // Temporary storage
 }
 
-void CudaBiCGSTAB::setupOperator(matrix_utils::SpMVOperator<double>* spmv_operator)
+void CudaBiCGSTAB::setupOperator(SpMVOperator<double>* spmv_operator)
 {
     if (!spmv_operator) {
         throw std::runtime_error("setupOperator: spmv_operator cannot be nullptr");
@@ -395,5 +395,5 @@ void CudaBiCGSTAB::check_cusparse_error(cusparseStatus_t status, const char* mes
     }
 }
 
-} // namespace cuda_iterative_solver
+} // namespace matrix_utils::sparse_cuda
 
