@@ -8,6 +8,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/fill.h>
 #include <thrust/scan.h>
+#include <thrust/sequence.h>
 #include <thrust/transform.h>
 
 #include <cstddef>
@@ -301,6 +302,23 @@ void CSRGenDiagScaledPruneMask(
 }
 
 //==============================================================================
+// CSRDiagDevice
+//==============================================================================
+
+template <typename ROWTYPE, typename COLTYPE>
+void CSRDiagDevice(COLTYPE n, ROWTYPE base, DeviceCSRMatrix<ROWTYPE, COLTYPE>& out)
+{
+    out.n_rows = n;
+    out.base = base;
+    out.ai.resize(static_cast<size_t>(n) + 1);
+    out.aj.resize(static_cast<size_t>(n));
+    thrust::sequence(thrust::device, out.ai.data(), out.ai.data() + (static_cast<size_t>(n) + 1),
+                    static_cast<ROWTYPE>(base), static_cast<ROWTYPE>(1));
+    thrust::sequence(thrust::device, out.aj.data(), out.aj.data() + n,
+                    static_cast<COLTYPE>(base), static_cast<COLTYPE>(1));
+}
+
+//==============================================================================
 // Explicit template instantiations
 //==============================================================================
 
@@ -318,5 +336,8 @@ template void CSRGenDiagScaledPruneMask<int, int, float, int>(int, const int*, c
 template void CSRGenDiagScaledPruneMask<int, int, double, int>(int, const int*, const int*, const double*, double, int*, cudaStream_t);
 template void CSRGenDiagScaledPruneMask<std::int64_t, int, float, int>(int, const std::int64_t*, const int*, const float*, float, int*, cudaStream_t);
 template void CSRGenDiagScaledPruneMask<std::int64_t, int, double, int>(int, const std::int64_t*, const int*, const double*, double, int*, cudaStream_t);
+
+template void CSRDiagDevice<int, int>(int, int, DeviceCSRMatrix<int, int>&);
+template void CSRDiagDevice<std::int64_t, int>(int, std::int64_t, DeviceCSRMatrix<std::int64_t, int>&);
 
 } // namespace matrix_utils::sparse_cuda

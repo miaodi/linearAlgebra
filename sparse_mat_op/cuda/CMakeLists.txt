@@ -11,6 +11,7 @@ set(CUDA_SOURCES
     cuda_ilu_symbolic_persistent.cu
     cuda_csr_utils.cu
     cuda_spmm.cu
+    cuda_iluk_U_symbolic.cu
 )
 
 add_library(${PROJECT_NAME} STATIC ${CUDA_SOURCES})

@@ -22,6 +22,13 @@ namespace matrix_utils::sparse_cuda
 // Public API declarations
 //==============================================================================
 
+/// @brief Create a device CSR matrix representing an n×n diagonal matrix.
+/// @param n Matrix dimension
+/// @param base Index base (0 or 1)
+/// @param out Output device CSR matrix (ai, aj filled on device via Thrust)
+template <typename ROWTYPE, typename COLTYPE>
+void CSRDiagDevice(COLTYPE n, ROWTYPE base, DeviceCSRMatrix<ROWTYPE, COLTYPE>& out);
+
 /// @brief Find the position and value of the diagonal entry for each row of a device CSR matrix.
 /// @param rows Number of rows
 /// @param d_ai CSR row pointers (device, size rows+1)
@@ -107,5 +114,8 @@ extern template void CSRGenDiagScaledPruneMask<int, int, float, int>(int, const 
 extern template void CSRGenDiagScaledPruneMask<int, int, double, int>(int, const int*, const int*, const double*, double, int*, cudaStream_t);
 extern template void CSRGenDiagScaledPruneMask<std::int64_t, int, float, int>(int, const std::int64_t*, const int*, const float*, float, int*, cudaStream_t);
 extern template void CSRGenDiagScaledPruneMask<std::int64_t, int, double, int>(int, const std::int64_t*, const int*, const double*, double, int*, cudaStream_t);
+
+extern template void CSRDiagDevice<int, int>(int, int, DeviceCSRMatrix<int, int>&);
+extern template void CSRDiagDevice<std::int64_t, int>(int, std::int64_t, DeviceCSRMatrix<std::int64_t, int>&);
 
 } // namespace matrix_utils::sparse_cuda

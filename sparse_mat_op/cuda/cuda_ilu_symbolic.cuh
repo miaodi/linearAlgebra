@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "cuda_csr_utils.cuh"
 
 namespace matrix_utils::sparse_cuda
 {
@@ -65,7 +66,7 @@ bool ILUSymbolicU_CUDA(COLTYPE n, const ROWTYPE* d_ai, const COLTYPE* d_aj, int 
  */
 template <typename ROWTYPE, typename COLTYPE>
 bool ILUSymbolicU_SpMM_CUDA(COLTYPE n, const ROWTYPE* d_ai, const COLTYPE* d_aj, int lvl,
-                            COLTYPE base, ROWTYPE* d_u_ai, COLTYPE** d_u_aj, ROWTYPE* u_nnz);
+                            COLTYPE base, DeviceCSRMatrix<ROWTYPE, COLTYPE>& U_matrix);
 
 /**
  * @brief Warp-persistent CUDA implementation of ILU(k) U-row symbolic factorization
@@ -90,6 +91,13 @@ extern template bool ILUSymbolicU_CUDA_Persistent<int64_t, int>(int n, const int
                                                                 const int* d_aj, int lvl, int base,
                                                                 bool keepdiag, int64_t* d_u_ai,
                                                                 int** d_u_aj, int64_t* u_nnz);
+
+extern template bool ILUSymbolicU_SpMM_CUDA<int, int>(int n, const int* d_ai, const int* d_aj,
+                                                      int lvl, int base,
+                                                      DeviceCSRMatrix<int, int>& U_matrix);
+extern template bool ILUSymbolicU_SpMM_CUDA<std::int64_t, int>(int n, const std::int64_t* d_ai,
+                                                               const int* d_aj, int lvl, int base,
+                                                               DeviceCSRMatrix<std::int64_t, int>& U_matrix);
 
 /**
  * @brief CUDA implementation of full ILU(k) symbolic factorization (combined LU)
