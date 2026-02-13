@@ -170,7 +170,7 @@ TEST(CudaILUSymbolicSpMM, SmallMatrix_Level1)
 
 TEST(CudaILUSymbolicSpMM, MediumMatrix_Level10)
 {
-    const int level = 10;
+    const int level = 20;
     std::vector<int> csr_rows;
     std::vector<int> csr_cols;
     std::vector<double> csr_vals;

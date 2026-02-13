@@ -120,6 +120,111 @@ __global__ void build_outer_product_pairs(const ROWTYPE* d_ai_A, const COLTYPE* 
     d_keys[global_pos] = key;
 }
 
+template <typename ROWTYPE, typename COLTYPE, int WARP_TILE_COLS = 128>
+__global__ void build_outer_product_pairs_shared(const ROWTYPE* d_ai_A, const COLTYPE* d_aj_A,
+                                                 const ROWTYPE* d_ai_B, const COLTYPE* d_aj_B, COLTYPE n,
+                                                 ROWTYPE base, const ROWTYPE* d_workload_prefix,
+                                                 ROWTYPE total_pairs, uint64_t* d_keys)
+{
+    constexpr int warp_size = 32;
+    int lane = threadIdx.x & (warp_size - 1);
+    int warp_in_block = threadIdx.x / warp_size;
+    int warps_per_block = blockDim.x / warp_size;
+    int global_warp_id = blockIdx.x * warps_per_block + warp_in_block;
+    int total_warps = gridDim.x * warps_per_block;
+    if (total_warps <= 0 || global_warp_id >= total_warps || total_pairs <= 0)
+        return;
+
+    ROWTYPE seg_begin = (total_pairs * static_cast<ROWTYPE>(global_warp_id)) / static_cast<ROWTYPE>(total_warps);
+    ROWTYPE seg_end = (total_pairs * static_cast<ROWTYPE>(global_warp_id + 1)) / static_cast<ROWTYPE>(total_warps);
+    if (seg_begin >= seg_end)
+        return;
+
+    extern __shared__ COLTYPE smem_cols[];
+    COLTYPE* warp_smem = smem_cols + warp_in_block * WARP_TILE_COLS;
+
+    ROWTYPE target = seg_begin + base;
+    COLTYPE low = 0, high = n;
+    while (low < high)
+    {
+        COLTYPE mid = (low + high) / 2;
+        if (d_workload_prefix[mid] <= target)
+            low = mid + 1;
+        else
+            high = mid;
+    }
+    COLTYPE row_i = low - 1;
+
+    ROWTYPE cursor = seg_begin;
+    while (cursor < seg_end && row_i < n)
+    {
+        ROWTYPE row_prefix_start = d_workload_prefix[row_i] - base;
+        ROWTYPE row_prefix_end = d_workload_prefix[row_i + 1] - base;
+        if (row_prefix_end <= cursor)
+        {
+            ++row_i;
+            continue;
+        }
+
+        ROWTYPE row_start_A = d_ai_A[row_i] - base;
+        ROWTYPE row_start_B = d_ai_B[row_i] - base;
+        ROWTYPE nnz_A = d_ai_A[row_i + 1] - d_ai_A[row_i];
+        ROWTYPE nnz_B = d_ai_B[row_i + 1] - d_ai_B[row_i];
+
+        ROWTYPE row_seg_begin = cursor > row_prefix_start ? cursor : row_prefix_start;
+        ROWTYPE row_seg_end = seg_end < row_prefix_end ? seg_end : row_prefix_end;
+        if (row_seg_begin >= row_seg_end || nnz_A <= 0 || nnz_B <= 0)
+        {
+            cursor = row_seg_end;
+            if (cursor >= row_prefix_end)
+                ++row_i;
+            continue;
+        }
+
+        ROWTYPE local_begin = row_seg_begin - row_prefix_start;
+        ROWTYPE local_end = row_seg_end - row_prefix_start;
+        ROWTYPE a_begin = local_begin / nnz_B;
+        ROWTYPE a_end = (local_end - 1) / nnz_B;
+
+        for (ROWTYPE a_offset = a_begin; a_offset <= a_end; ++a_offset)
+        {
+            ROWTYPE b_begin = (a_offset == a_begin) ? (local_begin - a_offset * nnz_B) : 0;
+            ROWTYPE b_end = (a_offset == a_end) ? (local_end - a_offset * nnz_B) : nnz_B;
+
+            COLTYPE row = 0;
+            if (lane == 0)
+                row = d_aj_A[row_start_A + a_offset];
+            row = __shfl_sync(0xFFFFFFFFu, row, 0);
+
+            for (ROWTYPE tile_begin = b_begin; tile_begin < b_end; tile_begin += WARP_TILE_COLS)
+            {
+                ROWTYPE remaining = b_end - tile_begin;
+                ROWTYPE tile_count = remaining < static_cast<ROWTYPE>(WARP_TILE_COLS)
+                                         ? remaining
+                                         : static_cast<ROWTYPE>(WARP_TILE_COLS);
+                for (ROWTYPE t = lane; t < tile_count; t += warp_size)
+                    warp_smem[t] = d_aj_B[row_start_B + tile_begin + t];
+                __syncwarp();
+
+                for (ROWTYPE t = lane; t < tile_count; t += warp_size)
+                {
+                    COLTYPE col = warp_smem[t];
+                    ROWTYPE b_offset = tile_begin + t;
+                    ROWTYPE local_pos = a_offset * nnz_B + b_offset;
+                    ROWTYPE global_pos = row_prefix_start + local_pos;
+                    uint64_t key = (static_cast<uint64_t>(row) << 32) | static_cast<uint32_t>(col);
+                    d_keys[global_pos] = key;
+                }
+                __syncwarp();
+            }
+        }
+
+        cursor = row_seg_end;
+        if (cursor >= row_prefix_end)
+            ++row_i;
+    }
+}
+
 // Unpack uint64_t keys into separate row and column arrays
 template <typename COLTYPE>
 __global__ void packed_to_split_coo(const uint64_t* d_keys, COLTYPE unique_nnz, COLTYPE* d_rows, COLTYPE* d_cols)
@@ -246,7 +351,8 @@ bool PackedCOOtoCSR(const uint64_t* d_keys, ROWTYPE unique_nnz, COLTYPE n_rows, 
  */
 template <typename ROWTYPE, typename COLTYPE>
 bool SpMMStruct(COLTYPE n, const ROWTYPE* d_ai_A, const COLTYPE* d_aj_A, const ROWTYPE* d_ai_B,
-                const COLTYPE* d_aj_B, ROWTYPE base, DeviceArray<uint64_t>& packed_coo)
+                const COLTYPE* d_aj_B, ROWTYPE base, DeviceArray<uint64_t>& packed_coo,
+                OuterProductBuildMethod method)
 {
     static_assert(sizeof(COLTYPE) <= 4, "SpMMStruct requires COLTYPE <= 32 bits.");
 
@@ -271,33 +377,55 @@ bool SpMMStruct(COLTYPE n, const ROWTYPE* d_ai_A, const COLTYPE* d_aj_A, const R
     d_keys.resize(static_cast<size_t>(total_pairs));
     d_keys_sorted.resize(static_cast<size_t>(total_pairs));
 
+    if (total_pairs <= 0)
+    {
+        return true;
+    }
+
     int threads = 256;
     int blocks = static_cast<int>((total_pairs + threads - 1) / threads);
 
     // Step 3: Build outer products directly to uint64_t keys
-    build_outer_product_pairs<ROWTYPE, COLTYPE><<<blocks, threads>>>(
-        d_ai_A, d_aj_A, d_ai_B, d_aj_B, n, base, d_workload_prefix.data(), total_pairs, d_keys.data());
+    if (method == OuterProductBuildMethod::SharedMemoryWarp)
+    {
+        constexpr int kWarpTileCols = 128;
+        int warps_per_block = threads / 32;
+        int warp_blocks = blocks;
+        int smem_bytes = warps_per_block * kWarpTileCols * static_cast<int>(sizeof(COLTYPE));
+        build_outer_product_pairs_shared<ROWTYPE, COLTYPE, kWarpTileCols><<<warp_blocks, threads, smem_bytes>>>(
+            d_ai_A, d_aj_A, d_ai_B, d_aj_B, n, base, d_workload_prefix.data(), total_pairs, d_keys.data());
+    }
+    else
+    {
+        build_outer_product_pairs<ROWTYPE, COLTYPE><<<blocks, threads>>>(
+            d_ai_A, d_aj_A, d_ai_B, d_aj_B, n, base, d_workload_prefix.data(), total_pairs, d_keys.data());
+    }
 
-    // Step 4: Sort using CUB
-    void* d_sort_temp = nullptr;
-    size_t sort_temp_bytes = 0;
-    cub::DeviceRadixSort::SortKeys(d_sort_temp, sort_temp_bytes, d_keys.data(), d_keys_sorted.data(), total_pairs);
-    DeviceArray<ROWTYPE> d_sort_storage;
-    d_sort_storage.resize(sort_temp_bytes);
-    cub::DeviceRadixSort::SortKeys(d_sort_storage.data(), sort_temp_bytes, d_keys.data(),
-                                   d_keys_sorted.data(), total_pairs);
-
-    // Step 5: Remove duplicates using CUB (reuse d_keys for output)
+    // Step 4 & 5: Sort and deduplicate using shared temp buffer
     DeviceArray<ROWTYPE> d_unique_count;
     d_unique_count.resize(1);
 
-    void* d_unique_temp = nullptr;
+    // Query memory requirements for both operations
+    void* d_temp_storage = nullptr;
+    size_t sort_temp_bytes = 0;
+    cub::DeviceRadixSort::SortKeys(d_temp_storage, sort_temp_bytes, d_keys.data(), d_keys_sorted.data(), total_pairs);
+
     size_t unique_temp_bytes = 0;
-    cub::DeviceSelect::Unique(d_unique_temp, unique_temp_bytes, d_keys_sorted.data(), d_keys.data(),
+    cub::DeviceSelect::Unique(d_temp_storage, unique_temp_bytes, d_keys_sorted.data(), d_keys.data(),
                               d_unique_count.data(), total_pairs);
-    DeviceArray<ROWTYPE> d_unique_storage;
-    d_unique_storage.resize(unique_temp_bytes);
-    cub::DeviceSelect::Unique(d_unique_storage.data(), unique_temp_bytes, d_keys_sorted.data(),
+
+    // Allocate single temp buffer with maximum required size
+    size_t temp_storage_bytes = std::max(sort_temp_bytes, unique_temp_bytes);
+    DeviceArray<uint8_t> d_temp_buffer;
+    d_temp_buffer.resize(temp_storage_bytes);
+    d_temp_storage = d_temp_buffer.data();
+
+    // Execute Sort
+    cub::DeviceRadixSort::SortKeys(d_temp_storage, sort_temp_bytes, d_keys.data(),
+                                   d_keys_sorted.data(), total_pairs);
+
+    // Execute Unique (reuse d_keys for output)
+    cub::DeviceSelect::Unique(d_temp_storage, unique_temp_bytes, d_keys_sorted.data(),
                               d_keys.data(), d_unique_count.data(), total_pairs);
 
     // Get unique count
@@ -321,9 +449,11 @@ template bool SpMMAnalyze<int64_t, int>(int n_rows, const int64_t* d_ai_A, const
 
 // Step 2: Build packed COO sparsity pattern
 template bool SpMMStruct<int, int>(int n, const int* d_ai_A, const int* d_aj_A, const int* d_ai_B,
-                                   const int* d_aj_B, int base, DeviceArray<uint64_t>& packed_coo);
+                                   const int* d_aj_B, int base, DeviceArray<uint64_t>& packed_coo,
+                                   OuterProductBuildMethod method);
 template bool SpMMStruct<int64_t, int>(int n, const int64_t* d_ai_A, const int* d_aj_A, const int64_t* d_ai_B,
-                                       const int* d_aj_B, int64_t base, DeviceArray<uint64_t>& packed_coo);
+                                       const int* d_aj_B, int64_t base, DeviceArray<uint64_t>& packed_coo,
+                                       OuterProductBuildMethod method);
 
 // Step 3: Convert packed COO to CSR
 template bool PackedCOOtoCSR<int, int>(const uint64_t* d_keys, int unique_nnz, int n_rows, int base,

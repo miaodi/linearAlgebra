@@ -8,6 +8,12 @@
 
 namespace matrix_utils::sparse_cuda
 {
+enum class OuterProductBuildMethod
+{
+    GlobalMemory = 0,
+    SharedMemoryWarp = 1
+};
+
 /**
  * @brief Step 1: Compute workload prefix sum and memory requirements for outer products
  *
@@ -52,12 +58,14 @@ bool SpMMAnalyze(COLTYPE n_rows, const ROWTYPE* d_ai_A, const ROWTYPE* d_ai_B, R
  * @param d_aj_B Device pointer to CSR column indices of B
  * @param base Index base (0 or 1)
  * @param packed_coo [Output] DeviceArray to receive packed COO format (uint64_t keys)
+ * @param method Build method for outer-product key generation
  *
  * @return true if successful, false otherwise
  */
 template <typename ROWTYPE, typename COLTYPE>
 bool SpMMStruct(COLTYPE n, const ROWTYPE* d_ai_A, const COLTYPE* d_aj_A, const ROWTYPE* d_ai_B,
-                const COLTYPE* d_aj_B, ROWTYPE base, DeviceArray<uint64_t>& packed_coo);
+                const COLTYPE* d_aj_B, ROWTYPE base, DeviceArray<uint64_t>& packed_coo,
+                OuterProductBuildMethod method = OuterProductBuildMethod::GlobalMemory);
 
 /**
  * @brief Convert packed COO format to CSR format

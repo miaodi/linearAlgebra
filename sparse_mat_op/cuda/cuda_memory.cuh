@@ -2,6 +2,8 @@
 
 #include <cusparse.h>
 #include <cuda_runtime.h>
+#include <string>
+#include <stdexcept>
 
 namespace matrix_utils::sparse_cuda
 {
@@ -208,5 +210,19 @@ private:
     DeviceVectorView(const DeviceVectorView&) = delete;
     DeviceVectorView& operator=(const DeviceVectorView&) = delete;
 };
+
+/**
+ * @brief Helper function to check and report CUDA errors
+ * 
+ * @param error CUDA error code to check
+ * @param message Descriptive message about the operation that failed
+ * @throws std::runtime_error if error is not cudaSuccess
+ */
+inline void checkCudaError(cudaError_t error, const char* message) {
+    if (error != cudaSuccess) {
+        throw std::runtime_error(std::string("CUDA error: ") + message + " - " + 
+                                cudaGetErrorString(error));
+    }
+}
 
 } // namespace matrix_utils::sparse_cuda
