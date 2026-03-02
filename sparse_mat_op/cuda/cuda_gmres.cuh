@@ -116,7 +116,6 @@ private:
     NoPreconditioner _default_preconditioner;
     
     // DeviceVectorView objects for cuSPARSE operations
-    DeviceVectorView _view_prec_x, _view_prec_y, _view_prec_tmp;
     DeviceVectorView _view_d_w;
     DeviceVectorView _view_q_j, _view_q_j_plus_1;
     DeviceVectorView _view_d_b, _view_d_x;
@@ -137,7 +136,7 @@ private:
     
     // Device memory arrays
     DeviceArray<double> _d_b, _d_x;
-    DeviceArray<double> _d_Q, _d_tmp, _d_w, _d_prec_tmp;
+    DeviceArray<double> _d_Q, _d_tmp, _d_w;
     DeviceArray<double> _d_g, _d_h_batch;
     
     // Host memory arrays

@@ -53,7 +53,6 @@ void CudaGMRES::cleanup_cuda()
     _d_Q.release();
     _d_tmp.release();
     _d_w.release();
-    _d_prec_tmp.release();
     _d_h_batch.release();
     _h_H.release();
     _h_g.release();
@@ -77,7 +76,6 @@ void CudaGMRES::initialize_workspace(size_t n)
     _d_Q.resize(n * (_current_restart + 1));
     _d_tmp.resize(n);
     _d_w.resize(n);
-    _d_prec_tmp.resize(n);
     
     // Allocate host memory using std::vector
     _h_c.resize(_current_restart);
@@ -115,11 +113,6 @@ void CudaGMRES::setupOperator(SpMVOperator<double>* spmv_operator)
     // Initialize workspace for this problem size
     initialize_workspace(n);
     
-    // Create vector descriptors using DeviceVectorView
-    _view_prec_x.create(static_cast<size_t>(_n), nullptr);
-    _view_prec_y.create(static_cast<size_t>(_n), nullptr);
-    _view_prec_tmp.create(static_cast<size_t>(_n), nullptr);
-    
     // Create DeviceVectorView wrappers for temporary vectors
     _view_d_w.create(static_cast<size_t>(_n), nullptr);
     
@@ -133,7 +126,6 @@ void CudaGMRES::setupOperator(SpMVOperator<double>* spmv_operator)
     
     // Set up DeviceVectorView wrappers to point to allocated memory
     _view_d_w.setData(_d_w.data());
-    _view_prec_tmp.setData(_d_prec_tmp.data());
     
     _is_operator_setup = true;
 }
