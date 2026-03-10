@@ -37,7 +37,7 @@ inline int CeilLog2U64(uint64_t value)
 } // namespace detail
 
 template <typename NnzType, typename IndexType>
-__global__ void build_tile_keys(
+__global__ void BuildTileKeys(
     NnzType nnz,
     int k,
     const IndexType* __restrict__ coo_row,
@@ -72,7 +72,7 @@ void LaunchBuildTileKeys(
 
     constexpr int block = 256;
     const int grid = static_cast<int>((nnz + block - 1) / block);
-    build_tile_keys<NnzType, IndexType><<<grid, block, 0, stream>>>(
+    BuildTileKeys<NnzType, IndexType><<<grid, block, 0, stream>>>(
         nnz, k, d_coo_row, d_coo_col, d_keys, col_bits, base);
 }
 
@@ -134,7 +134,7 @@ void CSRToTileCSR(
 
     LaunchBuildTileKeys<ROWTYPE, COLTYPE>(
         nnz, k, coo_rows.data(), d_aj, keys_in.data(), col_bits, static_cast<COLTYPE>(base), stream);
-    detail::check_cuda(cudaGetLastError(), "build_tile_keys kernel launch");
+    detail::check_cuda(cudaGetLastError(), "BuildTileKeys kernel launch");
 
     thrust::sequence(thrust::cuda::par.on(stream), perm_in.data(), perm_in.data() + static_cast<size_t>(nnz));
 
@@ -190,9 +190,9 @@ void CSRToTileCSR(
         thrust::device_pointer_cast(out.values.data()));
 }
 
-template __global__ void build_tile_keys<int, int>(
+template __global__ void BuildTileKeys<int, int>(
     int, int, const int*, const int*, uint64_t*, int, int);
-template __global__ void build_tile_keys<std::int64_t, int>(
+template __global__ void BuildTileKeys<std::int64_t, int>(
     std::int64_t, int, const int*, const int*, uint64_t*, int, int);
 template void LaunchBuildTileKeys<int, int>(
     int, int, const int*, const int*, uint64_t*, int, int, cudaStream_t);

@@ -21,7 +21,7 @@ struct DeviceTileCSRMatrix
 };
 
 template <typename NnzType, typename IndexType>
-__global__ void build_tile_keys(
+__global__ void BuildTileKeys(
     NnzType nnz,
     int k,
     const IndexType* __restrict__ coo_row,
