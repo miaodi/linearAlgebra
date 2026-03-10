@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "cuda_csr_utils.cuh"
-#include "cuda_tiled_csr.cuh"
+#include "cuda_tiled_sparse_mat.cuh"
 #include "matrix_utils.hpp"
 #include "utils.h"
 #include <cuda_runtime.h>
@@ -674,7 +674,7 @@ TEST(CudaCSRUtils, CSRPtrToCOORowDeviceBase1)
     EXPECT_EQ(coo_rows, expected);
 }
 
-TEST(CudaCSRUtils, CSRToTileCSRBase1)
+TEST(CudaCSRUtils, CSRToTileCOOBase1)
 {
     const int rows = 4;
     const int cols = 4;
@@ -689,8 +689,8 @@ TEST(CudaCSRUtils, CSRToTileCSRBase1)
     thrust::device_vector<int> d_aj(aj_host);
     thrust::device_vector<double> d_av(av_host);
 
-    cuda_utils::DeviceTileCSRMatrix<int, int, double> tiled;
-    cuda_utils::CSRToTileCSR(
+    cuda_utils::DeviceTileCOOMatrix<int, int, double> tiled;
+    cuda_utils::CSRToTileCOO(
         rows,
         cols,
         thrust::raw_pointer_cast(d_ai.data()),
@@ -703,23 +703,84 @@ TEST(CudaCSRUtils, CSRToTileCSRBase1)
     ASSERT_EQ(tiled.n_cols, cols);
     ASSERT_EQ(tiled.base, base);
     ASSERT_EQ(tiled.tile_k, k);
+    ASSERT_EQ(tiled.tile_col_bits, 1);
+    ASSERT_EQ(tiled.n_tile_rows, 2);
+    ASSERT_EQ(tiled.n_tile_cols, 2);
+    ASSERT_EQ(tiled.n_tiles, 4);
 
-    std::vector<uint64_t> keys_host(av_host.size());
+    std::vector<int> perm_host(av_host.size());
+    std::vector<int> tile_nnz_prefix_host(5);
+    std::vector<int> tile_rows_host(4);
+    std::vector<int> tile_cols_host(4);
     std::vector<int> row_host(av_host.size());
     std::vector<int> col_host(av_host.size());
     std::vector<double> val_host(av_host.size());
-    tiled.tile_keys.copyToHost(keys_host.data());
+    tiled.permutation.copyToHost(perm_host.data());
+    tiled.tile_nnz_prefix.copyToHost(tile_nnz_prefix_host.data());
+    tiled.tile_row_ind.copyToHost(tile_rows_host.data());
+    tiled.tile_col_ind.copyToHost(tile_cols_host.data());
     tiled.row_ind.copyToHost(row_host.data());
     tiled.col_ind.copyToHost(col_host.data());
     tiled.values.copyToHost(val_host.data());
 
-    const std::vector<uint64_t> expected_keys{0, 1, 1, 2, 2, 3};
+    const std::vector<int> expected_perm{0, 1, 2, 3, 5, 4};
+    const std::vector<int> expected_tile_nnz_prefix{0, 1, 3, 5, 6};
+    const std::vector<int> expected_tile_rows{0, 0, 1, 1};
+    const std::vector<int> expected_tile_cols{0, 1, 0, 1};
     const std::vector<int> expected_rows{1, 1, 2, 3, 4, 3};
     const std::vector<int> expected_cols{1, 4, 3, 1, 2, 4};
     const std::vector<double> expected_vals{10.0, 11.0, 12.0, 13.0, 15.0, 14.0};
 
-    EXPECT_EQ(keys_host, expected_keys);
+    EXPECT_EQ(perm_host, expected_perm);
+    EXPECT_EQ(tile_nnz_prefix_host, expected_tile_nnz_prefix);
+    EXPECT_EQ(tile_rows_host, expected_tile_rows);
+    EXPECT_EQ(tile_cols_host, expected_tile_cols);
     EXPECT_EQ(row_host, expected_rows);
     EXPECT_EQ(col_host, expected_cols);
     EXPECT_EQ(val_host, expected_vals);
+}
+
+TEST(CudaCSRUtils, TileKeysToCOOMeta)
+{
+    const int col_bits = 1;
+    std::vector<uint64_t> keys_host{0, 1, 1, 2, 2, 3};
+    thrust::device_vector<uint64_t> d_keys(keys_host);
+    thrust::device_vector<uint64_t> d_unique_keys(keys_host.size(), 0);
+    thrust::device_vector<int> d_tile_nnz(keys_host.size(), 0);
+    thrust::device_vector<int> d_tile_rows(keys_host.size(), -1);
+    thrust::device_vector<int> d_tile_cols(keys_host.size(), -1);
+
+    const int n_tiles = cuda_utils::CountUniqueTileKeys<int>(
+        static_cast<int>(keys_host.size()),
+        thrust::raw_pointer_cast(d_keys.data()),
+        nullptr);
+
+    cuda_utils::TileKeysToCOOMeta<int, int, int>(
+        static_cast<int>(keys_host.size()),
+        n_tiles,
+        thrust::raw_pointer_cast(d_keys.data()),
+        col_bits,
+        thrust::raw_pointer_cast(d_unique_keys.data()),
+        thrust::raw_pointer_cast(d_tile_nnz.data()),
+        thrust::raw_pointer_cast(d_tile_rows.data()),
+        thrust::raw_pointer_cast(d_tile_cols.data()));
+
+    std::vector<uint64_t> unique_keys(static_cast<size_t>(n_tiles));
+    std::vector<int> tile_nnz(static_cast<size_t>(n_tiles));
+    std::vector<int> tile_rows(static_cast<size_t>(n_tiles));
+    std::vector<int> tile_cols(static_cast<size_t>(n_tiles));
+    thrust::copy(d_unique_keys.begin(), d_unique_keys.begin() + n_tiles, unique_keys.begin());
+    thrust::copy(d_tile_nnz.begin(), d_tile_nnz.begin() + n_tiles, tile_nnz.begin());
+    thrust::copy(d_tile_rows.begin(), d_tile_rows.begin() + n_tiles, tile_rows.begin());
+    thrust::copy(d_tile_cols.begin(), d_tile_cols.begin() + n_tiles, tile_cols.begin());
+
+    const std::vector<uint64_t> expected_unique_keys{0, 1, 2, 3};
+    const std::vector<int> expected_tile_nnz{1, 2, 2, 1};
+    const std::vector<int> expected_rows{0, 0, 1, 1};
+    const std::vector<int> expected_cols{0, 1, 0, 1};
+
+    EXPECT_EQ(unique_keys, expected_unique_keys);
+    EXPECT_EQ(tile_nnz, expected_tile_nnz);
+    EXPECT_EQ(tile_rows, expected_rows);
+    EXPECT_EQ(tile_cols, expected_cols);
 }

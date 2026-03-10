@@ -5,6 +5,7 @@ set(CUDA_SOURCES
     cuda_gmres.cu
     cuda_bicgstab.cu
     cuda_spmv.cu
+    cuda_sptrsv.cu
     cuda_preconditioner.cu
     cuda_kernels.cu
     cuda_ilu_symbolic.cu
@@ -13,7 +14,7 @@ set(CUDA_SOURCES
     cuda_spmm.cu
     cuda_iluk_U_symbolic.cu
     cuda_ruiz_scale.cu
-    cuda_tiled_csr.cu
+    cuda_tiled_sparse_mat.cu
 )
 
 add_library(${PROJECT_NAME} STATIC ${CUDA_SOURCES})

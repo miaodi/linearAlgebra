@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cuda_tiled_sparse_mat.cuh"
 #include <cstdint>
 #include <cuda_runtime.h>
 #include <stdexcept>
@@ -47,5 +48,17 @@ enum class CudaRuizScalingNormType : uint8_t
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, CudaRuizScalingNormType NORM = CudaRuizScalingNormType::MaxNorm>
 bool RuizScaleCuda(const COLTYPE rows, const COLTYPE cols, const ROWTYPE* d_ai, const COLTYPE* d_aj,
                    VALTYPE* d_av, VALTYPE* d_dr, VALTYPE* d_dc, const int max_iters = 20);
+
+/// @brief CUDA Ruiz scaling using tile-COO matrix layout.
+///
+/// @details Norm computation is performed tile-by-tile with one warp processing one tile.
+/// Tile-local row/column norm accumulators live in shared memory, then are atomically
+/// merged into global row/column norm arrays.
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
+          CudaRuizScalingNormType NORM = CudaRuizScalingNormType::MaxNorm>
+bool RuizScaleCuda(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat,
+                   VALTYPE* d_dr,
+                   VALTYPE* d_dc,
+                   const int max_iters = 20);
 
 } // namespace matrix_utils::sparse_cuda

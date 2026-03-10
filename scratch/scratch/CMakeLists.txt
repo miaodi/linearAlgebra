@@ -22,6 +22,12 @@ if(USE_CUDA)
   # CUDA test executable
   add_executable(cuda_test cuda_test.cu)
   target_compile_features(cuda_test PRIVATE cxx_std_20)
+  target_link_libraries(cuda_test PRIVATE
+    cxxopts::cxxopts
+    sparse_mat_op
+    sparse_mat_op_cuda
+    CUDA::cudart
+  )
 else()
 endif()
 

@@ -1,161 +1,135 @@
+#include "cuda_tiled_sparse_mat.cuh"
+#include "io.hpp"
+#include "matrix_utils.hpp"
+
 #include <cuda_runtime.h>
-#include <cub/cub.cuh>
+#include <cxxopts.hpp>
+
+#include <cstdint>
+#include <fstream>
 #include <iostream>
+#include <stdexcept>
+#include <string>
 #include <vector>
-#include <random>
 
-// Kernel to sort an array using cub::WarpMergeSort with a single warp
-template <int ITEMS_PER_THREAD, int WARP_THREADS = 32>
-__global__ void warpMergeSortKernel(int* d_data, int num_items) {
-    // Single warp, so use threadIdx.x directly as lane_id
-    int lane_id = threadIdx.x;
-    
-    // Thread-private array to hold items
-    int thread_data[ITEMS_PER_THREAD];
-    
-    // Load data into thread-private storage (blocked arrangement)
-    // Each thread loads ITEMS_PER_THREAD consecutive items
-    int thread_offset = lane_id * ITEMS_PER_THREAD;
-    #pragma unroll
-    for (int i = 0; i < ITEMS_PER_THREAD; i++) {
-        int idx = thread_offset + i;
-        thread_data[i] = (idx < num_items) ? d_data[idx] : INT_MAX;
-    }
-    
-    // Create WarpMergeSort instance
-    typedef cub::WarpMergeSort<int, ITEMS_PER_THREAD, WARP_THREADS> WarpMergeSort;
-    
-    // Allocate shared memory for WarpMergeSort
-    __shared__ typename WarpMergeSort::TempStorage temp_storage;
-    
-    // Sort the data
-    WarpMergeSort(temp_storage).Sort(thread_data, [](int a, int b) { return a < b; });
-    
-    // Write sorted data back to global memory (blocked arrangement)
-    // Each thread writes ITEMS_PER_THREAD consecutive items
-    #pragma unroll
-    for (int i = 0; i < ITEMS_PER_THREAD; i++) {
-        int idx = thread_offset + i;
-        if (idx < num_items && thread_data[i] != INT_MAX) {
-            d_data[idx] = thread_data[i];
-        }
+namespace
+{
+inline void check_cuda(cudaError_t status, const char* msg)
+{
+    if (status != cudaSuccess)
+    {
+        throw std::runtime_error(std::string(msg) + ": " + cudaGetErrorString(status));
     }
 }
 
-// Helper function to check CUDA errors
-#define CUDA_CHECK(call) \
-    do { \
-        cudaError_t err = call; \
-        if (err != cudaSuccess) { \
-            std::cerr << "CUDA error in " << __FILE__ << " at line " << __LINE__ << ": " \
-                      << cudaGetErrorString(err) << std::endl; \
-            exit(EXIT_FAILURE); \
-        } \
-    } while (0)
+} // namespace
 
-// Dispatcher function to launch kernel with appropriate ITEMS_PER_THREAD
-void launchKernelWithSize(int* d_data, int num_items, int items_per_thread) {
-    switch(items_per_thread) {
-        case 1: warpMergeSortKernel<1><<<1, 32>>>(d_data, num_items); break;
-        case 2: warpMergeSortKernel<2><<<1, 32>>>(d_data, num_items); break;
-        case 4: warpMergeSortKernel<4><<<1, 32>>>(d_data, num_items); break;
-        case 8: warpMergeSortKernel<8><<<1, 32>>>(d_data, num_items); break;
-        case 16: warpMergeSortKernel<16><<<1, 32>>>(d_data, num_items); break;
-        case 32: warpMergeSortKernel<32><<<1, 32>>>(d_data, num_items); break;
-        case 64: warpMergeSortKernel<64><<<1, 32>>>(d_data, num_items); break;
-        case 128: warpMergeSortKernel<128><<<1, 32>>>(d_data, num_items); break;
-        case 256: warpMergeSortKernel<256><<<1, 32>>>(d_data, num_items); break;
-        default:
-            std::cerr << "Error: ITEMS_PER_THREAD " << items_per_thread 
-                      << " not supported (use power of 2 between 1 and 256)" << std::endl;
-            exit(EXIT_FAILURE);
-    }
-}
+int main(int argc, char** argv)
+{
+    cxxopts::Options options("cuda_test",
+                             "Read MTX, convert CSR to tiled CSR on GPU, and print entries");
+    options.add_options()("f,file", "Input MatrixMarket file path", cxxopts::value<std::string>())(
+        "k", "Tile exponent (tile size = 2^k)", cxxopts::value<int>()->default_value("4"))(
+        "h,help", "Show help");
 
-int main(int argc, char** argv) {
-    // Runtime-determined array size
-    int num_items = 256;
-    if (argc > 1) {
-        num_items = std::atoi(argv[1]);
+    const auto parsed = options.parse(argc, argv);
+    if (parsed.count("help") || !parsed.count("file"))
+    {
+        std::cout << options.help() << '\n';
+        return parsed.count("file") ? 0 : 1;
     }
-    
-    std::cout << "Sorting " << num_items << " elements using cub::WarpMergeSort with a single warp" << std::endl;
-    
-    // Configuration
-    const int WARP_THREADS = 32;
-    
-    // Calculate required ITEMS_PER_THREAD using binary search approach
-    // We need ITEMS_PER_THREAD * 32 >= num_items
-    int required_items_per_thread = (num_items + WARP_THREADS - 1) / WARP_THREADS;
-    
-    // Round up to next power of 2 for better performance
-    int items_per_thread = 1;
-    while (items_per_thread < required_items_per_thread) {
-        items_per_thread *= 2;
+
+    const std::string file_path = parsed["file"].as<std::string>();
+    const int k = parsed["k"].as<int>();
+    if (k < 0 || k >= 63)
+    {
+        throw std::invalid_argument("k must satisfy 0 <= k < 63");
     }
-    
-    std::cout << "Using ITEMS_PER_THREAD = " << items_per_thread 
-              << " (capacity: " << items_per_thread * WARP_THREADS << " elements)" << std::endl;
-    
-    // Prepare host data
-    std::vector<int> h_data(num_items);
-    std::mt19937 rng(42);
-    std::uniform_int_distribution<int> dist(0, 1000);
-    
-    std::cout << "Original data (first 20): ";
-    for (int i = 0; i < num_items; i++) {
-        h_data[i] = dist(rng);
-        if (i < 20) {
-            std::cout << h_data[i] << " ";
+
+    using HostCSR = matrix_utils::CSRMatrixVec<int, int, double>;
+    HostCSR h_csr;
+
+    {
+        std::ifstream in(file_path);
+        if (!in.is_open())
+        {
+            throw std::runtime_error("Cannot open MatrixMarket file: " + file_path);
         }
+        matrix_utils::readMatrixMarket(in, h_csr);
     }
-    std::cout << std::endl;
-    
-    // Allocate device memory
-    int* d_data;
-    CUDA_CHECK(cudaMalloc(&d_data, num_items * sizeof(int)));
-    
-    // Copy data to device
-    CUDA_CHECK(cudaMemcpy(d_data, h_data.data(), num_items * sizeof(int), cudaMemcpyHostToDevice));
-    
-    // Launch kernel with appropriate ITEMS_PER_THREAD
-    launchKernelWithSize(d_data, num_items, items_per_thread);
-    
-    // Check for kernel launch errors
-    CUDA_CHECK(cudaGetLastError());
-    
-    // Wait for kernel to finish
-    CUDA_CHECK(cudaDeviceSynchronize());
-    
-    // Copy result back to host
-    CUDA_CHECK(cudaMemcpy(h_data.data(), d_data, num_items * sizeof(int), cudaMemcpyDeviceToHost));
-    
-    // Verify results (each warp's segment should be sorted)
-    std::cout << "Sorted data (first 20): ";
-    for (int i = 0; i < std::min(20, num_items); i++) {
-        std::cout << h_data[i] << " ";
+
+    const int rows = h_csr.rows;
+    const int cols = h_csr.cols;
+    const int nnz = static_cast<int>(h_csr.NNZ());
+
+    std::cout << "Loaded matrix: rows=" << rows << ", cols=" << cols << ", nnz=" << nnz
+              << ", base=" << h_csr.Base() << '\n';
+
+    int* d_ai = nullptr;
+    int* d_aj = nullptr;
+    double* d_av = nullptr;
+
+    check_cuda(cudaMalloc(reinterpret_cast<void**>(&d_ai), sizeof(int) * static_cast<size_t>(rows + 1)),
+               "cudaMalloc d_ai");
+    check_cuda(cudaMalloc(reinterpret_cast<void**>(&d_aj), sizeof(int) * static_cast<size_t>(nnz)),
+               "cudaMalloc d_aj");
+    check_cuda(cudaMalloc(reinterpret_cast<void**>(&d_av), sizeof(double) * static_cast<size_t>(nnz)),
+               "cudaMalloc d_av");
+
+    check_cuda(cudaMemcpy(d_ai, h_csr.AI(), sizeof(int) * static_cast<size_t>(rows + 1), cudaMemcpyHostToDevice),
+               "copy AI to device");
+    check_cuda(cudaMemcpy(d_aj, h_csr.AJ(), sizeof(int) * static_cast<size_t>(nnz), cudaMemcpyHostToDevice),
+               "copy AJ to device");
+    check_cuda(cudaMemcpy(d_av, h_csr.AV(), sizeof(double) * static_cast<size_t>(nnz), cudaMemcpyHostToDevice),
+               "copy AV to device");
+
+    matrix_utils::sparse_cuda::DeviceTileCOOMatrix<int, int, double> d_tiled;
+    matrix_utils::sparse_cuda::CSRToTileCOO<int, int, double>(rows, cols, d_ai, d_aj, d_av, k, d_tiled, nullptr);
+    check_cuda(cudaDeviceSynchronize(), "CSRToTileCOO synchronize");
+
+    std::vector<int> h_perm(static_cast<size_t>(nnz));
+    std::vector<int> h_tile_nnz_prefix(static_cast<size_t>(d_tiled.n_tiles + 1));
+    std::vector<int> h_tile_rows(static_cast<size_t>(d_tiled.n_tiles));
+    std::vector<int> h_tile_cols(static_cast<size_t>(d_tiled.n_tiles));
+    std::vector<int> h_row_ind(static_cast<size_t>(nnz));
+    std::vector<int> h_col_ind(static_cast<size_t>(nnz));
+    std::vector<double> h_values(static_cast<size_t>(nnz));
+
+    d_tiled.permutation.copyToHost(h_perm.data());
+    d_tiled.tile_nnz_prefix.copyToHost(h_tile_nnz_prefix.data());
+    d_tiled.tile_row_ind.copyToHost(h_tile_rows.data());
+    d_tiled.tile_col_ind.copyToHost(h_tile_cols.data());
+    d_tiled.row_ind.copyToHost(h_row_ind.data());
+    d_tiled.col_ind.copyToHost(h_col_ind.data());
+    d_tiled.values.copyToHost(h_values.data());
+
+    const std::uint64_t tile_size = std::uint64_t{1} << k;
+    std::cout << "Tiled metadata COO (tile_k=" << k << ", tile_size=" << tile_size
+              << ", n_tiles=" << d_tiled.n_tiles << "):" << '\n';
+
+    for (int t = 0; t < d_tiled.n_tiles; ++t)
+    {
+        std::cout << "tile=" << t << " tile_row=" << h_tile_rows[static_cast<size_t>(t)]
+                  << " tile_col=" << h_tile_cols[static_cast<size_t>(t)]
+                  << " tile_nnz="
+                  << (h_tile_nnz_prefix[static_cast<size_t>(t + 1)] -
+                      h_tile_nnz_prefix[static_cast<size_t>(t)])
+                  << '\n';
     }
-    std::cout << std::endl;
-    
-    // Verify that the entire array is sorted
-    bool all_sorted = true;
-    for (int i = 0; i < num_items - 1; i++) {
-        if (h_data[i] > h_data[i + 1]) {
-            all_sorted = false;
-            std::cerr << "Error: Array not sorted at index " << i 
-                      << " (" << h_data[i] << " > " << h_data[i + 1] << ")" << std::endl;
-            break;
-        }
-    }
-    
-    if (all_sorted) {
-        std::cout << "Success! The entire array is properly sorted using a single warp." << std::endl;
-    } else {
-        std::cout << "Error: Array is not properly sorted." << std::endl;
-    }
-    
-    // Cleanup
-    CUDA_CHECK(cudaFree(d_data));
-    
-    return all_sorted ? 0 : 1;
+
+    // std::cout << "\nValues/indices grouped by sorted tile order:" << '\n';
+
+    // for (int i = 0; i < nnz; ++i)
+    // {
+    //     std::cout << "i=" << i << " perm=" << h_perm[static_cast<size_t>(i)]
+    //               << " row=" << h_row_ind[static_cast<size_t>(i)]
+    //               << " col=" << h_col_ind[static_cast<size_t>(i)]
+    //               << " val=" << h_values[static_cast<size_t>(i)] << '\n';
+    // }
+
+    check_cuda(cudaFree(d_ai), "cudaFree d_ai");
+    check_cuda(cudaFree(d_aj), "cudaFree d_aj");
+    check_cuda(cudaFree(d_av), "cudaFree d_av");
+
+    return 0;
 }
