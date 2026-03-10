@@ -29,6 +29,22 @@ namespace matrix_utils::sparse_cuda
 template <typename ROWTYPE, typename COLTYPE>
 void CSRDiagDevice(COLTYPE n, ROWTYPE base, DeviceCSRMatrix<ROWTYPE, COLTYPE>& out);
 
+/// @brief Expand CSR row pointers into COO row indices on device.
+///
+/// Produces d_coo_rows[k] = row index (with CSR base preserved) for each
+/// nonzero entry k in [0, nnz). Supports both 0-based and 1-based CSR.
+///
+/// @param rows Number of rows
+/// @param d_ai CSR row pointers (device, size rows+1)
+/// @param d_coo_rows Output COO row indices (device, size nnz)
+/// @param stream CUDA stream
+template <typename ROWTYPE, typename COLTYPE>
+void CSRPtrToCOORowDevice(
+    COLTYPE rows,
+    const ROWTYPE* d_ai,
+    COLTYPE* d_coo_rows,
+    cudaStream_t stream = nullptr);
+
 /// @brief Find the position and value of the diagonal entry for each row of a device CSR matrix.
 /// @param rows Number of rows
 /// @param d_ai CSR row pointers (device, size rows+1)
@@ -117,5 +133,7 @@ extern template void CSRGenDiagScaledPruneMask<std::int64_t, int, double, int>(i
 
 extern template void CSRDiagDevice<int, int>(int, int, DeviceCSRMatrix<int, int>&);
 extern template void CSRDiagDevice<std::int64_t, int>(int, std::int64_t, DeviceCSRMatrix<std::int64_t, int>&);
+extern template void CSRPtrToCOORowDevice<int, int>(int, const int*, int*, cudaStream_t);
+extern template void CSRPtrToCOORowDevice<std::int64_t, int>(int, const std::int64_t*, int*, cudaStream_t);
 
 } // namespace matrix_utils::sparse_cuda

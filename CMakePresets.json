@@ -20,8 +20,7 @@
             "inherits": "default",
             "binaryDir": "${sourceDir}/debug",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/.vscode/gcc-toolchain.cmake"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
@@ -31,8 +30,7 @@
             "inherits": "default",
             "binaryDir": "${sourceDir}/release",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/.vscode/gcc-toolchain.cmake"
+                "CMAKE_BUILD_TYPE": "Release"
             }
         },
         {

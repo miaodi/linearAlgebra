@@ -13,6 +13,7 @@ set(CUDA_SOURCES
     cuda_spmm.cu
     cuda_iluk_U_symbolic.cu
     cuda_ruiz_scale.cu
+    cuda_tiled_csr.cu
 )
 
 add_library(${PROJECT_NAME} STATIC ${CUDA_SOURCES})

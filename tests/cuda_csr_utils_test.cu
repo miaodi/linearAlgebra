@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "cuda_csr_utils.cuh"
+#include "cuda_tiled_csr.cuh"
 #include "matrix_utils.hpp"
 #include "utils.h"
 #include <cuda_runtime.h>
@@ -605,4 +606,120 @@ TEST(CudaCSRUtils, CSRFindDiagonalRealMatrixS3rmt3m3)
     {
         std::cout << "Missing diagonals: " << missing_count << std::endl;
     }
+}
+
+TEST(CudaCSRUtils, CSRPtrToCOORowDeviceBase0)
+{
+    const int rows = 8;
+    const int base = 0;
+
+    std::vector<int> ai_host, aj_host;
+    std::vector<double> av_host;
+    CreateTestMatrixForDiagonalPrune<int, int, double>(rows, base, ai_host, aj_host, av_host);
+
+    const int nnz = ai_host.back() - base;
+    thrust::device_vector<int> d_ai(ai_host);
+    thrust::device_vector<int> d_coo_rows(nnz, -1);
+
+    cuda_utils::CSRPtrToCOORowDevice(
+        rows,
+        thrust::raw_pointer_cast(d_ai.data()),
+        thrust::raw_pointer_cast(d_coo_rows.data()));
+
+    std::vector<int> coo_rows(nnz);
+    thrust::copy(d_coo_rows.begin(), d_coo_rows.end(), coo_rows.begin());
+
+    std::vector<int> expected(nnz, -1);
+    for (int i = 0; i < rows; ++i)
+    {
+        for (int k = ai_host[i] - base; k < ai_host[i + 1] - base; ++k)
+        {
+            expected[k] = i + base;
+        }
+    }
+
+    EXPECT_EQ(coo_rows, expected);
+}
+
+TEST(CudaCSRUtils, CSRPtrToCOORowDeviceBase1)
+{
+    const int rows = 8;
+    const int base = 1;
+
+    std::vector<int> ai_host, aj_host;
+    std::vector<double> av_host;
+    CreateTestMatrixForDiagonalPrune<int, int, double>(rows, base, ai_host, aj_host, av_host);
+
+    const int nnz = ai_host.back() - base;
+    thrust::device_vector<int> d_ai(ai_host);
+    thrust::device_vector<int> d_coo_rows(nnz, -1);
+
+    cuda_utils::CSRPtrToCOORowDevice(
+        rows,
+        thrust::raw_pointer_cast(d_ai.data()),
+        thrust::raw_pointer_cast(d_coo_rows.data()));
+
+    std::vector<int> coo_rows(nnz);
+    thrust::copy(d_coo_rows.begin(), d_coo_rows.end(), coo_rows.begin());
+
+    std::vector<int> expected(nnz, -1);
+    for (int i = 0; i < rows; ++i)
+    {
+        for (int k = ai_host[i] - base; k < ai_host[i + 1] - base; ++k)
+        {
+            expected[k] = i + base;
+        }
+    }
+
+    EXPECT_EQ(coo_rows, expected);
+}
+
+TEST(CudaCSRUtils, CSRToTileCSRBase1)
+{
+    const int rows = 4;
+    const int cols = 4;
+    const int base = 1;
+    const int k = 1;
+
+    std::vector<int> ai_host{1, 3, 4, 6, 7};
+    std::vector<int> aj_host{1, 4, 3, 1, 4, 2};
+    std::vector<double> av_host{10.0, 11.0, 12.0, 13.0, 14.0, 15.0};
+
+    thrust::device_vector<int> d_ai(ai_host);
+    thrust::device_vector<int> d_aj(aj_host);
+    thrust::device_vector<double> d_av(av_host);
+
+    cuda_utils::DeviceTileCSRMatrix<int, int, double> tiled;
+    cuda_utils::CSRToTileCSR(
+        rows,
+        cols,
+        thrust::raw_pointer_cast(d_ai.data()),
+        thrust::raw_pointer_cast(d_aj.data()),
+        thrust::raw_pointer_cast(d_av.data()),
+        k,
+        tiled);
+
+    ASSERT_EQ(tiled.n_rows, rows);
+    ASSERT_EQ(tiled.n_cols, cols);
+    ASSERT_EQ(tiled.base, base);
+    ASSERT_EQ(tiled.tile_k, k);
+
+    std::vector<uint64_t> keys_host(av_host.size());
+    std::vector<int> row_host(av_host.size());
+    std::vector<int> col_host(av_host.size());
+    std::vector<double> val_host(av_host.size());
+    tiled.tile_keys.copyToHost(keys_host.data());
+    tiled.row_ind.copyToHost(row_host.data());
+    tiled.col_ind.copyToHost(col_host.data());
+    tiled.values.copyToHost(val_host.data());
+
+    const std::vector<uint64_t> expected_keys{0, 1, 1, 2, 2, 3};
+    const std::vector<int> expected_rows{1, 1, 2, 3, 4, 3};
+    const std::vector<int> expected_cols{1, 4, 3, 1, 2, 4};
+    const std::vector<double> expected_vals{10.0, 11.0, 12.0, 13.0, 15.0, 14.0};
+
+    EXPECT_EQ(keys_host, expected_keys);
+    EXPECT_EQ(row_host, expected_rows);
+    EXPECT_EQ(col_host, expected_cols);
+    EXPECT_EQ(val_host, expected_vals);
 }

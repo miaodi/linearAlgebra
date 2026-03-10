@@ -7,6 +7,7 @@
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/fill.h>
+#include <thrust/gather.h>
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/transform.h>
@@ -57,6 +58,38 @@ struct KeepFlag
 {
     __host__ __device__ bool operator()(FLAG flag) const { return flag != FLAG(0); }
 };
+
+inline int CeilLog2U64(uint64_t value)
+{
+    int bits = 0;
+    uint64_t x = 1;
+    while (x < value)
+    {
+        x <<= 1;
+        ++bits;
+    }
+    return bits;
+}
+
+/// @brief Kernel: convert CSR row pointers to COO row indices (one thread per row).
+template <typename ROWTYPE, typename COLTYPE>
+__global__ void CSRPtrToCOORowKernel(
+    COLTYPE rows,
+    const ROWTYPE* __restrict__ d_ai,
+    COLTYPE* __restrict__ d_coo_rows,
+    ROWTYPE base)
+{
+    COLTYPE row = static_cast<COLTYPE>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (row >= rows) return;
+
+    const ROWTYPE row_start = d_ai[row] - base;
+    const ROWTYPE row_end = d_ai[row + 1] - base;
+    const COLTYPE row_out = row + static_cast<COLTYPE>(base);
+    for (ROWTYPE k = row_start; k < row_end; ++k)
+    {
+        d_coo_rows[k] = row_out;
+    }
+}
 
 /// @brief Device function: find row index for a given entry index using binary search.
 /// @param entry_idx The entry index (0-based relative to base)
@@ -137,6 +170,31 @@ __global__ void CSRGenDiagScaledPruneMaskKernel(
 //==============================================================================
 // Public API implementations
 //==============================================================================
+
+template <typename ROWTYPE, typename COLTYPE>
+void CSRPtrToCOORowDevice(
+    COLTYPE rows,
+    const ROWTYPE* d_ai,
+    COLTYPE* d_coo_rows,
+    cudaStream_t stream)
+{
+    if (rows <= 0) return;
+    if (!d_ai || !d_coo_rows)
+    {
+        throw std::invalid_argument("CSRPtrToCOORowDevice received null pointer");
+    }
+
+    ROWTYPE base{}, last{};
+    detail::check_cuda(cudaMemcpy(&base, d_ai, sizeof(ROWTYPE), cudaMemcpyDeviceToHost), "load CSR base");
+    detail::check_cuda(cudaMemcpy(&last, d_ai + rows, sizeof(ROWTYPE), cudaMemcpyDeviceToHost), "load CSR nnz bound");
+    const ROWTYPE nnz = last - base;
+    if (nnz <= 0) return;
+
+    constexpr int block = 256;
+    const int grid = static_cast<int>((rows + block - 1) / block);
+    detail::CSRPtrToCOORowKernel<<<grid, block, 0, stream>>>(rows, d_ai, d_coo_rows, base);
+    detail::check_cuda(cudaGetLastError(), "CSRPtrToCOORowDevice kernel launch");
+}
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void CSRFindDiagonalDevice(
@@ -339,5 +397,7 @@ template void CSRGenDiagScaledPruneMask<std::int64_t, int, double, int>(int, con
 
 template void CSRDiagDevice<int, int>(int, int, DeviceCSRMatrix<int, int>&);
 template void CSRDiagDevice<std::int64_t, int>(int, std::int64_t, DeviceCSRMatrix<std::int64_t, int>&);
+template void CSRPtrToCOORowDevice<int, int>(int, const int*, int*, cudaStream_t);
+template void CSRPtrToCOORowDevice<std::int64_t, int>(int, const std::int64_t*, int*, cudaStream_t);
 
 } // namespace matrix_utils::sparse_cuda

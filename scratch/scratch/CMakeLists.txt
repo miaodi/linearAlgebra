@@ -19,12 +19,9 @@ if(USE_CUDA)
     CUDA_STANDARD_REQUIRED ON
     CUDA_EXTENSIONS OFF
   )
+  # CUDA test executable
+  add_executable(cuda_test cuda_test.cu)
+  target_compile_features(cuda_test PRIVATE cxx_std_20)
 else()
-  # Fallback to regular C++ if CUDA is not available
-  add_executable(scratch_test test.cpp)
-  target_compile_features(scratch_test PRIVATE cxx_std_20)
 endif()
 
-# CUDA test executable
-add_executable(cuda_test cuda_test.cu)
-target_compile_features(cuda_test PRIVATE cxx_std_20)
