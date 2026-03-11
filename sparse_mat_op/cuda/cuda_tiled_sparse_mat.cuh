@@ -34,6 +34,15 @@ struct DeviceTileCOOMatrix
     DeviceArray<COLTYPE> row_ind;           // COO row indices in tile order
     DeviceArray<COLTYPE> col_ind;           // COO col indices in tile order
     DeviceArray<VALTYPE> values;            // COO values in tile order
+
+    const COLTYPE* tileRowIndData() const { return tile_row_ind.data(); }
+    const COLTYPE* tileColIndData() const { return tile_col_ind.data(); }
+    const ROWTYPE* tileNnzPrefixData() const { return tile_nnz_prefix.data(); }
+    const COLTYPE* rowIndData() const { return row_ind.data(); }
+    const COLTYPE* colIndData() const { return col_ind.data(); }
+    VALTYPE* valuesData() { return values.data(); }
+    const VALTYPE* valuesData() const { return values.data(); }
+    size_t nnz() const { return values.size(); }
 };
 
 template <typename NnzType, typename IndexType>

@@ -2,7 +2,7 @@
 
 #include <cusparse.h>
 #include <cuda_runtime.h>
-#include <string>
+#include <cstdio>
 #include <stdexcept>
 
 namespace matrix_utils::sparse_cuda
@@ -12,7 +12,9 @@ inline void checkCudaMemoryOp(cudaError_t error, const char* op)
 {
     if (error != cudaSuccess)
     {
-        throw std::runtime_error(std::string(op) + ": " + cudaGetErrorString(error));
+        char message[512];
+        std::snprintf(message, sizeof(message), "%s: %s", op, cudaGetErrorString(error));
+        throw std::runtime_error(message);
     }
 }
 
@@ -228,8 +230,10 @@ private:
  */
 inline void checkCudaError(cudaError_t error, const char* message) {
     if (error != cudaSuccess) {
-        throw std::runtime_error(std::string("CUDA error: ") + message + " - " + 
-                                cudaGetErrorString(error));
+        char full_message[512];
+        std::snprintf(full_message, sizeof(full_message), "CUDA error: %s - %s",
+                      message, cudaGetErrorString(error));
+        throw std::runtime_error(full_message);
     }
 }
 

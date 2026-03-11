@@ -137,9 +137,8 @@ static void BM_RuizScaleCudaTiled(benchmark::State& state, const std::string& ma
 {
     const int tile_k = static_cast<int>(state.range(0));
 
-    constexpr int warps_per_block = 4;
     const size_t tile_size = size_t{1} << tile_k;
-    const size_t shared_bytes = static_cast<size_t>(warps_per_block) * 2 * tile_size * sizeof(double);
+    const size_t shared_bytes = 2 * tile_size * sizeof(double);
 
     int max_shared_per_block = 0;
     checkCudaError(cudaDeviceGetAttribute(&max_shared_per_block, cudaDevAttrMaxSharedMemoryPerBlock, 0),
@@ -259,9 +258,9 @@ int main(int argc, char** argv)
         benchmark::RegisterBenchmark("BM_RuizScaleCudaTiled/k=10", BM_RuizScaleCudaTiled, matrix_file, max_iters)
             ->Arg(10)
             ->Unit(benchmark::kMillisecond);
-        // benchmark::RegisterBenchmark("BM_RuizScaleCudaTiled/k=12", BM_RuizScaleCudaTiled, matrix_file, max_iters)
-        //     ->Arg(12)
-        //     ->Unit(benchmark::kMillisecond);
+        benchmark::RegisterBenchmark("BM_RuizScaleCudaTiled/k=12", BM_RuizScaleCudaTiled, matrix_file, max_iters)
+            ->Arg(12)
+            ->Unit(benchmark::kMillisecond);
     }
     catch (const std::exception& e)
     {
