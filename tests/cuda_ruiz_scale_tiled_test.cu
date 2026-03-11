@@ -1,11 +1,10 @@
 #include <gtest/gtest.h>
 
+#include "cuda_kernels.cuh"
 #include "cuda_ruiz_scale.cuh"
 #include "cuda_tiled_sparse_mat.cuh"
 #include "io.hpp"
 #include "matrix_utils.hpp"
-
-#include <thrust/device_vector.h>
 
 #include <fstream>
 #include <vector>
@@ -25,31 +24,51 @@ TEST(CudaRuizScaleTiled, MultiIterationMatchesCSRWithValueUnpermute)
     const int cols = h_csr.cols;
     const int nnz = static_cast<int>(h_csr.NNZ());
 
-    thrust::device_vector<int> d_ai(h_csr.AI(), h_csr.AI() + static_cast<size_t>(rows + 1));
-    thrust::device_vector<int> d_aj(h_csr.AJ(), h_csr.AJ() + static_cast<size_t>(nnz));
-    thrust::device_vector<double> d_av_csr(h_csr.AV(), h_csr.AV() + static_cast<size_t>(nnz));
-    thrust::device_vector<double> d_av_tile = d_av_csr;
+    cuda_utils::DeviceArray<int> d_ai;
+    cuda_utils::DeviceArray<int> d_aj;
+    cuda_utils::DeviceArray<double> d_av_csr;
+    cuda_utils::DeviceArray<double> d_av_tile;
+    d_ai.copyFromHost(h_csr.AI(), static_cast<size_t>(rows + 1));
+    d_aj.copyFromHost(h_csr.AJ(), static_cast<size_t>(nnz));
+    d_av_csr.copyFromHost(h_csr.AV(), static_cast<size_t>(nnz));
+    d_av_tile.copyFromHost(h_csr.AV(), static_cast<size_t>(nnz));
 
-    thrust::device_vector<double> d_dr_csr(static_cast<size_t>(rows), 1.0);
-    thrust::device_vector<double> d_dc_csr(static_cast<size_t>(cols), 1.0);
-    thrust::device_vector<double> d_dr_tile(static_cast<size_t>(rows), 1.0);
-    thrust::device_vector<double> d_dc_tile(static_cast<size_t>(cols), 1.0);
+    cuda_utils::DeviceArray<double> d_dr_csr;
+    d_dr_csr.resize(static_cast<size_t>(rows));
+    cuda_utils::fillArray(d_dr_csr.data(), static_cast<size_t>(rows), 1.0);
+    ASSERT_EQ(cudaGetLastError(), cudaSuccess) << cudaGetErrorString(cudaGetLastError());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess) << cudaGetErrorString(cudaGetLastError());
+
+    cuda_utils::DeviceArray<double> d_dc_csr;
+    d_dc_csr.resize(static_cast<size_t>(cols));
+    cuda_utils::fillArray(d_dc_csr.data(), static_cast<size_t>(cols), 1.0);
+    ASSERT_EQ(cudaGetLastError(), cudaSuccess) << cudaGetErrorString(cudaGetLastError());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess) << cudaGetErrorString(cudaGetLastError());
+
+    cuda_utils::DeviceArray<double> d_dr_tile;
+    d_dr_tile.resize(static_cast<size_t>(rows));
+    cuda_utils::fillArray(d_dr_tile.data(), static_cast<size_t>(rows), 1.0);
+    ASSERT_EQ(cudaGetLastError(), cudaSuccess) << cudaGetErrorString(cudaGetLastError());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess) << cudaGetErrorString(cudaGetLastError());
+
+    cuda_utils::DeviceArray<double> d_dc_tile;
+    d_dc_tile.resize(static_cast<size_t>(cols));
+    cuda_utils::fillArray(d_dc_tile.data(), static_cast<size_t>(cols), 1.0);
+    ASSERT_EQ(cudaGetLastError(), cudaSuccess) << cudaGetErrorString(cudaGetLastError());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess) << cudaGetErrorString(cudaGetLastError());
 
     cuda_utils::DeviceTileCOOMatrix<int, int, double> tile_mat;
     constexpr int tile_k = 4;
     cuda_utils::CSRToTileCOO<int, int, double>(
-        rows, cols, thrust::raw_pointer_cast(d_ai.data()), thrust::raw_pointer_cast(d_aj.data()),
-        thrust::raw_pointer_cast(d_av_tile.data()), tile_k, tile_mat, nullptr);
+        rows, cols, d_ai.data(), d_aj.data(), d_av_tile.data(), tile_k, tile_mat, nullptr);
 
     constexpr int max_iters = 5;
-    ASSERT_TRUE((cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
-        rows, cols, thrust::raw_pointer_cast(d_ai.data()), thrust::raw_pointer_cast(d_aj.data()),
-        thrust::raw_pointer_cast(d_av_csr.data()), thrust::raw_pointer_cast(d_dr_csr.data()),
-        thrust::raw_pointer_cast(d_dc_csr.data()), max_iters)));
 
     ASSERT_TRUE((cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
-        tile_mat, thrust::raw_pointer_cast(d_dr_tile.data()),
-        thrust::raw_pointer_cast(d_dc_tile.data()), max_iters)));
+        tile_mat, d_dr_tile.data(), d_dc_tile.data(), max_iters)));
+
+    ASSERT_TRUE((cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
+        rows, cols, d_ai.data(), d_aj.data(), d_av_csr.data(), d_dr_csr.data(), d_dc_csr.data(), max_iters)));
 
     std::vector<double> h_dr_csr(static_cast<size_t>(rows));
     std::vector<double> h_dc_csr(static_cast<size_t>(cols));
@@ -60,11 +79,11 @@ TEST(CudaRuizScaleTiled, MultiIterationMatchesCSRWithValueUnpermute)
     std::vector<int> h_perm(static_cast<size_t>(nnz));
     std::vector<double> h_av_tile_original(static_cast<size_t>(nnz), 0.0);
 
-    thrust::copy(d_dr_csr.begin(), d_dr_csr.end(), h_dr_csr.begin());
-    thrust::copy(d_dc_csr.begin(), d_dc_csr.end(), h_dc_csr.begin());
-    thrust::copy(d_dr_tile.begin(), d_dr_tile.end(), h_dr_tile.begin());
-    thrust::copy(d_dc_tile.begin(), d_dc_tile.end(), h_dc_tile.begin());
-    thrust::copy(d_av_csr.begin(), d_av_csr.end(), h_av_csr.begin());
+    d_dr_csr.copyToHost(h_dr_csr.data());
+    d_dc_csr.copyToHost(h_dc_csr.data());
+    d_dr_tile.copyToHost(h_dr_tile.data());
+    d_dc_tile.copyToHost(h_dc_tile.data());
+    d_av_csr.copyToHost(h_av_csr.data());
     tile_mat.values.copyToHost(h_av_tile_sorted.data());
     tile_mat.permutation.copyToHost(h_perm.data());
 

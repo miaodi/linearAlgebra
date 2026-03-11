@@ -45,7 +45,8 @@ enum class CudaRuizScalingNormType : uint8_t
 ///
 /// @note The matrix values (d_av) are modified in-place to contain the scaled matrix.
 ///       To recover the original matrix, apply: A_orig[i,j] = d_av[i,j] / (d_dr[i] * d_dc[j])
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, CudaRuizScalingNormType NORM = CudaRuizScalingNormType::MaxNorm>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
+          CudaRuizScalingNormType NORM = CudaRuizScalingNormType::MaxNorm>
 bool RuizScaleCuda(const COLTYPE rows, const COLTYPE cols, const ROWTYPE* d_ai, const COLTYPE* d_aj,
                    VALTYPE* d_av, VALTYPE* d_dr, VALTYPE* d_dc, const int max_iters = 20);
 
@@ -56,9 +57,9 @@ bool RuizScaleCuda(const COLTYPE rows, const COLTYPE cols, const ROWTYPE* d_ai, 
 /// merged into global row/column norm arrays.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE,
           CudaRuizScalingNormType NORM = CudaRuizScalingNormType::MaxNorm>
-bool RuizScaleCuda(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat,
-                   VALTYPE* d_dr,
-                   VALTYPE* d_dc,
-                   const int max_iters = 20);
+bool RuizScaleCuda(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat, VALTYPE* d_dr,
+                   VALTYPE* d_dc, const int max_iters = 20);
 
 } // namespace matrix_utils::sparse_cuda
+
+#include "cuda_ruiz_scale_impl.cuh"

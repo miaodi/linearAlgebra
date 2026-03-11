@@ -267,38 +267,38 @@ void CSRToTileCOO(
         nnz, k, coo_rows.data(), d_aj, col_bits, static_cast<COLTYPE>(base), keys_in.data(), stream);
     detail::check_cuda(cudaGetLastError(), "BuildTileKeys kernel launch");
 
-    thrust::sequence(thrust::cuda::par.on(stream), perm_in.data(), perm_in.data() + static_cast<size_t>(nnz));
+    auto exec = thrust::cuda::par.on(stream);
+    auto perm_in_begin = thrust::device_pointer_cast(perm_in.data());
+    thrust::sequence(exec, perm_in_begin, perm_in_begin + static_cast<size_t>(nnz));
 
     void* d_temp_storage = nullptr;
     size_t temp_storage_bytes = 0;
-    cub::DeviceRadixSort::SortPairs(
-        d_temp_storage,
-        temp_storage_bytes,
-        keys_in.data(),
-        keys_sorted.data(),
-        perm_in.data(),
-        out.permutation.data(),
-        nnz,
-        0,
-        effective_end_bit,
-        stream);
+    detail::check_cuda(cub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                                       temp_storage_bytes,
+                                                       keys_in.data(),
+                                                       keys_sorted.data(),
+                                                       perm_in.data(),
+                                                       out.permutation.data(),
+                                                       nnz,
+                                                       0,
+                                                       effective_end_bit,
+                                                       stream),
+                       "DeviceRadixSort::SortPairs temp query");
 
     DeviceArray<std::uint8_t> temp_storage;
     temp_storage.resize(temp_storage_bytes == 0 ? 1 : temp_storage_bytes);
+    detail::check_cuda(cub::DeviceRadixSort::SortPairs(temp_storage.data(),
+                                                       temp_storage_bytes,
+                                                       keys_in.data(),
+                                                       keys_sorted.data(),
+                                                       perm_in.data(),
+                                                       out.permutation.data(),
+                                                       nnz,
+                                                       0,
+                                                       effective_end_bit,
+                                                       stream),
+                       "DeviceRadixSort::SortPairs sort");
 
-    cub::DeviceRadixSort::SortPairs(
-        temp_storage.data(),
-        temp_storage_bytes,
-        keys_in.data(),
-        keys_sorted.data(),
-        perm_in.data(),
-        out.permutation.data(),
-        nnz,
-        0,
-        effective_end_bit,
-        stream);
-
-    auto exec = thrust::cuda::par.on(stream);
     const auto nnz_count = static_cast<size_t>(nnz);
     auto perm_begin = thrust::device_pointer_cast(out.permutation.data());
     thrust::gather(

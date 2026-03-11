@@ -7,9 +7,6 @@
 #include <cxxopts.hpp>
 
 #include <cuda_runtime.h>
-#include <thrust/copy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_vector.h>
 
 #include <fstream>
 #include <iostream>
@@ -73,6 +70,24 @@ private:
     MatrixCache() = default;
 };
 
+__global__ void fill_double_kernel(double* data, int n, double value)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n)
+    {
+        data[i] = value;
+    }
+}
+
+inline void fillDeviceArray(cuda_utils::DeviceArray<double>& arr, int n, double value)
+{
+    const int block_size = 256;
+    const int grid_size = (n + block_size - 1) / block_size;
+    fill_double_kernel<<<grid_size, block_size>>>(arr.data(), n, value);
+    checkCudaError(cudaGetLastError(), "fill_double_kernel launch");
+    checkCudaError(cudaDeviceSynchronize(), "fill_double_kernel sync");
+}
+
 static void BM_RuizScaleCudaCSR(benchmark::State& state, const std::string& matrix_file, int max_iters)
 {
     MatrixCache& cache = MatrixCache::instance();
@@ -83,29 +98,35 @@ static void BM_RuizScaleCudaCSR(benchmark::State& state, const std::string& matr
     const int cols = mat.cols;
     const int nnz = static_cast<int>(mat.NNZ());
 
-    thrust::device_vector<int> d_ai(mat.ai);
-    thrust::device_vector<int> d_aj(mat.aj);
-    thrust::device_vector<double> d_av0(mat.av);
-    thrust::device_vector<double> d_av = d_av0;
-    thrust::device_vector<double> d_dr(static_cast<size_t>(rows), 1.0);
-    thrust::device_vector<double> d_dc(static_cast<size_t>(cols), 1.0);
+    cuda_utils::DeviceArray<int> d_ai;
+    cuda_utils::DeviceArray<int> d_aj;
+    cuda_utils::DeviceArray<double> d_av0;
+    cuda_utils::DeviceArray<double> d_av;
+    cuda_utils::DeviceArray<double> d_dr;
+    cuda_utils::DeviceArray<double> d_dc;
+    d_ai.copyFromHost(mat.AI(), static_cast<size_t>(rows + 1));
+    d_aj.copyFromHost(mat.AJ(), static_cast<size_t>(nnz));
+    d_av0.copyFromHost(mat.AV(), static_cast<size_t>(nnz));
+    d_av.copyFromHost(mat.AV(), static_cast<size_t>(nnz));
+    d_dr.resize(static_cast<size_t>(rows));
+    d_dc.resize(static_cast<size_t>(cols));
+    fillDeviceArray(d_dr, rows, 1.0);
+    fillDeviceArray(d_dc, cols, 1.0);
 
     (void)cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
-        rows, cols, thrust::raw_pointer_cast(d_ai.data()), thrust::raw_pointer_cast(d_aj.data()),
-        thrust::raw_pointer_cast(d_av.data()), thrust::raw_pointer_cast(d_dr.data()),
-        thrust::raw_pointer_cast(d_dc.data()), 1);
+        rows, cols, d_ai.data(), d_aj.data(), d_av.data(), d_dr.data(), d_dc.data(), 1);
     checkCudaError(cudaDeviceSynchronize(), "warm-up sync (csr)");
 
     for (auto _ : state)
     {
         state.PauseTiming();
-        thrust::copy(d_av0.begin(), d_av0.end(), d_av.begin());
+        checkCudaError(cudaMemcpy(d_av.data(), d_av0.data(), static_cast<size_t>(nnz) * sizeof(double),
+                                  cudaMemcpyDeviceToDevice),
+                       "reset d_av");
         state.ResumeTiming();
 
         (void)cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
-            rows, cols, thrust::raw_pointer_cast(d_ai.data()),
-            thrust::raw_pointer_cast(d_aj.data()), thrust::raw_pointer_cast(d_av.data()),
-            thrust::raw_pointer_cast(d_dr.data()), thrust::raw_pointer_cast(d_dc.data()), max_iters);
+            rows, cols, d_ai.data(), d_aj.data(), d_av.data(), d_dr.data(), d_dc.data(), max_iters);
         checkCudaError(cudaDeviceSynchronize(), "benchmark sync (csr)");
     }
 
@@ -137,34 +158,44 @@ static void BM_RuizScaleCudaTiled(benchmark::State& state, const std::string& ma
     const int cols = mat.cols;
     const int nnz = static_cast<int>(mat.NNZ());
 
-    thrust::device_vector<int> d_ai(mat.ai);
-    thrust::device_vector<int> d_aj(mat.aj);
-    thrust::device_vector<double> d_av_for_tile(mat.av);
-    thrust::device_vector<double> d_dr(static_cast<size_t>(rows), 1.0);
-    thrust::device_vector<double> d_dc(static_cast<size_t>(cols), 1.0);
+    cuda_utils::DeviceArray<int> d_ai;
+    cuda_utils::DeviceArray<int> d_aj;
+    cuda_utils::DeviceArray<double> d_av_for_tile;
+    cuda_utils::DeviceArray<double> d_dr;
+    cuda_utils::DeviceArray<double> d_dc;
+    d_ai.copyFromHost(mat.AI(), static_cast<size_t>(rows + 1));
+    d_aj.copyFromHost(mat.AJ(), static_cast<size_t>(nnz));
+    d_av_for_tile.copyFromHost(mat.AV(), static_cast<size_t>(nnz));
+    d_dr.resize(static_cast<size_t>(rows));
+    d_dc.resize(static_cast<size_t>(cols));
+    fillDeviceArray(d_dr, rows, 1.0);
+    fillDeviceArray(d_dc, cols, 1.0);
 
     cuda_utils::DeviceTileCOOMatrix<int, int, double> tile_mat;
     cuda_utils::CSRToTileCOO<int, int, double>(
-        rows, cols, thrust::raw_pointer_cast(d_ai.data()), thrust::raw_pointer_cast(d_aj.data()),
-        thrust::raw_pointer_cast(d_av_for_tile.data()), tile_k, tile_mat, nullptr);
+        rows, cols, d_ai.data(), d_aj.data(), d_av_for_tile.data(), tile_k, tile_mat, nullptr);
     checkCudaError(cudaDeviceSynchronize(), "tile preprocess sync");
 
-    thrust::device_ptr<double> tile_values_begin = thrust::device_pointer_cast(tile_mat.values.data());
-    thrust::device_ptr<double> tile_values_end = tile_values_begin + tile_mat.values.size();
-    thrust::device_vector<double> d_tile_values0(tile_values_begin, tile_values_end);
+    cuda_utils::DeviceArray<double> d_tile_values0;
+    d_tile_values0.resize(tile_mat.values.size());
+    checkCudaError(cudaMemcpy(d_tile_values0.data(), tile_mat.values.data(),
+                              tile_mat.values.size() * sizeof(double), cudaMemcpyDeviceToDevice),
+                   "snapshot tile values");
 
     (void)cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
-        tile_mat, thrust::raw_pointer_cast(d_dr.data()), thrust::raw_pointer_cast(d_dc.data()), 1);
+        tile_mat, d_dr.data(), d_dc.data(), 1);
     checkCudaError(cudaDeviceSynchronize(), "warm-up sync (tile)");
 
     for (auto _ : state)
     {
         state.PauseTiming();
-        thrust::copy(d_tile_values0.begin(), d_tile_values0.end(), tile_values_begin);
+        checkCudaError(cudaMemcpy(tile_mat.values.data(), d_tile_values0.data(),
+                                  tile_mat.values.size() * sizeof(double), cudaMemcpyDeviceToDevice),
+                       "reset tile values");
         state.ResumeTiming();
 
         (void)cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
-            tile_mat, thrust::raw_pointer_cast(d_dr.data()), thrust::raw_pointer_cast(d_dc.data()), max_iters);
+            tile_mat, d_dr.data(), d_dc.data(), max_iters);
         checkCudaError(cudaDeviceSynchronize(), "benchmark sync (tile)");
     }
 
@@ -177,7 +208,7 @@ void printUsage()
 {
     std::cout << "cuda_ruiz_scale_bench - Benchmark for RuizScaleCuda (CSR vs TileCOO)\n"
               << "\nCustom Options:\n"
-              << "  -m, --matrix FILE    Matrix Market file path (default: data/ex27.mtx)\n"
+              << "  -f, --file FILE      Matrix Market file path (default: data/ex27.mtx)\n"
               << "  -i, --iters N        Ruiz iterations per call (default: 5)\n"
               << "\nGoogle Benchmark Options:\n"
               << "  --help               Print Google Benchmark help\n"
@@ -191,7 +222,7 @@ int main(int argc, char** argv)
 {
     cxxopts::Options options("cuda_ruiz_scale_bench", "Benchmark for RuizScaleCuda");
     options.allow_unrecognised_options().add_options()(
-        "m,matrix", "Matrix Market file path", cxxopts::value<std::string>()->default_value("data/thermal2.mtx"))(
+        "f,file", "Matrix Market file path", cxxopts::value<std::string>()->default_value("data/thermal2.mtx"))(
         "i,iters", "Ruiz iterations per benchmark call", cxxopts::value<int>()->default_value("5"));
 
     std::string matrix_file;
@@ -200,12 +231,15 @@ int main(int argc, char** argv)
     try
     {
         auto result = options.parse(argc, argv);
-        matrix_file = result["m"].as<std::string>();
+        matrix_file = result["f"].as<std::string>();
         max_iters = result["i"].as<int>();
         if (max_iters <= 0)
         {
             throw std::runtime_error("--iters must be > 0");
         }
+
+        std::cout << "file path: " << matrix_file << std::endl;
+        std::cout << "iters: " << max_iters << std::endl;
 
         benchmark::RegisterBenchmark("BM_RuizScaleCudaCSR", BM_RuizScaleCudaCSR, matrix_file, max_iters)
             ->Unit(benchmark::kMillisecond);

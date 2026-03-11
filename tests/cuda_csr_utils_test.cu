@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
+#include <cub/cub.cuh>
 #include "cuda_csr_utils.cuh"
 #include "cuda_tiled_sparse_mat.cuh"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "utils.h"
 #include <cuda_runtime.h>
@@ -62,6 +64,57 @@ void CreateTestMatrixForDiagonalPrune(
         }
         ai[i + 1] = nnz_count + base;
     }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+matrix_utils::CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> TileCOOToSortedCSR(
+    COLTYPE rows,
+    COLTYPE cols,
+    ROWTYPE base,
+    const std::vector<COLTYPE>& row_ind,
+    const std::vector<COLTYPE>& col_ind,
+    const std::vector<VALTYPE>& values)
+{
+    struct Entry
+    {
+        COLTYPE row;
+        COLTYPE col;
+        VALTYPE val;
+    };
+
+    std::vector<Entry> entries(values.size());
+    for (size_t i = 0; i < values.size(); ++i)
+    {
+        entries[i] = Entry{row_ind[i], col_ind[i], values[i]};
+    }
+
+    std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+        if (a.row != b.row)
+            return a.row < b.row;
+        return a.col < b.col;
+    });
+
+    matrix_utils::CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> csr;
+    csr.rows = rows;
+    csr.cols = cols;
+    csr.ai.assign(static_cast<size_t>(rows + 1), base);
+    csr.aj.resize(entries.size());
+    csr.av.resize(entries.size());
+
+    size_t entry_idx = 0;
+    for (COLTYPE row = 0; row < rows; ++row)
+    {
+        const COLTYPE row_with_base = row + static_cast<COLTYPE>(base);
+        while (entry_idx < entries.size() && entries[entry_idx].row == row_with_base)
+        {
+            csr.aj[entry_idx] = entries[entry_idx].col;
+            csr.av[entry_idx] = entries[entry_idx].val;
+            ++entry_idx;
+        }
+        csr.ai[static_cast<size_t>(row + 1)] = static_cast<ROWTYPE>(entry_idx + base);
+    }
+
+    return csr;
 }
 
 TEST(CudaCSRUtils, CSRFindDiagonalDeviceBase0)
@@ -738,6 +791,145 @@ TEST(CudaCSRUtils, CSRToTileCOOBase1)
     EXPECT_EQ(row_host, expected_rows);
     EXPECT_EQ(col_host, expected_cols);
     EXPECT_EQ(val_host, expected_vals);
+}
+
+TEST(CudaCSRUtils, CSRToTileCOORoundTripFromMatrixMarket)
+{
+    std::ifstream f("data/ex27.mtx");
+    ASSERT_TRUE(f.is_open()) << "Failed to open data/ex27.mtx";
+
+    using HostCSR = matrix_utils::CSRMatrixVec<int, int, double>;
+    HostCSR original;
+    matrix_utils::readMatrixMarket(f, original);
+
+    const int rows = original.rows;
+    const int cols = original.cols;
+    const int nnz = static_cast<int>(original.NNZ());
+
+    thrust::device_vector<int> d_ai(original.AI(), original.AI() + static_cast<size_t>(rows + 1));
+    thrust::device_vector<int> d_aj(original.AJ(), original.AJ() + static_cast<size_t>(nnz));
+    thrust::device_vector<double> d_av(original.AV(), original.AV() + static_cast<size_t>(nnz));
+
+    cuda_utils::DeviceTileCOOMatrix<int, int, double> tiled;
+    constexpr int tile_k = 4;
+    cuda_utils::CSRToTileCOO(
+        rows,
+        cols,
+        thrust::raw_pointer_cast(d_ai.data()),
+        thrust::raw_pointer_cast(d_aj.data()),
+        thrust::raw_pointer_cast(d_av.data()),
+        tile_k,
+        tiled);
+
+    ASSERT_EQ(tiled.base, original.Base());
+    ASSERT_EQ(tiled.row_ind.size(), static_cast<size_t>(nnz));
+    ASSERT_EQ(tiled.col_ind.size(), static_cast<size_t>(nnz));
+    ASSERT_EQ(tiled.values.size(), static_cast<size_t>(nnz));
+    ASSERT_EQ(tiled.permutation.size(), static_cast<size_t>(nnz));
+
+    std::vector<int> tiled_rows(static_cast<size_t>(nnz));
+    std::vector<int> tiled_cols(static_cast<size_t>(nnz));
+    std::vector<double> tiled_vals(static_cast<size_t>(nnz));
+    std::vector<int> tiled_perm(static_cast<size_t>(nnz));
+    tiled.row_ind.copyToHost(tiled_rows.data());
+    tiled.col_ind.copyToHost(tiled_cols.data());
+    tiled.values.copyToHost(tiled_vals.data());
+    tiled.permutation.copyToHost(tiled_perm.data());
+
+    std::vector<int> sorted_perm = tiled_perm;
+    std::sort(sorted_perm.begin(), sorted_perm.end());
+    for (int i = 0; i < nnz; ++i)
+    {
+        ASSERT_EQ(sorted_perm[static_cast<size_t>(i)], i) << "invalid permutation at position " << i;
+    }
+
+    const int base = tiled.base;
+    for (int i = 0; i < nnz; ++i)
+    {
+        ASSERT_GE(tiled_rows[static_cast<size_t>(i)], base) << "row_ind out of range at nnz " << i;
+        ASSERT_LT(tiled_rows[static_cast<size_t>(i)], rows + base) << "row_ind out of range at nnz " << i;
+        ASSERT_GE(tiled_cols[static_cast<size_t>(i)], base) << "col_ind out of range at nnz " << i;
+        ASSERT_LT(tiled_cols[static_cast<size_t>(i)], cols + base) << "col_ind out of range at nnz " << i;
+    }
+
+    const HostCSR round_tripped = TileCOOToSortedCSR<int, int, double>(
+        rows, cols, tiled.base, tiled_rows, tiled_cols, tiled_vals);
+
+    ASSERT_EQ(round_tripped.rows, original.rows);
+    ASSERT_EQ(round_tripped.cols, original.cols);
+    ASSERT_EQ(round_tripped.ai.size(), original.ai.size());
+    ASSERT_EQ(round_tripped.aj.size(), original.aj.size());
+    ASSERT_EQ(round_tripped.av.size(), original.av.size());
+
+    EXPECT_EQ(round_tripped.ai, original.ai);
+    EXPECT_EQ(round_tripped.aj, original.aj);
+
+    constexpr double tol = 1e-14;
+    for (size_t i = 0; i < original.av.size(); ++i)
+    {
+        EXPECT_NEAR(round_tripped.av[i], original.av[i], tol)
+            << "value mismatch at nnz index " << i;
+    }
+}
+
+TEST(CudaCSRUtils, CUBSortPairsUint64Int)
+{
+    constexpr int n = 1 << 24;
+    std::vector<uint64_t> h_keys(static_cast<size_t>(n));
+    std::vector<int> h_vals(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+    {
+        const uint64_t seed = static_cast<uint64_t>(static_cast<uint32_t>(i));
+        h_keys[static_cast<size_t>(i)] = (seed * 48271ULL) % 65537ULL;
+        h_vals[static_cast<size_t>(i)] = i;
+    }
+
+    thrust::device_vector<uint64_t> d_keys_in(h_keys);
+    thrust::device_vector<uint64_t> d_keys_out(static_cast<size_t>(n));
+    thrust::device_vector<int> d_vals_in(h_vals);
+    thrust::device_vector<int> d_vals_out(static_cast<size_t>(n));
+
+    void* temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
+    auto status = cub::DeviceRadixSort::SortPairs(temp_storage,
+                                                  temp_storage_bytes,
+                                                  thrust::raw_pointer_cast(d_keys_in.data()),
+                                                  thrust::raw_pointer_cast(d_keys_out.data()),
+                                                  thrust::raw_pointer_cast(d_vals_in.data()),
+                                                  thrust::raw_pointer_cast(d_vals_out.data()),
+                                                  n);
+    ASSERT_EQ(status, cudaSuccess) << cudaGetErrorString(status);
+
+    thrust::device_vector<std::uint8_t> d_temp(temp_storage_bytes == 0 ? 1 : temp_storage_bytes);
+    status = cub::DeviceRadixSort::SortPairs(thrust::raw_pointer_cast(d_temp.data()),
+                                             temp_storage_bytes,
+                                             thrust::raw_pointer_cast(d_keys_in.data()),
+                                             thrust::raw_pointer_cast(d_keys_out.data()),
+                                             thrust::raw_pointer_cast(d_vals_in.data()),
+                                             thrust::raw_pointer_cast(d_vals_out.data()),
+                                             n);
+    ASSERT_EQ(status, cudaSuccess) << cudaGetErrorString(status);
+
+    status = cudaDeviceSynchronize();
+    ASSERT_EQ(status, cudaSuccess) << cudaGetErrorString(status);
+
+    std::vector<uint64_t> h_sorted_keys(static_cast<size_t>(n));
+    std::vector<int> h_sorted_vals(static_cast<size_t>(n));
+    thrust::copy(d_keys_out.begin(), d_keys_out.end(), h_sorted_keys.begin());
+    thrust::copy(d_vals_out.begin(), d_vals_out.end(), h_sorted_vals.begin());
+
+    for (int i = 1; i < n; ++i)
+    {
+        ASSERT_LE(h_sorted_keys[static_cast<size_t>(i - 1)], h_sorted_keys[static_cast<size_t>(i)])
+            << "keys not sorted at position " << i;
+    }
+
+    std::vector<int> sorted_vals = h_sorted_vals;
+    std::sort(sorted_vals.begin(), sorted_vals.end());
+    for (int i = 0; i < n; ++i)
+    {
+        ASSERT_EQ(sorted_vals[static_cast<size_t>(i)], i) << "values not preserved at position " << i;
+    }
 }
 
 TEST(CudaCSRUtils, TileKeysToCOOMeta)

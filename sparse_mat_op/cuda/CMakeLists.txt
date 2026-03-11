@@ -13,7 +13,7 @@ set(CUDA_SOURCES
     cuda_csr_utils.cu
     cuda_spmm.cu
     cuda_iluk_U_symbolic.cu
-    cuda_ruiz_scale.cu
+    cuda_ruiz_scale_impl.cu
     cuda_tiled_sparse_mat.cu
 )
 

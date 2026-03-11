@@ -21,6 +21,9 @@ template <int items_per_thread = 4>
 void elementwiseMultiply(const double* d_a, const double* d_b,
                          double* d_output, size_t n);
 
+template <typename T>
+void fillArray(T* d_data, size_t n, T value);
+
 // Additional CUDA kernels for iterative solvers can be added here
 
 } // namespace matrix_utils::sparse_cuda

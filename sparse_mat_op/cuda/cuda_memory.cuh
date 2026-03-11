@@ -8,6 +8,14 @@
 namespace matrix_utils::sparse_cuda
 {
 
+inline void checkCudaMemoryOp(cudaError_t error, const char* op)
+{
+    if (error != cudaSuccess)
+    {
+        throw std::runtime_error(std::string(op) + ": " + cudaGetErrorString(error));
+    }
+}
+
 /**
  * @brief Memory location descriptor
  */
@@ -86,9 +94,9 @@ public:
     void resize(size_t new_size) {
         if (new_size > _capacity) {
             if (_data) {
-                Allocator::deallocate(_data);
+                checkCudaMemoryOp(Allocator::deallocate(_data), "cuda deallocate failed");
             }
-            Allocator::allocate(&_data, new_size);
+            checkCudaMemoryOp(Allocator::allocate(&_data, new_size), "cuda allocate failed");
             _capacity = new_size;
         }
         _size = new_size;
@@ -99,7 +107,7 @@ public:
         resize(count);
         if (count > 0) {
             constexpr cudaMemcpyKind kind = getCopyKind<SrcLocation, Allocator::location>();
-            cudaMemcpy(_data, src_data, count * sizeof(T), kind);
+            checkCudaMemoryOp(cudaMemcpy(_data, src_data, count * sizeof(T), kind), "cudaMemcpy failed");
         }
     }
     
@@ -114,7 +122,7 @@ public:
     void copyToHost(T* host_data) const {
         if (_size > 0 && host_data != nullptr) {
             constexpr cudaMemcpyKind kind = getCopyKind<Allocator::location, MemoryLocation::Host>();
-            cudaMemcpy(host_data, _data, _size * sizeof(T), kind);
+            checkCudaMemoryOp(cudaMemcpy(host_data, _data, _size * sizeof(T), kind), "cudaMemcpy to host failed");
         }
     }
     
@@ -136,7 +144,7 @@ public:
     
     void release() {
         if (_data) {
-            Allocator::deallocate(_data);
+            checkCudaMemoryOp(Allocator::deallocate(_data), "cuda deallocate failed");
             _data = nullptr;
         }
         _size = 0;
