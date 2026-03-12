@@ -8,6 +8,7 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -120,8 +121,8 @@ static void BM_RuizScaleCudaCSR(benchmark::State& state, const std::string& matr
     for (auto _ : state)
     {
         state.PauseTiming();
-        checkCudaError(cudaMemcpy(d_av.data(), d_av0.data(), static_cast<size_t>(nnz) * sizeof(double),
-                                  cudaMemcpyDeviceToDevice),
+        checkCudaError(cudaMemcpy(d_av.data(), d_av0.data(),
+                                  static_cast<size_t>(nnz) * sizeof(double), cudaMemcpyDeviceToDevice),
                        "reset d_av");
         state.ResumeTiming();
 
@@ -171,9 +172,29 @@ static void BM_RuizScaleCudaTiled(benchmark::State& state, const std::string& ma
     fillDeviceArray(d_dc, cols, 1.0);
 
     cuda_utils::DeviceTileCOOMatrix<int, int, double> tile_mat;
-    cuda_utils::CSRToTileCOO<int, int, double>(
+    cuda_utils::CSRToTileCOO<int, int, double, true>(
         rows, cols, d_ai.data(), d_aj.data(), d_av_for_tile.data(), tile_k, tile_mat, nullptr);
     checkCudaError(cudaDeviceSynchronize(), "tile preprocess sync");
+
+    // Benchmark policy: dense tile if tile_nnz >= 32 * tile_size.
+    const int dense_threshold_nnz =
+        static_cast<int>(std::max<size_t>(1, static_cast<size_t>(32 * tile_size)));
+    std::vector<int> h_tile_nnz_prefix(static_cast<size_t>(tile_mat.n_tiles + 1));
+    tile_mat.tile_nnz_prefix.copyToHost(h_tile_nnz_prefix.data());
+    int split_point = 0;
+    for (int t = 0; t < tile_mat.n_tiles; ++t)
+    {
+        const int tile_nnz =
+            h_tile_nnz_prefix[static_cast<size_t>(t + 1)] - h_tile_nnz_prefix[static_cast<size_t>(t)];
+        if (tile_nnz < dense_threshold_nnz)
+        {
+            ++split_point;
+        }
+        else
+        {
+            break;
+        }
+    }
 
     cuda_utils::DeviceArray<double> d_tile_values0;
     d_tile_values0.resize(tile_mat.values.size());
@@ -182,7 +203,7 @@ static void BM_RuizScaleCudaTiled(benchmark::State& state, const std::string& ma
                    "snapshot tile values");
 
     (void)cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
-        tile_mat, d_dr.data(), d_dc.data(), 1);
+        tile_mat, d_dr.data(), d_dc.data(), split_point, 1);
     checkCudaError(cudaDeviceSynchronize(), "warm-up sync (tile)");
 
     for (auto _ : state)
@@ -194,13 +215,15 @@ static void BM_RuizScaleCudaTiled(benchmark::State& state, const std::string& ma
         state.ResumeTiming();
 
         (void)cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
-            tile_mat, d_dr.data(), d_dc.data(), max_iters);
+            tile_mat, d_dr.data(), d_dc.data(), split_point, max_iters);
         checkCudaError(cudaDeviceSynchronize(), "benchmark sync (tile)");
     }
 
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(nnz) * max_iters);
     state.counters["tile_k"] = tile_k;
     state.counters["n_tiles"] = static_cast<double>(tile_mat.n_tiles);
+    state.counters["split_point"] = split_point;
+    state.counters["dense_threshold_nnz"] = dense_threshold_nnz;
 }
 
 void printUsage()
@@ -258,9 +281,9 @@ int main(int argc, char** argv)
         benchmark::RegisterBenchmark("BM_RuizScaleCudaTiled/k=10", BM_RuizScaleCudaTiled, matrix_file, max_iters)
             ->Arg(10)
             ->Unit(benchmark::kMillisecond);
-        benchmark::RegisterBenchmark("BM_RuizScaleCudaTiled/k=12", BM_RuizScaleCudaTiled, matrix_file, max_iters)
-            ->Arg(12)
-            ->Unit(benchmark::kMillisecond);
+        // benchmark::RegisterBenchmark("BM_RuizScaleCudaTiled/k=12", BM_RuizScaleCudaTiled, matrix_file, max_iters)
+        //     ->Arg(12)
+        //     ->Unit(benchmark::kMillisecond);
     }
     catch (const std::exception& e)
     {

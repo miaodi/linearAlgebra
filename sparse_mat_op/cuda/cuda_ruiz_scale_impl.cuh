@@ -17,7 +17,13 @@ inline constexpr bool always_false_v = false;
     bool RuizScaleCudaTileImplMaxNorm(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat,               \
                                       VALTYPE* d_dr, VALTYPE* d_dc, const int max_iters);                      \
     bool RuizScaleCudaTileImplL2Norm(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat,                \
-                                     VALTYPE* d_dr, VALTYPE* d_dc, const int max_iters);
+                                     VALTYPE* d_dr, VALTYPE* d_dc, const int max_iters);                       \
+    bool RuizScaleCudaTileImplMaxNormSplit(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat,          \
+                                           VALTYPE* d_dr, VALTYPE* d_dc, const COLTYPE split_point,            \
+                                           const int max_iters);                                                 \
+    bool RuizScaleCudaTileImplL2NormSplit(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat,           \
+                                          VALTYPE* d_dr, VALTYPE* d_dc, const COLTYPE split_point,             \
+                                          const int max_iters);
 
 DECLARE_RUIZ_SCALE_CUDA_OVERLOADS(int32_t, int32_t, float)
 DECLARE_RUIZ_SCALE_CUDA_OVERLOADS(int32_t, int32_t, double)
@@ -57,6 +63,27 @@ bool RuizScaleCuda(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat, VAL
     else if constexpr (NORM == CudaRuizScalingNormType::L2Norm)
     {
         return detail::RuizScaleCudaTileImplL2Norm(tile_mat, d_dr, d_dc, max_iters);
+    }
+    else
+    {
+        static_assert(detail::always_false_v<ROWTYPE, COLTYPE, VALTYPE>, "Unsupported RuizScaleCuda norm");
+        return false;
+    }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, CudaRuizScalingNormType NORM>
+bool RuizScaleCuda(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat, VALTYPE* d_dr,
+                   VALTYPE* d_dc, const COLTYPE split_point, const int max_iters)
+{
+    if constexpr (NORM == CudaRuizScalingNormType::MaxNorm)
+    {
+        return detail::RuizScaleCudaTileImplMaxNormSplit(tile_mat, d_dr, d_dc, split_point,
+                                                         max_iters);
+    }
+    else if constexpr (NORM == CudaRuizScalingNormType::L2Norm)
+    {
+        return detail::RuizScaleCudaTileImplL2NormSplit(tile_mat, d_dr, d_dc, split_point,
+                                                        max_iters);
     }
     else
     {

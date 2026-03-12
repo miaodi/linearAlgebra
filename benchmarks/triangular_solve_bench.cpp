@@ -10,6 +10,7 @@
 #include "matrix_utils.hpp"
 #include "triangle_solve.hpp"
 #include "precond.hpp" // for ILULevelSymbolic / ILULevelNumeric
+#include "utils.h"
 #include <benchmark/benchmark.h>
 #include <omp.h>
 #include <fstream>

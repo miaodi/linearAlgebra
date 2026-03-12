@@ -1,7 +1,9 @@
 #pragma once
 #include "sparse_mat_traits.hpp"
-#include <fast_matrix_market/fast_matrix_market.hpp>
+#include <fast_matrix_market/types.hpp>
 #include <istream>
+#include <ostream>
+#include <vector>
 namespace matrix_utils {
 template <typename CSRMatrixType>
 void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,

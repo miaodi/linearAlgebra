@@ -1,5 +1,6 @@
 #include "matrix_utils.hpp"
 #include "precond.hpp"
+#include "utils.h"
 #include <algorithm>
 #include <benchmark/benchmark.h>
 #include <memory>

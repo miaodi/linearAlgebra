@@ -2,6 +2,7 @@
 #include "matrix_utils.hpp"
 #include "sparse_mat_traits.hpp"
 #include <Eigen/Sparse>
+#include <fast_matrix_market/fast_matrix_market.hpp>
 #include <fast_matrix_market/app/Eigen.hpp>
 #include <fast_matrix_market/app/triplet.hpp>
 

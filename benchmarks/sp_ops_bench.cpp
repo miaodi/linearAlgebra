@@ -1,5 +1,6 @@
 #include "matrix_utils.hpp"
 #include "sp_ops.hpp"
+#include "utils.h"
 #include <benchmark/benchmark.h>
 #include <cxxopts.hpp>
 #include <fstream>

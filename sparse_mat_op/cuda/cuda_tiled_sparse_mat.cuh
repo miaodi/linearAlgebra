@@ -57,25 +57,44 @@ void LaunchBuildTileKeys(NnzType nnz, int k, const IndexType* d_coo_row, const I
 template <typename NnzType>
 NnzType CountUniqueTileKeys(NnzType n, const uint64_t* d_keys, cudaStream_t stream = nullptr);
 
+/// @brief Build tile-level COO metadata from sorted tile keys.
+/// @details Produces one entry per non-empty tile: unique key, tile nnz count,
+/// and decoded tile row/column indices. The input keys must already be sorted.
 template <typename NnzType, typename CountType, typename IndexType>
 void TileKeysToCOOMeta(NnzType n, NnzType n_tiles, const uint64_t* d_keys, int col_bits,
                        uint64_t* d_unique_keys, CountType* d_tile_nnz, IndexType* d_tile_rows,
                        IndexType* d_tile_cols, cudaStream_t stream = nullptr);
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+/// @brief Convert CSR to tile-grouped COO layout on device.
+/// @tparam SORT_BY_TILE_NNZ If true, non-empty tiles are reordered by nnz
+/// in ascending order (small to large) before final COO gather. If false,
+/// tile order follows key order (tile row/col lexicographic order).
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool SORT_BY_TILE_NNZ = false>
 void CSRToTileCOO(COLTYPE rows, COLTYPE cols, const ROWTYPE* d_ai, const COLTYPE* d_aj,
           const VALTYPE* d_av, int k, DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& out,
-                  cudaStream_t stream = nullptr);
+          cudaStream_t stream = nullptr);
 
-extern template void CSRToTileCOO<int, int, float>(int, int, const int*, const int*, const float*, int,
+extern template void CSRToTileCOO<int, int, float, false>(int, int, const int*, const int*, const float*, int,
                            DeviceTileCOOMatrix<int, int, float>&, cudaStream_t);
-extern template void CSRToTileCOO<int, int, double>(int, int, const int*, const int*, const double*, int,
+extern template void CSRToTileCOO<int, int, float, true>(int, int, const int*, const int*, const float*, int,
+                           DeviceTileCOOMatrix<int, int, float>&, cudaStream_t);
+extern template void CSRToTileCOO<int, int, double, false>(int, int, const int*, const int*, const double*, int,
                             DeviceTileCOOMatrix<int, int, double>&, cudaStream_t);
-extern template void CSRToTileCOO<std::int64_t, int, float>(int, int, const std::int64_t*,
+extern template void CSRToTileCOO<int, int, double, true>(int, int, const int*, const int*, const double*, int,
+                            DeviceTileCOOMatrix<int, int, double>&, cudaStream_t);
+extern template void CSRToTileCOO<std::int64_t, int, float, false>(int, int, const std::int64_t*,
                                                             const int*, const float*, int,
                                 DeviceTileCOOMatrix<std::int64_t, int, float>&,
                                                             cudaStream_t);
-extern template void CSRToTileCOO<std::int64_t, int, double>(int, int, const std::int64_t*,
+extern template void CSRToTileCOO<std::int64_t, int, float, true>(int, int, const std::int64_t*,
+                                                            const int*, const float*, int,
+                                DeviceTileCOOMatrix<std::int64_t, int, float>&,
+                                                            cudaStream_t);
+extern template void CSRToTileCOO<std::int64_t, int, double, false>(int, int, const std::int64_t*,
+                                                             const int*, const double*, int,
+                                 DeviceTileCOOMatrix<std::int64_t, int, double>&,
+                                                             cudaStream_t);
+extern template void CSRToTileCOO<std::int64_t, int, double, true>(int, int, const std::int64_t*,
                                                              const int*, const double*, int,
                                  DeviceTileCOOMatrix<std::int64_t, int, double>&,
                                                              cudaStream_t);

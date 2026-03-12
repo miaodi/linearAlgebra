@@ -2,11 +2,12 @@
 
 #include "matrix_enums.hpp"
 #include "sparse_mat_traits.hpp"
-#include "utils.h"
+#include "utils_core.hpp"
 #include "graph_algs.hpp"
 #include "permutation.hpp"
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <execution>
 #include <iostream>
 #include <limits>

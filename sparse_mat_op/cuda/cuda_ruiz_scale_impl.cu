@@ -5,24 +5,18 @@
 #include <cstdio>
 #include <cuda_runtime.h>
 #include <iostream>
+#include <limits>
+#include <thrust/copy.h>
+#include <thrust/count.h>
+#include <thrust/device_ptr.h>
+#include <thrust/execution_policy.h>
+#include <thrust/sequence.h>
 #include <type_traits>
 
 namespace matrix_utils::sparse_cuda
 {
 namespace
 {
-template <typename CountType, typename SizeType>
-inline __host__ __device__ bool should_use_shared_norms(CountType tile_nnz, SizeType tile_size)
-{
-    return tile_nnz >= static_cast<CountType>(6 * tile_size);
-}
-
-template <typename CountType, typename SizeType>
-inline __host__ __device__ bool should_use_shared_scales(CountType tile_nnz, SizeType tile_size)
-{
-    return tile_nnz >= static_cast<CountType>(8 * tile_size);
-}
-
 inline void cuda_check(cudaError_t error, const char* message)
 {
     if (error != cudaSuccess)
@@ -33,6 +27,17 @@ inline void cuda_check(cudaError_t error, const char* message)
         throw std::runtime_error(full_message);
     }
 }
+
+template <typename ROWTYPE, typename COLTYPE>
+struct TileIsSparseNnzPredicate
+{
+    ROWTYPE dense_threshold_nnz{};
+
+    __host__ __device__ bool operator()(ROWTYPE tile_nnz) const
+    {
+        return tile_nnz < dense_threshold_nnz;
+    }
+};
 } // namespace
 
 /// @brief Specialized kernel for double precision atomicMax
@@ -121,7 +126,7 @@ __global__ void compute_norms(COLTYPE rows, const ROWTYPE* ai, const COLTYPE* aj
 /// shared across all participating threads before a single global flush.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, CudaRuizScalingNormType NORM>
 __global__ void compute_norms_tiled(COLTYPE rows, COLTYPE cols, COLTYPE n_tiles, int tile_k,
-                                    ROWTYPE base, const COLTYPE* tile_row_ind,
+                                    const COLTYPE* tile_ids, ROWTYPE base, const COLTYPE* tile_row_ind,
                                     const COLTYPE* tile_col_ind, const ROWTYPE* tile_nnz_prefix,
                                     const COLTYPE* row_ind, const COLTYPE* col_ind,
                                     const VALTYPE* values, VALTYPE* row_norms, VALTYPE* col_norms)
@@ -129,7 +134,8 @@ __global__ void compute_norms_tiled(COLTYPE rows, COLTYPE cols, COLTYPE n_tiles,
     extern __shared__ unsigned char shared_norms_raw[];
 
     const int tid = static_cast<int>(threadIdx.x);
-    const COLTYPE tile = static_cast<COLTYPE>(blockIdx.x);
+    const COLTYPE tile_slot = static_cast<COLTYPE>(blockIdx.x);
+    const COLTYPE tile = tile_ids[static_cast<size_t>(tile_slot)];
     if (tile >= n_tiles)
         return;
 
@@ -142,79 +148,75 @@ __global__ void compute_norms_tiled(COLTYPE rows, COLTYPE cols, COLTYPE n_tiles,
     const COLTYPE tile_col0 = static_cast<COLTYPE>(tile_col_ind[tile] * tile_size);
     const ROWTYPE start = tile_nnz_prefix[tile];
     const ROWTYPE end = tile_nnz_prefix[tile + 1];
-    const ROWTYPE tile_nnz = static_cast<ROWTYPE>(end - start);
-    const bool use_shared = should_use_shared_norms(tile_nnz, tile_size);
 
-    if (use_shared)
+    // Initialize tile-local row/column accumulators in shared memory.
+    for (COLTYPE i = static_cast<COLTYPE>(tid); i < tile_size; i += static_cast<COLTYPE>(blockDim.x))
     {
-        // Initialize tile-local row/column accumulators in shared memory.
-        for (COLTYPE i = static_cast<COLTYPE>(tid); i < tile_size;
-             i += static_cast<COLTYPE>(blockDim.x))
-        {
-            tile_row_norms[i] = static_cast<VALTYPE>(0);
-            tile_col_norms[i] = static_cast<VALTYPE>(0);
-        }
-        __syncthreads();
+        tile_row_norms[i] = static_cast<VALTYPE>(0);
+        tile_col_norms[i] = static_cast<VALTYPE>(0);
+    }
+    __syncthreads();
 
-        // Sweep nnz entries that belong to this tile and accumulate into tile-local norms.
-        for (ROWTYPE i = static_cast<ROWTYPE>(start + tid); i < end;
-             i = static_cast<ROWTYPE>(i + blockDim.x))
-        {
-            const COLTYPE row_global = static_cast<COLTYPE>(row_ind[i] - static_cast<COLTYPE>(base));
-            const COLTYPE col_global = static_cast<COLTYPE>(col_ind[i] - static_cast<COLTYPE>(base));
-            const COLTYPE row_local = static_cast<COLTYPE>(row_global - tile_row0);
-            const COLTYPE col_local = static_cast<COLTYPE>(col_global - tile_col0);
-            const VALTYPE val = values[i];
+    // Sweep nnz entries that belong to this tile and accumulate into tile-local norms.
+    for (ROWTYPE i = static_cast<ROWTYPE>(start + tid); i < end;
+         i = static_cast<ROWTYPE>(i + blockDim.x))
+    {
+        const COLTYPE row_global = static_cast<COLTYPE>(row_ind[i] - static_cast<COLTYPE>(base));
+        const COLTYPE col_global = static_cast<COLTYPE>(col_ind[i] - static_cast<COLTYPE>(base));
+        const COLTYPE row_local = static_cast<COLTYPE>(row_global - tile_row0);
+        const COLTYPE col_local = static_cast<COLTYPE>(col_global - tile_col0);
+        const VALTYPE val = values[i];
 
-            if constexpr (NORM == CudaRuizScalingNormType::MaxNorm)
+        if constexpr (NORM == CudaRuizScalingNormType::MaxNorm)
+        {
+            const VALTYPE abs_val = fabs(val);
+            if (row_local >= 0 && row_local < tile_size)
             {
-                const VALTYPE abs_val = fabs(val);
-                if (row_local >= 0 && row_local < tile_size)
+                if constexpr (std::is_same_v<VALTYPE, double>)
                 {
-                    if constexpr (std::is_same_v<VALTYPE, double>)
-                    {
-                        atomicMax_device_double(&tile_row_norms[row_local], abs_val);
-                    }
-                    else
-                    {
-                        atomicMax_device_float(&tile_row_norms[row_local], abs_val);
-                    }
+                    atomicMax_device_double(&tile_row_norms[row_local], abs_val);
                 }
-                if (col_local >= 0 && col_local < tile_size)
+                else
                 {
-                    if constexpr (std::is_same_v<VALTYPE, double>)
-                    {
-                        atomicMax_device_double(&tile_col_norms[col_local], abs_val);
-                    }
-                    else
-                    {
-                        atomicMax_device_float(&tile_col_norms[col_local], abs_val);
-                    }
+                    atomicMax_device_float(&tile_row_norms[row_local], abs_val);
                 }
             }
-            else
+            if (col_local >= 0 && col_local < tile_size)
             {
-                const VALTYPE sq = val * val;
-                if (row_local >= 0 && row_local < tile_size)
+                if constexpr (std::is_same_v<VALTYPE, double>)
                 {
-                    atomicAdd(&tile_row_norms[row_local], sq);
+                    atomicMax_device_double(&tile_col_norms[col_local], abs_val);
                 }
-                if (col_local >= 0 && col_local < tile_size)
+                else
                 {
-                    atomicAdd(&tile_col_norms[col_local], sq);
+                    atomicMax_device_float(&tile_col_norms[col_local], abs_val);
                 }
             }
         }
-        __syncthreads();
-
-        // Flush tile-local row/column norms to global arrays via atomics.
-        for (COLTYPE i = static_cast<COLTYPE>(tid); i < tile_size;
-             i += static_cast<COLTYPE>(blockDim.x))
+        else
         {
-            const COLTYPE row_global = static_cast<COLTYPE>(tile_row0 + i);
-            if (row_global < rows)
+            const VALTYPE sq = val * val;
+            if (row_local >= 0 && row_local < tile_size)
             {
-                const VALTYPE value = tile_row_norms[i];
+                atomicAdd(&tile_row_norms[row_local], sq);
+            }
+            if (col_local >= 0 && col_local < tile_size)
+            {
+                atomicAdd(&tile_col_norms[col_local], sq);
+            }
+        }
+    }
+    __syncthreads();
+
+    // Flush tile-local row/column norms to global arrays via atomics.
+    for (COLTYPE i = static_cast<COLTYPE>(tid); i < tile_size; i += static_cast<COLTYPE>(blockDim.x))
+    {
+        const COLTYPE row_global = static_cast<COLTYPE>(tile_row0 + i);
+        if (row_global < rows)
+        {
+            const VALTYPE value = tile_row_norms[i];
+            if (value != static_cast<VALTYPE>(0))
+            {
                 if constexpr (std::is_same_v<VALTYPE, double>)
                 {
                     if constexpr (NORM == CudaRuizScalingNormType::MaxNorm)
@@ -238,11 +240,14 @@ __global__ void compute_norms_tiled(COLTYPE rows, COLTYPE cols, COLTYPE n_tiles,
                     }
                 }
             }
+        }
 
-            const COLTYPE col_global = static_cast<COLTYPE>(tile_col0 + i);
-            if (col_global < cols)
+        const COLTYPE col_global = static_cast<COLTYPE>(tile_col0 + i);
+        if (col_global < cols)
+        {
+            const VALTYPE value = tile_col_norms[i];
+            if (value != static_cast<VALTYPE>(0))
             {
-                const VALTYPE value = tile_col_norms[i];
                 if constexpr (std::is_same_v<VALTYPE, double>)
                 {
                     if constexpr (NORM == CudaRuizScalingNormType::MaxNorm)
@@ -268,35 +273,41 @@ __global__ void compute_norms_tiled(COLTYPE rows, COLTYPE cols, COLTYPE n_tiles,
             }
         }
     }
-    else
-    {
-        for (ROWTYPE i = static_cast<ROWTYPE>(start + tid); i < end;
-             i = static_cast<ROWTYPE>(i + blockDim.x))
-        {
-            const COLTYPE row_global = static_cast<COLTYPE>(row_ind[i] - static_cast<COLTYPE>(base));
-            const COLTYPE col_global = static_cast<COLTYPE>(col_ind[i] - static_cast<COLTYPE>(base));
-            const VALTYPE val = values[i];
+}
 
-            if constexpr (NORM == CudaRuizScalingNormType::MaxNorm)
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, CudaRuizScalingNormType NORM>
+__global__ void compute_norms_sparse_coo_global(ROWTYPE sparse_nnz, ROWTYPE base, const COLTYPE* row_ind,
+                                                const COLTYPE* col_ind, const VALTYPE* values,
+                                                VALTYPE* row_norms, VALTYPE* col_norms)
+{
+    ROWTYPE i = static_cast<ROWTYPE>(blockIdx.x * blockDim.x + threadIdx.x);
+    const ROWTYPE stride = static_cast<ROWTYPE>(blockDim.x * gridDim.x);
+
+    for (; i < sparse_nnz; i = static_cast<ROWTYPE>(i + stride))
+    {
+        const COLTYPE row_global = static_cast<COLTYPE>(row_ind[i] - static_cast<COLTYPE>(base));
+        const COLTYPE col_global = static_cast<COLTYPE>(col_ind[i] - static_cast<COLTYPE>(base));
+        const VALTYPE val = values[i];
+
+        if constexpr (NORM == CudaRuizScalingNormType::MaxNorm)
+        {
+            const VALTYPE abs_val = fabs(val);
+            if constexpr (std::is_same_v<VALTYPE, double>)
             {
-                const VALTYPE abs_val = fabs(val);
-                if constexpr (std::is_same_v<VALTYPE, double>)
-                {
-                    atomicMax_device_double(&row_norms[row_global], abs_val);
-                    atomicMax_device_double(&col_norms[col_global], abs_val);
-                }
-                else
-                {
-                    atomicMax_device_float(&row_norms[row_global], abs_val);
-                    atomicMax_device_float(&col_norms[col_global], abs_val);
-                }
+                atomicMax_device_double(&row_norms[row_global], abs_val);
+                atomicMax_device_double(&col_norms[col_global], abs_val);
             }
             else
             {
-                const VALTYPE sq = val * val;
-                atomicAdd(&row_norms[row_global], sq);
-                atomicAdd(&col_norms[col_global], sq);
+                atomicMax_device_float(&row_norms[row_global], abs_val);
+                atomicMax_device_float(&col_norms[col_global], abs_val);
             }
+        }
+        else
+        {
+            const VALTYPE sq = val * val;
+            atomicAdd(&row_norms[row_global], sq);
+            atomicAdd(&col_norms[col_global], sq);
         }
     }
 }
@@ -360,7 +371,7 @@ __global__ void scale_matrix_and_track_change(COLTYPE rows, const ROWTYPE* ai, c
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 __global__ void scale_tiled_values(COLTYPE rows, COLTYPE cols, COLTYPE n_tiles, int tile_k,
-                                   ROWTYPE base, const COLTYPE* tile_row_ind,
+                                   const COLTYPE* tile_ids, ROWTYPE base, const COLTYPE* tile_row_ind,
                                    const COLTYPE* tile_col_ind, const ROWTYPE* tile_nnz_prefix,
                                    const COLTYPE* row_ind, const COLTYPE* col_ind, VALTYPE* values,
                                    const VALTYPE* row_scale, const VALTYPE* col_scale)
@@ -368,7 +379,8 @@ __global__ void scale_tiled_values(COLTYPE rows, COLTYPE cols, COLTYPE n_tiles, 
     extern __shared__ unsigned char shared_scales_raw[];
 
     const int tid = static_cast<int>(threadIdx.x);
-    const COLTYPE tile = static_cast<COLTYPE>(blockIdx.x);
+    const COLTYPE tile_slot = static_cast<COLTYPE>(blockIdx.x);
+    const COLTYPE tile = tile_ids[static_cast<size_t>(tile_slot)];
     if (tile >= n_tiles)
         return;
 
@@ -381,48 +393,102 @@ __global__ void scale_tiled_values(COLTYPE rows, COLTYPE cols, COLTYPE n_tiles, 
     const COLTYPE tile_col0 = static_cast<COLTYPE>(tile_col_ind[tile] * tile_size);
     const ROWTYPE start = tile_nnz_prefix[tile];
     const ROWTYPE end = tile_nnz_prefix[tile + 1];
-    const ROWTYPE tile_nnz = static_cast<ROWTYPE>(end - start);
-    const bool use_shared = should_use_shared_scales(tile_nnz, tile_size);
 
-    if (use_shared)
+    // Stage this tile's row/column scale vectors in shared memory.
+    for (COLTYPE i = static_cast<COLTYPE>(tid); i < tile_size; i += static_cast<COLTYPE>(blockDim.x))
     {
-        // Stage this tile's row/column scale vectors in shared memory.
-        for (COLTYPE i = static_cast<COLTYPE>(tid); i < tile_size;
-             i += static_cast<COLTYPE>(blockDim.x))
-        {
-            const COLTYPE row = static_cast<COLTYPE>(tile_row0 + i);
-            const COLTYPE col = static_cast<COLTYPE>(tile_col0 + i);
-            tile_row_scale[i] = (row < rows) ? row_scale[row] : static_cast<VALTYPE>(1);
-            tile_col_scale[i] = (col < cols) ? col_scale[col] : static_cast<VALTYPE>(1);
-        }
-        __syncthreads();
+        const COLTYPE row = static_cast<COLTYPE>(tile_row0 + i);
+        const COLTYPE col = static_cast<COLTYPE>(tile_col0 + i);
+        tile_row_scale[i] = (row < rows) ? row_scale[row] : static_cast<VALTYPE>(1);
+        tile_col_scale[i] = (col < cols) ? col_scale[col] : static_cast<VALTYPE>(1);
+    }
+    __syncthreads();
 
-        for (ROWTYPE i = static_cast<ROWTYPE>(start + tid); i < end;
-             i = static_cast<ROWTYPE>(i + blockDim.x))
+    for (ROWTYPE i = static_cast<ROWTYPE>(start + tid); i < end;
+         i = static_cast<ROWTYPE>(i + blockDim.x))
+    {
+        const COLTYPE row_global = static_cast<COLTYPE>(row_ind[i] - static_cast<COLTYPE>(base));
+        const COLTYPE col_global = static_cast<COLTYPE>(col_ind[i] - static_cast<COLTYPE>(base));
+        const COLTYPE row_local = static_cast<COLTYPE>(row_global - tile_row0);
+        const COLTYPE col_local = static_cast<COLTYPE>(col_global - tile_col0);
+        const bool in_row_tile = (row_local >= 0 && row_local < tile_size);
+        const bool in_col_tile = (col_local >= 0 && col_local < tile_size);
+        const VALTYPE rs = in_row_tile ? tile_row_scale[row_local] : row_scale[row_global];
+        const VALTYPE cs = in_col_tile ? tile_col_scale[col_local] : col_scale[col_global];
+        values[i] = values[i] * rs * cs;
+    }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+__global__ void scale_sparse_coo_global(ROWTYPE sparse_nnz, ROWTYPE base, const COLTYPE* row_ind,
+                                        const COLTYPE* col_ind, VALTYPE* values,
+                                        const VALTYPE* row_scale, const VALTYPE* col_scale)
+{
+    ROWTYPE i = static_cast<ROWTYPE>(blockIdx.x * blockDim.x + threadIdx.x);
+    const ROWTYPE stride = static_cast<ROWTYPE>(blockDim.x * gridDim.x);
+
+    for (; i < sparse_nnz; i = static_cast<ROWTYPE>(i + stride))
+    {
+        const COLTYPE row_global = static_cast<COLTYPE>(row_ind[i] - static_cast<COLTYPE>(base));
+        const COLTYPE col_global = static_cast<COLTYPE>(col_ind[i] - static_cast<COLTYPE>(base));
+        values[i] = values[i] * row_scale[row_global] * col_scale[col_global];
+    }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+__global__ void scale_sparse_tiles_global(const COLTYPE* sparse_tile_ids, COLTYPE n_sparse_tiles,
+                                          int* sparse_tile_cursor, ROWTYPE base, const ROWTYPE* tile_nnz_prefix,
+                                          const COLTYPE* row_ind, const COLTYPE* col_ind, VALTYPE* values,
+                                          const VALTYPE* row_scale, const VALTYPE* col_scale)
+{
+    constexpr int kWarp = 32;
+    constexpr int kTilesPerClaim = 8;
+    const int lane = static_cast<int>(threadIdx.x & (kWarp - 1));
+
+    while (true)
+    {
+        int claim_begin = 0;
+        if (lane == 0)
         {
-            const COLTYPE row_global = static_cast<COLTYPE>(row_ind[i] - static_cast<COLTYPE>(base));
-            const COLTYPE col_global = static_cast<COLTYPE>(col_ind[i] - static_cast<COLTYPE>(base));
-            const COLTYPE row_local = static_cast<COLTYPE>(row_global - tile_row0);
-            const COLTYPE col_local = static_cast<COLTYPE>(col_global - tile_col0);
-            const bool in_row_tile = (row_local >= 0 && row_local < tile_size);
-            const bool in_col_tile = (col_local >= 0 && col_local < tile_size);
-            const VALTYPE rs = in_row_tile ? tile_row_scale[row_local] : row_scale[row_global];
-            const VALTYPE cs = in_col_tile ? tile_col_scale[col_local] : col_scale[col_global];
-            values[i] = values[i] * rs * cs;
+            claim_begin = atomicAdd(sparse_tile_cursor, kTilesPerClaim);
+        }
+        claim_begin = __shfl_sync(0xffffffff, claim_begin, 0);
+        const COLTYPE claim_start = static_cast<COLTYPE>(claim_begin);
+        if (claim_start >= n_sparse_tiles)
+        {
+            break;
+        }
+
+        const COLTYPE claim_end =
+            static_cast<COLTYPE>(min(static_cast<unsigned long long>(n_sparse_tiles),
+                                     static_cast<unsigned long long>(claim_start) + kTilesPerClaim));
+
+        for (COLTYPE sparse_slot = claim_start; sparse_slot < claim_end; ++sparse_slot)
+        {
+            const COLTYPE tile = sparse_tile_ids[static_cast<size_t>(sparse_slot)];
+            const ROWTYPE start = tile_nnz_prefix[tile];
+            const ROWTYPE end = tile_nnz_prefix[tile + 1];
+
+            for (ROWTYPE i = static_cast<ROWTYPE>(start + lane); i < end; i = static_cast<ROWTYPE>(i + kWarp))
+            {
+                const COLTYPE row_global = static_cast<COLTYPE>(row_ind[i] - static_cast<COLTYPE>(base));
+                const COLTYPE col_global = static_cast<COLTYPE>(col_ind[i] - static_cast<COLTYPE>(base));
+                const VALTYPE rs = row_scale[row_global];
+                const VALTYPE cs = col_scale[col_global];
+                values[i] = values[i] * rs * cs;
+            }
         }
     }
-    else
-    {
-        for (ROWTYPE i = static_cast<ROWTYPE>(start + tid); i < end;
-             i = static_cast<ROWTYPE>(i + blockDim.x))
-        {
-            const COLTYPE row_global = static_cast<COLTYPE>(row_ind[i] - static_cast<COLTYPE>(base));
-            const COLTYPE col_global = static_cast<COLTYPE>(col_ind[i] - static_cast<COLTYPE>(base));
-            const VALTYPE rs = row_scale[row_global];
-            const VALTYPE cs = col_scale[col_global];
-            values[i] = values[i] * rs * cs;
-        }
-    }
+}
+
+template <typename ROWTYPE, typename COLTYPE>
+__global__ void compute_tile_nnz_from_prefix(COLTYPE n_tiles, const ROWTYPE* tile_nnz_prefix, ROWTYPE* tile_nnz)
+{
+    const COLTYPE tile = static_cast<COLTYPE>(blockIdx.x * blockDim.x + threadIdx.x);
+    if (tile >= n_tiles)
+        return;
+    tile_nnz[static_cast<size_t>(tile)] =
+        static_cast<ROWTYPE>(tile_nnz_prefix[tile + 1] - tile_nnz_prefix[tile]);
 }
 
 namespace
@@ -528,7 +594,8 @@ bool RuizScaleCudaCSRTemplate(const COLTYPE rows, const COLTYPE cols, const ROWT
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, CudaRuizScalingNormType NORM>
 bool RuizScaleCudaTileTemplate(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat,
-                               VALTYPE* d_dr, VALTYPE* d_dc, const int max_iters)
+                               VALTYPE* d_dr, VALTYPE* d_dc, const COLTYPE split_point,
+                               const int max_iters)
 {
     const COLTYPE rows = tile_mat.n_rows;
     const COLTYPE cols = tile_mat.n_cols;
@@ -552,8 +619,8 @@ bool RuizScaleCudaTileTemplate(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& t
 
     const size_t tile_size = size_t{1} << tile_mat.tile_k;
     const int tile_block_size = choose_tile_block_size(tile_size);
-    const int tile_grid_size = static_cast<int>(n_tiles);
     const size_t shared_bytes = 2 * tile_size * sizeof(VALTYPE);
+    const int sparse_block_size = 256;
 
     int max_shared_per_block = 0;
     cuda_check(cudaDeviceGetAttribute(&max_shared_per_block, cudaDevAttrMaxSharedMemoryPerBlock, 0),
@@ -582,17 +649,65 @@ bool RuizScaleCudaTileTemplate(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& t
     cudaEvent_t scale_factors_ready;
     cuda_check(cudaEventCreate(&scale_factors_ready), "Failed to create event");
 
+    DeviceArray<COLTYPE> dense_tile_ids;
+    dense_tile_ids.resize(static_cast<size_t>(n_tiles));
+
+    auto dense_ids_begin = thrust::device_pointer_cast(dense_tile_ids.data());
+
+    COLTYPE n_sparse_tiles = split_point;
+    if (n_sparse_tiles < static_cast<COLTYPE>(0))
+    {
+        n_sparse_tiles = static_cast<COLTYPE>(0);
+    }
+    if (n_sparse_tiles > n_tiles)
+    {
+        n_sparse_tiles = n_tiles;
+    }
+
+    // Tile matrix is expected to be pre-sorted by tile nnz (small -> large).
+    // Dense tiles are contiguous in [n_sparse_tiles, n_tiles).
+    const COLTYPE n_dense_tiles = static_cast<COLTYPE>(n_tiles - n_sparse_tiles);
+
+    if (n_dense_tiles > 0)
+    {
+        thrust::sequence(thrust::device, dense_ids_begin, dense_ids_begin + n_dense_tiles, n_sparse_tiles);
+    }
+
+    ROWTYPE sparse_nnz = 0;
+    if (n_sparse_tiles > 0)
+    {
+        cuda_check(cudaMemcpy(&sparse_nnz, tile_mat.tileNnzPrefixData() + n_sparse_tiles,
+                              sizeof(ROWTYPE), cudaMemcpyDeviceToHost),
+                   "Failed to copy sparse nnz boundary");
+    }
+
+    const int dense_grid_size = static_cast<int>(n_dense_tiles);
+    const int sparse_grid_size = std::max(
+        1, static_cast<int>((static_cast<size_t>(sparse_nnz) + sparse_block_size - 1) / sparse_block_size));
+
     for (int iter = 0; iter < max_iters; ++iter)
     {
         fillArray(d_row_norms, static_cast<size_t>(rows), static_cast<VALTYPE>(0));
         fillArray(d_col_norms, static_cast<size_t>(cols), static_cast<VALTYPE>(0));
 
-        compute_norms_tiled<ROWTYPE, COLTYPE, VALTYPE, NORM>
-            <<<tile_grid_size, tile_block_size, shared_bytes>>>(
-                rows, cols, n_tiles, tile_mat.tile_k, tile_mat.base, tile_mat.tileRowIndData(),
-                tile_mat.tileColIndData(), tile_mat.tileNnzPrefixData(), tile_mat.rowIndData(),
-                tile_mat.colIndData(), tile_mat.valuesData(), d_row_norms, d_col_norms);
-        cuda_check(cudaGetLastError(), "compute_norms_tiled failed");
+        if (n_dense_tiles > 0)
+        {
+            compute_norms_tiled<ROWTYPE, COLTYPE, VALTYPE, NORM>
+                <<<dense_grid_size, tile_block_size, shared_bytes>>>(
+                    rows, cols, n_tiles, tile_mat.tile_k, dense_tile_ids.data(), tile_mat.base,
+                    tile_mat.tileRowIndData(), tile_mat.tileColIndData(),
+                    tile_mat.tileNnzPrefixData(), tile_mat.rowIndData(), tile_mat.colIndData(),
+                    tile_mat.valuesData(), d_row_norms, d_col_norms);
+            cuda_check(cudaGetLastError(), "compute_norms_tiled(dense) failed");
+        }
+        if (sparse_nnz > 0)
+        {
+            compute_norms_sparse_coo_global<ROWTYPE, COLTYPE, VALTYPE, NORM>
+                <<<sparse_grid_size, sparse_block_size>>>(
+                    sparse_nnz, tile_mat.base, tile_mat.rowIndData(), tile_mat.colIndData(),
+                    tile_mat.valuesData(), d_row_norms, d_col_norms);
+            cuda_check(cudaGetLastError(), "compute_norms_sparse_coo_global failed");
+        }
         cuda_check(cudaDeviceSynchronize(), "compute_norms_tiled sync failed");
 
         compute_scaling_factors<VALTYPE, NORM>
@@ -614,11 +729,21 @@ bool RuizScaleCudaTileTemplate(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& t
             static_cast<int>(cols), d_dc, d_col_scale);
         cuda_check(cudaGetLastError(), "tiled col accumulation launch failed");
 
-        scale_tiled_values<<<tile_grid_size, tile_block_size, shared_bytes>>>(
-            rows, cols, n_tiles, tile_mat.tile_k, tile_mat.base, tile_mat.tileRowIndData(),
-            tile_mat.tileColIndData(), tile_mat.tileNnzPrefixData(), tile_mat.rowIndData(),
-            tile_mat.colIndData(), tile_mat.valuesData(), d_row_scale, d_col_scale);
-        cuda_check(cudaGetLastError(), "scale_tiled_values failed");
+        if (n_dense_tiles > 0)
+        {
+            scale_tiled_values<<<dense_grid_size, tile_block_size, shared_bytes>>>(
+                rows, cols, n_tiles, tile_mat.tile_k, dense_tile_ids.data(), tile_mat.base,
+                tile_mat.tileRowIndData(), tile_mat.tileColIndData(), tile_mat.tileNnzPrefixData(),
+                tile_mat.rowIndData(), tile_mat.colIndData(), tile_mat.valuesData(), d_row_scale, d_col_scale);
+            cuda_check(cudaGetLastError(), "scale_tiled_values(dense) failed");
+        }
+        if (sparse_nnz > 0)
+        {
+            scale_sparse_coo_global<<<sparse_grid_size, sparse_block_size>>>(
+                sparse_nnz, tile_mat.base, tile_mat.rowIndData(), tile_mat.colIndData(),
+                tile_mat.valuesData(), d_row_scale, d_col_scale);
+            cuda_check(cudaGetLastError(), "scale_sparse_coo_global failed");
+        }
         cuda_check(cudaDeviceSynchronize(), "scale_tiled_values sync failed");
     }
 
@@ -630,6 +755,34 @@ bool RuizScaleCudaTileTemplate(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& t
     cuda_check(cudaEventDestroy(scale_factors_ready), "Failed to destroy event");
 
     return true;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+COLTYPE compute_sparse_split_point(const DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat)
+{
+    const COLTYPE n_tiles = tile_mat.n_tiles;
+    if (n_tiles <= 0)
+    {
+        return static_cast<COLTYPE>(0);
+    }
+
+    const size_t tile_size = size_t{1} << tile_mat.tile_k;
+    const ROWTYPE dense_threshold_nnz =
+        static_cast<ROWTYPE>(std::max<size_t>(1, static_cast<size_t>(std::ceil(64 * tile_size))));
+
+    DeviceArray<ROWTYPE> tile_nnz;
+    tile_nnz.resize(static_cast<size_t>(n_tiles));
+    constexpr int classify_block = 256;
+    const int classify_grid =
+        static_cast<int>((static_cast<size_t>(n_tiles) + classify_block - 1) / classify_block);
+    compute_tile_nnz_from_prefix<<<classify_grid, classify_block>>>(n_tiles, tile_mat.tileNnzPrefixData(),
+                                                                     tile_nnz.data());
+    cuda_check(cudaGetLastError(), "compute_tile_nnz_from_prefix failed");
+    cuda_check(cudaDeviceSynchronize(), "compute_tile_nnz_from_prefix sync failed");
+
+    return static_cast<COLTYPE>(
+        thrust::count_if(thrust::device, tile_nnz.data(), tile_nnz.data() + n_tiles,
+                         TileIsSparseNnzPredicate<ROWTYPE, COLTYPE>{dense_threshold_nnz}));
 }
 
 #define DEFINE_RUIZ_SCALE_CUDA_OVERLOADS(ROWTYPE, COLTYPE, VALTYPE)                                             \
@@ -650,23 +803,37 @@ bool RuizScaleCudaTileTemplate(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& t
     bool detail::RuizScaleCudaTileImplMaxNorm(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat,         \
                                               VALTYPE* d_dr, VALTYPE* d_dc, const int max_iters)                \
     {                                                                                                           \
-        return RuizScaleCudaTileTemplate<ROWTYPE, COLTYPE, VALTYPE, CudaRuizScalingNormType::MaxNorm>(          \
-            tile_mat, d_dr, d_dc, max_iters);                                                                   \
+        const COLTYPE split_point = compute_sparse_split_point<ROWTYPE, COLTYPE, VALTYPE>(tile_mat);          \
+        return detail::RuizScaleCudaTileImplMaxNormSplit(tile_mat, d_dr, d_dc, split_point, max_iters);        \
     }                                                                                                           \
     bool detail::RuizScaleCudaTileImplL2Norm(DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat,          \
                                              VALTYPE* d_dr, VALTYPE* d_dc, const int max_iters)                 \
     {                                                                                                           \
+        const COLTYPE split_point = compute_sparse_split_point<ROWTYPE, COLTYPE, VALTYPE>(tile_mat);          \
+        return detail::RuizScaleCudaTileImplL2NormSplit(tile_mat, d_dr, d_dc, split_point, max_iters);         \
+    }                                                                                                           \
+    bool detail::RuizScaleCudaTileImplMaxNormSplit(                                                              \
+        DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat, VALTYPE* d_dr, VALTYPE* d_dc,                \
+        const COLTYPE split_point, const int max_iters)                                                         \
+    {                                                                                                           \
+        return RuizScaleCudaTileTemplate<ROWTYPE, COLTYPE, VALTYPE, CudaRuizScalingNormType::MaxNorm>(          \
+            tile_mat, d_dr, d_dc, split_point, max_iters);                                                      \
+    }                                                                                                           \
+    bool detail::RuizScaleCudaTileImplL2NormSplit(                                                               \
+        DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& tile_mat, VALTYPE* d_dr, VALTYPE* d_dc,                \
+        const COLTYPE split_point, const int max_iters)                                                         \
+    {                                                                                                           \
         return RuizScaleCudaTileTemplate<ROWTYPE, COLTYPE, VALTYPE, CudaRuizScalingNormType::L2Norm>(           \
-            tile_mat, d_dr, d_dc, max_iters);                                                                   \
+            tile_mat, d_dr, d_dc, split_point, max_iters);                                                      \
     }                                                                                                           \
     template bool RuizScaleCudaCSRTemplate<ROWTYPE, COLTYPE, VALTYPE, CudaRuizScalingNormType::MaxNorm>(        \
         const COLTYPE, const COLTYPE, const ROWTYPE*, const COLTYPE*, VALTYPE*, VALTYPE*, VALTYPE*, const int); \
     template bool RuizScaleCudaCSRTemplate<ROWTYPE, COLTYPE, VALTYPE, CudaRuizScalingNormType::L2Norm>(         \
         const COLTYPE, const COLTYPE, const ROWTYPE*, const COLTYPE*, VALTYPE*, VALTYPE*, VALTYPE*, const int); \
     template bool RuizScaleCudaTileTemplate<ROWTYPE, COLTYPE, VALTYPE, CudaRuizScalingNormType::MaxNorm>(       \
-        DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>&, VALTYPE*, VALTYPE*, const int);                        \
+        DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>&, VALTYPE*, VALTYPE*, const COLTYPE, const int);         \
     template bool RuizScaleCudaTileTemplate<ROWTYPE, COLTYPE, VALTYPE, CudaRuizScalingNormType::L2Norm>(        \
-        DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>&, VALTYPE*, VALTYPE*, const int);
+        DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>&, VALTYPE*, VALTYPE*, const COLTYPE, const int);
 
 DEFINE_RUIZ_SCALE_CUDA_OVERLOADS(int32_t, int32_t, float)
 DEFINE_RUIZ_SCALE_CUDA_OVERLOADS(int32_t, int32_t, double)

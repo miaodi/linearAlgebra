@@ -7,14 +7,32 @@
 #include "matrix_utils.hpp"
 
 #include <fstream>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 namespace cuda_utils = matrix_utils::sparse_cuda;
 
+namespace {
+
+std::string get_matrix_path()
+{
+    const char* env_path = std::getenv("MTX_FILE");
+    if (env_path != nullptr && env_path[0] != '\0')
+    {
+        return std::string(env_path);
+    }
+    return "data/ex27.mtx";
+}
+
+} // namespace
+
 TEST(CudaRuizScaleTiled, MultiIterationMatchesCSRWithValueUnpermute)
 {
-    std::ifstream f("data/ex27.mtx");
-    ASSERT_TRUE(f.is_open()) << "Failed to open data/ex27.mtx";
+    const std::string matrix_path = get_matrix_path();
+    std::cout << "Testing Ruiz scaling on matrix: " << matrix_path << std::endl;
+    std::ifstream f(matrix_path);
+    ASSERT_TRUE(f.is_open()) << "Failed to open " << matrix_path;
 
     using HostCSR = matrix_utils::CSRMatrixVec<int, int, double>;
     HostCSR h_csr;
@@ -59,10 +77,10 @@ TEST(CudaRuizScaleTiled, MultiIterationMatchesCSRWithValueUnpermute)
 
     cuda_utils::DeviceTileCOOMatrix<int, int, double> tile_mat;
     constexpr int tile_k = 4;
-    cuda_utils::CSRToTileCOO<int, int, double>(
+    cuda_utils::CSRToTileCOO<int, int, double, true>(
         rows, cols, d_ai.data(), d_aj.data(), d_av_tile.data(), tile_k, tile_mat, nullptr);
 
-    constexpr int max_iters = 5;
+    constexpr int max_iters = 10;
 
     ASSERT_TRUE((cuda_utils::RuizScaleCuda<int, int, double, cuda_utils::CudaRuizScalingNormType::MaxNorm>(
         tile_mat, d_dr_tile.data(), d_dc_tile.data(), max_iters)));

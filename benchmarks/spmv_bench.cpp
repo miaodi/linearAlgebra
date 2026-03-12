@@ -1,9 +1,11 @@
 #include "incomplete_lu.h"
 #include "matrix_utils.hpp"
 #include "spmv.hpp"
+#include "utils.h"
 #include <algorithm>
 #include <benchmark/benchmark.h>
 #include <cxxopts.hpp>
+#include <fstream>
 #include <memory>
 #include <numeric>
 #include <omp.h>

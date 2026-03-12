@@ -18,6 +18,7 @@ endif()
 # List of tests to exclude
 set(EXCLUDED_TESTS 
    #  "reordering_test.cpp"
+   # "cuda_csr_utils_test.cu"
 )
 
 # Conditionally exclude CUDA tests if CUDA is not enabled

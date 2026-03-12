@@ -1,6 +1,7 @@
 #include "cuda_spmm.cuh"
 #include "cuda_csr_utils.cuh"
 #include "matrix_utils.hpp"
+#include "utils.h"
 #include <benchmark/benchmark.h>
 #include <cxxopts.hpp>
 #include <fstream>
