@@ -1,8 +1,25 @@
 cmake_minimum_required(VERSION 3.5...3.20)
-project(scratch_test CXX CUDA)
+project(scratch_test CXX)
+
+add_executable(ilu_factorization_levels ilu_factorization_levels.cpp)
+target_compile_features(ilu_factorization_levels PRIVATE cxx_std_20)
+target_link_libraries(ilu_factorization_levels PRIVATE
+  cxxopts::cxxopts
+  graph
+  reordering
+  sparse_mat_op
+)
+if(USE_CUDA)
+  target_link_libraries(ilu_factorization_levels PRIVATE
+    sparse_mat_op_cuda
+    CUDA::cudart
+  )
+endif()
 
 # CUDA test executable for SpMMAnalyze
 if(USE_CUDA)
+  enable_language(CUDA)
+
   set_source_files_properties(test.cpp PROPERTIES LANGUAGE CUDA)
   add_executable(scratch_test test.cpp)
   

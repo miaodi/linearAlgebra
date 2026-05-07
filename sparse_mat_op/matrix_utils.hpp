@@ -543,19 +543,27 @@ template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 bool Diagonal(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av,
               ROWTYPE* diagpos, VALTYPE* diag, const bool invert = false)
 {
-    volatile bool missing_diag = false;
+    bool all_diag_present = true;
     const auto base = ai[0];
-#pragma omp parallel for shared(missing_diag)
+#pragma omp parallel for reduction(&& : all_diag_present)
     for (COLTYPE i = 0; i < rows; i++)
     {
-        auto mid = std::lower_bound(aj + ai[i] - base, aj + ai[i + 1] - base, i + base);
-        if (*mid != i + base)
+        auto row_begin = aj + ai[i] - base;
+        auto row_end = aj + ai[i + 1] - base;
+        auto mid = std::lower_bound(row_begin, row_end, i + base);
+        const bool found = (mid != row_end && *mid == i + base);
+        all_diag_present = all_diag_present && found;
+        if (!found)
         {
-            missing_diag = true;
+            if (diagpos)
+                diagpos[i] = ai[i + 1];
+            if (diag)
+                diag[i] = VALTYPE{};
+            continue;
         }
         if (diagpos)
             diagpos[i] = mid - aj + base;
-        if (diag)
+        if (diag && av)
         {
             VALTYPE val = av[mid - aj];
             if (invert)
@@ -572,7 +580,7 @@ bool Diagonal(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE 
             diag[i] = val;
         }
     }
-    return !missing_diag;
+    return all_diag_present;
 }
 
 /// @brief Split a matrix into strictly lower triangular matrix L, diagonal D,

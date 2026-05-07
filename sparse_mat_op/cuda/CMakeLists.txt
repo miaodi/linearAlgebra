@@ -10,6 +10,7 @@ set(CUDA_SOURCES
     cuda_kernels.cu
     cuda_ilu_symbolic.cu
     cuda_ilu_symbolic_persistent.cu
+    cuda_ilu_base.cu
     cuda_csr_utils.cu
     cuda_spmm.cu
     cuda_iluk_U_symbolic.cu

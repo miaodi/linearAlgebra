@@ -26,8 +26,8 @@ void ICCMerge( OutVec& out_vec, In1Iter in1_begin, In1Iter in1_end, In2Iter in2_
         }
         else
         {
-            out_vec.emplace_back(
-                std::make_pair( in1_begin->first, std::min( in1_begin->second, in2_begin->second ) ) );
+            out_vec.emplace_back( std::make_pair(
+                in1_begin->first, std::min( in1_begin->second, in2_begin->second ) ) );
             in1_begin++;
             in2_begin++;
         }
@@ -42,10 +42,15 @@ void ICCMerge( OutVec& out_vec, In1Iter in1_begin, In1Iter in1_end, In2Iter in2_
     }
 }
 
-template <typename OutVec, typename In1PosIter, typename In1LvlIter, typename In2PosIter, typename In2LvlIter,
-          typename Level>
-void ICCFirstMerge( OutVec& out_vec, In1PosIter in1p_begin, In1PosIter in1p_end, In1LvlIter in1l_iter,
-                    In2PosIter in2p_begin, In2PosIter in2p_end, In2LvlIter in2l_iter, Level lvl )
+template <typename OutVec, typename In1PosIter, typename In1LvlIter, typename In2PosIter, typename In2LvlIter, typename Level>
+void ICCFirstMerge( OutVec& out_vec,
+                    In1PosIter in1p_begin,
+                    In1PosIter in1p_end,
+                    In1LvlIter in1l_iter,
+                    In2PosIter in2p_begin,
+                    In2PosIter in2p_end,
+                    In2LvlIter in2l_iter,
+                    Level lvl )
 {
     while ( in1p_begin != in1p_end && in2p_begin != in2p_end )
     {
@@ -92,9 +97,9 @@ void ICCFirstMerge( OutVec& out_vec, In1PosIter in1p_begin, In1PosIter in1p_end,
 
 // NOTE: for level 0 ICC with Symmetric matrix input
 template <ResizableCSR CSRMatrixType>
-void ICCLevel0SymSymbolic( const typename CSRMatrixType::COLTYPE size, 
-                           typename CSRMatrixType::ROWTYPE const* ai, 
-                           typename CSRMatrixType::COLTYPE const* aj, 
+void ICCLevel0SymSymbolic( const typename CSRMatrixType::COLTYPE size,
+                           typename CSRMatrixType::ROWTYPE const* ai,
+                           typename CSRMatrixType::COLTYPE const* aj,
                            CSRMatrixType& icc )
 {
     using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -121,11 +126,11 @@ void ICCLevel0SymSymbolic( const typename CSRMatrixType::COLTYPE size,
 }
 
 template <typename CSRMatrixType>
-void ICCLevelSymbolic0( const typename CSRMatrixType::COLTYPE size, 
-                        typename CSRMatrixType::ROWTYPE const* ai, 
-                        typename CSRMatrixType::COLTYPE const* aj, 
+void ICCLevelSymbolic0( const typename CSRMatrixType::COLTYPE size,
+                        typename CSRMatrixType::ROWTYPE const* ai,
+                        typename CSRMatrixType::COLTYPE const* aj,
                         typename CSRMatrixType::COLTYPE const* diag_pos,
-                        const int lvl, 
+                        const int lvl,
                         CSRMatrixType& icc )
 {
     using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -248,11 +253,11 @@ void ICCLevelSymbolic0( const typename CSRMatrixType::COLTYPE size,
 }
 
 template <ResizableCSR CSRMatrixType>
-void ICCLevelSymbolic1( const typename CSRMatrixType::COLTYPE size, 
-                        typename CSRMatrixType::ROWTYPE const* ai, 
-                        typename CSRMatrixType::COLTYPE const* aj, 
+void ICCLevelSymbolic1( const typename CSRMatrixType::COLTYPE size,
+                        typename CSRMatrixType::ROWTYPE const* ai,
+                        typename CSRMatrixType::COLTYPE const* aj,
                         typename CSRMatrixType::COLTYPE const* diag_pos,
-                        const int lvl, 
+                        const int lvl,
                         CSRMatrixType& icc )
 {
     using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -306,7 +311,9 @@ void ICCLevelSymbolic1( const typename CSRMatrixType::COLTYPE size,
 
             lik = av_lvls[i_idx - base];
             current_row_pos = 0;
-            next_i = current_row_pos + 1 == current_row_size_before ? NONE : current_row[current_row_pos + 1].first;
+            next_i = current_row_pos + 1 == current_row_size_before
+                         ? NONE
+                         : current_row[current_row_pos + 1].first;
             // merge row k to row j
             for ( ; i_idx < i_idx_end; i_idx++ )
             {
@@ -315,15 +322,17 @@ void ICCLevelSymbolic1( const typename CSRMatrixType::COLTYPE size,
                 while ( next_i <= i )
                 {
                     current_row_pos += 1;
-                    next_i = current_row_pos + 1 == current_row_size_before ? NONE
-                                                                             : current_row[current_row_pos + 1].first;
+                    next_i = current_row_pos + 1 == current_row_size_before
+                                 ? NONE
+                                 : current_row[current_row_pos + 1].first;
                 }
                 level = lik + av_lvls[i_idx - base] + 1;
                 if ( level <= lvl )
                 {
                     if ( current_row[current_row_pos].first == i )
                     {
-                        current_row[current_row_pos].second = std::min( current_row[current_row_pos].second, level );
+                        current_row[current_row_pos].second =
+                            std::min( current_row[current_row_pos].second, level );
                     }
                     else
                     {
@@ -373,11 +382,11 @@ void ICCLevelSymbolic1( const typename CSRMatrixType::COLTYPE size,
 }
 
 template <ResizableCSR CSRMatrixType>
-void ICCLevelSymbolic2( const typename CSRMatrixType::COLTYPE size, 
-                        typename CSRMatrixType::ROWTYPE const* ai, 
-                        typename CSRMatrixType::COLTYPE const* aj, 
+void ICCLevelSymbolic2( const typename CSRMatrixType::COLTYPE size,
+                        typename CSRMatrixType::ROWTYPE const* ai,
+                        typename CSRMatrixType::COLTYPE const* aj,
                         typename CSRMatrixType::COLTYPE const* diag_pos,
-                        const int lvl, 
+                        const int lvl,
                         CSRMatrixType& icc )
 {
     using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -504,11 +513,11 @@ void ICCLevelSymbolic2( const typename CSRMatrixType::COLTYPE size,
 }
 
 template <ResizableCSR CSRMatrixType>
-void ICCLevelSymbolic3( const typename CSRMatrixType::COLTYPE size, 
-                        typename CSRMatrixType::ROWTYPE const* ai, 
-                        typename CSRMatrixType::COLTYPE const* aj, 
+void ICCLevelSymbolic3( const typename CSRMatrixType::COLTYPE size,
+                        typename CSRMatrixType::ROWTYPE const* ai,
+                        typename CSRMatrixType::COLTYPE const* aj,
                         typename CSRMatrixType::COLTYPE const* diag_pos,
-                        const int lvl, 
+                        const int lvl,
                         CSRMatrixType& icc )
 {
     using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -579,25 +588,26 @@ void ICCLevelSymbolic3( const typename CSRMatrixType::COLTYPE size,
         {
             lik1 = av_lvls[merge_spans[span_pos].first - base];
             lik2 = av_lvls[merge_spans[span_pos + 1].first - base];
-            std::span<COLTYPE> sp1{av_lvls.begin() + merge_spans[span_pos].first - base,
-                                   merge_spans[span_pos].second};
-            std::span<COLTYPE> sp2{av_lvls.begin() + merge_spans[span_pos + 1].first - base,
-                                   merge_spans[span_pos + 1].second};
+            std::span<COLTYPE> sp1{ av_lvls.begin() + merge_spans[span_pos].first - base,
+                                    merge_spans[span_pos].second };
+            std::span<COLTYPE> sp2{ av_lvls.begin() + merge_spans[span_pos + 1].first - base,
+                                    merge_spans[span_pos + 1].second };
             auto tsp1 = lvlTransform1( sp1 );
             auto tsp2 = lvlTransform2( sp2 );
-            ICCFirstMerge( current_row1, icc.aj.get() + merge_spans[span_pos].first - base,
-                           icc.aj.get() + merge_spans[span_pos].first + merge_spans[span_pos].second - base,
-                           tsp1.begin(), icc.aj.get() + merge_spans[span_pos + 1].first - base,
-                           icc.aj.get() + merge_spans[span_pos + 1].first + merge_spans[span_pos + 1].second - base,
-                           tsp2.begin(), lvl );
+            ICCFirstMerge(
+                current_row1, icc.aj.get() + merge_spans[span_pos].first - base,
+                icc.aj.get() + merge_spans[span_pos].first + merge_spans[span_pos].second - base,
+                tsp1.begin(), icc.aj.get() + merge_spans[span_pos + 1].first - base,
+                icc.aj.get() + merge_spans[span_pos + 1].first + merge_spans[span_pos + 1].second - base,
+                tsp2.begin(), lvl );
             span_prefix1.push_back( current_row1.size() );
         }
 
         if ( span_pos < merge_spans.size() )
         {
             lik1 = av_lvls[merge_spans[span_pos].first - base];
-            std::span<COLTYPE> sp1{av_lvls.begin() + merge_spans[span_pos].first - base,
-                                   merge_spans[span_pos].second};
+            std::span<COLTYPE> sp1{ av_lvls.begin() + merge_spans[span_pos].first - base,
+                                    merge_spans[span_pos].second };
             auto tsp1 = lvlTransform1( ( sp1 ) );
 
             ICCFirstMerge( current_row1, icc.aj.get() + merge_spans[span_pos].first - base,
@@ -670,9 +680,16 @@ void ICCLevelSymbolic3( const typename CSRMatrixType::COLTYPE size,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool ICCLevelNumeric( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av,
-                      COLTYPE const* diag_pos, const int lvl, const VALTYPE omega, ROWTYPE const* icc_ai,
-                      COLTYPE const* icc_aj, VALTYPE* icc_av )
+bool ICCLevelNumeric( const COLTYPE size,
+                      ROWTYPE const* ai,
+                      COLTYPE const* aj,
+                      VALTYPE const* av,
+                      COLTYPE const* diag_pos,
+                      const int lvl,
+                      const VALTYPE omega,
+                      ROWTYPE const* icc_ai,
+                      COLTYPE const* icc_aj,
+                      VALTYPE* icc_av )
 {
     const auto base = ai[0];
     const ROWTYPE nnz = ai[size] - base;
@@ -758,8 +775,10 @@ bool ICCLevelNumeric( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, 
 }
 
 template <ResizableDiagonal CSRMatrixType>
-bool ILULevel0Symbolic( const typename CSRMatrixType::COLTYPE size, typename CSRMatrixType::ROWTYPE const* ai,
-                        typename CSRMatrixType::COLTYPE const* aj, CSRMatrixType& ilu )
+bool ILULevel0Symbolic( const typename CSRMatrixType::COLTYPE size,
+                        typename CSRMatrixType::ROWTYPE const* ai,
+                        typename CSRMatrixType::COLTYPE const* aj,
+                        CSRMatrixType& ilu )
 {
     ilu.rows = size;
     ilu.cols = size;
@@ -946,106 +965,112 @@ bool ILULevelSymbolic<CSRMatrixType>::operator()( const typename CSRMatrixType::
 }
 
 template <ResizableDiagonal CSRMatrixType, bool keepdiag>
-typename ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::ROWTYPE
-ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::BuildURow(
-    const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl, const COLTYPE base,
-    std::vector<COLTYPE>& visited_thread, std::vector<COLTYPE>& Q_thread,
-    std::vector<COLTYPE>& Q_next_thread)
+typename ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::ROWTYPE ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::BuildURow(
+    const COLTYPE i,
+    ROWTYPE const* ai,
+    COLTYPE const* aj,
+    const int lvl,
+    const COLTYPE base,
+    std::vector<COLTYPE>& visited_thread,
+    std::vector<COLTYPE>& Q_thread,
+    std::vector<COLTYPE>& Q_next_thread )
 {
     Q_thread.clear();
     Q_next_thread.clear();
-    Q_thread.push_back(i);
+    Q_thread.push_back( i );
     int level = 0;
     visited_thread[i] = i;
     auto& Ui_row = _U[i];
     Ui_row.clear();
-    if constexpr (keepdiag)
+    if constexpr ( keepdiag )
     {
-        Ui_row.push_back(i + base);
+        Ui_row.push_back( i + base );
     }
-    while (level <= lvl && Q_thread.size())
+    while ( level <= lvl && Q_thread.size() )
     {
-        for (const auto row : Q_thread)
+        for ( const auto row : Q_thread )
         {
             const ROWTYPE row_start = ai[row] - base;
             const ROWTYPE row_end = ai[row + 1] - base;
-            for (auto adj_idx = row_start; adj_idx < row_end; ++adj_idx)
+            for ( auto adj_idx = row_start; adj_idx < row_end; ++adj_idx )
             {
                 const COLTYPE col = aj[adj_idx] - base;
-                if (visited_thread[col] == i)
+                if ( visited_thread[col] == i )
                     continue;
                 visited_thread[col] = i;
-                if (col < i)
+                if ( col < i )
                 {
-                    Q_next_thread.push_back(col);
+                    Q_next_thread.push_back( col );
                 }
-                else if (col > i)
+                else if ( col > i )
                 {
-                    Ui_row.push_back(col + base);
+                    Ui_row.push_back( col + base );
                 }
             }
         }
         level++;
-        std::swap(Q_thread, Q_next_thread);
+        std::swap( Q_thread, Q_next_thread );
     }
-    if (lvl > 0)
-        std::sort(Ui_row.begin() + keepdiag, Ui_row.end());
-    return static_cast<ROWTYPE>(Ui_row.size());
+    if ( lvl > 0 )
+        std::sort( Ui_row.begin() + keepdiag, Ui_row.end() );
+    return static_cast<ROWTYPE>( Ui_row.size() );
 }
 
 template <ResizableDiagonal CSRMatrixType, bool keepdiag>
-bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYPE size, ROWTYPE const* ai,
-                                                         COLTYPE const* aj, const int lvl, CSRMatrixType& U)
+bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()( const COLTYPE size,
+                                                                     ROWTYPE const* ai,
+                                                                     COLTYPE const* aj,
+                                                                     const int lvl,
+                                                                     CSRMatrixType& U )
 {
     U.rows = size;
     U.cols = size;
-    _U.resize(size);
+    _U.resize( size );
     const auto base = ai[0];
-    U.ResizeAI(size + 1);
+    U.ResizeAI( size + 1 );
     auto* u_ai = U.AI();
     u_ai[0] = base;
     const int reserve_size = 32;
     const COLTYPE not_visited = std::numeric_limits<COLTYPE>::max();
-    _U.resize(size);
+    _U.resize( size );
     const int chunk_size = 32;
 
-#pragma omp parallel num_threads(_nthreads)
+#pragma omp parallel num_threads( _nthreads )
     {
         const int tid = omp_get_thread_num();
         auto& visited_thread = _visited[tid];
-        visited_thread.resize(size);
-        std::fill(visited_thread.begin(), visited_thread.end(), not_visited);
+        visited_thread.resize( size );
+        std::fill( visited_thread.begin(), visited_thread.end(), not_visited );
 
         auto& Q_thread = _Q[tid];
         auto& Q_next_thread = _Q_next[tid];
-        Q_thread.reserve(reserve_size);
-        Q_next_thread.reserve(reserve_size);
+        Q_thread.reserve( reserve_size );
+        Q_next_thread.reserve( reserve_size );
 
-#pragma omp for schedule(dynamic, chunk_size)
-        for (COLTYPE i = 0; i < size; i++)
+#pragma omp for schedule( dynamic, chunk_size )
+        for ( COLTYPE i = 0; i < size; i++ )
         {
-            const ROWTYPE row_size =
-                BuildURow(i, ai, aj, lvl, base, visited_thread, Q_thread, Q_next_thread);
+            const ROWTYPE row_size = BuildURow( i, ai, aj, lvl, base, visited_thread, Q_thread, Q_next_thread );
             u_ai[i + 1] = row_size;
         }
     }
-    utils::ParallelPrefixSumInplace(_nthreads, u_ai, u_ai + size + 1);
+    utils::ParallelPrefixSumInplace( _nthreads, u_ai, u_ai + size + 1 );
     const ROWTYPE nnz = u_ai[size] - base;
-    U.ResizeAJ(nnz);
-    U.ResizeAV(nnz);
-    auto *u_aj = U.AJ();
-    
+    U.ResizeAJ( nnz );
+    U.ResizeAV( nnz );
+    auto* u_aj = U.AJ();
+
     // Parallel copy _U to u_aj using prefix-based load balancing
-#pragma omp parallel num_threads(_nthreads)
+#pragma omp parallel num_threads( _nthreads )
     {
         const int tid = omp_get_thread_num();
-    auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos(u_ai, u_ai + size, tid, _nthreads);
-        
-        for (COLTYPE i = copy_start; i < copy_end; i++)
+        auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos( u_ai, u_ai + size, tid, _nthreads );
+
+        for ( COLTYPE i = copy_start; i < copy_end; i++ )
         {
             const ROWTYPE row_start = u_ai[i] - base;
-            const size_t num_bytes = _U[i].size() * sizeof(COLTYPE);
-            std::memcpy(u_aj + row_start, _U[i].data(), num_bytes);
+            const size_t num_bytes = _U[i].size() * sizeof( COLTYPE );
+            std::memcpy( u_aj + row_start, _U[i].data(), num_bytes );
         }
     }
     return true;
@@ -1053,9 +1078,16 @@ bool ILULevelSymbolicParallelU<CSRMatrixType, keepdiag>::operator()(const COLTYP
 
 template <ResizableDiagonal CSRMatrixType, enums::matrix_utils::TriangularMatrix Triangular, bool keepdiag>
 typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::BuildRow(
-    const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl, const COLTYPE base,
-    const COLTYPE invalid_peak, std::vector<NodeInfo>& visited_thread, std::vector<COLTYPE>& added_thread,
-    std::vector<NodeInfo>& Q_thread, std::vector<NodeInfo>& Q_next_thread)
+    const COLTYPE i,
+    ROWTYPE const* ai,
+    COLTYPE const* aj,
+    const int lvl,
+    const COLTYPE base,
+    const COLTYPE invalid_peak,
+    std::vector<NodeInfo>& visited_thread,
+    std::vector<COLTYPE>& added_thread,
+    std::vector<NodeInfo>& Q_thread,
+    std::vector<NodeInfo>& Q_next_thread )
 {
     Q_thread.clear();
     Q_next_thread.clear();
@@ -1064,123 +1096,121 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
 
     // Initialize Q with columns from row i where col < i
     ROWTYPE row_idx;
-    for (row_idx = ai[i] - base; row_idx < ai[i + 1] - base; ++row_idx)
+    for ( row_idx = ai[i] - base; row_idx < ai[i + 1] - base; ++row_idx )
     {
         const COLTYPE col = aj[row_idx] - base;
-        if (col >= i)
+        if ( col >= i )
             break;
-        Q_thread.push_back({col, col});
-        L_i.push_back(col + base);
+        Q_thread.push_back( { col, col } );
+        L_i.push_back( col + base );
         auto& visited_col = visited_thread[col];
         visited_col.index = i;
         visited_col.peak = col;
         added_thread[col] = i;
     }
 
-    if constexpr(Triangular == enums::matrix_utils::TriangularMatrix::LU)
+    if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
     {
         _U[i].clear();
-        for (; row_idx < ai[i + 1] - base; ++row_idx)
+        for ( ; row_idx < ai[i + 1] - base; ++row_idx )
         {
             const COLTYPE col = aj[row_idx] - base;
             auto& visited_col = visited_thread[col];
             visited_col.index = i;
-            _U[i].push_back(col + base);
+            _U[i].push_back( col + base );
         }
     }
 
     int level = 0;
-    while (level < lvl && !Q_thread.empty())
+    while ( level < lvl && !Q_thread.empty() )
     {
-        for (const auto& node : Q_thread)
+        for ( const auto& node : Q_thread )
         {
             const COLTYPE idx = node.index;
             const COLTYPE peak = node.peak;
 
             // Expand to neighbors: iterate over row idx where col < i
-            for (ROWTYPE adj_idx = ai[idx] - base; adj_idx < ai[idx + 1] - base; ++adj_idx)
+            for ( ROWTYPE adj_idx = ai[idx] - base; adj_idx < ai[idx + 1] - base; ++adj_idx )
             {
                 const COLTYPE k = aj[adj_idx] - base;
-                if (k >= i)
+                if ( k >= i )
                 {
-                    if constexpr (Triangular == enums::matrix_utils::TriangularMatrix::LU)
+                    if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
                     {
-                        if (visited_thread[k].index != i)
+                        if ( visited_thread[k].index != i )
                         {
                             visited_thread[k].index = i;
-                            _U[i].push_back(k + base);
+                            _U[i].push_back( k + base );
                         }
                     }
                     continue;
                 }
 
                 auto& visited_k = visited_thread[k];
-                if (visited_k.index != i)
+                if ( visited_k.index != i )
                 {
                     visited_k.index = i;
                     visited_k.peak = invalid_peak;
                 }
 
                 // Skip if we've already found a path with smaller or equal peak
-                if (visited_k.peak <= peak)
+                if ( visited_k.peak <= peak )
                     continue;
 
                 // Update peak for this node
                 visited_k.peak = peak;
-                const bool is_new = (added_thread[k] != i);
+                const bool is_new = ( added_thread[k] != i );
 
                 // Add to result if this is a new node and k > peak (k is the max in path)
-                if (is_new && k > peak)
+                if ( is_new && k > peak )
                 {
                     added_thread[k] = i;
-                    L_i.push_back(k + base);
+                    L_i.push_back( k + base );
                 }
 
                 // Enqueue for next level with updated peak
-                const COLTYPE new_peak = std::max(peak, k);
-                Q_next_thread.push_back({k, new_peak});
+                const COLTYPE new_peak = std::max( peak, k );
+                Q_next_thread.push_back( { k, new_peak } );
             }
         }
 
         level++;
-        std::swap(Q_thread, Q_next_thread);
+        std::swap( Q_thread, Q_next_thread );
         Q_next_thread.clear();
     }
-    if (lvl > 0)
-        std::sort(L_i.begin(), L_i.end());
-    if constexpr (Triangular == enums::matrix_utils::TriangularMatrix::L)
+    if ( lvl > 0 )
+        std::sort( L_i.begin(), L_i.end() );
+    if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::L )
     {
-        if constexpr (keepdiag)
-            L_i.push_back(i + base);
-        return static_cast<ROWTYPE>(L_i.size());
+        if constexpr ( keepdiag )
+            L_i.push_back( i + base );
+        return static_cast<ROWTYPE>( L_i.size() );
     }
-    else if constexpr (Triangular == enums::matrix_utils::TriangularMatrix::LU)
+    else if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
     {
-        if (lvl > 0)
-            std::sort(_U[i].begin(), _U[i].end());
+        if ( lvl > 0 )
+            std::sort( _U[i].begin(), _U[i].end() );
     }
-    return static_cast<ROWTYPE>(L_i.size() + _U[i].size());
+    return static_cast<ROWTYPE>( L_i.size() + _U[i].size() );
 }
 
-template <ResizableDiagonal CSRMatrixType,
-          enums::matrix_utils::TriangularMatrix Triangular,
-          bool keepdiag>
-bool ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::operator()(const COLTYPE size,
-                                                                               ROWTYPE const* ai,
-                                                                               COLTYPE const* aj,
-                                                                               const int lvl,
-                                                                               CSRMatrixType& ILU)
+template <ResizableDiagonal CSRMatrixType, enums::matrix_utils::TriangularMatrix Triangular, bool keepdiag>
+bool ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::operator()( const COLTYPE size,
+                                                                                ROWTYPE const* ai,
+                                                                                COLTYPE const* aj,
+                                                                                const int lvl,
+                                                                                CSRMatrixType& ILU )
 {
     ILU.rows = size;
     ILU.cols = size;
-    _L.resize(size);
-    if constexpr (Triangular == enums::matrix_utils::TriangularMatrix::LU)
+    _L.resize( size );
+    if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
     {
-        _U.resize(size);
-        ILU.ResizeDiagonal(size);
+        _U.resize( size );
+        ILU.ResizeDiagonal( size );
     }
     const auto base = ai[0];
-    ILU.ResizeAI(size + 1);
+    ILU.ResizeAI( size + 1 );
     auto* l_ai = ILU.AI();
     l_ai[0] = base;
     const int reserve_size = 64;
@@ -1188,58 +1218,58 @@ bool ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::operator()(c
     const COLTYPE not_visited = std::numeric_limits<COLTYPE>::max();
     const COLTYPE invalid_peak = std::numeric_limits<COLTYPE>::max();
 
-#pragma omp parallel num_threads(_nthreads)
+#pragma omp parallel num_threads( _nthreads )
     {
         const int tid = omp_get_thread_num();
         auto& visited_thread = _visited[tid];
-        visited_thread.resize(size);
+        visited_thread.resize( size );
 
         auto& added_thread = _added[tid];
-        added_thread.resize(size);
+        added_thread.resize( size );
 
         auto& Q_thread = _Q[tid];
         auto& Q_next_thread = _Q_next[tid];
-        Q_thread.reserve(reserve_size);
-        Q_next_thread.reserve(reserve_size);
+        Q_thread.reserve( reserve_size );
+        Q_next_thread.reserve( reserve_size );
 
-        for (auto& node : visited_thread)
+        for ( auto& node : visited_thread )
         {
             node.index = not_visited;
             node.peak = invalid_peak;
         }
-        std::fill(added_thread.begin(), added_thread.end(), not_visited);
+        std::fill( added_thread.begin(), added_thread.end(), not_visited );
 
-#pragma omp for schedule(dynamic, chunk_size)
-        for (COLTYPE i = 0; i < size; i++)
+#pragma omp for schedule( dynamic, chunk_size )
+        for ( COLTYPE i = 0; i < size; i++ )
         {
-            const ROWTYPE row_size = BuildRow(i, ai, aj, lvl, base, invalid_peak, visited_thread,
-                                              added_thread, Q_thread, Q_next_thread);
+            const ROWTYPE row_size = BuildRow( i, ai, aj, lvl, base, invalid_peak, visited_thread,
+                                               added_thread, Q_thread, Q_next_thread );
             l_ai[i + 1] = row_size;
         }
     }
 
-    utils::ParallelPrefixSumInplace(_nthreads, l_ai, l_ai + size + 1);
+    utils::ParallelPrefixSumInplace( _nthreads, l_ai, l_ai + size + 1 );
     const ROWTYPE nnz = l_ai[size] - base;
-    ILU.ResizeAJ(nnz);
-    ILU.ResizeAV(nnz);
+    ILU.ResizeAJ( nnz );
+    ILU.ResizeAV( nnz );
     auto* l_aj = ILU.AJ();
 
     // Parallel copy _L to l_aj using prefix-based load balancing
-#pragma omp parallel num_threads(_nthreads)
+#pragma omp parallel num_threads( _nthreads )
     {
         const int tid = omp_get_thread_num();
-        auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos(l_ai, l_ai + size, tid, _nthreads);
+        auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos( l_ai, l_ai + size, tid, _nthreads );
 
-        for (COLTYPE i = copy_start; i < copy_end; i++)
+        for ( COLTYPE i = copy_start; i < copy_end; i++ )
         {
             const ROWTYPE row_start = l_ai[i] - base;
             const size_t l_num = _L[i].size();
-            std::copy_n(_L[i].begin(), l_num, l_aj + row_start);
-            if constexpr(Triangular == enums::matrix_utils::TriangularMatrix::LU)
+            std::copy_n( _L[i].begin(), l_num, l_aj + row_start );
+            if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
             {
                 const ROWTYPE u_row_start = row_start + l_num;
                 const size_t u_num = _U[i].size();
-                std::copy_n(_U[i].begin(), u_num, l_aj + u_row_start);
+                std::copy_n( _U[i].begin(), u_num, l_aj + u_row_start );
                 ILU.diagonal[i] = row_start + _L[i].size() + base;
             }
         }
@@ -1250,39 +1280,43 @@ bool ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::operator()(c
 // Policy classes for sequential vs parallel elimination
 struct SequentialPolicy
 {
-    SequentialPolicy(std::size_t /*size*/) {}
-    
-    template<typename COLT>
-    void wait_for_row(COLT /*k*/) const {}
-    
-    template<typename COLT>
-    void mark_row_ready(COLT /*i*/) {}
+    SequentialPolicy( std::size_t /*size*/ ) {}
+
+    template <typename COLT>
+    void wait_for_row( COLT /*k*/ ) const
+    {
+    }
+
+    template <typename COLT>
+    void mark_row_ready( COLT /*i*/ )
+    {
+    }
 };
 
 struct ParallelPolicy
 {
     std::atomic<std::int32_t>* ready;
-    
-    ParallelPolicy(std::size_t size) : ready(nullptr) {}
-    
-    void set_ready_array(std::atomic<std::int32_t>* ready_arr)
+
+    ParallelPolicy( std::size_t size )
+        : ready( nullptr )
     {
-        ready = ready_arr;
     }
-    
-    template<typename COLT>
-    void wait_for_row(COLT k) const
+
+    void set_ready_array( std::atomic<std::int32_t>* ready_arr ) { ready = ready_arr; }
+
+    template <typename COLT>
+    void wait_for_row( COLT k ) const
     {
-        while (ready[k].load(std::memory_order_acquire) == 0)
+        while ( ready[k].load( std::memory_order_acquire ) == 0 )
         {
             // Spin-wait until row k is ready
         }
     }
-    
-    template<typename COLT>
-    void mark_row_ready(COLT i)
+
+    template <typename COLT>
+    void mark_row_ready( COLT i )
     {
-        ready[i].store(1, std::memory_order_release);
+        ready[i].store( 1, std::memory_order_release );
     }
 };
 
@@ -1291,33 +1325,38 @@ template <typename ROWT, typename COLT, typename VALT, typename Policy = Sequent
 struct ILURowEliminator
 {
     static constexpr ROWT MARKER_ABSENT = std::numeric_limits<ROWT>::max();
-    
+
     // Workspace for marker array
     std::vector<ROWT> marker;
     Policy policy;
-    
-    ILURowEliminator(COLT size) : marker(size, MARKER_ABSENT), policy(size) {}
-    
-    // For parallel version: set the ready array
-    void set_ready_array(std::atomic<std::int32_t>* ready_arr)
+
+    ILURowEliminator( COLT size )
+        : marker( size, MARKER_ABSENT ),
+          policy( size )
     {
-        if constexpr (std::is_same_v<Policy, ParallelPolicy>)
+    }
+
+    // For parallel version: set the ready array
+    void set_ready_array( std::atomic<std::int32_t>* ready_arr )
+    {
+        if constexpr ( std::is_same_v<Policy, ParallelPolicy> )
         {
-            policy.set_ready_array(ready_arr);
+            policy.set_ready_array( ready_arr );
         }
     }
-    
+
     // Perform elimination on row i using previously factorized rows
     // Assumes row i has been initialized with values from A
     // Returns false if singular pivot encountered
-    bool eliminate_row(
-        COLT i,
-        ROWT base,
-        ROWT row_start,
-        ROWT row_end,
-        // ILU matrix being built
-        ROWT const* ilu_ai, COLT const* ilu_aj, VALT* ilu_av,
-        ROWT const* ilu_diag)
+    bool eliminate_row( COLT i,
+                        ROWT base,
+                        ROWT row_start,
+                        ROWT row_end,
+                        // ILU matrix being built
+                        ROWT const* ilu_ai,
+                        COLT const* ilu_aj,
+                        VALT* ilu_av,
+                        ROWT const* ilu_diag )
     {
         // ---- Elimination: process L part entries (pivot columns k < i) ----
         for ( ROWT k_pos = row_start; k_pos < row_end; ++k_pos )
@@ -1327,10 +1366,10 @@ struct ILURowEliminator
                 break; // reached diagonal / upper part
             if ( ilu_av[k_pos] == VALT( 0 ) )
                 continue; // nothing to eliminate
-            
+
             // Wait for row k to be ready (no-op in sequential, spin-wait in parallel)
-            policy.wait_for_row(k);
-            
+            policy.wait_for_row( k );
+
             const VALT akk = ilu_av[ilu_diag[k] - base];
             if ( akk == VALT( 0 ) )
                 return false; // singular pivot
@@ -1356,10 +1395,10 @@ struct ILURowEliminator
             COLT col = ilu_aj[pos] - base;
             marker[col] = MARKER_ABSENT;
         }
-        
+
         // Mark this row as ready (no-op in sequential)
-        policy.mark_row_ready(i);
-        
+        policy.mark_row_ready( i );
+
         return true;
     }
 };
@@ -1383,7 +1422,7 @@ bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
     using VALT = typename CSRMatrixType::VALTYPE;
 
     // Create row eliminator with workspace
-    ILURowEliminator<ROWT, COLT, VALT> eliminator(size);
+    ILURowEliminator<ROWT, COLT, VALT> eliminator( size );
 
     for ( COLT i = 0; i < size; i++ )
     {
@@ -1392,7 +1431,7 @@ bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
         const ROWT row_end = ilu_ai[i + 1] - base;
         ROWT a_pos = ai[i] - base;
         const ROWT a_row_end = ai[i + 1] - base;
-        
+
         // Build marker for current row and copy values from A
         for ( ROWT pos = row_start; pos < row_end; ++pos )
         {
@@ -1409,7 +1448,7 @@ bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
         }
 
         // Perform elimination
-        if (!eliminator.eliminate_row(i, base, row_start, row_end, ilu_ai, ilu_aj, ilu_av, ilu_diag))
+        if ( !eliminator.eliminate_row( i, base, row_start, row_end, ilu_ai, ilu_aj, ilu_av, ilu_diag ) )
             return false;
     }
     return true;
@@ -1525,8 +1564,7 @@ bool ICCLevelSymbolicParallel<CSRMatrixType>::operator()( const COLTYPE size,
             L.ResizeAV( L.AI()[size] - base );
         }
 
-        auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
-            L.AI(), L.AI() + size, tid, _num_threads );
+        auto [start, end] = utils::LoadPrefixBalancedPartitionPos( L.AI(), L.AI() + size, tid, _num_threads );
         for ( auto i = start; i < end; i++ )
         {
             ROWTYPE pos = L.AI()[i] - base;
@@ -1562,8 +1600,7 @@ bool ICCLevelNumericFixedPoint<CSRMatrixType>::operator()( const COLTYPE size,
 
         // copy av to _av according to L's sparsity pattern
         // and initialize _L_av_init
-        auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
-            L.AI(), L.AI() + size, tid, _num_threads );
+        auto [start, end] = utils::LoadPrefixBalancedPartitionPos( L.AI(), L.AI() + size, tid, _num_threads );
         for ( auto i = start; i < end; i++ )
         {
             ROWTYPE i_idx = ai[i] - base;
@@ -1591,8 +1628,7 @@ bool ICCLevelNumericFixedPoint<CSRMatrixType>::operator()( const COLTYPE size,
             assert( sum_square > 0 );
             const VALTYPE weight = std::sqrt( _av[ilu_i_idx - 1] / sum_square );
 
-            for ( ROWTYPE ilu_i_idx = L.AI()[i] - base;
-                  ilu_i_idx < L.AI()[i + 1] - base; ilu_i_idx++ )
+            for ( ROWTYPE ilu_i_idx = L.AI()[i] - base; ilu_i_idx < L.AI()[i + 1] - base; ilu_i_idx++ )
             {
                 _L_av_init[ilu_i_idx] *= weight;
             }
@@ -1698,8 +1734,8 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
     if ( size == COLT( 0 ) )
         return true;
 
-    const size_t reserve_hint = static_cast<size_t>( std::max<ROWT>(
-        ROWT( 8 ), ( nnz_a / static_cast<ROWT>( size ) ) + ROWT( 4 ) ) );
+    const size_t reserve_hint =
+        static_cast<size_t>( std::max<ROWT>( ROWT( 8 ), ( nnz_a / static_cast<ROWT>( size ) ) + ROWT( 4 ) ) );
 
     struct Entry
     {
@@ -1754,7 +1790,8 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
 
             const ROWT diag_offset = ilu_diag[k] - base;
             const VALT akk = ilu_av[diag_offset];
-            if ( akk == VALT( 0 ) ){
+            if ( akk == VALT( 0 ) )
+            {
                 std::cerr << "Error: zero diagonal in ILU preconditioner.\n";
                 return false;
             }
@@ -1786,8 +1823,7 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
                         const auto prev_size = lower_cols.size();
                         lower_cols.resize( prev_size + 1 );
                         auto insert_pos = static_cast<LowerColsDiffT>( prev_size );
-                        while ( insert_pos >
-                                static_cast<LowerColsDiffT>( lower_idx ) &&
+                        while ( insert_pos > static_cast<LowerColsDiffT>( lower_idx ) &&
                                 lower_cols[insert_pos - 1] > j )
                         {
                             lower_cols[insert_pos] = lower_cols[insert_pos - 1];
@@ -1798,17 +1834,15 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
 #else
                     if ( j < i )
                     {
-                        auto it = std::upper_bound(
-                            lower_cols.begin() + static_cast<LowerColsDiffT>( lower_idx ),
-                            lower_cols.end(), j );
+                        auto it = std::upper_bound( lower_cols.begin() + static_cast<LowerColsDiffT>( lower_idx ),
+                                                    lower_cols.end(), j );
                         lower_cols.insert( it, j );
                     }
 #endif
                 }
                 else
                 {
-                    row_entries[row_pos].val =
-                        std::fma( -aik, u_kj, row_entries[row_pos].val );
+                    row_entries[row_pos].val = std::fma( -aik, u_kj, row_entries[row_pos].val );
                     // no row_max update (using original L2)
                 }
             }
@@ -1829,7 +1863,8 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
                 diag_present = true;
                 diag_value = val;
             }
-            else if ( std::abs( val ) <= drop_tol ){
+            else if ( std::abs( val ) <= drop_tol )
+            {
                 continue;
             }
 
@@ -1837,7 +1872,8 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
         }
         row_entries.resize( compact_pos );
 
-        if ( !diag_present ){
+        if ( !diag_present )
+        {
             std::cerr << "Error: missing diagonal in ILU preconditioner.\n";
             return false;
         }
@@ -1870,40 +1906,38 @@ bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,
     return true;
 }
 
-template void ICCLevel0SymSymbolic<CSRMatrix<int, int, double>>(
-    const int rows, int const* ai, int const* aj, CSRMatrix<int, int, double>& icc );
+template void ICCLevel0SymSymbolic<CSRMatrix<int, int, double>>( const int rows,
+                                                                 int const* ai,
+                                                                 int const* aj,
+                                                                 CSRMatrix<int, int, double>& icc );
 
-template void ICCLevelSymbolic0<CSRMatrix<int, int, double>>(
-    const int rows,
-    int const* ai,
-    int const* aj,
-    int const* diag_pos,
-    const int lvl,
-    CSRMatrix<int, int, double>& icc );
+template void ICCLevelSymbolic0<CSRMatrix<int, int, double>>( const int rows,
+                                                              int const* ai,
+                                                              int const* aj,
+                                                              int const* diag_pos,
+                                                              const int lvl,
+                                                              CSRMatrix<int, int, double>& icc );
 
-template void ICCLevelSymbolic1<CSRMatrix<int, int, double>>(
-    const int rows,
-    int const* ai,
-    int const* aj,
-    int const* diag_pos,
-    const int lvl,
-    CSRMatrix<int, int, double>& icc );
+template void ICCLevelSymbolic1<CSRMatrix<int, int, double>>( const int rows,
+                                                              int const* ai,
+                                                              int const* aj,
+                                                              int const* diag_pos,
+                                                              const int lvl,
+                                                              CSRMatrix<int, int, double>& icc );
 
-template void ICCLevelSymbolic2<CSRMatrix<int, int, double>>(
-    const int rows,
-    int const* ai,
-    int const* aj,
-    int const* diag_pos,
-    const int lvl,
-    CSRMatrix<int, int, double>& icc );
+template void ICCLevelSymbolic2<CSRMatrix<int, int, double>>( const int rows,
+                                                              int const* ai,
+                                                              int const* aj,
+                                                              int const* diag_pos,
+                                                              const int lvl,
+                                                              CSRMatrix<int, int, double>& icc );
 
-template void ICCLevelSymbolic3<CSRMatrix<int, int, double>>(
-    const int rows,
-    int const* ai,
-    int const* aj,
-    int const* diag_pos,
-    const int lvl,
-    CSRMatrix<int, int, double>& icc );
+template void ICCLevelSymbolic3<CSRMatrix<int, int, double>>( const int rows,
+                                                              int const* ai,
+                                                              int const* aj,
+                                                              int const* diag_pos,
+                                                              const int lvl,
+                                                              CSRMatrix<int, int, double>& icc );
 
 template bool ICCLevelNumeric<int, int, double>( const int rows,
                                                  int const* ai,
@@ -1918,35 +1952,26 @@ template bool ICCLevelNumeric<int, int, double>( const int rows,
 
 template class ICCLevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>>;
 template class ICCLevelNumericFixedPoint<matrix_utils::CSRMatrix<int, int, double>>;
-template bool ILULevel0Symbolic<matrix_utils::CSRMatrix<int, int, double>>(
-    const int size,
-    int const* ai,
-    int const* aj,
-    matrix_utils::CSRMatrix<int, int, double>& ilu );
+template bool ILULevel0Symbolic<matrix_utils::CSRMatrix<int, int, double>>( const int size,
+                                                                            int const* ai,
+                                                                            int const* aj,
+                                                                            matrix_utils::CSRMatrix<int, int, double>& ilu );
 template class ILULevelSymbolic<matrix_utils::CSRMatrix<int, int, double>>;
 template class ILULevelSymbolicParallelU<matrix_utils::CSRMatrix<int, int, double>, false>;
 template class ILULevelSymbolicParallelU<matrix_utils::CSRMatrix<int, int, double>, true>;
-template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>,
-                                        enums::matrix_utils::L,
-                                        false>;
-template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>,
-                                        enums::matrix_utils::L,
-                                        true>;
-template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>,
-                                        enums::matrix_utils::LU,
-                                        true>;
-template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>(
-    const int size,
-    int const* ai,
-    int const* aj,
-    double const* av,
-    const int lvl,
-    matrix_utils::CSRMatrix<int, int, double>& ilu );
-template bool ILUTNumeric<matrix_utils::CSRMatrix<int, int, double>>(
-    const int size,
-    int const* ai,
-    int const* aj,
-    double const* av,
-    const double tau,
-    matrix_utils::CSRMatrix<int, int, double>& ilu );
+template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::L, false>;
+template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::L, true>;
+template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::LU, true>;
+template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>( const int size,
+                                                                          int const* ai,
+                                                                          int const* aj,
+                                                                          double const* av,
+                                                                          const int lvl,
+                                                                          matrix_utils::CSRMatrix<int, int, double>& ilu );
+template bool ILUTNumeric<matrix_utils::CSRMatrix<int, int, double>>( const int size,
+                                                                      int const* ai,
+                                                                      int const* aj,
+                                                                      double const* av,
+                                                                      const double tau,
+                                                                      matrix_utils::CSRMatrix<int, int, double>& ilu );
 } // namespace matrix_utils
