@@ -52,11 +52,13 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
    
    # CUDA benchmarks need different dependencies and settings
    if(IS_CUDA_BENCH)
-      set_target_properties(${TARGET_NAME} PROPERTIES 
-         CUDA_STANDARD ${CMAKE_CUDA_STANDARD}
-         CUDA_STANDARD_REQUIRED ON
-         CUDA_SEPARABLE_COMPILATION ON
-      )
+      if(BENCH_EXT STREQUAL ".cu")
+         set_target_properties(${TARGET_NAME} PROPERTIES 
+            CUDA_STANDARD ${CMAKE_CUDA_STANDARD}
+            CUDA_STANDARD_REQUIRED ON
+            CUDA_SEPARABLE_COMPILATION ON
+         )
+      endif()
       target_link_libraries(${TARGET_NAME} PRIVATE 
          benchmark::benchmark 
          sparse_mat_op_cuda

@@ -16,6 +16,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(LINEAR_ALGEBRA_LINK_COMPILE_COMMANDS_FOR_CLANGD
+  "Create a source-tree compile_commands.json link for clangd" ON)
+
+if(CMAKE_EXPORT_COMPILE_COMMANDS
+   AND LINEAR_ALGEBRA_LINK_COMPILE_COMMANDS_FOR_CLANGD
+   AND UNIX
+   AND NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+      "${CMAKE_BINARY_DIR}/compile_commands.json"
+      "${CMAKE_SOURCE_DIR}/compile_commands.json"
+  )
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -222,28 +236,19 @@ if(USE_CUDA)
   message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER}")
   message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
 
-  # Download CPM.cmake for package management
-  set(CPM_DOWNLOAD_VERSION 0.40.2)
-  set(CPM_DOWNLOAD_LOCATION "${CMAKE_BINARY_DIR}/cmake/CPM_${CPM_DOWNLOAD_VERSION}.cmake")
-  if(NOT EXISTS ${CPM_DOWNLOAD_LOCATION})
-    message(STATUS "Downloading CPM.cmake v${CPM_DOWNLOAD_VERSION}")
-    file(DOWNLOAD
-      https://github.com/cpm-cmake/CPM.cmake/releases/download/v${CPM_DOWNLOAD_VERSION}/CPM.cmake
-      ${CPM_DOWNLOAD_LOCATION}
-    )
-  endif()
-  include(${CPM_DOWNLOAD_LOCATION})
-
   # cuCollections (cuco) for GPU hash set support
-  CPMAddPackage(
-    NAME cuco
-    GITHUB_REPOSITORY NVIDIA/cuCollections
+  set(LINEAR_ALGEBRA_BUILD_BENCHMARKS ${BUILD_BENCHMARKS})
+  set(BUILD_TESTS OFF)
+  set(BUILD_BENCHMARKS OFF)
+  set(BUILD_EXAMPLES OFF)
+  FetchContent_Declare(
+    cuco
+    GIT_REPOSITORY https://github.com/NVIDIA/cuCollections.git
     GIT_TAG dev
-    OPTIONS
-      "BUILD_TESTS OFF"
-      "BUILD_BENCHMARKS OFF"
-      "BUILD_EXAMPLES OFF"
+    GIT_SHALLOW TRUE
   )
+  FetchContent_MakeAvailable(cuco)
+  set(BUILD_BENCHMARKS ${LINEAR_ALGEBRA_BUILD_BENCHMARKS})
 endif()
 
 configure_file(

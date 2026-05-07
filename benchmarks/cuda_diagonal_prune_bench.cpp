@@ -4,11 +4,11 @@
 #include <benchmark/benchmark.h>
 #include <cxxopts.hpp>
 #include <cuda_runtime.h>
-#include <thrust/device_vector.h>
 #include <omp.h>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -30,6 +30,43 @@ static void checkCudaError(cudaError_t error, const char* message) {
                                 cudaGetErrorString(error));
     }
 }
+
+template <typename T>
+class CudaBuffer {
+public:
+    explicit CudaBuffer(std::size_t size) : size_(size) {
+        if (size_ > 0) {
+            checkCudaError(cudaMalloc(&data_, size_ * sizeof(T)), "cudaMalloc");
+        }
+    }
+
+    ~CudaBuffer() {
+        if (data_ != nullptr) {
+            cudaFree(data_);
+        }
+    }
+
+    CudaBuffer(const CudaBuffer&) = delete;
+    CudaBuffer& operator=(const CudaBuffer&) = delete;
+
+    T* data() { return data_; }
+    const T* data() const { return data_; }
+
+    void copy_from(const std::vector<T>& source) {
+        if (source.size() > size_) {
+            throw std::runtime_error("CUDA buffer copy source is larger than allocation");
+        }
+        if (!source.empty()) {
+            checkCudaError(cudaMemcpy(data_, source.data(), source.size() * sizeof(T),
+                                      cudaMemcpyHostToDevice),
+                           "cudaMemcpy host to device");
+        }
+    }
+
+private:
+    T* data_ = nullptr;
+    std::size_t size_ = 0;
+};
 
 // CPU version benchmark
 static void BM_DiagonalScaledPrune_CPU(benchmark::State& state) {
@@ -64,52 +101,55 @@ static void BM_DiagonalScaledPrune_GPU(benchmark::State& state) {
     const double threshold = state.range(0) / 1000.0; // Convert from integer millis to double
     
     // Allocate device memory once
-    thrust::device_vector<int> d_ai(g_ai);
-    thrust::device_vector<int> d_aj(g_aj);
-    thrust::device_vector<double> d_av(g_av);
-    thrust::device_vector<int> d_mask(g_original_nnz);
-    thrust::device_vector<int> d_ai_out(g_rows + 1);
-    thrust::device_vector<int> d_aj_out(g_original_nnz);
-    thrust::device_vector<double> d_av_out(g_original_nnz);
+    CudaBuffer<int> d_ai(g_ai.size());
+    CudaBuffer<int> d_aj(g_aj.size());
+    CudaBuffer<double> d_av(g_av.size());
+    CudaBuffer<int> d_mask(g_original_nnz);
+    CudaBuffer<int> d_ai_out(g_rows + 1);
+    CudaBuffer<int> d_aj_out(g_original_nnz);
+    CudaBuffer<double> d_av_out(g_original_nnz);
+    d_ai.copy_from(g_ai);
+    d_aj.copy_from(g_aj);
+    d_av.copy_from(g_av);
     
     // Warm-up
     cuda_utils::CSRGenDiagScaledPruneMask(
         g_rows,
-        thrust::raw_pointer_cast(d_ai.data()),
-        thrust::raw_pointer_cast(d_aj.data()),
-        thrust::raw_pointer_cast(d_av.data()),
+        d_ai.data(),
+        d_aj.data(),
+        d_av.data(),
         threshold,
-        thrust::raw_pointer_cast(d_mask.data()));
+        d_mask.data());
     cudaDeviceSynchronize();
     
     for (auto _ : state) {
         // Reset input data
         state.PauseTiming();
-        thrust::copy(g_ai.begin(), g_ai.end(), d_ai.begin());
-        thrust::copy(g_aj.begin(), g_aj.end(), d_aj.begin());
-        thrust::copy(g_av.begin(), g_av.end(), d_av.begin());
+        d_ai.copy_from(g_ai);
+        d_aj.copy_from(g_aj);
+        d_av.copy_from(g_av);
         cudaDeviceSynchronize();
         state.ResumeTiming();
         
         // Step 1: Generate mask
         cuda_utils::CSRGenDiagScaledPruneMask(
             g_rows,
-            thrust::raw_pointer_cast(d_ai.data()),
-            thrust::raw_pointer_cast(d_aj.data()),
-            thrust::raw_pointer_cast(d_av.data()),
+            d_ai.data(),
+            d_aj.data(),
+            d_av.data(),
             threshold,
-            thrust::raw_pointer_cast(d_mask.data()));
+            d_mask.data());
         
         // Step 2: Apply mask
         int removed = cuda_utils::CSRSelectByMaskDevice(
             g_rows,
-            thrust::raw_pointer_cast(d_ai.data()),
-            thrust::raw_pointer_cast(d_aj.data()),
-            thrust::raw_pointer_cast(d_av.data()),
-            thrust::raw_pointer_cast(d_mask.data()),
-            thrust::raw_pointer_cast(d_ai_out.data()),
-            thrust::raw_pointer_cast(d_aj_out.data()),
-            thrust::raw_pointer_cast(d_av_out.data()));
+            d_ai.data(),
+            d_aj.data(),
+            d_av.data(),
+            d_mask.data(),
+            d_ai_out.data(),
+            d_aj_out.data(),
+            d_av_out.data());
         
         cudaDeviceSynchronize();
         benchmark::DoNotOptimize(removed);
@@ -124,29 +164,32 @@ static void BM_DiagonalScaledPrune_GPU(benchmark::State& state) {
 static void BM_DiagonalScaledPrune_GPU_MaskOnly(benchmark::State& state) {
     const double threshold = state.range(0) / 1000.0;
     
-    thrust::device_vector<int> d_ai(g_ai);
-    thrust::device_vector<int> d_aj(g_aj);
-    thrust::device_vector<double> d_av(g_av);
-    thrust::device_vector<int> d_mask(g_original_nnz);
+    CudaBuffer<int> d_ai(g_ai.size());
+    CudaBuffer<int> d_aj(g_aj.size());
+    CudaBuffer<double> d_av(g_av.size());
+    CudaBuffer<int> d_mask(g_original_nnz);
+    d_ai.copy_from(g_ai);
+    d_aj.copy_from(g_aj);
+    d_av.copy_from(g_av);
     
     // Warm-up
     cuda_utils::CSRGenDiagScaledPruneMask(
         g_rows,
-        thrust::raw_pointer_cast(d_ai.data()),
-        thrust::raw_pointer_cast(d_aj.data()),
-        thrust::raw_pointer_cast(d_av.data()),
+        d_ai.data(),
+        d_aj.data(),
+        d_av.data(),
         threshold,
-        thrust::raw_pointer_cast(d_mask.data()));
+        d_mask.data());
     cudaDeviceSynchronize();
     
     for (auto _ : state) {
         cuda_utils::CSRGenDiagScaledPruneMask(
             g_rows,
-            thrust::raw_pointer_cast(d_ai.data()),
-            thrust::raw_pointer_cast(d_aj.data()),
-            thrust::raw_pointer_cast(d_av.data()),
+            d_ai.data(),
+            d_aj.data(),
+            d_av.data(),
             threshold,
-            thrust::raw_pointer_cast(d_mask.data()));
+            d_mask.data());
         
         cudaDeviceSynchronize();
     }
@@ -160,34 +203,37 @@ static void BM_DiagonalScaledPrune_GPU_MaskOnly(benchmark::State& state) {
 static void BM_DiagonalScaledPrune_GPU_SelectOnly(benchmark::State& state) {
     const double threshold = state.range(0) / 1000.0;
     
-    thrust::device_vector<int> d_ai(g_ai);
-    thrust::device_vector<int> d_aj(g_aj);
-    thrust::device_vector<double> d_av(g_av);
-    thrust::device_vector<int> d_mask(g_original_nnz);
-    thrust::device_vector<int> d_ai_out(g_rows + 1);
-    thrust::device_vector<int> d_aj_out(g_original_nnz);
-    thrust::device_vector<double> d_av_out(g_original_nnz);
+    CudaBuffer<int> d_ai(g_ai.size());
+    CudaBuffer<int> d_aj(g_aj.size());
+    CudaBuffer<double> d_av(g_av.size());
+    CudaBuffer<int> d_mask(g_original_nnz);
+    CudaBuffer<int> d_ai_out(g_rows + 1);
+    CudaBuffer<int> d_aj_out(g_original_nnz);
+    CudaBuffer<double> d_av_out(g_original_nnz);
+    d_ai.copy_from(g_ai);
+    d_aj.copy_from(g_aj);
+    d_av.copy_from(g_av);
     
     // Generate mask once
     cuda_utils::CSRGenDiagScaledPruneMask(
         g_rows,
-        thrust::raw_pointer_cast(d_ai.data()),
-        thrust::raw_pointer_cast(d_aj.data()),
-        thrust::raw_pointer_cast(d_av.data()),
+        d_ai.data(),
+        d_aj.data(),
+        d_av.data(),
         threshold,
-        thrust::raw_pointer_cast(d_mask.data()));
+        d_mask.data());
     cudaDeviceSynchronize();
     
     for (auto _ : state) {
         int removed = cuda_utils::CSRSelectByMaskDevice(
             g_rows,
-            thrust::raw_pointer_cast(d_ai.data()),
-            thrust::raw_pointer_cast(d_aj.data()),
-            thrust::raw_pointer_cast(d_av.data()),
-            thrust::raw_pointer_cast(d_mask.data()),
-            thrust::raw_pointer_cast(d_ai_out.data()),
-            thrust::raw_pointer_cast(d_aj_out.data()),
-            thrust::raw_pointer_cast(d_av_out.data()));
+            d_ai.data(),
+            d_aj.data(),
+            d_av.data(),
+            d_mask.data(),
+            d_ai_out.data(),
+            d_aj_out.data(),
+            d_av_out.data());
         
         cudaDeviceSynchronize();
         benchmark::DoNotOptimize(removed);
