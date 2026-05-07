@@ -3,7 +3,8 @@ project(scratch_test CXX CUDA)
 
 # CUDA test executable for SpMMAnalyze
 if(USE_CUDA)
-  add_executable(scratch_test test.cu)
+  set_source_files_properties(test.cpp PROPERTIES LANGUAGE CUDA)
+  add_executable(scratch_test test.cpp)
   
   # Link with CUDA libraries and sparse_mat_op_cuda
   target_link_libraries(scratch_test PRIVATE 
@@ -20,7 +21,8 @@ if(USE_CUDA)
     CUDA_EXTENSIONS OFF
   )
   # CUDA test executable
-  add_executable(cuda_test cuda_test.cu)
+  set_source_files_properties(cuda_test.cpp PROPERTIES LANGUAGE CUDA)
+  add_executable(cuda_test cuda_test.cpp)
   target_compile_features(cuda_test PRIVATE cxx_std_20)
   target_link_libraries(cuda_test PRIVATE
     cxxopts::cxxopts
@@ -30,4 +32,3 @@ if(USE_CUDA)
   )
 else()
 endif()
-

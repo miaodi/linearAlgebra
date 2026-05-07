@@ -14,4 +14,4 @@ make scratch_test
 
 ## Note
 
-Files in this directory are ignored by git (except CMakeLists.txt, test.cpp, and this README).
+Files in this directory are ignored by git (except CMakeLists.txt, test.cpp, cuda_test.cpp, and this README).
