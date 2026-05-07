@@ -1,32 +1,59 @@
+include_guard(GLOBAL)
+
 include(FetchContent)
+include("${CMAKE_CURRENT_LIST_DIR}/DownloadCache.cmake")
 
 option(CMAKE_TLS_VERIFY "Verify SSL certificates" ON)
 
-function(download_file url hash filename)
-message("Downloading ${filename} from ${url} ${hash}")
-if(${hash} STREQUAL "NONE")
-    FetchContent_Declare(${filename}
-    URL ${url}
-    DOWNLOAD_NO_EXTRACT true
-    )
-else()
-    FetchContent_Declare(${filename}
-    URL ${url}
-    URL_HASH SHA256=${hash}
-    DOWNLOAD_NO_EXTRACT true
-    )
-endif()
+linear_algebra_set_default_cache_dir(
+    LINEAR_ALGEBRA_FILE_DOWNLOAD_CACHE_DIR
+    "files"
+    "Directory used to cache direct file downloads handled by FetchContent")
 
-if(NOT ${filename}_POPULATED)
-    FetchContent_MakeAvailable(${filename})
-    if(EXISTS ${${filename}_SOURCE_DIR}/${filename}.tar.gz)
-        file(ARCHIVE_EXTRACT INPUT ${${filename}_SOURCE_DIR}/${filename}.tar.gz DESTINATION ${${filename}_SOURCE_DIR})
-    elseif(EXISTS ${${filename}_SOURCE_DIR}/${filename}.mtx.gz)
-        # file(ARCHIVE_EXTRACT INPUT ${${filename}_SOURCE_DIR}/${filename}.mtx.gz DESTINATION ${${filename}_SOURCE_DIR} COMPRESSION GZip)
-        execute_process(COMMAND gunzip -d ${${filename}_SOURCE_DIR}/${filename}.mtx.gz)
+function(download_file url hash filename)
+    message(STATUS "Preparing ${filename} from ${url}")
+
+    set(_previous_fetchcontent_base_dir "${FETCHCONTENT_BASE_DIR}")
+    set(FETCHCONTENT_BASE_DIR "${LINEAR_ALGEBRA_FILE_DOWNLOAD_CACHE_DIR}")
+
+    if("${hash}" STREQUAL "NONE")
+        FetchContent_Declare("${filename}"
+            URL "${url}"
+            DOWNLOAD_NO_EXTRACT true
+        )
+    else()
+        FetchContent_Declare("${filename}"
+            URL "${url}"
+            URL_HASH "SHA256=${hash}"
+            DOWNLOAD_NO_EXTRACT true
+        )
     endif()
-endif()
-# message("src_folder: ${${filename}_SOURCE_DIR}")
+
+    FetchContent_GetProperties("${filename}" POPULATED _populated SOURCE_DIR _source_dir)
+    if(NOT _populated)
+        FetchContent_MakeAvailable("${filename}")
+        FetchContent_GetProperties("${filename}" SOURCE_DIR _source_dir)
+    endif()
+
+    set(FETCHCONTENT_BASE_DIR "${_previous_fetchcontent_base_dir}")
+
+    if(EXISTS "${_source_dir}/${filename}.tar.gz")
+        if(NOT EXISTS "${_source_dir}/${filename}")
+            file(ARCHIVE_EXTRACT INPUT "${_source_dir}/${filename}.tar.gz" DESTINATION "${_source_dir}")
+        endif()
+    elseif(EXISTS "${_source_dir}/${filename}.mtx.gz")
+        if(NOT EXISTS "${_source_dir}/${filename}.mtx")
+            execute_process(
+                COMMAND gzip -cd "${_source_dir}/${filename}.mtx.gz"
+                OUTPUT_FILE "${_source_dir}/${filename}.mtx"
+                RESULT_VARIABLE _gzip_result
+                ERROR_VARIABLE _gzip_error
+            )
+            if(NOT _gzip_result EQUAL 0)
+                message(FATAL_ERROR "Failed to decompress ${_source_dir}/${filename}.mtx.gz: ${_gzip_error}")
+            endif()
+        endif()
+    endif()
 
 endfunction(download_file)
 

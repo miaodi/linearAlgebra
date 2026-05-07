@@ -92,6 +92,9 @@ if(NOT metis_POPULATED)
   string(REPLACE "add_subdirectory(\"build/xinclude\")"
                  "# add_subdirectory(\"build/xinclude\") # Commented out for FetchContent"
                  METIS_CMAKE_CONTENT "${METIS_CMAKE_CONTENT}")
+  string(REPLACE "add_subdirectory(\"programs\")"
+                 "# add_subdirectory(\"programs\") # Library-only FetchContent build"
+                 METIS_CMAKE_CONTENT "${METIS_CMAKE_CONTENT}")
   file(WRITE "${metis_SOURCE_DIR}/CMakeLists.txt" "${METIS_CMAKE_CONTENT}")
   
   # Patch metislib.h to include metis.h before GKlib.h
@@ -120,6 +123,7 @@ if(NOT metis_POPULATED)
   
   # Build METIS with GKlib path
   set(GKLIB_PATH "${gklib_SOURCE_DIR}" CACHE PATH "Path to GKlib" FORCE)
+  set(GKLIB_BUILD_APPS OFF CACHE BOOL "Build GKlib applications" FORCE)
   set(SHARED FALSE CACHE BOOL "Build shared libraries for METIS" FORCE)
   
   # Set METIS data type widths (32 or 64 bit)

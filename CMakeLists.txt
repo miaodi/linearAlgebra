@@ -75,6 +75,7 @@ list(APPEND CMAKE_MODULE_PATH
 
 include(FetchContent)
 include(cmake/SimdOptions.cmake)
+include(cmake/DownloadCache.cmake)
 
 FetchContent_Declare(
   fast_matrix_market
@@ -149,6 +150,7 @@ endif()
 find_package(LAPACK REQUIRED)
 
 if(ENABLE_TESTS OR ENABLE_DATA_DOWNLOADS OR BUILD_DATA)
+  linear_algebra_prefer_user_python()
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   message(STATUS "Using Python interpreter: ${Python3_EXECUTABLE}")
 
