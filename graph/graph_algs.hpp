@@ -178,14 +178,13 @@ struct KahnSerial
     /// @param aj Column indices array
     /// @param perm Output array for topological ordering (size = nodes)
     /// @param prefix Output array for level set boundaries (size = num_levels + 1)
-    /// @param has_diagonal If true, graph contains self-loops that should be ignored
+    /// @note Self-loop entries are ignored.
     /// @return Number of levels in the topological ordering
     COLTYPE operator()( const COLTYPE nodes,
                         ROWTYPE const* ai,
                         COLTYPE const* aj,
                         COLTYPE* perm,
-                        COLTYPE* prefix,
-                        bool has_diagonal = false );
+                        COLTYPE* prefix );
 
     std::vector<COLTYPE> _degrees;    // In-degree of each node
     std::vector<ROWTYPE> _t_ai;       // Transpose graph row pointers
@@ -206,7 +205,9 @@ struct KahnParallel
     /// @brief Constructor
     /// @param nthreads Number of threads to use for parallel computation
     KahnParallel( int nthreads )
-        : _nthreads( nthreads ), _threads_nodes( nthreads ), _threads_prefix( nthreads + 1 )
+        : _nthreads( std::max( 1, nthreads ) ),
+          _threads_nodes( _nthreads ),
+          _threads_prefix( _nthreads + 1 )
     {
     }
     
@@ -216,14 +217,13 @@ struct KahnParallel
     /// @param aj Column indices array
     /// @param perm Output array for topological ordering (size = nodes)
     /// @param prefix Output array for level set boundaries (size = num_levels + 1)
-    /// @param has_diagonal If true, graph contains self-loops that should be ignored
+    /// @note Self-loop entries are ignored.
     /// @return Number of levels in the topological ordering
     COLTYPE operator()( const COLTYPE nodes,
                         ROWTYPE const* ai,
                         COLTYPE const* aj,
                         COLTYPE* perm,
-                        COLTYPE* prefix,
-                        bool has_diagonal = false );
+                        COLTYPE* prefix );
 
     int _nthreads;                                      // Number of threads
     std::unique_ptr<std::atomic<COLTYPE>[]> _degrees;  // Atomic in-degrees for parallel updates
@@ -234,35 +234,36 @@ struct KahnParallel
     std::vector<COLTYPE> _threads_prefix;              // Per-thread prefix sums for output positions
 };
 
-/// @brief Topological sort using maximum degree ordering
+/// @brief Topological sort using dependency-depth level ordering
 ///
-/// This algorithm processes nodes in order of decreasing out-degree (for upper triangular)
-/// or in-degree (for lower triangular), which can provide good parallelism for sparse
-/// triangular solves. The template parameter TS determines the matrix type.
+/// This algorithm assigns each node to one plus the maximum depth of its
+/// dependencies, then groups nodes with the same depth into level sets. The
+/// template parameter TS determines whether rows are traversed as lower or upper
+/// triangular dependencies. TriangularMatrix::LU is treated as lower triangular
+/// and uses only lower-side dependencies.
 ///
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
 /// @tparam COLTYPE Column index type (typically int or int64_t)
-/// @tparam TS Triangular matrix type (U for upper, L for lower)
+/// @tparam TS Triangular matrix type (U for upper, L/LU for lower)
 template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
 struct TopologicalSort2
 {
-    /// @brief Compute degree-based topological sort
+    /// @brief Compute depth-based topological level sets
     /// @param nodes Number of nodes in the graph
     /// @param ai Row pointers array (ai[0] contains the base indexing)
     /// @param aj Column indices array
     /// @param perm Output array for topological ordering (size = nodes)
     /// @param prefix Output array for level set boundaries (size = num_levels + 1)
     ///               After sorting, the base of prefix matches ai[0]
-    /// @param has_diagonal If true, graph contains self-loops that should be excluded from degree count
+    /// @note Self-loop entries are ignored.
     /// @return Number of levels in the topological ordering
     COLTYPE operator()( const COLTYPE nodes,
                         ROWTYPE const* ai,
                         COLTYPE const* aj,
                         COLTYPE* perm,
-                        COLTYPE* prefix,
-                        bool has_diagonal = false );
+                        COLTYPE* prefix );
                         
-    std::vector<COLTYPE> _degrees;  // Degree of each node (in-degree or out-degree based on TS)
+    std::vector<COLTYPE> _depths;  // Dependency depth of each node
 };
 
 /**

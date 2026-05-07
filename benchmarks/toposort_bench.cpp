@@ -62,7 +62,7 @@ auto KahnSerialBench = [](benchmark::State &state, const CSRMatrixType &mat) {
   graph::KahnSerial<int, int> kahn;
   for (auto _ : state) {
     kahn.operator()(
-        mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
+        mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data());
   }
 };
 
@@ -72,7 +72,7 @@ auto KahnParallelBench = [](benchmark::State &state, const CSRMatrixType &mat) {
   graph::KahnParallel<int, int> kahn(num_threads);
   for (auto _ : state) {
     kahn.operator()(
-        mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
+        mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data());
   }
 };
 
@@ -82,7 +82,7 @@ auto TopologicalSort2Bench = [](benchmark::State &state, const CSRMatrixType &ma
   graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topologicalSort;
   for (auto _ : state) {
     topologicalSort.operator()(
-        mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data(), false);
+        mat.rows, mat.AI(), mat.AJ(), perm.data(), prefix.data());
   }
 };
 

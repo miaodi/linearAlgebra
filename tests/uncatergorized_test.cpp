@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <gtest/gtest.h>
 #include <omp.h>
+#include <vector>
 
 TEST(transpose_and_partranspose, base0) {
   auto mat = mkl_wrapper::random_sparse(100, 16);
@@ -404,7 +405,7 @@ TEST(TopologicalSort, L)
         std::vector<std::int32_t> prefix( size + 1 );
         graph::KahnSerial<std::int32_t, std::int32_t> kahn;
         std::int32_t level =
-            kahn( size, L.AI(), L.AJ(), perm.data(), prefix.data(), false );
+            kahn( size, L.AI(), L.AJ(), perm.data(), prefix.data() );
         EXPECT_EQ( prefix[0], base );
         std::map<std::int32_t, std::int32_t> idx_map;
         for ( int i = 0; i < size; i++ )
@@ -427,7 +428,7 @@ TEST(TopologicalSort, L)
         graph::KahnParallel<std::int32_t, std::int32_t> kahn_parallel(
             5 );
         std::int32_t level_parallel = kahn_parallel(
-            size, L.AI(), L.AJ(), perm_parallel.data(), prefix_parallel.data(), false );
+            size, L.AI(), L.AJ(), perm_parallel.data(), prefix_parallel.data() );
         EXPECT_EQ( prefix_parallel[0], base );
         EXPECT_EQ( prefix_parallel[level_parallel] - base, size );
         EXPECT_EQ( level, level_parallel );
@@ -448,7 +449,7 @@ TEST(TopologicalSort, L)
         std::vector<std::int32_t> prefix_2( size + 1 );
         graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topSort;
         std::int32_t level_2 =
-            topSort( size, L.AI(), L.AJ(), perm_2.data(), prefix_2.data(), false );
+            topSort( size, L.AI(), L.AJ(), perm_2.data(), prefix_2.data() );
         EXPECT_EQ( prefix_2[0], base );
         EXPECT_EQ( prefix_2[level_2] - base, size );
         EXPECT_EQ( level, level_2 );
@@ -481,6 +482,73 @@ TEST(TopologicalSort, L)
     }
 }
 
+TEST(TopologicalSort, IgnoresSelfLoops)
+{
+    auto expect_level = []( const std::vector<int>& perm,
+                            const std::vector<int>& prefix,
+                            int base,
+                            int level,
+                            std::vector<int> expected )
+    {
+        std::vector<int> actual( perm.begin() + prefix[level] - base,
+                                 perm.begin() + prefix[level + 1] - base );
+        for ( auto& node : expected )
+        {
+            node += base;
+        }
+        std::sort( actual.begin(), actual.end() );
+        std::sort( expected.begin(), expected.end() );
+        EXPECT_EQ( actual, expected );
+    };
+
+    for ( int base = 0; base <= 1; ++base )
+    {
+        const int nodes = 4;
+        const std::vector<int> lower_ai{ base, base + 1, base + 3, base + 5, base + 8 };
+        const std::vector<int> lower_aj{ base, base, base + 1, base, base + 2, base + 1, base + 2, base + 3 };
+        const std::vector<int> upper_ai{ base, base + 3, base + 5, base + 7, base + 8 };
+        const std::vector<int> upper_aj{ base, base + 1, base + 2, base + 1, base + 3, base + 2, base + 3, base + 3 };
+        const std::vector<int> lu_ai{ base, base + 3, base + 6, base + 9, base + 12 };
+        const std::vector<int> lu_aj{ base,     base + 1, base + 2,
+                                      base,     base + 1, base + 3,
+                                      base,     base + 2, base + 3,
+                                      base + 1, base + 2, base + 3 };
+
+        std::vector<int> perm( nodes );
+        std::vector<int> prefix( nodes + 1 );
+
+        graph::KahnSerial<int, int> kahn;
+        EXPECT_EQ( kahn( nodes, lower_ai.data(), lower_aj.data(), perm.data(), prefix.data() ), 3 );
+        expect_level( perm, prefix, base, 0, { 0 } );
+        expect_level( perm, prefix, base, 1, { 1, 2 } );
+        expect_level( perm, prefix, base, 2, { 3 } );
+
+        graph::KahnParallel<int, int> kahn_parallel( 2 );
+        EXPECT_EQ( kahn_parallel( nodes, lower_ai.data(), lower_aj.data(), perm.data(), prefix.data() ), 3 );
+        expect_level( perm, prefix, base, 0, { 0 } );
+        expect_level( perm, prefix, base, 1, { 1, 2 } );
+        expect_level( perm, prefix, base, 2, { 3 } );
+
+        graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> top_l;
+        EXPECT_EQ( top_l( nodes, lower_ai.data(), lower_aj.data(), perm.data(), prefix.data() ), 3 );
+        expect_level( perm, prefix, base, 0, { 0 } );
+        expect_level( perm, prefix, base, 1, { 1, 2 } );
+        expect_level( perm, prefix, base, 2, { 3 } );
+
+        graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::U> top_u;
+        EXPECT_EQ( top_u( nodes, upper_ai.data(), upper_aj.data(), perm.data(), prefix.data() ), 3 );
+        expect_level( perm, prefix, base, 0, { 3 } );
+        expect_level( perm, prefix, base, 1, { 1, 2 } );
+        expect_level( perm, prefix, base, 2, { 0 } );
+
+        graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::LU> top_lu;
+        EXPECT_EQ( top_lu( nodes, lu_ai.data(), lu_aj.data(), perm.data(), prefix.data() ), 3 );
+        expect_level( perm, prefix, base, 0, { 0 } );
+        expect_level( perm, prefix, base, 1, { 1, 2 } );
+        expect_level( perm, prefix, base, 2, { 3 } );
+    }
+}
+
 TEST(TopologicalSort, U)
 {
     const int size = 1003;
@@ -499,7 +567,7 @@ TEST(TopologicalSort, U)
         std::vector<std::int32_t> prefix( size + 1 );
         graph::KahnSerial<std::int32_t, std::int32_t> kahn;
         std::int32_t level =
-            kahn.operator()( size, U.AI(), U.AJ(), perm.data(), prefix.data(), false );
+            kahn.operator()( size, U.AI(), U.AJ(), perm.data(), prefix.data() );
         EXPECT_EQ( prefix[0], base );
         std::map<std::int32_t, std::int32_t> idx_map;
         for ( int i = 0; i < size; i++ )
@@ -522,7 +590,7 @@ TEST(TopologicalSort, U)
         graph::KahnParallel<std::int32_t, std::int32_t> kahn_parallel(
             5 );
         std::int32_t level_parallel = kahn_parallel.operator()(
-            size, U.AI(), U.AJ(), perm_parallel.data(), prefix_parallel.data(), false );
+            size, U.AI(), U.AJ(), perm_parallel.data(), prefix_parallel.data() );
         EXPECT_EQ( prefix_parallel[0], base );
         EXPECT_EQ( prefix_parallel[level_parallel] - base, size );
         EXPECT_EQ( level, level_parallel );
@@ -543,7 +611,7 @@ TEST(TopologicalSort, U)
         std::vector<std::int32_t> prefix_2( size + 1 );
         graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::U> topSort;
         std::int32_t level_2 = topSort.operator()(
-            size, U.AI(), U.AJ(), perm_2.data(), prefix_2.data(), false );
+            size, U.AI(), U.AJ(), perm_2.data(), prefix_2.data() );
         EXPECT_EQ( prefix_2[0], base );
         EXPECT_EQ( prefix_2[level_2] - base, size );
         EXPECT_EQ( level, level_2 );

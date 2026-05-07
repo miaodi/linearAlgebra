@@ -113,7 +113,7 @@ void LevelScheduleTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::analysi
     const auto base = _ai[0];
     _iperm.resize(_size);
     _levelPrefix.resize(_size + 1);
-    _levels = _topSort( _size, _ai, _aj, _iperm.data(), _levelPrefix.data(), false );
+    _levels = _topSort( _size, _ai, _aj, _iperm.data(), _levelPrefix.data() );
 }
 
 
@@ -395,7 +395,7 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::computeLevelSched
 {
     _iperm.resize( size );
     _levelPrefix.resize( size + 1 );
-    _levels = _topSort( size, ai, aj, _iperm.data(), _levelPrefix.data(), false );
+    _levels = _topSort( size, ai, aj, _iperm.data(), _levelPrefix.data() );
 
     std::cout << "size: " << size << ", levels: " << _levels << std::endl;
 }

@@ -259,18 +259,18 @@ int main( int argc, char* argv[] )
         {
             graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> topo;
             scc_levels = topo( num_sccs, scc_ai.data(), scc_aj.data(),
-                               scc_perm.data(), scc_level_prefix.data(), true );
+                               scc_perm.data(), scc_level_prefix.data() );
 
             // matrix_utils::KahnParallel<int, int> kahn(8);
             // scc_levels = kahn(num_sccs, scc_ai.data(), scc_aj.data(), scc_perm.data(),
-            //                   scc_level_prefix.data(), true);
+            //                   scc_level_prefix.data());
         }
         else
         {
             std::cout << "SCC graph not lower triangular; falling back to Kahn topological order." << std::endl;
             graph::KahnParallel<int, int> kahn_parallel( omp_get_max_threads() );
             scc_levels = kahn_parallel( num_sccs, scc_ai.data(), scc_aj.data(),
-                                        scc_perm.data(), scc_level_prefix.data(), true );
+                                        scc_perm.data(), scc_level_prefix.data() );
         }
         std::cout << "SCC graph levels: " << scc_levels << std::endl;
         for ( int lvl = 0; lvl < scc_levels; ++lvl )

@@ -164,7 +164,7 @@ public:
 
         graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> kahnL;
         auto levelL = kahnL( h_L.rows, h_L.AI(), h_L.AJ(),
-                             ipermL.data(), prefixL.data(), true );
+                             ipermL.data(), prefixL.data() );
         int maxL = 0;
         for ( int i = 0; i < levelL; ++i )
             if ( prefixL[i + 1] - prefixL[i] > maxL )
@@ -174,7 +174,7 @@ public:
         std::vector<int> prefixU( h_U.rows + 1 );
         graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::U> kahnU;
         auto levelU = kahnU( h_U.rows, h_U.AI(), h_U.AJ(),
-                             ipermU.data(), prefixU.data(), true );
+                             ipermU.data(), prefixU.data() );
         int maxU = 0;
         for ( int i = 0; i < levelU; ++i )
             if ( prefixU[i + 1] - prefixU[i] > maxU )

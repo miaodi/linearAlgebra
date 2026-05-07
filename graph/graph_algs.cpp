@@ -30,8 +30,7 @@ void ElimTree( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE
     COLTYPE jroot = empty_tag;
     for ( COLTYPE i = 0; i < rows; i++ )
     {
-        for ( ROWTYPE j = ai[i] - base, jroot = aj[j] - base;
-              j < ai[i + 1] - base && jroot < i; j++ )
+        for ( ROWTYPE j = ai[i] - base, jroot = aj[j] - base; j < ai[i + 1] - base && jroot < i; j++ )
         {
             while ( parent[jroot] != empty_tag && parent[jroot] != i + base )
             {
@@ -74,14 +73,14 @@ bool IsDAG( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj )
 
 template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG>
 COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, KEEPDIAG>::operator()( const COLTYPE work_graph_rows,
-                                                               ROWTYPE const* work_ai,
-                                                               COLTYPE const* work_aj,
-                                                               const COLTYPE num_tasks,
-                                                               COLTYPE const* task_prefix,
-                                                               COLTYPE const* task_to_node,
-                                                               COLTYPE const* node_to_task,
-                                                               ROWTYPE* task_ai,
-                                                               COLTYPE* task_aj )
+                                                                         ROWTYPE const* work_ai,
+                                                                         COLTYPE const* work_aj,
+                                                                         const COLTYPE num_tasks,
+                                                                         COLTYPE const* task_prefix,
+                                                                         COLTYPE const* task_to_node,
+                                                                         COLTYPE const* node_to_task,
+                                                                         ROWTYPE* task_ai,
+                                                                         COLTYPE* task_aj )
 {
     const ROWTYPE work_base = work_ai[0];
     const COLTYPE task_base = task_prefix[0];
@@ -112,8 +111,7 @@ COLTYPE ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, KEEPDIAG>::operator()( const C
             COLTYPE task_work_end = task_prefix[task_id + 1] - task_base;
 
             // For each work item in this task
-            for ( COLTYPE work_offset = task_work_start;
-                  work_offset < task_work_end; ++work_offset )
+            for ( COLTYPE work_offset = task_work_start; work_offset < task_work_end; ++work_offset )
             {
                 COLTYPE work_idx = task_to_node[work_offset] - work_base;
 
@@ -222,7 +220,8 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
             merge_buffer.clear();
             merge_buffer.reserve( result.size() + static_cast<std::size_t>( end - begin ) );
             std::merge( result.begin(), result.end(), begin, end, std::back_inserter( merge_buffer ) );
-            merge_buffer.erase( std::unique( merge_buffer.begin(), merge_buffer.end() ), merge_buffer.end() );
+            merge_buffer.erase( std::unique( merge_buffer.begin(), merge_buffer.end() ),
+                                merge_buffer.end() );
             result.swap( merge_buffer );
         };
 
@@ -307,7 +306,9 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
         }
     }
 
-    const auto reachability_ms = std::chrono::duration_cast<std::chrono::milliseconds>( reachability_end - reachability_start ).count();
+    const auto reachability_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>( reachability_end - reachability_start )
+            .count();
 
     const auto reduction_start = std::chrono::steady_clock::now();
 
@@ -325,7 +326,8 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
     }
 
     const auto reduction_end = std::chrono::steady_clock::now();
-    const auto reduction_ms = std::chrono::duration_cast<std::chrono::milliseconds>( reduction_end - reachability_end ).count();
+    const auto reduction_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>( reduction_end - reachability_end ).count();
 
     std::cout << "Transitive reduction timing -- reachability: " << reachability_ms
               << " ms, reduction: " << reduction_ms << " ms" << std::endl;
@@ -485,16 +487,15 @@ COLTYPE MISPerm( COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* pe
         degree_perm[i] = { degree[i], perm[i] };
     }
 
-    std::sort(
-        degree_perm.begin(), degree_perm.end(),
-        []( const auto& a, const auto& b )
-        {
-            if ( a.first != b.first )
-            {
-                return a.first > b.first; // Descending by degree
-            }
-            return a.second < b.second; // Ascending by original index for ties
-        } );
+    std::sort( degree_perm.begin(), degree_perm.end(),
+               []( const auto& a, const auto& b )
+               {
+                   if ( a.first != b.first )
+                   {
+                       return a.first > b.first; // Descending by degree
+                   }
+                   return a.second < b.second; // Ascending by original index for ties
+               } );
 
     COLTYPE idx = 0;
     // First pass: find all "not seen" nodes (state 0) and add them to perm
@@ -579,11 +580,10 @@ void BuildPermutationFromSccLevels( COLTYPE num_sccs,
 
 template <typename ROWTYPE, typename COLTYPE>
 COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
-                                                      ROWTYPE const* ai,
-                                                      COLTYPE const* aj,
-                                                      COLTYPE* perm,
-                                                      COLTYPE* prefix,
-                                                      bool has_diagonal )
+                                                  ROWTYPE const* ai,
+                                                  COLTYPE const* aj,
+                                                  COLTYPE* perm,
+                                                  COLTYPE* prefix )
 {
     _degrees.resize( nodes );
     const auto base = ai[0];
@@ -595,17 +595,22 @@ COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
     COLTYPE level = 0;
 
     // reverse graph to get out edges
-    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr,
-                        _t_ai.data(), _t_aj.data(), (double*)nullptr );
+    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr, _t_ai.data(),
+                                      _t_aj.data(), (double*)nullptr );
 
     prefix[0] = base;
 
     auto degree_for = [&]( const COLTYPE i )
     {
-        COLTYPE degree = ai[i + 1] - ai[i];
-        if ( has_diagonal && degree > 0 )
+        COLTYPE degree = 0;
+        const auto row_start = ai[i] - base;
+        const auto row_end = ai[i + 1] - base;
+        for ( auto pos = row_start; pos < row_end; ++pos )
         {
-            --degree;
+            if ( aj[pos] - base != i )
+            {
+                ++degree;
+            }
         }
         return degree;
     };
@@ -627,12 +632,9 @@ COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
         const auto row_end = _t_ai[idx + 1] - base;
         for ( auto pos = row_start; pos < row_end; ++pos )
         {
-            if ( has_diagonal )
+            if ( _t_aj[pos] - base == idx )
             {
-                if ( _t_aj[pos] - base == idx )
-                {
-                    continue;
-                }
+                continue;
             }
             handle_neighbor( _t_aj[pos] );
         }
@@ -662,11 +664,10 @@ COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
 
 template <typename ROWTYPE, typename COLTYPE>
 COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
-                                                        ROWTYPE const* ai,
-                                                        COLTYPE const* aj,
-                                                        COLTYPE* perm,
-                                                        COLTYPE* prefix,
-                                                        bool has_diagonal )
+                                                    ROWTYPE const* ai,
+                                                    COLTYPE const* aj,
+                                                    COLTYPE* perm,
+                                                    COLTYPE* prefix )
 {
     if ( _degrees_size < nodes )
     {
@@ -682,17 +683,22 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
     COLTYPE level = 0;
 
     // reverse graph
-    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr,
-                        _t_ai.data(), _t_aj.data(), (double*)nullptr );
+    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr, _t_ai.data(),
+                                      _t_aj.data(), (double*)nullptr );
 
     prefix[0] = base;
-    
+
     auto degree_for = [&]( const COLTYPE i )
     {
-        COLTYPE degree = ai[i + 1] - ai[i];
-        if ( has_diagonal && degree > 0 )
+        COLTYPE degree = 0;
+        const auto row_start = ai[i] - base;
+        const auto row_end = ai[i + 1] - base;
+        for ( auto pos = row_start; pos < row_end; ++pos )
         {
-            --degree;
+            if ( aj[pos] - base != i )
+            {
+                ++degree;
+            }
         }
         return degree;
     };
@@ -703,12 +709,9 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
         const auto row_end = _t_ai[idx + 1] - base;
         for ( auto pos = row_start; pos < row_end; ++pos )
         {
-            if( has_diagonal )
+            if ( _t_aj[pos] - base == idx )
             {
-                if ( _t_aj[pos] - base == idx )
-                {
-                    continue;
-                }
+                continue;
             }
             handle_neighbor( _t_aj[pos] );
         }
@@ -725,7 +728,7 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
 
         for ( COLTYPE i = chunk_begin; i < chunk_end; ++i )
         {
-            _degrees[i] =  degree_for( i );
+            _degrees[i] = degree_for( i );
             if ( _degrees[i] == 0 )
             {
                 _threads_nodes[thread_id].push_back( i + base );
@@ -753,11 +756,10 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
         {
             _threads_prefix[thread_id + 1] = 0;
             _threads_nodes[thread_id].clear();
-            auto start_range = prefix[level] - base +
-                               ( prefix[level + 1] - prefix[level] ) * thread_id / _nthreads;
-            auto end_range =
-                prefix[level] - base +
-                ( prefix[level + 1] - prefix[level] ) * ( thread_id + 1 ) / _nthreads;
+            auto start_range =
+                prefix[level] - base + ( prefix[level + 1] - prefix[level] ) * thread_id / _nthreads;
+            auto end_range = prefix[level] - base +
+                             ( prefix[level + 1] - prefix[level] ) * ( thread_id + 1 ) / _nthreads;
 
             for ( COLTYPE idx_pos = start_range; idx_pos < end_range; ++idx_pos )
             {
@@ -765,8 +767,7 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
                 process_row( idx,
                              [&]( const COLTYPE neighbor )
                              {
-                                 if ( _degrees[neighbor - base].fetch_sub(
-                                          1, std::memory_order_relaxed ) == 1 )
+                                 if ( _degrees[neighbor - base].fetch_sub( 1, std::memory_order_relaxed ) == 1 )
                                  {
                                      _threads_nodes[thread_id].push_back( neighbor );
                                  }
@@ -802,11 +803,10 @@ COLTYPE TopologicalSort2<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
                                                             ROWTYPE const* ai,
                                                             COLTYPE const* aj,
                                                             COLTYPE* perm,
-                                                            COLTYPE* prefix,
-                                                            bool has_diagonal )
+                                                            COLTYPE* prefix )
 {
-    _degrees.resize( nodes );
-    std::fill( _degrees.begin(), _degrees.end(), 0 );
+    _depths.resize( nodes );
+    std::fill( _depths.begin(), _depths.end(), 0 );
 
     const auto base = ai[0];
 
@@ -820,35 +820,38 @@ COLTYPE TopologicalSort2<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
         }
         auto row_begin = ai[i] - base;
         auto row_end = ai[i + 1] - base;
-        if ( has_diagonal && row_end > row_begin )
+        for ( auto j = row_begin; j < row_end; ++j )
         {
+            const COLTYPE dependency = aj[j] - base;
             if constexpr ( TS == TriangularMatrix::U )
             {
-                ++row_begin;
+                if ( dependency <= i )
+                {
+                    continue;
+                }
             }
             else
             {
-                --row_end;
+                if ( dependency >= i )
+                {
+                    continue;
+                }
             }
+            _depths[i] = std::max( _depths[i], static_cast<COLTYPE>( _depths[dependency] + 1 ) );
         }
-        for ( auto j = row_begin; j < row_end; ++j )
-        {
-            _degrees[i] = std::max(
-                _degrees[i], static_cast<COLTYPE>( _degrees[aj[j] - base] + 1 ) );
-        }
-        level = std::max( level, _degrees[i] + 1 );
+        level = std::max( level, _depths[i] + 1 );
     }
     std::fill( prefix, prefix + level + 1, 0 );
     prefix[0] = base;
     for ( COLTYPE i = 0; i < nodes; i++ )
     {
-        prefix[_degrees[i] + 1]++;
+        prefix[_depths[i] + 1]++;
     }
     std::inclusive_scan( prefix, prefix + level + 1, prefix );
 
     for ( COLTYPE i = 0; i < nodes; i++ )
     {
-        perm[prefix[_degrees[i]]++ - base] = i + base;
+        perm[prefix[_depths[i]]++ - base] = i + base;
     }
     for ( COLTYPE i = level; i > 0; i-- )
     {
@@ -869,17 +872,16 @@ COLTYPE TopologicalSort2<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
     template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, false>;                                     \
     template struct ProjectGraphToTaskGraph<ROWTYPE, COLTYPE, true>;                                      \
     template struct TransitiveReduction<ROWTYPE, COLTYPE>;                                                \
-    template COLTYPE MISPerm<ROWTYPE, COLTYPE>( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, \
-                                                COLTYPE* perm, COLTYPE* iperm );                          \
+    template COLTYPE MISPerm<ROWTYPE, COLTYPE>(                                                           \
+        const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm );        \
     template void BuildPermutationFromSccLevels<ROWTYPE, COLTYPE>(                                        \
-        COLTYPE num_sccs, ROWTYPE const* scc_prefix, COLTYPE const* scc_to_node,                          \
-        COLTYPE const* scc_perm, ROWTYPE const* scc_level_prefix, COLTYPE scc_levels,                     \
-        COLTYPE* node_perm, COLTYPE* node_iperm );                                                        \
+        COLTYPE num_sccs, ROWTYPE const* scc_prefix, COLTYPE const* scc_to_node, COLTYPE const* scc_perm, \
+        ROWTYPE const* scc_level_prefix, COLTYPE scc_levels, COLTYPE* node_perm, COLTYPE* node_iperm );   \
     template struct KahnSerial<ROWTYPE, COLTYPE>;                                                         \
     template struct KahnParallel<ROWTYPE, COLTYPE>;                                                       \
     template struct TopologicalSort2<ROWTYPE, COLTYPE, TriangularMatrix::L>;                              \
-    template struct TopologicalSort2<ROWTYPE, COLTYPE, TriangularMatrix::U>;
-
+    template struct TopologicalSort2<ROWTYPE, COLTYPE, TriangularMatrix::U>;                              \
+    template struct TopologicalSort2<ROWTYPE, COLTYPE, TriangularMatrix::LU>;
 
 // INSTANTIATE_GRAPH_ALGS(int, int)
 INSTANTIATE_GRAPH_ALGS( std::int32_t, std::int32_t )
@@ -928,12 +930,11 @@ double jaccardSimilarity( const COLTYPE A_rows,
     matrix_utils::CSRMatrixVec<ROWTYPE, COLTYPE, int8_t> C;
 
     // Analysis phase
-    spadd.analysis( A_rows, A_cols, A_ai, A_aj,
-                    B_rows, B_cols, B_ai, B_aj, C );
+    spadd.analysis( A_rows, A_cols, A_ai, A_aj, B_rows, B_cols, B_ai, B_aj, C );
 
     // Numerical phase with alpha=1, beta=1
-    spadd( A_rows, A_cols, A_ai, A_aj, A_av.data(), static_cast<int8_t>(1),
-           B_rows, B_cols, B_ai, B_aj, B_av.data(), static_cast<int8_t>(1), C );
+    spadd( A_rows, A_cols, A_ai, A_aj, A_av.data(), static_cast<int8_t>( 1 ), B_rows, B_cols, B_ai,
+           B_aj, B_av.data(), static_cast<int8_t>( 1 ), C );
 
     const ROWTYPE C_base = C.AI()[0];
     const ROWTYPE C_nnz = C.AI()[C.rows] - C_base;
@@ -956,13 +957,23 @@ double jaccardSimilarity( const COLTYPE A_rows,
 }
 
 // Explicit instantiation for common types
-template double jaccardSimilarity<int, int>( const int, const int,
-                                              const int*, const int*,
-                                              const int, const int,
-                                              const int*, const int*, int );
-template double jaccardSimilarity<int64_t, int64_t>( const int64_t, const int64_t,
-                                                      const int64_t*, const int64_t*,
-                                                      const int64_t, const int64_t,
-                                                      const int64_t*, const int64_t*, int );
+template double jaccardSimilarity<int, int>( const int,
+                                             const int,
+                                             const int*,
+                                             const int*,
+                                             const int,
+                                             const int,
+                                             const int*,
+                                             const int*,
+                                             int );
+template double jaccardSimilarity<int64_t, int64_t>( const int64_t,
+                                                     const int64_t,
+                                                     const int64_t*,
+                                                     const int64_t*,
+                                                     const int64_t,
+                                                     const int64_t,
+                                                     const int64_t*,
+                                                     const int64_t*,
+                                                     int );
 
 } // namespace graph
