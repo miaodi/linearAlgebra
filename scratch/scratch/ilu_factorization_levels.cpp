@@ -8,7 +8,8 @@
 #include "sp_ops.hpp"
 
 #ifdef USE_CUDA
-#include "cuda_ilu_base.cuh"
+#include "ilu/ilu_numeric.cuh"
+#include "ilu/ilu_update_cache.hpp"
 
 #include <cuda_runtime.h>
 #endif
@@ -165,11 +166,13 @@ private:
     cudaEvent_t event_ = nullptr;
 };
 
+
 GpuNumericResult run_gpu_numeric_factorization( const CSR& matrix,
                                                 const CSR& lu,
                                                 const std::vector<int>& permutation,
                                                 const std::vector<int>& level_prefix,
-                                                const int levels )
+                                                const int levels,
+                                                const matrix_utils::sparse_cuda::ILUUpdateCache<int>* update_cache )
 {
     int device_count = 0;
     check_cuda( cudaGetDeviceCount( &device_count ), "cudaGetDeviceCount" );
@@ -191,6 +194,9 @@ GpuNumericResult run_gpu_numeric_factorization( const CSR& matrix,
     DeviceBuffer<int> d_level_perm( static_cast<std::size_t>( permutation.size() ) );
     DeviceBuffer<double> d_lu_av( static_cast<std::size_t>( lu.NNZ() ) );
     DeviceBuffer<int> d_status( 1 );
+    DeviceBuffer<int> d_update_ptr;
+    DeviceBuffer<int> d_update_jpos;
+    DeviceBuffer<int> d_update_pos;
 
     check_cuda( cudaMemcpyAsync( d_a_ai.get(), matrix.AI(), static_cast<std::size_t>( matrix.rows + 1 ) * sizeof( int ),
                                  cudaMemcpyHostToDevice, stream.get() ),
@@ -214,12 +220,46 @@ GpuNumericResult run_gpu_numeric_factorization( const CSR& matrix,
                                  cudaMemcpyHostToDevice, stream.get() ),
                 "cudaMemcpyAsync d_level_perm" );
 
+    if ( update_cache != nullptr )
+    {
+        d_update_ptr.resize( update_cache->update_ptr.size() );
+        d_update_jpos.resize( std::max<std::size_t>( update_cache->update_jpos.size(), 1 ) );
+        d_update_pos.resize( std::max<std::size_t>( update_cache->update_pos.size(), 1 ) );
+        check_cuda( cudaMemcpyAsync( d_update_ptr.get(), update_cache->update_ptr.data(),
+                                     update_cache->update_ptr.size() * sizeof( int ),
+                                     cudaMemcpyHostToDevice, stream.get() ),
+                    "cudaMemcpyAsync d_update_ptr" );
+        if ( !update_cache->update_jpos.empty() )
+        {
+            check_cuda( cudaMemcpyAsync( d_update_jpos.get(), update_cache->update_jpos.data(),
+                                         update_cache->update_jpos.size() * sizeof( int ),
+                                         cudaMemcpyHostToDevice, stream.get() ),
+                        "cudaMemcpyAsync d_update_jpos" );
+            check_cuda( cudaMemcpyAsync( d_update_pos.get(), update_cache->update_pos.data(),
+                                         update_cache->update_pos.size() * sizeof( int ),
+                                         cudaMemcpyHostToDevice, stream.get() ),
+                        "cudaMemcpyAsync d_update_pos" );
+        }
+    }
+
     check_cuda( cudaEventRecord( start.get(), stream.get() ), "cudaEventRecord start" );
-    check_cuda( matrix_utils::sparse_cuda::ILUBaseNumericFactorizationAsync<int, int, double>(
-                    matrix.rows, d_a_ai.get(), d_a_aj.get(), d_a_av.get(), d_lu_ai.get(), d_lu_aj.get(),
-                    d_lu_diag.get(), d_level_perm.get(), level_prefix.data(), levels, matrix.Base(),
-                    d_lu_av.get(), d_status.get(), stream.get() ),
-                "ILUBaseNumericFactorizationAsync" );
+    if ( update_cache != nullptr )
+    {
+        check_cuda( matrix_utils::sparse_cuda::ILUBaseNumericFactorizationCachedAsync<int, int, double>(
+                        matrix.rows, d_a_ai.get(), d_a_aj.get(), d_a_av.get(), d_lu_ai.get(), d_lu_aj.get(),
+                        d_lu_diag.get(), d_update_ptr.get(), d_update_jpos.get(), d_update_pos.get(),
+                        d_level_perm.get(), level_prefix.data(), levels, matrix.Base(),
+                        d_lu_av.get(), d_status.get(), stream.get() ),
+                    "ILUBaseNumericFactorizationCachedAsync" );
+    }
+    else
+    {
+        check_cuda( matrix_utils::sparse_cuda::ILUBaseNumericFactorizationAsync<int, int, double>(
+                        matrix.rows, d_a_ai.get(), d_a_aj.get(), d_a_av.get(), d_lu_ai.get(), d_lu_aj.get(),
+                        d_lu_diag.get(), d_level_perm.get(), level_prefix.data(), levels, matrix.Base(),
+                        d_lu_av.get(), d_status.get(), stream.get() ),
+                    "ILUBaseNumericFactorizationAsync" );
+    }
     check_cuda( cudaEventRecord( stop.get(), stream.get() ), "cudaEventRecord stop" );
 
     int h_status = 1;
@@ -380,7 +420,9 @@ int main( int argc, char** argv )
         cxxopts::value<std::string>()->default_value( "../../tests/data/ex5.mtx" ) )(
         "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )(
         "n,threads", "Number of threads for ILU symbolic setup",
-        cxxopts::value<int>()->default_value( "1" ) )( "h,help", "Print usage" );
+        cxxopts::value<int>()->default_value( "1" ) )(
+        "disable-gpu-update-cache", "Use the original GPU numeric path without the precomputed update cache" )(
+        "h,help", "Print usage" );
 
     const auto parsed = options.parse( argc, argv );
     if ( parsed.count( "help" ) )
@@ -392,6 +434,7 @@ int main( int argc, char** argv )
     const std::string file_path = parsed["file"].as<std::string>();
     const int level = parsed["level"].as<int>();
     const int threads = parsed["threads"].as<int>();
+    const bool use_gpu_update_cache = parsed.count( "disable-gpu-update-cache" ) == 0;
     if ( level < 0 )
     {
         std::cerr << "ILU level must be non-negative\n";
@@ -462,6 +505,19 @@ int main( int argc, char** argv )
     std::cout << "TopologicalSort2 dependency levels: " << levels
               << ", max level width=" << max_level_width << '\n';
 
+#ifdef USE_CUDA
+    matrix_utils::sparse_cuda::ILUUpdateCache<int> update_cache;
+    if ( use_gpu_update_cache )
+    {
+        update_cache = matrix_utils::sparse_cuda::BuildILUUpdateCache<int, int>(
+            lu.rows, lu.AI(), lu.AJ(), lu.Diagonal(), lu.Base(), threads );
+        const double cache_mib = static_cast<double>( update_cache.bytes() ) / ( 1024.0 * 1024.0 );
+        std::cout << "ILU update cache: entries=" << update_cache.update_jpos.size()
+                  << ", memory=" << cache_mib << " MiB"
+                  << ", build time=" << update_cache.build_ms << " ms\n";
+    }
+#endif
+
     const auto numeric_start = std::chrono::steady_clock::now();
     if ( !matrix_utils::ILULevelNumeric( matrix.rows, matrix.AI(), matrix.AJ(), matrix.AV(), level, lu ) )
     {
@@ -477,9 +533,12 @@ int main( int argc, char** argv )
     try
     {
         const GpuNumericResult gpu_result =
-            run_gpu_numeric_factorization( matrix, lu, permutation, level_prefix, levels );
+            run_gpu_numeric_factorization( matrix, lu, permutation, level_prefix, levels,
+                                           use_gpu_update_cache ? &update_cache : nullptr );
         std::cout << "ILU(" << level << ") GPU numeric factorization complete\n";
-        std::cout << "ILUBaseNumericFactorizationAsync GPU event time: " << gpu_result.elapsed_ms << " ms\n";
+        std::cout << ( use_gpu_update_cache ? "ILUBaseNumericFactorizationCachedAsync"
+                                            : "ILUBaseNumericFactorizationAsync" )
+                  << " GPU event time: " << gpu_result.elapsed_ms << " ms\n";
         std::cout << "GPU vs CPU LU value check: mismatches=" << gpu_result.mismatches
                   << ", max abs diff=" << gpu_result.max_abs_diff << '\n';
         if ( gpu_result.mismatches != 0 )

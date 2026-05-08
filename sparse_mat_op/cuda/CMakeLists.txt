@@ -10,7 +10,8 @@ set(CUDA_SOURCES
     cuda_kernels.cu
     cuda_ilu_symbolic.cu
     cuda_ilu_symbolic_persistent.cu
-    cuda_ilu_base.cu
+    ilu/ilu_numeric.cu
+    ilu/ilu_update_cache.cpp
     cuda_csr_utils.cu
     cuda_spmm.cu
     cuda_iluk_U_symbolic.cu
@@ -29,6 +30,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     CUDA::cudart 
     LAPACK::LAPACK
     cuco
+)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    OpenMP::OpenMP_CXX
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
