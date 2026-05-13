@@ -2,7 +2,9 @@
 
 #include <cusparse.h>
 #include <cuda_runtime.h>
+#include <cstddef>
 #include <cstdio>
+#include <limits>
 #include <stdexcept>
 
 namespace matrix_utils::sparse_cuda
@@ -98,7 +100,83 @@ public:
             if (_data) {
                 checkCudaMemoryOp(Allocator::deallocate(_data), "cuda deallocate failed");
             }
-            checkCudaMemoryOp(Allocator::allocate(&_data, new_size), "cuda allocate failed");
+
+            if (new_size > (std::numeric_limits<size_t>::max() / sizeof(T))) {
+                throw std::runtime_error("cuda allocate failed: requested allocation size overflow");
+            }
+
+            const size_t requested_bytes = new_size * sizeof(T);
+#ifdef CUDA_ALLOC_TRACE
+            size_t free_before_bytes = 0;
+            size_t total_before_bytes = 0;
+            if constexpr (Allocator::location == MemoryLocation::Device) {
+                (void)cudaMemGetInfo(&free_before_bytes, &total_before_bytes);
+            }
+#endif
+
+            const cudaError_t alloc_status = Allocator::allocate(&_data, new_size);
+            if (alloc_status != cudaSuccess) {
+                size_t free_bytes = 0;
+                size_t total_bytes = 0;
+                const cudaError_t mem_info_status = cudaMemGetInfo(&free_bytes, &total_bytes);
+                constexpr double kBytesPerGB = 1024 * 1024 * 1024;
+                const double requested_gb = static_cast<double>(requested_bytes) / kBytesPerGB;
+                const double free_gb = static_cast<double>(free_bytes) / kBytesPerGB;
+                const double total_gb = static_cast<double>(total_bytes) / kBytesPerGB;
+
+                char message[768];
+                if (mem_info_status == cudaSuccess) {
+                    std::snprintf(
+                        message, sizeof(message),
+                        "cuda allocate failed in Array::resize: requested %.3f GB (%zu elements x %zu bytes), "
+                        "capacity before resize %zu elements, device free %.3f GB / total %.3f GB: %s",
+                        requested_gb, new_size, sizeof(T), _capacity, free_gb, total_gb,
+                        cudaGetErrorString(alloc_status));
+                } else {
+                    std::snprintf(
+                        message, sizeof(message),
+                        "cuda allocate failed in Array::resize: requested %.3f GB (%zu elements x %zu bytes), "
+                        "capacity before resize %zu elements; memory stats unavailable: %s",
+                        requested_gb, new_size, sizeof(T), _capacity,
+                        cudaGetErrorString(alloc_status));
+                }
+                throw std::runtime_error(message);
+            }
+
+#ifdef CUDA_ALLOC_TRACE
+            if constexpr (Allocator::location == MemoryLocation::Device) {
+                size_t free_after_bytes = 0;
+                size_t total_after_bytes = 0;
+                const cudaError_t after_status = cudaMemGetInfo(&free_after_bytes, &total_after_bytes);
+                constexpr double kBytesPerGB = 1024 * 1024 * 1024;
+                const double requested_gb = static_cast<double>(requested_bytes) / kBytesPerGB;
+                const double used_before_gb =
+                    static_cast<double>(total_before_bytes - free_before_bytes) / kBytesPerGB;
+                const double free_before_gb = static_cast<double>(free_before_bytes) / kBytesPerGB;
+
+                if (after_status == cudaSuccess) {
+                    const double used_after_gb =
+                        static_cast<double>(total_after_bytes - free_after_bytes) / kBytesPerGB;
+                    const double free_after_gb = static_cast<double>(free_after_bytes) / kBytesPerGB;
+                    const double used_delta_gb = used_after_gb - used_before_gb;
+                    std::fprintf(
+                        stderr,
+                        "[CUDA_ALLOC] request=%.3f GB (%zu elements x %zu bytes), cap %zu->%zu, "
+                        "used %.3f->%.3f GB (delta %.3f GB), free %.3f->%.3f GB, ptr=%p\n",
+                        requested_gb, new_size, sizeof(T), _capacity, new_size,
+                        used_before_gb, used_after_gb, used_delta_gb,
+                        free_before_gb, free_after_gb, static_cast<void*>(_data));
+                } else {
+                    std::fprintf(
+                        stderr,
+                        "[CUDA_ALLOC] request=%.3f GB (%zu elements x %zu bytes), cap %zu->%zu, "
+                        "used(before)=%.3f GB, free(before)=%.3f GB, ptr=%p (post-allocation mem stats unavailable)\n",
+                        requested_gb, new_size, sizeof(T), _capacity, new_size,
+                        used_before_gb, free_before_gb, static_cast<void*>(_data));
+                }
+            }
+#endif
+
             _capacity = new_size;
         }
         _size = new_size;

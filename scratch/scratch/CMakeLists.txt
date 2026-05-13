@@ -53,6 +53,7 @@ if(USE_CUDA)
   target_compile_features(cuda_spgemm_phase_demo PRIVATE cxx_std_20)
   target_compile_definitions(cuda_spgemm_phase_demo PRIVATE
     CCCL_IGNORE_DEPRECATED_STREAM_REF_HEADER
+    # CUDA_ALLOC_TRACE # Enable CUDA allocation tracing for debugging purposes
   )
   target_link_libraries(cuda_spgemm_phase_demo PRIVATE
     cxxopts::cxxopts

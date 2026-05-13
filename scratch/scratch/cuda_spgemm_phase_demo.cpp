@@ -52,14 +52,34 @@ void requireCudaDevice()
 }
 
 template <typename Func>
-double timeMs( Func&& func )
+double timeMs( const char* phase, Func&& func )
 {
-    checkCuda( cudaDeviceSynchronize(), "pre-timing synchronize" );
-    const auto begin = std::chrono::high_resolution_clock::now();
-    func();
-    checkCuda( cudaDeviceSynchronize(), "post-timing synchronize" );
-    const auto end = std::chrono::high_resolution_clock::now();
-    return std::chrono::duration<double, std::milli>( end - begin ).count();
+    try
+    {
+        checkCuda( cudaDeviceSynchronize(), "pre-timing synchronize" );
+        const auto begin = std::chrono::high_resolution_clock::now();
+        func();
+        checkCuda( cudaDeviceSynchronize(), "post-timing synchronize" );
+        const auto end = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration<double, std::milli>( end - begin ).count();
+    }
+    catch ( const std::exception& err )
+    {
+        throw std::runtime_error( std::string( "phase " ) + phase + " failed: " + err.what() );
+    }
+}
+
+template <typename Func>
+void runStep( const char* step, Func&& func )
+{
+    try
+    {
+        func();
+    }
+    catch ( const std::exception& err )
+    {
+        throw std::runtime_error( std::string( step ) + ": " + err.what() );
+    }
 }
 
 void printTimingRow( const char* phase, double milliseconds, double total_ms )
@@ -388,12 +408,19 @@ int main( int argc, char** argv )
         DeviceArray<int> d_row_ptr;
         DeviceArray<int> d_col_ind;
         DeviceArray<double> d_values;
-        d_row_ptr.copyFromHost( matrix.AI(), static_cast<size_t>( rows + 1 ) );
-        d_col_ind.copyFromHost( matrix.AJ(), static_cast<size_t>( nnz ) );
-        d_values.copyFromHost( matrix.AV(), static_cast<size_t>( nnz ) );
+        runStep(
+            "copyFromHost(AI)",
+            [&] { d_row_ptr.copyFromHost( matrix.AI(), static_cast<size_t>( rows + 1 ) ); } );
+        runStep(
+            "copyFromHost(AJ)",
+            [&] { d_col_ind.copyFromHost( matrix.AJ(), static_cast<size_t>( nnz ) ); } );
+        runStep(
+            "copyFromHost(AV)",
+            [&] { d_values.copyFromHost( matrix.AV(), static_cast<size_t>( nnz ) ); } );
 
         matrix_utils::sparse_cuda::SpGEMMSymbolicResult<int, int> symbolic;
         double symbolic_ms = timeMs(
+            "SpGEMMSymbolicAnalyzeCSR",
             [&]
             {
                 if ( !matrix_utils::sparse_cuda::SpGEMMSymbolicAnalyzeCSR<int, int>(
@@ -405,6 +432,7 @@ int main( int argc, char** argv )
 
         matrix_utils::sparse_cuda::SpGEMMExpandedProducts<int, double> expanded;
         double expansion_ms = timeMs(
+            "SpGEMMExpandCSR",
             [&]
             {
                 if ( !matrix_utils::sparse_cuda::SpGEMMExpandCSR<int, int, double>(
@@ -417,6 +445,7 @@ int main( int argc, char** argv )
 
         matrix_utils::sparse_cuda::SpGEMMExpandedProducts<int, double> sorted;
         double sorting_ms = timeMs(
+            "SpGEMMSortExpandedProductsByColumn",
             [&]
             {
                 if ( !matrix_utils::sparse_cuda::SpGEMMSortExpandedProductsByColumn<int, int, double>(
@@ -426,8 +455,13 @@ int main( int argc, char** argv )
                 }
             } );
 
+        // expanded is no longer needed after sorting — free 23.7 GB
+        expanded.col_ind.release();
+        expanded.values.release();
+
         matrix_utils::sparse_cuda::SpGEMMReducedProducts<int, double> reduced;
         double contraction_ms = timeMs(
+            "SpGEMMContractSortedProducts",
             [&]
             {
                 if ( !matrix_utils::sparse_cuda::SpGEMMContractSortedProducts<int, int, double>(
@@ -440,6 +474,7 @@ int main( int argc, char** argv )
         matrix_utils::sparse_cuda::DeviceCSRMatrix<int, int> contracted;
         DeviceArray<double> contracted_values;
         double construct_ms = timeMs(
+            "SpGEMMConstructCSR",
             [&]
             {
                 if ( !matrix_utils::sparse_cuda::SpGEMMConstructCSR<int, int, double>(
@@ -457,24 +492,6 @@ int main( int argc, char** argv )
         contracted.aj.copyToHost( contracted_col_ind.data() );
         contracted_values.copyToHost( contracted_av.data() );
 
-        DeviceCsrProduct cusparse_product;
-        double cusparse_ms = timeMs(
-            [&]
-            {
-                runCuSparseSpGEMMAA( rows, nnz, d_row_ptr.data(), d_col_ind.data(), d_values.data(), cusparse_product );
-            } );
-
-        std::vector<int> cusparse_row_ptr( static_cast<size_t>( rows + 1 ) );
-        std::vector<int> cusparse_col_ind( static_cast<size_t>( cusparse_product.nnz ) );
-        std::vector<double> cusparse_av( static_cast<size_t>( cusparse_product.nnz ) );
-        cusparse_product.row_ptr.copyToHost( cusparse_row_ptr.data() );
-        cusparse_product.col_ind.copyToHost( cusparse_col_ind.data() );
-        cusparse_product.values.copyToHost( cusparse_av.data() );
-
-        const auto ai_comparison = compareExact( contracted_row_ptr, cusparse_row_ptr );
-        const auto aj_comparison = compareExact( contracted_col_ind, cusparse_col_ind );
-        const auto av_comparison = compareValues( contracted_av, cusparse_av );
-
         const int thread_rows = symbolic.classEnd( matrix_utils::sparse_cuda::SpGEMMRowClass::Thread ) -
                                 symbolic.classBegin( matrix_utils::sparse_cuda::SpGEMMRowClass::Thread );
         const int warp_rows = symbolic.classEnd( matrix_utils::sparse_cuda::SpGEMMRowClass::Warp ) -
@@ -484,19 +501,80 @@ int main( int argc, char** argv )
         const int global_rows = symbolic.classEnd( matrix_utils::sparse_cuda::SpGEMMRowClass::Global ) -
                                 symbolic.classBegin( matrix_utils::sparse_cuda::SpGEMMRowClass::Global );
 
+        // Free all custom SpGEMM device memory; results are safely on host
+        sorted.col_ind.release();
+        sorted.values.release();
+        reduced.row_col_keys.release();
+        reduced.values.release();
+        symbolic.expanded_nnz.release();
+        symbolic.expanded_row_ptr.release();
+        symbolic.row_perm.release();
+        symbolic.sorted_expanded_nnz.release();
+        contracted.ai.release();
+        contracted.aj.release();
+        contracted_values.release();
+
+        DeviceCsrProduct cusparse_product;
+        double cusparse_ms = -1.0;
+        bool cusparse_ok = false;
+        try
+        {
+            cusparse_ms = timeMs(
+                "cuSPARSE SpGEMM A*A",
+                [&]
+                {
+                    runCuSparseSpGEMMAA( rows, nnz, d_row_ptr.data(), d_col_ind.data(), d_values.data(), cusparse_product );
+                } );
+            cusparse_ok = true;
+        }
+        catch ( const std::exception& err )
+        {
+            std::cerr << "warning: cuSPARSE comparison skipped: " << err.what() << '\n';
+        }
+
+        std::vector<int> cusparse_row_ptr;
+        std::vector<int> cusparse_col_ind;
+        std::vector<double> cusparse_av;
+        if ( cusparse_ok )
+        {
+            cusparse_row_ptr.resize( static_cast<size_t>( rows + 1 ) );
+            cusparse_col_ind.resize( static_cast<size_t>( cusparse_product.nnz ) );
+            cusparse_av.resize( static_cast<size_t>( cusparse_product.nnz ) );
+            cusparse_product.row_ptr.copyToHost( cusparse_row_ptr.data() );
+            cusparse_product.col_ind.copyToHost( cusparse_col_ind.data() );
+            cusparse_product.values.copyToHost( cusparse_av.data() );
+        }
+        // Free cuSPARSE device buffers
+        cusparse_product.row_ptr.release();
+        cusparse_product.col_ind.release();
+        cusparse_product.values.release();
+
         const double total_ms = symbolic_ms + expansion_ms + sorting_ms + contraction_ms + construct_ms;
 
         std::cout << "\nA*A Result\n"
                   << "  nnz(C_hat): " << symbolic.total_expanded_nnz << '\n'
-                  << "  nnz(C): " << contracted_nnz << '\n'
-                  << "  nnz(C cuSPARSE): " << cusparse_product.nnz << '\n'
-                  << "  row classes: thread=" << thread_rows << ", warp=" << warp_rows
+                  << "  nnz(C): " << contracted_nnz << '\n';
+        if ( cusparse_ok )
+        {
+            std::cout << "  nnz(C cuSPARSE): " << cusparse_product.nnz << '\n';
+        }
+        std::cout << "  row classes: thread=" << thread_rows << ", warp=" << warp_rows
                   << ", cta=" << cta_rows << ", global=" << global_rows << '\n';
 
-        std::cout << "\nComparison vs cuSPARSE\n";
-        printExactComparison( "ai", ai_comparison );
-        printExactComparison( "aj", aj_comparison );
-        printValueComparison( "av", av_comparison );
+        if ( cusparse_ok )
+        {
+            const auto ai_comparison = compareExact( contracted_row_ptr, cusparse_row_ptr );
+            const auto aj_comparison = compareExact( contracted_col_ind, cusparse_col_ind );
+            const auto av_comparison = compareValues( contracted_av, cusparse_av );
+            std::cout << "\nComparison vs cuSPARSE\n";
+            printExactComparison( "ai", ai_comparison );
+            printExactComparison( "aj", aj_comparison );
+            printValueComparison( "av", av_comparison );
+        }
+        else
+        {
+            std::cout << "\nComparison vs cuSPARSE: skipped (OOM)\n";
+        }
 
         std::cout << "\nTiming\n"
                   << std::fixed << std::setprecision( 3 ) << "  " << std::left << std::setw( 12 ) << "phase"
@@ -507,7 +585,10 @@ int main( int argc, char** argv )
         printTimingRow( "contraction", contraction_ms, total_ms );
         printTimingRow( "construct", construct_ms, total_ms );
         printTimingRow( "custom total", total_ms, total_ms );
-        printTimingRow( "cusparse", cusparse_ms, total_ms );
+        if ( cusparse_ok )
+        {
+            printTimingRow( "cusparse", cusparse_ms, total_ms );
+        }
 
         return 0;
     }
