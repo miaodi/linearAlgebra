@@ -17,7 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
-
+#include <iostream>
 namespace matrix_utils::sparse_cuda
 {
 

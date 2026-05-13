@@ -1,4 +1,5 @@
 #include "cuda_ilu_symbolic.cuh"
+#include <cuda/iterator>
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
 #include <thrust/device_ptr.h>
@@ -12,14 +13,13 @@
 #include <thrust/functional.h>
 #include <thrust/scatter.h>
 #include <thrust/reduce.h>
-#include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/execution_policy.h>
 #include <algorithm>
 #include <array>
 #include <limits>
 #include <vector>
-
+#include <iostream>
 namespace matrix_utils::sparse_cuda
 {
 
@@ -1020,7 +1020,7 @@ bool ILUSymbolicU_CUDA_Persistent(
 
     auto reduce_end = thrust::reduce_by_key(
         row_it, row_it_end,
-        thrust::make_constant_iterator<ROWTYPE>(1),
+        cuda::make_constant_iterator(ROWTYPE{1}),
         unique_rows.begin(), unique_counts.begin());
     size_t unique_size = static_cast<size_t>(reduce_end.first - unique_rows.begin());
     unique_rows.resize(unique_size);
@@ -1032,7 +1032,7 @@ bool ILUSymbolicU_CUDA_Persistent(
     if (base != 0)
     {
         thrust::transform(u_ai_dev.begin() + 1, u_ai_dev.end(),
-                          thrust::make_constant_iterator(ROWTYPE(base)),
+                          cuda::make_constant_iterator(ROWTYPE(base)),
                           u_ai_dev.begin() + 1, thrust::plus<ROWTYPE>());
     }
     u_ai_dev[0] = ROWTYPE(base);

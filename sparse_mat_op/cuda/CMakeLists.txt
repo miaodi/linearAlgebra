@@ -12,6 +12,9 @@ set(CUDA_SOURCES
     cuda_ilu_symbolic_persistent.cu
     ilu/ilu_numeric.cu
     ilu/ilu_update_cache.cpp
+    spgemm/spgemm_expand.cu
+    spgemm/spgemm_sort.cu
+    spgemm/spgemm_contract.cu
     cuda_csr_utils.cu
     cuda_spmm.cu
     cuda_iluk_U_symbolic.cu
@@ -21,13 +24,17 @@ set(CUDA_SOURCES
 
 add_library(${PROJECT_NAME} STATIC ${CUDA_SOURCES})
 
-target_include_directories(${PROJECT_NAME} PUBLIC 
-  ${CMAKE_CURRENT_LIST_DIR}
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    CCCL_IGNORE_DEPRECATED_STREAM_REF_HEADER
 )
-target_link_libraries(${PROJECT_NAME} PUBLIC 
-    CUDA::cusparse 
-    CUDA::cublas 
-    CUDA::cudart 
+
+target_include_directories(${PROJECT_NAME} PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}
+)
+target_link_libraries(${PROJECT_NAME} PUBLIC
+    CUDA::cusparse
+    CUDA::cublas
+    CUDA::cudart
     LAPACK::LAPACK
     cuco
 )

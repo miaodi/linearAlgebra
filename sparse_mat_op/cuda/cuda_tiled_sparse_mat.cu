@@ -1,4 +1,5 @@
 #include "cuda_tiled_sparse_mat.cuh"
+#include <cuda/iterator>
 #include <cub/cub.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
@@ -149,7 +150,7 @@ void TileKeysToCOOMeta(NnzType n, NnzType n_tiles, const uint64_t* d_keys, int c
 
     const auto reduce_result =
         thrust::reduce_by_key(exec, keys_begin, keys_begin + static_cast<size_t>(n),
-                              thrust::make_constant_iterator(CountType{1}), unique_begin, tile_nnz_begin);
+                              cuda::make_constant_iterator(CountType{1}), unique_begin, tile_nnz_begin);
 
     const NnzType produced_tiles = static_cast<NnzType>(reduce_result.first - unique_begin);
     if (produced_tiles != n_tiles)

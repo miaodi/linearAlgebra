@@ -47,5 +47,24 @@ if(USE_CUDA)
     sparse_mat_op_cuda
     CUDA::cudart
   )
+
+  set_source_files_properties(cuda_spgemm_phase_demo.cpp PROPERTIES LANGUAGE CUDA)
+  add_executable(cuda_spgemm_phase_demo cuda_spgemm_phase_demo.cpp)
+  target_compile_features(cuda_spgemm_phase_demo PRIVATE cxx_std_20)
+  target_compile_definitions(cuda_spgemm_phase_demo PRIVATE
+    CCCL_IGNORE_DEPRECATED_STREAM_REF_HEADER
+  )
+  target_link_libraries(cuda_spgemm_phase_demo PRIVATE
+    cxxopts::cxxopts
+    sparse_mat_op
+    sparse_mat_op_cuda
+    CUDA::cusparse
+    CUDA::cudart
+  )
+  set_target_properties(cuda_spgemm_phase_demo PROPERTIES
+    CUDA_STANDARD ${CMAKE_CUDA_STANDARD}
+    CUDA_STANDARD_REQUIRED ON
+    CUDA_EXTENSIONS OFF
+  )
 else()
 endif()

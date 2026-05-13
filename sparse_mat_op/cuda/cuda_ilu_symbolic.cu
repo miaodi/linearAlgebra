@@ -1,5 +1,6 @@
 #include "cuda_ilu_symbolic.cuh"
 #include "cuda_memory.cuh"
+#include <cuda/iterator>
 #include <cuda_runtime.h>
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>
@@ -10,7 +11,6 @@
 #include <thrust/transform.h>
 #include <thrust/functional.h>
 #include <thrust/scatter.h>
-#include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/execution_policy.h>
 #include <thrust/binary_search.h>
@@ -392,7 +392,7 @@ bool ILUSymbolicU_CUDA(
     thrust::device_vector<COLTYPE> unique_rows(u_pattern.size());
     thrust::device_vector<ROWTYPE> unique_counts(u_pattern.size());
 
-    auto reduce_end = thrust::reduce_by_key(row_it, row_it_end, thrust::make_constant_iterator<ROWTYPE>(1),
+    auto reduce_end = thrust::reduce_by_key(row_it, row_it_end, cuda::make_constant_iterator(ROWTYPE{1}),
                                             unique_rows.begin(), unique_counts.begin());
     size_t unique_size = reduce_end.first - unique_rows.begin();
     unique_rows.resize(unique_size);
@@ -403,7 +403,7 @@ bool ILUSymbolicU_CUDA(
     thrust::inclusive_scan(row_counts.begin(), row_counts.end(), u_ai_dev.begin() + 1);
     if (base != 0)
     {
-        thrust::transform(u_ai_dev.begin() + 1, u_ai_dev.end(), thrust::make_constant_iterator(ROWTYPE(base)),
+        thrust::transform(u_ai_dev.begin() + 1, u_ai_dev.end(), cuda::make_constant_iterator(ROWTYPE(base)),
                           u_ai_dev.begin() + 1, thrust::plus<ROWTYPE>());
     }
     u_ai_dev[0] = ROWTYPE(base);
@@ -946,7 +946,7 @@ bool ILUSymbolic_CUDA(
     if (base != 0)
     {
         thrust::transform(lu_ai_dev.begin(), lu_ai_dev.end(), 
-                          thrust::make_constant_iterator(ROWTYPE(base)),
+                          cuda::make_constant_iterator(ROWTYPE(base)),
                           lu_ai_dev.begin(), thrust::plus<ROWTYPE>());
     }
 
