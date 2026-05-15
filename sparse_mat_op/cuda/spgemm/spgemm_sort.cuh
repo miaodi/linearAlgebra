@@ -11,39 +11,26 @@ namespace matrix_utils::sparse_cuda
 /**
  * @brief Sort expanded SpGEMM products by column inside each output row.
  *
- * This is a baseline segmented radix sort over the expanded row slices described
- * by symbolic.expanded_row_ptr. It preserves duplicate columns and moves values
- * together with their column keys, preparing the data for a later row-wise
- * reduction/contraction phase. The sorted output must not alias the expanded
- * input buffers.
+ * Uses cub::DoubleBuffer to ping-pong between expanded and sorted buffers,
+ * eliminating CUB's internal temporary copy.  The expanded input is clobbered.
+ * After return, sorted always holds the result; if the final radix pass left
+ * the data in expanded's buffer the arrays are swapped.
  */
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 bool SpGEMMSortExpandedProductsByColumn( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>& symbolic,
-                                         const SpGEMMExpandedProducts<COLTYPE, VALTYPE>& expanded,
+                                         SpGEMMExpandedProducts<COLTYPE, VALTYPE>& expanded,
                                          SpGEMMExpandedProducts<COLTYPE, VALTYPE>& sorted,
                                          cudaStream_t stream = nullptr );
 
 extern template bool SpGEMMSortExpandedProductsByColumn<int, int, float>(
     const SpGEMMSymbolicResult<int, int>&,
-    const SpGEMMExpandedProducts<int, float>&,
+    SpGEMMExpandedProducts<int, float>&,
     SpGEMMExpandedProducts<int, float>&,
     cudaStream_t );
 
 extern template bool SpGEMMSortExpandedProductsByColumn<int, int, double>(
     const SpGEMMSymbolicResult<int, int>&,
-    const SpGEMMExpandedProducts<int, double>&,
     SpGEMMExpandedProducts<int, double>&,
-    cudaStream_t );
-
-extern template bool SpGEMMSortExpandedProductsByColumn<std::int64_t, int, float>(
-    const SpGEMMSymbolicResult<std::int64_t, int>&,
-    const SpGEMMExpandedProducts<int, float>&,
-    SpGEMMExpandedProducts<int, float>&,
-    cudaStream_t );
-
-extern template bool SpGEMMSortExpandedProductsByColumn<std::int64_t, int, double>(
-    const SpGEMMSymbolicResult<std::int64_t, int>&,
-    const SpGEMMExpandedProducts<int, double>&,
     SpGEMMExpandedProducts<int, double>&,
     cudaStream_t );
 

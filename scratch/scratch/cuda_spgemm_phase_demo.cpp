@@ -405,6 +405,7 @@ int main( int argc, char** argv )
                   << "  nnz(A): " << nnz << '\n'
                   << "  base: " << matrix.Base() << '\n';
 
+        // Upload CSR arrays to GPU.
         DeviceArray<int> d_row_ptr;
         DeviceArray<int> d_col_ind;
         DeviceArray<double> d_values;
@@ -418,17 +419,28 @@ int main( int argc, char** argv )
             "copyFromHost(AV)",
             [&] { d_values.copyFromHost( matrix.AV(), static_cast<size_t>( nnz ) ); } );
 
+        // Warm up: flush lazy CUDA context/driver initialization and JIT overhead
+        // so timed phases measure only kernel work.
+        {
+            DeviceArray<std::uint8_t> warmup_buf;
+            warmup_buf.resize( 1 );
+            checkCuda( cudaMemset( warmup_buf.data(), 0, 1 ), "GPU warm-up memset" );
+            checkCuda( cudaDeviceSynchronize(), "GPU warm-up sync" );
+        }
+
         matrix_utils::sparse_cuda::SpGEMMSymbolicResult<int, int> symbolic;
         double symbolic_ms = timeMs(
             "SpGEMMSymbolicAnalyzeCSR",
             [&]
             {
                 if ( !matrix_utils::sparse_cuda::SpGEMMSymbolicAnalyzeCSR<int, int>(
-                         rows, matrix.cols, d_row_ptr.data(), d_col_ind.data(), rows, d_row_ptr.data(), 0, symbolic ) )
+                         rows, matrix.cols, d_row_ptr.data(), d_col_ind.data(), rows, d_row_ptr.data(),
+                         int{0}, symbolic ) )
                 {
                     throw std::runtime_error( "SpGEMMSymbolicAnalyzeCSR failed." );
                 }
             } );
+        symbolic.n_cols = rows; // A*A: output columns = rows
 
         matrix_utils::sparse_cuda::SpGEMMExpandedProducts<int, double> expanded;
         double expansion_ms = timeMs(
@@ -437,7 +449,7 @@ int main( int argc, char** argv )
             {
                 if ( !matrix_utils::sparse_cuda::SpGEMMExpandCSR<int, int, double>(
                          rows, matrix.cols, d_row_ptr.data(), d_col_ind.data(), d_values.data(), rows,
-                         d_row_ptr.data(), d_col_ind.data(), d_values.data(), 0, symbolic, expanded ) )
+                         d_row_ptr.data(), d_col_ind.data(), d_values.data(), int{0}, symbolic, expanded ) )
                 {
                     throw std::runtime_error( "SpGEMMExpandCSR failed." );
                 }
@@ -459,28 +471,16 @@ int main( int argc, char** argv )
         expanded.col_ind.release();
         expanded.values.release();
 
-        matrix_utils::sparse_cuda::SpGEMMReducedProducts<int, double> reduced;
+        matrix_utils::sparse_cuda::DeviceCSRMatrix<int, int> contracted;
+        DeviceArray<double> contracted_values;
         double contraction_ms = timeMs(
             "SpGEMMContractSortedProducts",
             [&]
             {
                 if ( !matrix_utils::sparse_cuda::SpGEMMContractSortedProducts<int, int, double>(
-                         symbolic, sorted, reduced ) )
+                         symbolic, sorted, contracted, contracted_values ) )
                 {
                     throw std::runtime_error( "SpGEMMContractSortedProducts failed." );
-                }
-            } );
-
-        matrix_utils::sparse_cuda::DeviceCSRMatrix<int, int> contracted;
-        DeviceArray<double> contracted_values;
-        double construct_ms = timeMs(
-            "SpGEMMConstructCSR",
-            [&]
-            {
-                if ( !matrix_utils::sparse_cuda::SpGEMMConstructCSR<int, int, double>(
-                         symbolic, reduced, contracted, contracted_values ) )
-                {
-                    throw std::runtime_error( "SpGEMMConstructCSR failed." );
                 }
             } );
 
@@ -504,8 +504,6 @@ int main( int argc, char** argv )
         // Free all custom SpGEMM device memory; results are safely on host
         sorted.col_ind.release();
         sorted.values.release();
-        reduced.row_col_keys.release();
-        reduced.values.release();
         symbolic.expanded_nnz.release();
         symbolic.expanded_row_ptr.release();
         symbolic.row_perm.release();
@@ -549,7 +547,7 @@ int main( int argc, char** argv )
         cusparse_product.col_ind.release();
         cusparse_product.values.release();
 
-        const double total_ms = symbolic_ms + expansion_ms + sorting_ms + contraction_ms + construct_ms;
+        const double total_ms = symbolic_ms + expansion_ms + sorting_ms + contraction_ms;
 
         std::cout << "\nA*A Result\n"
                   << "  nnz(C_hat): " << symbolic.total_expanded_nnz << '\n'
@@ -583,7 +581,6 @@ int main( int argc, char** argv )
         printTimingRow( "expansion", expansion_ms, total_ms );
         printTimingRow( "sorting", sorting_ms, total_ms );
         printTimingRow( "contraction", contraction_ms, total_ms );
-        printTimingRow( "construct", construct_ms, total_ms );
         printTimingRow( "custom total", total_ms, total_ms );
         if ( cusparse_ok )
         {

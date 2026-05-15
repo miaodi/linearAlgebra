@@ -64,18 +64,25 @@ struct PinnedAllocator
 
 /**
  * @brief Generic array class for managing CUDA memory with capacity tracking
+ *
+ * The Allocator is held as an instance so stateful allocators (e.g.
+ * AsyncDeviceAllocator carrying a cudaStream_t) pair alloc/free on the same
+ * state. Stateless allocators (DeviceAllocator, PinnedAllocator) cost nothing
+ * extra thanks to empty-base / zero-size-member optimisation.
  */
 template<typename T, typename Allocator>
 class Array
 {
 public:
-    Array() : _data(nullptr), _size(0), _capacity(0) {}
+    Array() : _data(nullptr), _size(0), _capacity(0), _alloc{} {}
+
+    explicit Array(Allocator alloc) : _data(nullptr), _size(0), _capacity(0), _alloc(alloc) {}
     
     ~Array() { release(); }
     
     // Move constructor
     Array(Array&& other) noexcept 
-        : _data(other._data), _size(other._size), _capacity(other._capacity) {
+        : _data(other._data), _size(other._size), _capacity(other._capacity), _alloc(other._alloc) {
         other._data = nullptr;
         other._size = 0;
         other._capacity = 0;
@@ -88,6 +95,7 @@ public:
             _data = other._data;
             _size = other._size;
             _capacity = other._capacity;
+            _alloc = other._alloc;
             other._data = nullptr;
             other._size = 0;
             other._capacity = 0;
@@ -98,7 +106,7 @@ public:
     void resize(size_t new_size) {
         if (new_size > _capacity) {
             if (_data) {
-                checkCudaMemoryOp(Allocator::deallocate(_data), "cuda deallocate failed");
+                checkCudaMemoryOp(_alloc.deallocate(_data), "cuda deallocate failed");
             }
 
             if (new_size > (std::numeric_limits<size_t>::max() / sizeof(T))) {
@@ -114,7 +122,7 @@ public:
             }
 #endif
 
-            const cudaError_t alloc_status = Allocator::allocate(&_data, new_size);
+            const cudaError_t alloc_status = _alloc.allocate(&_data, new_size);
             if (alloc_status != cudaSuccess) {
                 size_t free_bytes = 0;
                 size_t total_bytes = 0;
@@ -224,7 +232,36 @@ public:
     
     void release() {
         if (_data) {
-            checkCudaMemoryOp(Allocator::deallocate(_data), "cuda deallocate failed");
+#ifdef CUDA_ALLOC_TRACE
+            if constexpr (Allocator::location == MemoryLocation::Device) {
+                size_t free_before = 0, total_before = 0;
+                (void)cudaMemGetInfo(&free_before, &total_before);
+                checkCudaMemoryOp(_alloc.deallocate(_data), "cuda deallocate failed");
+                size_t free_after = 0, total_after = 0;
+                const cudaError_t after_status = cudaMemGetInfo(&free_after, &total_after);
+                constexpr double kBytesPerGB = 1024.0 * 1024 * 1024;
+                const double released_gb = static_cast<double>(_capacity * sizeof(T)) / kBytesPerGB;
+                if (after_status == cudaSuccess) {
+                    const double free_before_gb = static_cast<double>(free_before) / kBytesPerGB;
+                    const double free_after_gb = static_cast<double>(free_after) / kBytesPerGB;
+                    std::fprintf(
+                        stderr,
+                        "[CUDA_FREE] released=%.3f GB (%zu elements x %zu bytes), "
+                        "free %.3f->%.3f GB, ptr=%p\n",
+                        released_gb, _capacity, sizeof(T),
+                        free_before_gb, free_after_gb, static_cast<void*>(_data));
+                } else {
+                    std::fprintf(
+                        stderr,
+                        "[CUDA_FREE] released=%.3f GB (%zu elements x %zu bytes), ptr=%p\n",
+                        released_gb, _capacity, sizeof(T), static_cast<void*>(_data));
+                }
+            } else {
+                checkCudaMemoryOp(_alloc.deallocate(_data), "cuda deallocate failed");
+            }
+#else
+            checkCudaMemoryOp(_alloc.deallocate(_data), "cuda deallocate failed");
+#endif
             _data = nullptr;
         }
         _size = 0;
@@ -238,10 +275,14 @@ public:
     
     MemoryLocation getLocation() const { return Allocator::location; }
     
+    Allocator& allocator() { return _alloc; }
+    const Allocator& allocator() const { return _alloc; }
+
 private:
     T* _data;
     size_t _size;
     size_t _capacity;
+    Allocator _alloc;
     
     // Disable copy and assignment
     Array(const Array&) = delete;
@@ -254,6 +295,37 @@ using DeviceArray = Array<T, DeviceAllocator>;
 
 template<typename T>
 using PinnedArray = Array<T, PinnedAllocator>;
+
+/**
+ * @brief Stream-ordered device allocator using CUDA's built-in memory pool
+ *        (cudaMallocAsync / cudaFreeAsync, CUDA 11.2+).
+ *
+ * Freed blocks are returned to the device's default memory pool and can be
+ * reused by later allocations on the same stream without a round-trip through
+ * the OS/driver. No custom caching logic is needed.
+ *
+ * This is a stateful allocator: each instance carries a cudaStream_t so that
+ * allocations and deallocations are always paired on the same stream.
+ */
+struct AsyncDeviceAllocator
+{
+    static constexpr MemoryLocation location = MemoryLocation::Device;
+
+    cudaStream_t stream = nullptr;
+
+    template<typename T>
+    cudaError_t allocate(T** ptr, size_t count) const {
+        return cudaMallocAsync(ptr, count * sizeof(T), stream);
+    }
+
+    template<typename T>
+    cudaError_t deallocate(T* ptr) const {
+        return cudaFreeAsync(ptr, stream);
+    }
+};
+
+template<typename T>
+using AsyncDeviceArray = Array<T, AsyncDeviceAllocator>;
 
 /**
  * @brief View wrapper for cuSPARSE dense vector descriptor with device memory pointer

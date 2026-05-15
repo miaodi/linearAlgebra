@@ -60,18 +60,18 @@ TEST( CudaSpGEMMSymbolic, ComputesExpandedCountsPrefixPermutationAndBins )
     EXPECT_EQ( symbolic.base, 0 );
     EXPECT_EQ( symbolic.total_expanded_nnz, 8 );
 
-    std::vector<int> expanded_nnz( 4 );
-    std::vector<int> expanded_row_ptr( 5 );
-    std::vector<int> sorted_expanded_nnz( 4 );
+    std::vector<ExpandedIndex> expanded_nnz( 4 );
+    std::vector<ExpandedIndex> expanded_row_ptr( 5 );
+    std::vector<ExpandedIndex> sorted_expanded_nnz( 4 );
     std::vector<int> row_perm( 4 );
     symbolic.expanded_nnz.copyToHost( expanded_nnz.data() );
     symbolic.expanded_row_ptr.copyToHost( expanded_row_ptr.data() );
     symbolic.sorted_expanded_nnz.copyToHost( sorted_expanded_nnz.data() );
     symbolic.row_perm.copyToHost( row_perm.data() );
 
-    EXPECT_EQ( expanded_nnz, ( std::vector<int>{ 5, 0, 3, 0 } ) );
-    EXPECT_EQ( expanded_row_ptr, ( std::vector<int>{ 0, 5, 5, 8, 8 } ) );
-    EXPECT_EQ( sorted_expanded_nnz, ( std::vector<int>{ 0, 0, 3, 5 } ) );
+    EXPECT_EQ( expanded_nnz, ( std::vector<ExpandedIndex>{ 5, 0, 3, 0 } ) );
+    EXPECT_EQ( expanded_row_ptr, ( std::vector<ExpandedIndex>{ 0, 5, 5, 8, 8 } ) );
+    EXPECT_EQ( sorted_expanded_nnz, ( std::vector<ExpandedIndex>{ 0, 0, 3, 5 } ) );
     EXPECT_EQ( row_perm, ( std::vector<int>{ 1, 3, 2, 0 } ) );
     EXPECT_EQ( symbolic.row_class_offsets, ( std::array<int, 5>{ 0, 2, 3, 3, 4 } ) );
     EXPECT_EQ( symbolic.classBegin( SpGEMMRowClass::Warp ), 2 );
@@ -132,7 +132,7 @@ TEST( CudaSpGEMMSymbolic, SortsExpandedProductsByColumnWithinRows )
         GTEST_SKIP() << "CUDA device unavailable: " << cuda_skip_reason;
     }
 
-    const std::vector<int> row_ptr = { 0, 3, 3, 6 };
+    const std::vector<ExpandedIndex> row_ptr = { 0, 3, 3, 6 };
     const std::vector<int> col_ind = { 4, 1, 2, 3, 0, 2 };
     const std::vector<double> values = { 40.0, 10.0, 20.0, 30.0, 0.0, 21.0 };
 
@@ -166,7 +166,7 @@ TEST( CudaSpGEMMSymbolic, ContractsAndConstructsSortedProductsWithDuplicateColum
         GTEST_SKIP() << "CUDA device unavailable: " << cuda_skip_reason;
     }
 
-    const std::vector<int> row_ptr = { 0, 5, 5, 8 };
+    const std::vector<ExpandedIndex> row_ptr = { 0, 5, 5, 8 };
     const std::vector<int> col_ind = { 1, 1, 3, 3, 4, 0, 0, 2 };
     const std::vector<double> values = { 2.0, 5.0, 10.0, 20.0, 7.0, 1.0, 3.0, 9.0 };
 
@@ -180,7 +180,7 @@ TEST( CudaSpGEMMSymbolic, ContractsAndConstructsSortedProductsWithDuplicateColum
     sorted.col_ind.copyFromHost( col_ind.data(), col_ind.size() );
     sorted.values.copyFromHost( values.data(), values.size() );
 
-    SpGEMMReducedProducts<int, double> reduced;
+    SpGEMMReducedProducts<double> reduced;
     ASSERT_TRUE( ( SpGEMMContractSortedProducts<int, int, double>( symbolic, sorted, reduced ) ) );
     EXPECT_EQ( reduced.nnz, 5 );
 
@@ -210,31 +210,31 @@ TEST( CudaSpGEMMSymbolic, PreservesOneBasedRowPointersAndPermutationIds )
         GTEST_SKIP() << "CUDA device unavailable: " << cuda_skip_reason;
     }
 
-    const std::vector<std::int64_t> A_row_ptr = { 1, 3, 4 };
+    const std::vector<int> A_row_ptr = { 1, 3, 4 };
     const std::vector<int> A_col_ind = { 1, 2, 3 };
-    const std::vector<std::int64_t> B_row_ptr = { 1, 2, 4, 4 };
+    const std::vector<int> B_row_ptr = { 1, 2, 4, 4 };
 
-    DeviceArray<std::int64_t> d_A_row_ptr;
+    DeviceArray<int> d_A_row_ptr;
     DeviceArray<int> d_A_col_ind;
-    DeviceArray<std::int64_t> d_B_row_ptr;
+    DeviceArray<int> d_B_row_ptr;
     d_A_row_ptr.copyFromHost( A_row_ptr.data(), A_row_ptr.size() );
     d_A_col_ind.copyFromHost( A_col_ind.data(), A_col_ind.size() );
     d_B_row_ptr.copyFromHost( B_row_ptr.data(), B_row_ptr.size() );
 
-    SpGEMMSymbolicResult<std::int64_t, int> symbolic;
-    ASSERT_TRUE( ( SpGEMMSymbolicAnalyzeCSR<std::int64_t, int>(
+    SpGEMMSymbolicResult<int, int> symbolic;
+    ASSERT_TRUE( ( SpGEMMSymbolicAnalyzeCSR<int, int>(
         2, 3, d_A_row_ptr.data(), d_A_col_ind.data(), 3, d_B_row_ptr.data(), 1, symbolic ) ) );
 
     EXPECT_EQ( symbolic.total_expanded_nnz, 3 );
 
-    std::vector<std::int64_t> expanded_nnz( 2 );
-    std::vector<std::int64_t> expanded_row_ptr( 3 );
+    std::vector<ExpandedIndex> expanded_nnz( 2 );
+    std::vector<ExpandedIndex> expanded_row_ptr( 3 );
     std::vector<int> row_perm( 2 );
     symbolic.expanded_nnz.copyToHost( expanded_nnz.data() );
     symbolic.expanded_row_ptr.copyToHost( expanded_row_ptr.data() );
     symbolic.row_perm.copyToHost( row_perm.data() );
 
-    EXPECT_EQ( expanded_nnz, ( std::vector<std::int64_t>{ 3, 0 } ) );
-    EXPECT_EQ( expanded_row_ptr, ( std::vector<std::int64_t>{ 1, 4, 4 } ) );
+    EXPECT_EQ( expanded_nnz, ( std::vector<ExpandedIndex>{ 3, 0 } ) );
+    EXPECT_EQ( expanded_row_ptr, ( std::vector<ExpandedIndex>{ 1, 4, 4 } ) );
     EXPECT_EQ( row_perm, ( std::vector<int>{ 2, 1 } ) );
 }
