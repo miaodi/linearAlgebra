@@ -7,19 +7,10 @@
 #include "Reordering.h"
 #include "sp_ops.hpp"
 
-#ifdef USE_CUDA
-#include "ilu/ilu_numeric.cuh"
-#include "ilu/ilu_numeric_workqueue.cuh"
-#include "ilu/ilu_update_cache.hpp"
-
-#include <cuda_runtime.h>
-#endif
-
 #include <cxxopts.hpp>
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
@@ -31,333 +22,67 @@ namespace
 {
 using CSR = matrix_utils::CSRMatrix<int, int, double>;
 
-#ifdef USE_CUDA
-struct GpuNumericResult
+enum class SymbolicMode
 {
-    double elapsed_ms = 0.0;
-    double max_abs_diff = 0.0;
-    int mismatches = 0;
+    V1,
+    V2
 };
 
-enum class GpuNumericMode
+enum class ReorderMode
 {
-    Cached,
-    Global,
-    WorkQueue
+    None,
+    Metis
 };
 
-GpuNumericMode parse_gpu_numeric_mode( const std::string& mode )
+SymbolicMode parse_symbolic_mode( const std::string& mode )
 {
-    if ( mode == "cached" )
+    if ( mode == "v1" )
     {
-        return GpuNumericMode::Cached;
+        return SymbolicMode::V1;
     }
-    if ( mode == "global" )
+    if ( mode == "v2" )
     {
-        return GpuNumericMode::Global;
+        return SymbolicMode::V2;
     }
-    if ( mode == "workqueue" )
-    {
-        return GpuNumericMode::WorkQueue;
-    }
-    throw std::invalid_argument( "GPU numeric mode must be one of: cached, global, workqueue" );
+    throw std::invalid_argument( "Symbolic mode must be one of: v1, v2" );
 }
 
-const char* gpu_numeric_mode_label( const GpuNumericMode mode )
+ReorderMode parse_reorder_mode( const std::string& mode )
+{
+    if ( mode == "none" )
+    {
+        return ReorderMode::None;
+    }
+    if ( mode == "metis" )
+    {
+        return ReorderMode::Metis;
+    }
+    throw std::invalid_argument( "Reorder mode must be one of: none, metis" );
+}
+
+const char* symbolic_mode_label( const SymbolicMode mode )
 {
     switch ( mode )
     {
-    case GpuNumericMode::Cached:
-        return "ILUBaseNumericFactorizationCachedAsync";
-    case GpuNumericMode::Global:
-        return "ILUBaseNumericFactorizationAsync";
-    case GpuNumericMode::WorkQueue:
-        return "ILUBaseNumericFactorizationWorkQueueAsync";
+    case SymbolicMode::V1:
+        return "ILULevelSymbolicParallel";
+    case SymbolicMode::V2:
+        return "ILULevelSymbolicParallelV2";
     }
-    return "Unknown GPU numeric mode";
+    return "Unknown symbolic mode";
 }
 
-void check_cuda( const cudaError_t status, const char* operation )
+const char* reorder_mode_label( const ReorderMode mode )
 {
-    if ( status != cudaSuccess )
+    switch ( mode )
     {
-        throw std::runtime_error( std::string( operation ) + ": " + cudaGetErrorString( status ) );
+    case ReorderMode::None:
+        return "none";
+    case ReorderMode::Metis:
+        return "metis";
     }
+    return "unknown";
 }
-
-template <typename T>
-class DeviceBuffer
-{
-public:
-    DeviceBuffer() = default;
-
-    explicit DeviceBuffer( const std::size_t count )
-    {
-        resize( count );
-    }
-
-    DeviceBuffer( const DeviceBuffer& ) = delete;
-    DeviceBuffer& operator=( const DeviceBuffer& ) = delete;
-
-    DeviceBuffer( DeviceBuffer&& other ) noexcept : data_( other.data_ )
-    {
-        other.data_ = nullptr;
-    }
-
-    DeviceBuffer& operator=( DeviceBuffer&& other ) noexcept
-    {
-        if ( this != &other )
-        {
-            release();
-            data_ = other.data_;
-            other.data_ = nullptr;
-        }
-        return *this;
-    }
-
-    ~DeviceBuffer()
-    {
-        release();
-    }
-
-    void resize( const std::size_t count )
-    {
-        release();
-        check_cuda( cudaMalloc( reinterpret_cast<void**>( &data_ ), count * sizeof( T ) ), "cudaMalloc" );
-    }
-
-    T* get()
-    {
-        return data_;
-    }
-
-    const T* get() const
-    {
-        return data_;
-    }
-
-private:
-    void release()
-    {
-        if ( data_ != nullptr )
-        {
-            cudaFree( data_ );
-            data_ = nullptr;
-        }
-    }
-
-    T* data_ = nullptr;
-};
-
-class CudaStream
-{
-public:
-    CudaStream()
-    {
-        check_cuda( cudaStreamCreate( &stream_ ), "cudaStreamCreate" );
-    }
-
-    CudaStream( const CudaStream& ) = delete;
-    CudaStream& operator=( const CudaStream& ) = delete;
-
-    ~CudaStream()
-    {
-        if ( stream_ != nullptr )
-        {
-            cudaStreamDestroy( stream_ );
-        }
-    }
-
-    cudaStream_t get() const
-    {
-        return stream_;
-    }
-
-private:
-    cudaStream_t stream_ = nullptr;
-};
-
-class CudaEvent
-{
-public:
-    CudaEvent()
-    {
-        check_cuda( cudaEventCreate( &event_ ), "cudaEventCreate" );
-    }
-
-    CudaEvent( const CudaEvent& ) = delete;
-    CudaEvent& operator=( const CudaEvent& ) = delete;
-
-    ~CudaEvent()
-    {
-        if ( event_ != nullptr )
-        {
-            cudaEventDestroy( event_ );
-        }
-    }
-
-    cudaEvent_t get() const
-    {
-        return event_;
-    }
-
-private:
-    cudaEvent_t event_ = nullptr;
-};
-
-
-GpuNumericResult run_gpu_numeric_factorization( const CSR& matrix,
-                                                const CSR& lu,
-                                                const std::vector<int>& permutation,
-                                                const std::vector<int>& level_prefix,
-                                                const int levels,
-                                                const GpuNumericMode gpu_numeric_mode,
-                                                const matrix_utils::sparse_cuda::ILUUpdateCache<int>* update_cache,
-                                                const int workqueue_blocks_per_sm )
-{
-    int device_count = 0;
-    check_cuda( cudaGetDeviceCount( &device_count ), "cudaGetDeviceCount" );
-    if ( device_count == 0 )
-    {
-        throw std::runtime_error( "No CUDA device available" );
-    }
-
-    CudaStream stream;
-    CudaEvent start;
-    CudaEvent stop;
-
-    DeviceBuffer<int> d_a_ai( static_cast<std::size_t>( matrix.rows + 1 ) );
-    DeviceBuffer<int> d_a_aj( static_cast<std::size_t>( matrix.NNZ() ) );
-    DeviceBuffer<double> d_a_av( static_cast<std::size_t>( matrix.NNZ() ) );
-    DeviceBuffer<int> d_lu_ai( static_cast<std::size_t>( lu.rows + 1 ) );
-    DeviceBuffer<int> d_lu_aj( static_cast<std::size_t>( lu.NNZ() ) );
-    DeviceBuffer<int> d_lu_diag( static_cast<std::size_t>( lu.rows ) );
-    DeviceBuffer<int> d_level_perm( static_cast<std::size_t>( permutation.size() ) );
-    DeviceBuffer<double> d_lu_av( static_cast<std::size_t>( lu.NNZ() ) );
-    DeviceBuffer<int> d_status( 1 );
-    DeviceBuffer<int> d_update_ptr;
-    DeviceBuffer<int> d_update_jpos;
-    DeviceBuffer<int> d_update_pos;
-    DeviceBuffer<int> d_level_row_counter;
-
-    check_cuda( cudaMemcpyAsync( d_a_ai.get(), matrix.AI(), static_cast<std::size_t>( matrix.rows + 1 ) * sizeof( int ),
-                                 cudaMemcpyHostToDevice, stream.get() ),
-                "cudaMemcpyAsync d_a_ai" );
-    check_cuda( cudaMemcpyAsync( d_a_aj.get(), matrix.AJ(), static_cast<std::size_t>( matrix.NNZ() ) * sizeof( int ),
-                                 cudaMemcpyHostToDevice, stream.get() ),
-                "cudaMemcpyAsync d_a_aj" );
-    check_cuda( cudaMemcpyAsync( d_a_av.get(), matrix.AV(), static_cast<std::size_t>( matrix.NNZ() ) * sizeof( double ),
-                                 cudaMemcpyHostToDevice, stream.get() ),
-                "cudaMemcpyAsync d_a_av" );
-    check_cuda( cudaMemcpyAsync( d_lu_ai.get(), lu.AI(), static_cast<std::size_t>( lu.rows + 1 ) * sizeof( int ),
-                                 cudaMemcpyHostToDevice, stream.get() ),
-                "cudaMemcpyAsync d_lu_ai" );
-    check_cuda( cudaMemcpyAsync( d_lu_aj.get(), lu.AJ(), static_cast<std::size_t>( lu.NNZ() ) * sizeof( int ),
-                                 cudaMemcpyHostToDevice, stream.get() ),
-                "cudaMemcpyAsync d_lu_aj" );
-    check_cuda( cudaMemcpyAsync( d_lu_diag.get(), lu.Diagonal(), static_cast<std::size_t>( lu.rows ) * sizeof( int ),
-                                 cudaMemcpyHostToDevice, stream.get() ),
-                "cudaMemcpyAsync d_lu_diag" );
-    check_cuda( cudaMemcpyAsync( d_level_perm.get(), permutation.data(), permutation.size() * sizeof( int ),
-                                 cudaMemcpyHostToDevice, stream.get() ),
-                "cudaMemcpyAsync d_level_perm" );
-
-    if ( gpu_numeric_mode == GpuNumericMode::Cached )
-    {
-        if ( update_cache == nullptr )
-        {
-            throw std::runtime_error( "Cached GPU numeric mode requires an update cache" );
-        }
-        d_update_ptr.resize( update_cache->update_ptr.size() );
-        d_update_jpos.resize( std::max<std::size_t>( update_cache->update_jpos.size(), 1 ) );
-        d_update_pos.resize( std::max<std::size_t>( update_cache->update_pos.size(), 1 ) );
-        check_cuda( cudaMemcpyAsync( d_update_ptr.get(), update_cache->update_ptr.data(),
-                                     update_cache->update_ptr.size() * sizeof( int ),
-                                     cudaMemcpyHostToDevice, stream.get() ),
-                    "cudaMemcpyAsync d_update_ptr" );
-        if ( !update_cache->update_jpos.empty() )
-        {
-            check_cuda( cudaMemcpyAsync( d_update_jpos.get(), update_cache->update_jpos.data(),
-                                         update_cache->update_jpos.size() * sizeof( int ),
-                                         cudaMemcpyHostToDevice, stream.get() ),
-                        "cudaMemcpyAsync d_update_jpos" );
-            check_cuda( cudaMemcpyAsync( d_update_pos.get(), update_cache->update_pos.data(),
-                                         update_cache->update_pos.size() * sizeof( int ),
-                                         cudaMemcpyHostToDevice, stream.get() ),
-                        "cudaMemcpyAsync d_update_pos" );
-        }
-    }
-    else if ( gpu_numeric_mode == GpuNumericMode::WorkQueue )
-    {
-        d_level_row_counter.resize( 1 );
-    }
-
-    check_cuda( cudaEventRecord( start.get(), stream.get() ), "cudaEventRecord start" );
-    if ( gpu_numeric_mode == GpuNumericMode::Cached )
-    {
-        check_cuda( matrix_utils::sparse_cuda::ILUBaseNumericFactorizationCachedAsync<int, int, double>(
-                        matrix.rows, d_a_ai.get(), d_a_aj.get(), d_a_av.get(), d_lu_ai.get(), d_lu_aj.get(),
-                        d_lu_diag.get(), d_update_ptr.get(), d_update_jpos.get(), d_update_pos.get(),
-                        d_level_perm.get(), level_prefix.data(), levels, matrix.Base(),
-                        d_lu_av.get(), d_status.get(), stream.get() ),
-                    "ILUBaseNumericFactorizationCachedAsync" );
-    }
-    else if ( gpu_numeric_mode == GpuNumericMode::WorkQueue )
-    {
-        check_cuda( matrix_utils::sparse_cuda::ILUBaseNumericFactorizationWorkQueueAsync<int, int, double>(
-                        matrix.rows, d_a_ai.get(), d_a_aj.get(), d_a_av.get(), d_lu_ai.get(), d_lu_aj.get(),
-                        d_lu_diag.get(), d_level_perm.get(), level_prefix.data(), levels, matrix.Base(),
-                        d_lu_av.get(), d_status.get(), d_level_row_counter.get(), workqueue_blocks_per_sm,
-                        stream.get() ),
-                    "ILUBaseNumericFactorizationWorkQueueAsync" );
-    }
-    else
-    {
-        check_cuda( matrix_utils::sparse_cuda::ILUBaseNumericFactorizationAsync<int, int, double>(
-                        matrix.rows, d_a_ai.get(), d_a_aj.get(), d_a_av.get(), d_lu_ai.get(), d_lu_aj.get(),
-                        d_lu_diag.get(), d_level_perm.get(), level_prefix.data(), levels, matrix.Base(),
-                        d_lu_av.get(), d_status.get(), stream.get() ),
-                    "ILUBaseNumericFactorizationAsync" );
-    }
-    check_cuda( cudaEventRecord( stop.get(), stream.get() ), "cudaEventRecord stop" );
-
-    int h_status = 1;
-    check_cuda( cudaMemcpyAsync( &h_status, d_status.get(), sizeof( int ), cudaMemcpyDeviceToHost, stream.get() ),
-                "cudaMemcpyAsync d_status" );
-    check_cuda( cudaStreamSynchronize( stream.get() ), "cudaStreamSynchronize" );
-    if ( h_status != 0 )
-    {
-        throw std::runtime_error( "GPU ILU numeric factorization failed: zero pivot" );
-    }
-
-    float elapsed_ms = 0.0f;
-    check_cuda( cudaEventElapsedTime( &elapsed_ms, start.get(), stop.get() ), "cudaEventElapsedTime" );
-
-    std::vector<double> gpu_lu_values( static_cast<std::size_t>( lu.NNZ() ) );
-    check_cuda( cudaMemcpyAsync( gpu_lu_values.data(), d_lu_av.get(), gpu_lu_values.size() * sizeof( double ),
-                                 cudaMemcpyDeviceToHost, stream.get() ),
-                "cudaMemcpyAsync d_lu_av" );
-    check_cuda( cudaStreamSynchronize( stream.get() ), "cudaStreamSynchronize d_lu_av" );
-
-    constexpr double abs_tolerance = 1.0e-10;
-    constexpr double rel_tolerance = 1.0e-10;
-    GpuNumericResult result;
-    result.elapsed_ms = static_cast<double>( elapsed_ms );
-    for ( int i = 0; i < lu.NNZ(); ++i )
-    {
-        const double cpu_value = lu.AV()[i];
-        const double gpu_value = gpu_lu_values[static_cast<std::size_t>( i )];
-        const double abs_diff = std::abs( gpu_value - cpu_value );
-        const double allowed = abs_tolerance + rel_tolerance * std::abs( cpu_value );
-        result.max_abs_diff = std::max( result.max_abs_diff, abs_diff );
-        if ( abs_diff > allowed )
-        {
-            ++result.mismatches;
-        }
-    }
-    return result;
-}
-#endif
 
 std::vector<int> find_missing_diagonal_rows( const CSR& matrix )
 {
@@ -480,11 +205,10 @@ int main( int argc, char** argv )
         "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )(
         "n,threads", "Number of threads for ILU symbolic setup",
         cxxopts::value<int>()->default_value( "1" ) )(
-        "disable-gpu-update-cache", "Use the original GPU numeric path without the precomputed update cache" )(
-        "gpu-numeric-mode", "GPU numeric mode: cached, global, workqueue",
-        cxxopts::value<std::string>()->default_value( "cached" ) )(
-        "gpu-workqueue-blocks-per-sm", "Persistent workqueue blocks per SM",
-        cxxopts::value<int>()->default_value( "4" ) )(
+        "symbolic-mode", "Symbolic setup mode: v1, v2",
+        cxxopts::value<std::string>()->default_value( "v2" ) )(
+        "reorder", "Matrix reordering mode before ILU: none, metis",
+        cxxopts::value<std::string>()->default_value( "none" ) )(
         "h,help", "Print usage" );
 
     const auto parsed = options.parse( argc, argv );
@@ -497,31 +221,18 @@ int main( int argc, char** argv )
     const std::string file_path = parsed["file"].as<std::string>();
     const int level = parsed["level"].as<int>();
     const int threads = parsed["threads"].as<int>();
-#ifdef USE_CUDA
-    std::string gpu_numeric_mode_name = parsed["gpu-numeric-mode"].as<std::string>();
-    if ( parsed.count( "disable-gpu-update-cache" ) != 0 )
-    {
-        gpu_numeric_mode_name = "global";
-    }
-
-    GpuNumericMode gpu_numeric_mode = GpuNumericMode::Cached;
+    SymbolicMode symbolic_mode = SymbolicMode::V2;
+    ReorderMode reorder_mode = ReorderMode::Metis;
     try
     {
-        gpu_numeric_mode = parse_gpu_numeric_mode( gpu_numeric_mode_name );
+        symbolic_mode = parse_symbolic_mode( parsed["symbolic-mode"].as<std::string>() );
+        reorder_mode = parse_reorder_mode( parsed["reorder"].as<std::string>() );
     }
     catch ( const std::exception& e )
     {
         std::cerr << e.what() << '\n';
         return 1;
     }
-
-    const int gpu_workqueue_blocks_per_sm = parsed["gpu-workqueue-blocks-per-sm"].as<int>();
-    if ( gpu_workqueue_blocks_per_sm <= 0 )
-    {
-        std::cerr << "GPU workqueue blocks per SM must be positive\n";
-        return 1;
-    }
-#endif
     if ( level < 0 )
     {
         std::cerr << "ILU level must be non-negative\n";
@@ -544,11 +255,19 @@ int main( int argc, char** argv )
     }
 
     CSR matrix;
-    if ( !metis_reorder_matrix( input_matrix, matrix, threads ) )
+    if ( reorder_mode == ReorderMode::Metis )
     {
-        return 1;
+        if ( !metis_reorder_matrix( input_matrix, matrix, threads ) )
+        {
+            return 1;
+        }
     }
-    std::cout << "METIS reordered matrix: rows=" << matrix.rows << ", cols=" << matrix.cols
+    else
+    {
+        matrix = input_matrix;
+    }
+    std::cout << "Reorder mode: " << reorder_mode_label( reorder_mode ) << '\n';
+    std::cout << "ILU input matrix: rows=" << matrix.rows << ", cols=" << matrix.cols
               << ", nnz=" << matrix.NNZ() << ", base=" << matrix.Base() << '\n';
 
     std::vector<int> diagonal_positions( static_cast<std::size_t>( matrix.rows ) );
@@ -563,19 +282,29 @@ int main( int argc, char** argv )
     }
     std::cout << "All diagonal entries are present\n";
 
-    matrix_utils::ILULevelSymbolicParallel<CSR, enums::matrix_utils::LU, true> symbolic( threads );
     CSR lu;
     const auto symbolic_start = std::chrono::steady_clock::now();
-    if ( !symbolic( matrix.rows, matrix.AI(), matrix.AJ(), level, lu ) )
+    bool symbolic_success = false;
+    if ( symbolic_mode == SymbolicMode::V1 )
     {
-        std::cerr << "ILULevelSymbolicParallel failed\n";
+        matrix_utils::ILULevelSymbolicParallel<CSR, enums::matrix_utils::LU, true> symbolic( threads );
+        symbolic_success = symbolic( matrix.rows, matrix.AI(), matrix.AJ(), level, lu );
+    }
+    else
+    {
+        matrix_utils::ILULevelSymbolicParallelV2<CSR, enums::matrix_utils::LU, true> symbolic( threads );
+        symbolic_success = symbolic.apply( matrix.rows, matrix.AI(), matrix.AJ(), level, lu );
+    }
+    if ( !symbolic_success )
+    {
+        std::cerr << symbolic_mode_label( symbolic_mode ) << " failed\n";
         return 1;
     }
     const auto symbolic_end = std::chrono::steady_clock::now();
     const std::chrono::duration<double, std::milli> symbolic_ms = symbolic_end - symbolic_start;
     std::cout << "ILU(" << level << ") symbolic LU: rows=" << lu.rows << ", cols=" << lu.cols
               << ", nnz=" << lu.NNZ() << ", base=" << lu.Base() << '\n';
-    std::cout << "ILULevelSymbolicParallel time: " << symbolic_ms.count() << " ms\n";
+    std::cout << symbolic_mode_label( symbolic_mode ) << " time: " << symbolic_ms.count() << " ms\n";
 
     std::vector<int> permutation( static_cast<std::size_t>( lu.rows ) );
     std::vector<int> level_prefix( static_cast<std::size_t>( lu.rows + 1 ) );
@@ -592,57 +321,17 @@ int main( int argc, char** argv )
     std::cout << "TopologicalSort2 dependency levels: " << levels
               << ", max level width=" << max_level_width << '\n';
 
-#ifdef USE_CUDA
-    matrix_utils::sparse_cuda::ILUUpdateCache<int> update_cache;
-    if ( gpu_numeric_mode == GpuNumericMode::Cached )
-    {
-        update_cache = matrix_utils::sparse_cuda::BuildILUUpdateCache<int, int>(
-            lu.rows, lu.AI(), lu.AJ(), lu.Diagonal(), lu.Base(), threads );
-        const double cache_mib = static_cast<double>( update_cache.bytes() ) / ( 1024.0 * 1024.0 );
-        std::cout << "ILU update cache: entries=" << update_cache.update_jpos.size()
-                  << ", memory=" << cache_mib << " MiB"
-                  << ", build time=" << update_cache.build_ms << " ms\n";
-    }
-#endif
+    // const auto numeric_start = std::chrono::steady_clock::now();
+    // if ( !matrix_utils::ILULevelNumeric( matrix.rows, matrix.AI(), matrix.AJ(), matrix.AV(), level, lu ) )
+    // {
+    //     std::cerr << "ILULevelNumeric failed\n";
+    //     return 1;
+    // }
+    // const auto numeric_end = std::chrono::steady_clock::now();
+    // const std::chrono::duration<double, std::milli> numeric_ms = numeric_end - numeric_start;
+    // std::cout << "ILU(" << level << ") numeric factorization complete\n";
+    // std::cout << "ILULevelNumeric time: " << numeric_ms.count() << " ms\n";
 
-    const auto numeric_start = std::chrono::steady_clock::now();
-    if ( !matrix_utils::ILULevelNumeric( matrix.rows, matrix.AI(), matrix.AJ(), matrix.AV(), level, lu ) )
-    {
-        std::cerr << "ILULevelNumeric failed\n";
-        return 1;
-    }
-    const auto numeric_end = std::chrono::steady_clock::now();
-    const std::chrono::duration<double, std::milli> numeric_ms = numeric_end - numeric_start;
-    std::cout << "ILU(" << level << ") numeric factorization complete\n";
-    std::cout << "ILULevelNumeric time: " << numeric_ms.count() << " ms\n";
-
-#ifdef USE_CUDA
-    try
-    {
-        const GpuNumericResult gpu_result =
-            run_gpu_numeric_factorization(
-                matrix, lu, permutation, level_prefix, levels, gpu_numeric_mode,
-                gpu_numeric_mode == GpuNumericMode::Cached ? &update_cache : nullptr,
-                gpu_workqueue_blocks_per_sm );
-        std::cout << "ILU(" << level << ") GPU numeric factorization complete\n";
-        std::cout << gpu_numeric_mode_label( gpu_numeric_mode )
-                  << " GPU event time: " << gpu_result.elapsed_ms << " ms\n";
-        std::cout << "GPU vs CPU LU value check: mismatches=" << gpu_result.mismatches
-                  << ", max abs diff=" << gpu_result.max_abs_diff << '\n';
-        if ( gpu_result.mismatches != 0 )
-        {
-            return 1;
-        }
-    }
-    catch ( const std::exception& e )
-    {
-        std::cerr << "GPU numeric factorization failed: " << e.what() << '\n';
-        return 1;
-    }
-#else
-    std::cout << "GPU numeric factorization skipped: USE_CUDA=OFF\n";
-#endif
-
-    std::cout << "ILU factorization level analysis complete\n";
+    // std::cout << "ILU factorization level analysis complete\n";
     return 0;
 }

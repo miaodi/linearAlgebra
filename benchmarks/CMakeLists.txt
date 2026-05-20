@@ -19,6 +19,8 @@ set(EXCLUDED_BENCHMARKS
 )
 
 set(CUDA_REQUIRED_BENCHMARKS
+    "spmv_bench.cpp"
+    "spmv_reorder_bench.cpp"
     "spmm_struct_bench.cpp"
 )
 
@@ -58,7 +60,17 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
    add_executable(${TARGET_NAME} ${ONE_BENCH_CPP})
    set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_BENCH_EXEC})
    
-   # CUDA benchmarks need different dependencies and settings
+   target_link_libraries(${TARGET_NAME} PRIVATE
+      benchmark::benchmark
+      reordering
+      graph
+      utils
+      sparse_mat_op
+      OpenMP::OpenMP_CXX
+      cxxopts
+   )
+
+   # CUDA benchmarks keep the normal benchmark dependencies and add CUDA usage.
    if(IS_CUDA_BENCH)
       if(BENCH_EXT STREQUAL ".cu")
          set_target_properties(${TARGET_NAME} PROPERTIES 
@@ -68,17 +80,11 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
          )
       endif()
       target_link_libraries(${TARGET_NAME} PRIVATE 
-         benchmark::benchmark 
          sparse_mat_op_cuda
-         sparse_mat_op
-         utils
          CUDA::cudart
-         cxxopts
       )
-   else()
-      target_link_libraries(${TARGET_NAME} PRIVATE benchmark::benchmark reordering graph utils sparse_mat_op OpenMP::OpenMP_CXX cxxopts)
-      target_enable_simd(${TARGET_NAME})
    endif()
+   target_enable_simd(${TARGET_NAME})
 endforeach()
 
 # https://sparse.tamu.edu/VLSI/nv2

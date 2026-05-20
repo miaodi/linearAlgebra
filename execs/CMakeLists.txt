@@ -56,6 +56,7 @@ if(USE_CUDA)
     CUDA::cublas 
     CUDA::cudart
     sparse_mat_op
+    sparse_mat_op_cuda
     reordering
     solver
     utils

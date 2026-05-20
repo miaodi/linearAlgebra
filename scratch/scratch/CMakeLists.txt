@@ -9,12 +9,6 @@ target_link_libraries(ilu_factorization_levels PRIVATE
   reordering
   sparse_mat_op
 )
-if(USE_CUDA)
-  target_link_libraries(ilu_factorization_levels PRIVATE
-    sparse_mat_op_cuda
-    CUDA::cudart
-  )
-endif()
 
 # CUDA test executable for SpMMAnalyze
 if(USE_CUDA)

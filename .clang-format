@@ -46,5 +46,4 @@ SpacesInParentheses: true
 Standard: Latest
 TabWidth: 4
 UseTab: Never
-PackConstructorInitializers: Never
 SortIncludes: false

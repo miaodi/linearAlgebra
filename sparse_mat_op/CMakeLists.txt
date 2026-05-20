@@ -9,7 +9,6 @@ set(DEPENDENCIES enums utils graph OpenMP::OpenMP_CXX Eigen3::Eigen fast_matrix_
 if(USE_CUDA)
     enable_language(CUDA)
     add_subdirectory(cuda)
-    set(DEPENDENCIES ${DEPENDENCIES} sparse_mat_op_cuda)
 endif()
 
 if(USE_METIS_LIB)
@@ -24,4 +23,3 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC ${DEPENDENCIES})
 target_enable_simd(${PROJECT_NAME})
-

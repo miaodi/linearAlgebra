@@ -203,10 +203,12 @@ private:
                   "ILULevelSymbolicParallel with LU requires keepdiag = true");
 
     int _nthreads;
+    // Per-thread scratch buffers (indexed by thread id) to avoid synchronization.
     std::vector<std::vector<NodeInfo>> _visited;
     std::vector<std::vector<NodeInfo>> _Q;
     std::vector<std::vector<NodeInfo>> _Q_next;
     std::vector<std::vector<COLTYPE>> _added;
+    // Per-thread row outputs before final assembly.
     std::vector<std::vector<COLTYPE>> _L;
     std::vector<std::vector<COLTYPE>> _U;
 
@@ -214,6 +216,100 @@ private:
                      const COLTYPE base, const COLTYPE invalid_peak,
                      std::vector<NodeInfo>& visited_thread, std::vector<COLTYPE>& added_thread,
                      std::vector<NodeInfo>& Q_thread, std::vector<NodeInfo>& Q_next_thread);
+};
+
+// Gustavson-style ILU(k) symbolic factorization.
+// V2 builds each row as repeated Op * A products: an inner K-way merge coalesces
+// row expansion candidates, then an outer merge applies those candidates to the
+// sorted visited list for the current row.
+template <ResizableDiagonal CSRMatrixType,
+          enums::matrix_utils::TriangularMatrix Triangular = enums::matrix_utils::L,
+          bool keepdiag = false>
+class ILULevelSymbolicParallelV2
+{
+public:
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+
+    struct NodeInfo
+    {
+        COLTYPE index;
+        COLTYPE peak;
+    };
+
+    ILULevelSymbolicParallelV2( const int nthreads )
+        : _nthreads( nthreads ),
+          _visited( nthreads ),
+          _visited_next( nthreads ),
+          _op( nthreads ),
+          _op_next( nthreads ),
+          _candidates( nthreads ),
+          _merge_cursors( nthreads )
+    {
+    }
+
+    bool apply( const typename CSRMatrixType::COLTYPE size,
+                typename CSRMatrixType::ROWTYPE const* ai,
+                typename CSRMatrixType::COLTYPE const* aj,
+                const int lvl,
+                CSRMatrixType& ILU );
+
+private:
+    static_assert( Triangular == enums::matrix_utils::L || Triangular == enums::matrix_utils::LU,
+                   "ILULevelSymbolicParallelV2 supports L and LU only" );
+    static_assert( Triangular != enums::matrix_utils::LU || keepdiag,
+                   "ILULevelSymbolicParallelV2 with LU requires keepdiag = true" );
+
+    struct MergeCursor
+    {
+        // Candidate emitted by the current cursor position in A(row, :).
+        COLTYPE index;
+        // Candidate peak after semiring multiplication: max(source_peak, index).
+        COLTYPE peak;
+        // CSR range currently scanned by this cursor.
+        ROWTYPE pos;
+        ROWTYPE end;
+        // Peak carried by the Op/frontier node that owns this cursor.
+        COLTYPE source_peak;
+    };
+
+    int _nthreads;
+    // Per-thread scratch buffers; no synchronization is needed while building rows.
+    std::vector<std::vector<NodeInfo>> _visited;
+    std::vector<std::vector<NodeInfo>> _visited_next;
+    std::vector<std::vector<NodeInfo>> _op;
+    std::vector<std::vector<NodeInfo>> _op_next;
+    std::vector<std::vector<NodeInfo>> _candidates;
+    std::vector<std::vector<MergeCursor>> _merge_cursors;
+    // Per-row outputs assembled after prefix sum.
+    std::vector<std::vector<COLTYPE>> _L;
+    std::vector<std::vector<COLTYPE>> _U;
+
+    ROWTYPE BuildRow( const COLTYPE i,
+                      ROWTYPE const* ai,
+                      COLTYPE const* aj,
+                      const int lvl,
+                      const COLTYPE base,
+                      std::vector<NodeInfo>& visited,
+                      std::vector<NodeInfo>& visited_next,
+                      std::vector<NodeInfo>& op,
+                      std::vector<NodeInfo>& op_next,
+                      std::vector<NodeInfo>& candidates,
+                      std::vector<MergeCursor>& merge_cursors );
+
+    void BuildMergedCandidates( const COLTYPE i,
+                                ROWTYPE const* ai,
+                                COLTYPE const* aj,
+                                const COLTYPE base,
+                                std::vector<NodeInfo> const& op,
+                                std::vector<NodeInfo>& candidates,
+                                std::vector<MergeCursor>& merge_cursors ) const;
+
+    void MergeCandidatesWithVisited( const COLTYPE i,
+                                     std::vector<NodeInfo> const& candidates,
+                                     std::vector<NodeInfo> const& visited,
+                                     std::vector<NodeInfo>& visited_next,
+                                     std::vector<NodeInfo>& op_next ) const;
 };
 
 template <ResizableDiagonal CSRMatrixType>

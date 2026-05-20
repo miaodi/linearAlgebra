@@ -1124,6 +1124,7 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
     int level = 0;
     while ( level < lvl && !Q_thread.empty() )
     {
+        const bool build_next_frontier = level + 1 < lvl;
         for ( const auto& node : Q_thread )
         {
             const COLTYPE idx = node.index;
@@ -1145,7 +1146,7 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
                     }
                     continue;
                 }
-
+                // k < i : candidate for L_i
                 auto& visited_k = visited_thread[k];
                 if ( visited_k.index != i )
                 {
@@ -1168,15 +1169,21 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
                     L_i.push_back( k + base );
                 }
 
-                // Enqueue for next level with updated peak
-                const COLTYPE new_peak = std::max( peak, k );
-                Q_next_thread.push_back( { k, new_peak } );
+                // Only build a next frontier when another expansion level will consume it.
+                if ( build_next_frontier )
+                {
+                    const COLTYPE new_peak = std::max( peak, k );
+                    Q_next_thread.push_back( { k, new_peak } );
+                }
             }
         }
 
         level++;
-        std::swap( Q_thread, Q_next_thread );
-        Q_next_thread.clear();
+        if ( build_next_frontier )
+        {
+            std::swap( Q_thread, Q_next_thread );
+            Q_next_thread.clear();
+        }
     }
     if ( lvl > 0 )
         std::sort( L_i.begin(), L_i.end() );
@@ -1213,8 +1220,8 @@ bool ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::operator()( 
     ILU.ResizeAI( size + 1 );
     auto* l_ai = ILU.AI();
     l_ai[0] = base;
-    const int reserve_size = 64;
-    const int chunk_size = 32;
+    const int reserve_size = 512;
+    const int chunk_size = 128;
     const COLTYPE not_visited = std::numeric_limits<COLTYPE>::max();
     const COLTYPE invalid_peak = std::numeric_limits<COLTYPE>::max();
 
@@ -1270,6 +1277,357 @@ bool ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::operator()( 
                 const ROWTYPE u_row_start = row_start + l_num;
                 const size_t u_num = _U[i].size();
                 std::copy_n( _U[i].begin(), u_num, l_aj + u_row_start );
+                ILU.diagonal[i] = row_start + _L[i].size() + base;
+            }
+        }
+    }
+    return true;
+}
+
+template <ResizableDiagonal CSRMatrixType, enums::matrix_utils::TriangularMatrix Triangular, bool keepdiag>
+void ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::BuildMergedCandidates(
+    const COLTYPE i,
+    ROWTYPE const* ai,
+    COLTYPE const* aj,
+    const COLTYPE base,
+    std::vector<NodeInfo> const& op,
+    std::vector<NodeInfo>& candidates,
+    std::vector<MergeCursor>& merge_cursors ) const
+{
+    candidates.clear();
+    merge_cursors.clear();
+
+    if ( op.size() == 1 )
+    {
+        const auto& node = op.front();
+        ROWTYPE row_begin = ai[node.index] - base;
+        ROWTYPE row_end = ai[node.index + 1] - base;
+        if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::L )
+        {
+            const COLTYPE limit = i + base;
+            row_end = static_cast<ROWTYPE>( std::lower_bound( aj + row_begin, aj + row_end, limit ) - aj );
+        }
+
+        for ( ROWTYPE row_pos = row_begin; row_pos < row_end; ++row_pos )
+        {
+            const COLTYPE col = aj[row_pos] - base;
+            const COLTYPE peak = std::max( node.peak, col );
+            if ( !candidates.empty() && candidates.back().index == col )
+            {
+                candidates.back().peak = std::min( candidates.back().peak, peak );
+            }
+            else
+            {
+                candidates.push_back( { col, peak } );
+            }
+        }
+        return;
+    }
+
+    for ( const auto& node : op )
+    {
+        ROWTYPE row_begin = ai[node.index] - base;
+        ROWTYPE row_end = ai[node.index + 1] - base;
+        if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::L )
+        {
+            const COLTYPE limit = i + base;
+            row_end = static_cast<ROWTYPE>( std::lower_bound( aj + row_begin, aj + row_end, limit ) - aj );
+        }
+        if ( row_begin == row_end )
+            continue;
+
+        const COLTYPE col = aj[row_begin] - base;
+        merge_cursors.push_back( { col, std::max( node.peak, col ), row_begin, row_end, node.peak } );
+    }
+
+    const auto cursor_greater = []( const MergeCursor& lhs, const MergeCursor& rhs ) {
+        if ( lhs.index != rhs.index )
+            return lhs.index > rhs.index;
+        return lhs.peak > rhs.peak;
+    };
+    std::make_heap( merge_cursors.begin(), merge_cursors.end(), cursor_greater );
+
+    auto pop_cursor = [&]() {
+        std::pop_heap( merge_cursors.begin(), merge_cursors.end(), cursor_greater );
+        MergeCursor cursor = merge_cursors.back();
+        merge_cursors.pop_back();
+        return cursor;
+    };
+
+    auto advance_and_push = [&]( MergeCursor& cursor ) {
+        ++cursor.pos;
+        if ( cursor.pos == cursor.end )
+            return;
+        cursor.index = aj[cursor.pos] - base;
+        cursor.peak = std::max( cursor.source_peak, cursor.index );
+        merge_cursors.push_back( cursor );
+        std::push_heap( merge_cursors.begin(), merge_cursors.end(), cursor_greater );
+    };
+
+    // Inner level: K-way merge Op * A.  For duplicate indices we keep only the
+    // candidate with the smallest peak value before touching the visited list.
+    while ( !merge_cursors.empty() )
+    {
+        MergeCursor cursor = pop_cursor();
+        const COLTYPE index = cursor.index;
+        COLTYPE best_peak = cursor.peak;
+        advance_and_push( cursor );
+
+        while ( !merge_cursors.empty() && merge_cursors.front().index == index )
+        {
+            cursor = pop_cursor();
+            best_peak = std::min( best_peak, cursor.peak );
+            advance_and_push( cursor );
+        }
+        candidates.push_back( { index, best_peak } );
+    }
+}
+
+template <ResizableDiagonal CSRMatrixType, enums::matrix_utils::TriangularMatrix Triangular, bool keepdiag>
+void ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::MergeCandidatesWithVisited(
+    const COLTYPE i,
+    std::vector<NodeInfo> const& candidates,
+    std::vector<NodeInfo> const& visited,
+    std::vector<NodeInfo>& visited_next,
+    std::vector<NodeInfo>& op_next ) const
+{
+    visited_next.clear();
+    op_next.clear();
+
+    auto enqueue_if_expandable = [&]( const NodeInfo& node ) {
+        if ( node.index <= i )
+            op_next.push_back( node );
+    };
+
+    std::size_t visited_pos = 0;
+    std::size_t candidate_pos = 0;
+    while ( visited_pos < visited.size() && candidate_pos < candidates.size() )
+    {
+        const NodeInfo& old_node = visited[visited_pos];
+        const NodeInfo& candidate = candidates[candidate_pos];
+        if ( old_node.index < candidate.index )
+        {
+            visited_next.push_back( old_node );
+            ++visited_pos;
+        }
+        else if ( candidate.index < old_node.index )
+        {
+            visited_next.push_back( candidate );
+            enqueue_if_expandable( candidate );
+            ++candidate_pos;
+        }
+        else
+        {
+            NodeInfo merged = old_node;
+            if ( candidate.peak < old_node.peak )
+            {
+                merged.peak = candidate.peak;
+                enqueue_if_expandable( merged );
+            }
+            visited_next.push_back( merged );
+            ++visited_pos;
+            ++candidate_pos;
+        }
+    }
+
+    for ( ; visited_pos < visited.size(); ++visited_pos )
+        visited_next.push_back( visited[visited_pos] );
+
+    for ( ; candidate_pos < candidates.size(); ++candidate_pos )
+    {
+        visited_next.push_back( candidates[candidate_pos] );
+        enqueue_if_expandable( candidates[candidate_pos] );
+    }
+}
+
+template <ResizableDiagonal CSRMatrixType, enums::matrix_utils::TriangularMatrix Triangular, bool keepdiag>
+typename ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::ROWTYPE ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::BuildRow(
+    const COLTYPE i,
+    ROWTYPE const* ai,
+    COLTYPE const* aj,
+    const int lvl,
+    const COLTYPE base,
+    std::vector<NodeInfo>& visited,
+    std::vector<NodeInfo>& visited_next,
+    std::vector<NodeInfo>& op,
+    std::vector<NodeInfo>& op_next,
+    std::vector<NodeInfo>& candidates,
+    std::vector<MergeCursor>& merge_cursors )
+{
+    auto& L_i = _L[i];
+    L_i.clear();
+    if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
+        _U[i].clear();
+
+    visited.clear();
+    visited_next.clear();
+    op.clear();
+    op_next.clear();
+    candidates.clear();
+    merge_cursors.clear();
+
+    // Level 0 is identity * A, so initialize it directly instead of routing the
+    // original row through the K-way merge.  The identity node keeps the diagonal
+    // from being treated as a fill path; lower entries become the first Op row.
+    const COLTYPE identity_peak = std::numeric_limits<COLTYPE>::lowest();
+    bool identity_inserted = false;
+    ROWTYPE row_begin = ai[i] - base;
+    ROWTYPE row_end = ai[i + 1] - base;
+    if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::L )
+    {
+        const COLTYPE limit = i + base;
+        row_end = static_cast<ROWTYPE>( std::lower_bound( aj + row_begin, aj + row_end, limit ) - aj );
+    }
+
+    for ( ROWTYPE row_pos = row_begin; row_pos < row_end; ++row_pos )
+    {
+        const COLTYPE col = aj[row_pos] - base;
+        if ( !identity_inserted && col > i )
+        {
+            visited.push_back( { i, identity_peak } );
+            identity_inserted = true;
+        }
+        if ( col == i )
+        {
+            if ( !identity_inserted )
+            {
+                visited.push_back( { i, identity_peak } );
+                identity_inserted = true;
+            }
+            continue;
+        }
+
+        NodeInfo node{ col, col };
+        visited.push_back( node );
+        if ( col < i )
+            op.push_back( node );
+    }
+    if ( !identity_inserted )
+        visited.push_back( { i, identity_peak } );
+
+    for ( int level = 1; level <= lvl && !op.empty(); ++level )
+    {
+        BuildMergedCandidates( i, ai, aj, base, op, candidates, merge_cursors );
+        if ( candidates.empty() )
+            break;
+
+        // Outer level: merge the sorted Op * A candidates into the sorted
+        // visited vector.  Only new or improved nodes become the next Op row.
+        MergeCandidatesWithVisited( i, candidates, visited, visited_next, op_next );
+        visited.swap( visited_next );
+        op.swap( op_next );
+    }
+
+    if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
+        _U[i].push_back( i + base );
+
+    // A fill path is accepted exactly when its best peak equals its destination.
+    // The diagonal comes from keepdiag/LU handling rather than the identity node.
+    for ( const auto& node : visited )
+    {
+        if ( node.index == i || node.index != node.peak )
+            continue;
+
+        if ( node.index < i )
+        {
+            L_i.push_back( node.index + base );
+        }
+        else if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
+        {
+            _U[i].push_back( node.index + base );
+        }
+    }
+
+    if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::L )
+    {
+        if constexpr ( keepdiag )
+            L_i.push_back( i + base );
+        return static_cast<ROWTYPE>( L_i.size() );
+    }
+    else
+    {
+        return static_cast<ROWTYPE>( L_i.size() + _U[i].size() );
+    }
+}
+
+template <ResizableDiagonal CSRMatrixType, enums::matrix_utils::TriangularMatrix Triangular, bool keepdiag>
+bool ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::apply( const COLTYPE size,
+                                                                             ROWTYPE const* ai,
+                                                                             COLTYPE const* aj,
+                                                                             const int lvl,
+                                                                             CSRMatrixType& ILU )
+{
+    if ( lvl < 0 )
+        return false;
+
+    ILU.rows = size;
+    ILU.cols = size;
+    _L.resize( size );
+    if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
+    {
+        _U.resize( size );
+        ILU.ResizeDiagonal( size );
+    }
+
+    const auto base = ai[0];
+    ILU.ResizeAI( size + 1 );
+    auto* ilu_ai = ILU.AI();
+    ilu_ai[0] = base;
+
+    const ROWTYPE nnz_a = ai[size] - base;
+    const std::size_t reserve_size =
+        size == 0 ? std::size_t{ 1 }
+                  : std::max<std::size_t>( std::size_t{ 1 },
+                                           static_cast<std::size_t>( nnz_a ) / static_cast<std::size_t>( size ) );
+    const int chunk_size = 32;
+
+#pragma omp parallel num_threads( _nthreads )
+    {
+        const int tid = omp_get_thread_num();
+        auto& visited = _visited[tid];
+        auto& visited_next = _visited_next[tid];
+        auto& op = _op[tid];
+        auto& op_next = _op_next[tid];
+        auto& candidates = _candidates[tid];
+        auto& merge_cursors = _merge_cursors[tid];
+
+        visited.reserve( reserve_size );
+        visited_next.reserve( reserve_size );
+        op.reserve( reserve_size );
+        op_next.reserve( reserve_size );
+        candidates.reserve( reserve_size );
+        merge_cursors.reserve( reserve_size );
+
+#pragma omp for schedule( dynamic, chunk_size )
+        for ( COLTYPE i = 0; i < size; i++ )
+        {
+            const ROWTYPE row_size = BuildRow( i, ai, aj, lvl, base, visited, visited_next, op, op_next,
+                                               candidates, merge_cursors );
+            ilu_ai[i + 1] = row_size;
+        }
+    }
+
+    utils::ParallelPrefixSumInplace( _nthreads, ilu_ai, ilu_ai + size + 1 );
+    const ROWTYPE nnz = ilu_ai[size] - base;
+    ILU.ResizeAJ( nnz );
+    ILU.ResizeAV( nnz );
+    auto* ilu_aj = ILU.AJ();
+
+#pragma omp parallel num_threads( _nthreads )
+    {
+        const int tid = omp_get_thread_num();
+        auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos( ilu_ai, ilu_ai + size, tid, _nthreads );
+
+        for ( COLTYPE i = copy_start; i < copy_end; i++ )
+        {
+            const ROWTYPE row_start = ilu_ai[i] - base;
+            const size_t l_num = _L[i].size();
+            std::copy_n( _L[i].begin(), l_num, ilu_aj + row_start );
+            if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
+            {
+                const ROWTYPE u_row_start = row_start + l_num;
+                const size_t u_num = _U[i].size();
+                std::copy_n( _U[i].begin(), u_num, ilu_aj + u_row_start );
                 ILU.diagonal[i] = row_start + _L[i].size() + base;
             }
         }
@@ -1962,6 +2320,9 @@ template class ILULevelSymbolicParallelU<matrix_utils::CSRMatrix<int, int, doubl
 template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::L, false>;
 template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::L, true>;
 template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::LU, true>;
+template class ILULevelSymbolicParallelV2<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::L, false>;
+template class ILULevelSymbolicParallelV2<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::L, true>;
+template class ILULevelSymbolicParallelV2<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::LU, true>;
 template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>( const int size,
                                                                           int const* ai,
                                                                           int const* aj,
