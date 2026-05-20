@@ -10,16 +10,6 @@ namespace graph
 {
 using enums::matrix_utils::TriangularMatrix;
 
-/// @brief Compute the elimination tree of a sparse matrix
-/// @tparam ROWTYPE Row pointer type (typically int or int64_t)
-/// @tparam COLTYPE Column index type (typically int or int64_t)
-/// @param rows Number of rows in the matrix
-/// @param ai Row pointers array (ai[0] contains the base indexing)
-/// @param aj Column indices array
-/// @param parent Output array for parent nodes in elimination tree
-template <typename ROWTYPE, typename COLTYPE>
-void ElimTree(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parent);
-
 /// @brief Check if a graph represented by CSR format is a Directed Acyclic Graph (DAG)
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
 /// @tparam COLTYPE Column index type (typically int or int64_t)

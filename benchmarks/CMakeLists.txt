@@ -18,6 +18,10 @@ set(EXCLUDED_BENCHMARKS
     "unionfind_bench.cpp"
 )
 
+set(CUDA_REQUIRED_BENCHMARKS
+    "spmm_struct_bench.cpp"
+)
+
 foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
    get_filename_component(ONE_BENCH_FILENAME ${ONE_BENCH_CPP} NAME)
    get_filename_component(ONE_BENCH_EXEC ${ONE_BENCH_CPP} NAME_WE)
@@ -35,6 +39,10 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
    get_filename_component(BENCH_EXT ${ONE_BENCH_CPP} EXT)
    set(IS_CUDA_BENCH FALSE)
    if(NOT CUDA_POS_LOWER EQUAL -1 OR NOT CUDA_POS_UPPER EQUAL -1 OR BENCH_EXT STREQUAL ".cu")
+      set(IS_CUDA_BENCH TRUE)
+   endif()
+   list(FIND CUDA_REQUIRED_BENCHMARKS ${ONE_BENCH_FILENAME} REQUIRES_CUDA)
+   if(REQUIRES_CUDA GREATER -1)
       set(IS_CUDA_BENCH TRUE)
    endif()
 

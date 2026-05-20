@@ -20,29 +20,6 @@ namespace graph
 using enums::matrix_utils::TriangularMatrix;
 
 template <typename ROWTYPE, typename COLTYPE>
-void ElimTree( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parent )
-{
-    const int base = ai[0];
-    const COLTYPE empty_tag = std::numeric_limits<COLTYPE>::max();
-    // initialize parent
-    std::fill_n( parent, rows, empty_tag );
-
-    COLTYPE jroot = empty_tag;
-    for ( COLTYPE i = 0; i < rows; i++ )
-    {
-        for ( ROWTYPE j = ai[i] - base, jroot = aj[j] - base; j < ai[i + 1] - base && jroot < i; j++ )
-        {
-            while ( parent[jroot] != empty_tag && parent[jroot] != i + base )
-            {
-                jroot = parent[jroot] - base;
-            }
-            if ( parent[jroot] == empty_tag )
-                parent[jroot] = i + base;
-        }
-    }
-}
-
-template <typename ROWTYPE, typename COLTYPE>
 bool IsDAG( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj )
 {
     const int base = ai[0];
@@ -863,8 +840,6 @@ COLTYPE TopologicalSort2<ROWTYPE, COLTYPE, TS>::operator()( const COLTYPE nodes,
 
 // Template instantiations
 #define INSTANTIATE_GRAPH_ALGS( ROWTYPE, COLTYPE )                                                        \
-    template void ElimTree<ROWTYPE, COLTYPE>( const COLTYPE rows, ROWTYPE const* ai,                      \
-                                              COLTYPE const* aj, COLTYPE* parent );                       \
     template bool IsDAG<ROWTYPE, COLTYPE>( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj );    \
     template COLTYPE FindStronglyConnectedComponents<ROWTYPE, COLTYPE>(                                   \
         const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* scc_prefix,                    \

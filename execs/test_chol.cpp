@@ -1,5 +1,6 @@
 
 #include "Cholesky.hpp"
+#include "tree.hpp"
 #include "sp_ops.hpp"
 #include "config.h"
 #include "io.hpp"
@@ -36,9 +37,8 @@ int main(int argc, char **argv) {
   std::vector<int> parent(csr_matrix.rows);
   std::vector<int> ancestor(csr_matrix.rows);
 
-  factorization::EliminationTree(csr_matrix.rows, csr_matrix.AI(),
-                                 csr_matrix.AJ(), parent.data(),
-                                 ancestor.data());
+  graph::eliminationTree(csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
+                         parent.data(), ancestor.data());
   // for (size_t i = 0; i < csr_matrix.rows; i++) {
   //   std::cout << i + 1 << "->" << parent[i] + 1 << std::endl;
   // }
@@ -57,17 +57,17 @@ int main(int argc, char **argv) {
   std::vector<int> perm(csr_matrix.rows);
   std::vector<int> iperm(csr_matrix.rows);
   std::vector<int> permed_parent(csr_matrix.rows);
-  factorization::PostOrderNoRecur<int> postorder;
-  postorder(csr_matrix.rows, 0, parent.data(), permed_parent.data(),
-            perm.data(), iperm.data());
+  graph::PostOrderNoRecur<int> postorder;
+  postorder.apply(csr_matrix.rows, 0, parent.data(), permed_parent.data(),
+                  perm.data(), iperm.data());
   //   {
 
-  //     factorization::PostOrderNoRecur<int> postorder2;
+  //     graph::PostOrderNoRecur<int> postorder2;
   //     std::vector<int> perm2(csr_matrix.rows);
   //     std::vector<int> iperm2(csr_matrix.rows);
   //     std::vector<int> permed_parent2(csr_matrix.rows);
-  //     postorder2(csr_matrix.rows, 0, parent.data(), permed_parent2.data(),
-  //                perm2.data(), iperm2.data());
+  //     postorder2.apply(csr_matrix.rows, 0, parent.data(),
+  //                      permed_parent2.data(), perm2.data(), iperm2.data());
 
   // #ifdef USE_BOOST_LIB
   //     utils::printEliminationTree(csr_matrix.rows, csr_matrix.AI()[0],
@@ -109,20 +109,20 @@ int main(int argc, char **argv) {
   //   std::cout << "symbolic cholesky col" << std::endl;
   //   factorization::SymbolicCholeskyCol<decltype(csr_matrix_perm2)>
   //       cholesky_symbol(5);
-  //   cholesky_symbol(csr_matrix.rows, csr_matrix_perm2.AI(),
-  //                   csr_matrix_perm2.AJ(), permed_parent.data(),
-  //                   csr_matrix_perm2);
+  //   cholesky_symbol.apply(csr_matrix.rows, csr_matrix_perm2.AI(),
+  //                         csr_matrix_perm2.AJ(), permed_parent.data(),
+  //                         csr_matrix_perm2);
   // }
   // std::cout << "cholesky symbol" << std::endl;
   // matrix_utils::CSRMatrix<int, int, double> skeleton_graph, L;
   // factorization::SkeletonGraph<decltype(skeleton_graph)> sk_generator(4);
-  // sk_generator(csr_matrix.rows, csr_matrix_perm.AI(), csr_matrix_perm.AJ(),
-  //              permed_parent.data(), skeleton_graph);
+  // sk_generator.apply(csr_matrix.rows, csr_matrix_perm.AI(),
+  //                    csr_matrix_perm.AJ(), permed_parent.data(),
+  //                    skeleton_graph);
   // factorization::SymbolicCholesky<decltype(L)> cholesky_symbol(4);
-  // cholesky_symbol(csr_matrix.rows, csr_matrix_perm.AI(),
-  // csr_matrix_perm.AJ(),
-  //                 permed_parent.data(), skeleton_graph.AI(),
-  //                 skeleton_graph.AJ(), L);
+  // cholesky_symbol.apply(csr_matrix.rows, csr_matrix_perm.AI(),
+  //                       csr_matrix_perm.AJ(), permed_parent.data(),
+  //                       skeleton_graph.AI(), skeleton_graph.AJ(), L);
   // // std::cout << "L: " << std::endl;
   // // for (int i = 0; i < L.rows + 1; i++) {
   // //   std::cout << L.AI()[i] << " ";
@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
   // // std::vector<int> col_count(csr_matrix.rows + 1);
   // // row_count[0] = col_count[0] = csr_matrix_perm.Base();
   // // std::vector<int> mark(csr_matrix.rows);
-  // // factorization::NNZCount(csr_matrix.rows, csr_matrix_perm.AI(),
+  // // factorization::nnzCount(csr_matrix.rows, csr_matrix_perm.AI(),
   // //                         csr_matrix_perm.AJ(), permed_parent.data(),
   // //                         row_count.data() + 1, col_count.data() + 1,
   // //                         mark.data());
