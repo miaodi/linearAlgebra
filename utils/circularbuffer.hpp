@@ -30,6 +30,11 @@ namespace utils {
 /**
  * @brief Implements a circular buffer that supports LIFO and FIFO operations.
  *
+ * This implementation pre-allocates an array of T and assigns into existing
+ * slots. T must be default-constructible, and the insertion overload used must
+ * have the corresponding copy or move assignment available. The buffer is not
+ * internally synchronized.
+ *
  * @tparam T The type of the data to store in the buffer.
  */
 template <typename T> class CircularBuffer {
@@ -94,6 +99,8 @@ public:
    * @brief Removes an element from the beginning of the buffer.
    *
    * @throws std::out_of_range if the buffer is empty.
+   * @return Reference to the removed slot; consume it immediately. The
+   * reference may be invalidated or overwritten by the next non-const operation.
    */
   const T &pop_front();
 
@@ -101,6 +108,8 @@ public:
    * @brief Removes an element from the end of the buffer.
    *
    * @throws std::out_of_range if the buffer is empty.
+   * @return Reference to the removed slot; consume it immediately. The
+   * reference may be invalidated or overwritten by the next non-const operation.
    */
   const T &pop_back();
 
@@ -169,22 +178,17 @@ public:
    * @brief Resets the buffer to a clean status, making all buffer positions
    available.
    *
-   * @note This does not clean up any dynamically allocated memory stored in
-   the buffer.
-   * Clearing a buffer that points to heap-allocated memory may cause a
-   memory leak, if it's not properly cleaned up.
+   * @note This only marks the buffer empty. Because storage slots are
+   * pre-constructed, values in slots are not destroyed until they are
+   * overwritten, the storage is reallocated, or the buffer is destroyed.
    */
   void clear();
 
   /**
-   * @brief Copies the buffer content into the provided array.
+   * @brief Copies the buffer content into the provided vector.
    *
-   * @note No verification is done about the provided array length, it's the
-   user responsibility to ensure the array provides enough space to
-   accomodate
-   * all the elements currently stored in the buffer. After the function
-   returns the elements in the buffer can be found starting at index 0 and up
-   to the buffer size() at the moment of the copyToArray function call.
+   * @return false if dest is smaller than size(); otherwise copies elements
+   * starting at dest[0] and returns true.
    */
   bool dump_to_vector(std::vector<T> &dest) const;
 
@@ -206,8 +210,10 @@ public:
   // void copyToArray( R* dest, R ( &convertFn )( const T& ) ) const;
 
   /**
-   * @brief Resizes the buffer while preserving existing elements.
-   * Similar to std::vector::resize().
+   * @brief Changes the buffer capacity while preserving existing elements.
+   *
+   * The logical size() is unchanged. This is closer to a capacity resize than
+   * std::vector::resize().
    *
    * @param size The new size for the buffer.
    * @return false if size < current element count or size == 0.
@@ -234,7 +240,8 @@ private:
    * @brief Copies buffer contents to a contiguous array.
    * Helper function to eliminate duplication in dump_to_vector, resize, etc.
    *
-   * @param dest Pointer to destination array (must have space for at least _count elements)
+   * @param dest Pointer to destination array (must have space for at least
+   * _count elements)
    */
   void copy_to_array(T *dest) const;
 
