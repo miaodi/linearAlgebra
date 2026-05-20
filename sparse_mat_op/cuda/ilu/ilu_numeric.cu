@@ -1,4 +1,5 @@
 #include "ilu_numeric.cuh"
+#include "ilu_numeric_common.cuh"
 
 #include <cuda_runtime.h>
 
@@ -8,65 +9,9 @@ namespace matrix_utils::sparse_cuda
 {
 namespace
 {
-constexpr int kWarpSize = 32;
-constexpr int kWarpsPerBlock = 4;
-constexpr int kThreadsPerBlock = kWarpSize * kWarpsPerBlock;
-
-template <typename ROWTYPE, typename COLTYPE>
-__device__ ROWTYPE binary_search_row( const COLTYPE target,
-                                      const ROWTYPE row_begin,
-                                      const ROWTYPE row_end,
-                                      const COLTYPE* cols,
-                                      const COLTYPE base )
-{
-    ROWTYPE left = row_begin;
-    ROWTYPE right = row_end;
-    while ( left < right )
-    {
-        const ROWTYPE mid = left + ( right - left ) / 2;
-        const COLTYPE col = cols[mid] - base;
-        if ( col < target )
-        {
-            left = mid + 1;
-        }
-        else
-        {
-            right = mid;
-        }
-    }
-    return ( left < row_end && cols[left] - base == target ) ? left : ROWTYPE( -1 );
-}
-
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-__global__ void init_lu_values_kernel( COLTYPE n,
-                                       const ROWTYPE* a_ai,
-                                       const COLTYPE* a_aj,
-                                       const VALTYPE* a_av,
-                                       const ROWTYPE* lu_ai,
-                                       const COLTYPE* lu_aj,
-                                       COLTYPE base,
-                                       VALTYPE* lu_av )
-{
-    const int warp_in_block = threadIdx.x / kWarpSize;
-    const int lane = threadIdx.x & ( kWarpSize - 1 );
-    const COLTYPE row = static_cast<COLTYPE>( blockIdx.x * kWarpsPerBlock + warp_in_block );
-    if ( row >= n )
-    {
-        return;
-    }
-
-    const ROWTYPE lu_begin = lu_ai[row] - base;
-    const ROWTYPE lu_end = lu_ai[row + 1] - base;
-    const ROWTYPE a_begin = a_ai[row] - base;
-    const ROWTYPE a_end = a_ai[row + 1] - base;
-
-    for ( ROWTYPE pos = lu_begin + lane; pos < lu_end; pos += kWarpSize )
-    {
-        const COLTYPE col = lu_aj[pos] - base;
-        const ROWTYPE a_pos = binary_search_row<ROWTYPE, COLTYPE>( col, a_begin, a_end, a_aj, base );
-        lu_av[pos] = ( a_pos >= 0 ) ? a_av[a_pos] : VALTYPE( 0 );
-    }
-}
+using ilu_detail::kThreadsPerBlock;
+using ilu_detail::kWarpsPerBlock;
+using ilu_detail::kWarpSize;
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 __global__ void ilu_level_factor_kernel( COLTYPE level_rows,
@@ -87,52 +32,8 @@ __global__ void ilu_level_factor_kernel( COLTYPE level_rows,
     }
 
     const COLTYPE i = level_rows_perm[level_row] - base;
-    const ROWTYPE row_begin = lu_ai[i] - base;
-    const ROWTYPE row_end = lu_ai[i + 1] - base;
-    const ROWTYPE lower_end = lu_diag[i] - base;
-
-    for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
-    {
-        const COLTYPE k = lu_aj[k_pos] - base;
-        VALTYPE aik = lu_av[k_pos];
-        if ( aik == VALTYPE( 0 ) )
-        {
-            continue;
-        }
-
-        if ( lane == 0 )
-        {
-            const VALTYPE akk = lu_av[lu_diag[k] - base];
-            if ( akk == VALTYPE( 0 ) )
-            {
-                atomicCAS( status, 0, 1 );
-                aik = VALTYPE( 0 );
-            }
-            else
-            {
-                aik /= akk;
-                lu_av[k_pos] = aik;
-            }
-        }
-
-        aik = __shfl_sync( 0xffffffffu, aik, 0 );
-        if ( *status != 0 || aik == VALTYPE( 0 ) )
-        {
-            continue;
-        }
-
-        const ROWTYPE k_u_begin = ( lu_diag[k] - base ) + 1;
-        const ROWTYPE k_u_end = lu_ai[k + 1] - base;
-        for ( ROWTYPE j_pos = k_u_begin + lane; j_pos < k_u_end; j_pos += kWarpSize )
-        {
-            const COLTYPE j = lu_aj[j_pos] - base;
-            const ROWTYPE pos_i = binary_search_row<ROWTYPE, COLTYPE>( j, row_begin, row_end, lu_aj, base );
-            if ( pos_i >= 0 )
-            {
-                lu_av[pos_i] -= aik * lu_av[j_pos];
-            }
-        }
-    }
+    ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE>(
+        i, lu_ai, lu_aj, lu_diag, base, lu_av, status, lane );
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
@@ -163,29 +64,9 @@ __global__ void ilu_level_factor_cached_kernel( COLTYPE level_rows,
     for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
     {
         const COLTYPE k = lu_aj[k_pos] - base;
-        VALTYPE aik = lu_av[k_pos];
+        const VALTYPE aik = ilu_detail::NormalizeLowerEntry<ROWTYPE, COLTYPE, VALTYPE>(
+            k_pos, k, lu_diag, base, lu_av, status, lane );
         if ( aik == VALTYPE( 0 ) )
-        {
-            continue;
-        }
-
-        if ( lane == 0 )
-        {
-            const VALTYPE akk = lu_av[lu_diag[k] - base];
-            if ( akk == VALTYPE( 0 ) )
-            {
-                atomicCAS( status, 0, 1 );
-                aik = VALTYPE( 0 );
-            }
-            else
-            {
-                aik /= akk;
-                lu_av[k_pos] = aik;
-            }
-        }
-
-        aik = __shfl_sync( 0xffffffffu, aik, 0 );
-        if ( *status != 0 || aik == VALTYPE( 0 ) )
         {
             continue;
         }
@@ -202,11 +83,6 @@ __global__ void ilu_level_factor_cached_kernel( COLTYPE level_rows,
 inline bool cuda_ok( cudaError_t status )
 {
     return status == cudaSuccess;
-}
-
-inline cudaError_t cuda_launch_status()
-{
-    return cudaGetLastError();
 }
 
 inline cudaError_t allocate_status( int** d_status, cudaStream_t stream, bool* async_allocated )
@@ -271,9 +147,9 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
     }
 
     const int init_blocks = ( n + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
-    init_lu_values_kernel<<<init_blocks, kThreadsPerBlock, 0, stream>>>(
+    ilu_detail::InitLUValuesKernel<<<init_blocks, kThreadsPerBlock, 0, stream>>>(
         n, d_a_ai, d_a_aj, d_a_av, d_lu_ai, d_lu_aj, base, d_lu_av );
-    status = cuda_launch_status();
+    status = ilu_detail::CudaLaunchStatus();
     if ( status != cudaSuccess )
     {
         return status;
@@ -292,7 +168,7 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
         const int blocks = ( level_rows + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
         ilu_level_factor_kernel<<<blocks, kThreadsPerBlock, 0, stream>>>(
             level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av, d_status );
-        status = cuda_launch_status();
+        status = ilu_detail::CudaLaunchStatus();
         if ( status != cudaSuccess )
         {
             return status;
@@ -337,9 +213,9 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
     }
 
     const int init_blocks = ( n + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
-    init_lu_values_kernel<<<init_blocks, kThreadsPerBlock, 0, stream>>>(
+    ilu_detail::InitLUValuesKernel<<<init_blocks, kThreadsPerBlock, 0, stream>>>(
         n, d_a_ai, d_a_aj, d_a_av, d_lu_ai, d_lu_aj, base, d_lu_av );
-    status = cuda_launch_status();
+    status = ilu_detail::CudaLaunchStatus();
     if ( status != cudaSuccess )
     {
         return status;
@@ -359,7 +235,7 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
         ilu_level_factor_cached_kernel<<<blocks, kThreadsPerBlock, 0, stream>>>(
             level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag,
             d_update_ptr, d_update_jpos, d_update_pos, base, d_lu_av, d_status );
-        status = cuda_launch_status();
+        status = ilu_detail::CudaLaunchStatus();
         if ( status != cudaSuccess )
         {
             return status;

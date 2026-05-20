@@ -11,6 +11,7 @@ set(CUDA_SOURCES
     cuda_ilu_symbolic.cu
     cuda_ilu_symbolic_persistent.cu
     ilu/ilu_numeric.cu
+    ilu/ilu_numeric_workqueue.cu
     ilu/ilu_update_cache.cpp
     spgemm/spgemm_expand.cu
     spgemm/spgemm_sort.cu

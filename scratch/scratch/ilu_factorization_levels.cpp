@@ -9,6 +9,7 @@
 
 #ifdef USE_CUDA
 #include "ilu/ilu_numeric.cuh"
+#include "ilu/ilu_numeric_workqueue.cuh"
 #include "ilu/ilu_update_cache.hpp"
 
 #include <cuda_runtime.h>
@@ -37,6 +38,44 @@ struct GpuNumericResult
     double max_abs_diff = 0.0;
     int mismatches = 0;
 };
+
+enum class GpuNumericMode
+{
+    Cached,
+    Global,
+    WorkQueue
+};
+
+GpuNumericMode parse_gpu_numeric_mode( const std::string& mode )
+{
+    if ( mode == "cached" )
+    {
+        return GpuNumericMode::Cached;
+    }
+    if ( mode == "global" )
+    {
+        return GpuNumericMode::Global;
+    }
+    if ( mode == "workqueue" )
+    {
+        return GpuNumericMode::WorkQueue;
+    }
+    throw std::invalid_argument( "GPU numeric mode must be one of: cached, global, workqueue" );
+}
+
+const char* gpu_numeric_mode_label( const GpuNumericMode mode )
+{
+    switch ( mode )
+    {
+    case GpuNumericMode::Cached:
+        return "ILUBaseNumericFactorizationCachedAsync";
+    case GpuNumericMode::Global:
+        return "ILUBaseNumericFactorizationAsync";
+    case GpuNumericMode::WorkQueue:
+        return "ILUBaseNumericFactorizationWorkQueueAsync";
+    }
+    return "Unknown GPU numeric mode";
+}
 
 void check_cuda( const cudaError_t status, const char* operation )
 {
@@ -172,7 +211,9 @@ GpuNumericResult run_gpu_numeric_factorization( const CSR& matrix,
                                                 const std::vector<int>& permutation,
                                                 const std::vector<int>& level_prefix,
                                                 const int levels,
-                                                const matrix_utils::sparse_cuda::ILUUpdateCache<int>* update_cache )
+                                                const GpuNumericMode gpu_numeric_mode,
+                                                const matrix_utils::sparse_cuda::ILUUpdateCache<int>* update_cache,
+                                                const int workqueue_blocks_per_sm )
 {
     int device_count = 0;
     check_cuda( cudaGetDeviceCount( &device_count ), "cudaGetDeviceCount" );
@@ -197,6 +238,7 @@ GpuNumericResult run_gpu_numeric_factorization( const CSR& matrix,
     DeviceBuffer<int> d_update_ptr;
     DeviceBuffer<int> d_update_jpos;
     DeviceBuffer<int> d_update_pos;
+    DeviceBuffer<int> d_level_row_counter;
 
     check_cuda( cudaMemcpyAsync( d_a_ai.get(), matrix.AI(), static_cast<std::size_t>( matrix.rows + 1 ) * sizeof( int ),
                                  cudaMemcpyHostToDevice, stream.get() ),
@@ -220,8 +262,12 @@ GpuNumericResult run_gpu_numeric_factorization( const CSR& matrix,
                                  cudaMemcpyHostToDevice, stream.get() ),
                 "cudaMemcpyAsync d_level_perm" );
 
-    if ( update_cache != nullptr )
+    if ( gpu_numeric_mode == GpuNumericMode::Cached )
     {
+        if ( update_cache == nullptr )
+        {
+            throw std::runtime_error( "Cached GPU numeric mode requires an update cache" );
+        }
         d_update_ptr.resize( update_cache->update_ptr.size() );
         d_update_jpos.resize( std::max<std::size_t>( update_cache->update_jpos.size(), 1 ) );
         d_update_pos.resize( std::max<std::size_t>( update_cache->update_pos.size(), 1 ) );
@@ -241,9 +287,13 @@ GpuNumericResult run_gpu_numeric_factorization( const CSR& matrix,
                         "cudaMemcpyAsync d_update_pos" );
         }
     }
+    else if ( gpu_numeric_mode == GpuNumericMode::WorkQueue )
+    {
+        d_level_row_counter.resize( 1 );
+    }
 
     check_cuda( cudaEventRecord( start.get(), stream.get() ), "cudaEventRecord start" );
-    if ( update_cache != nullptr )
+    if ( gpu_numeric_mode == GpuNumericMode::Cached )
     {
         check_cuda( matrix_utils::sparse_cuda::ILUBaseNumericFactorizationCachedAsync<int, int, double>(
                         matrix.rows, d_a_ai.get(), d_a_aj.get(), d_a_av.get(), d_lu_ai.get(), d_lu_aj.get(),
@@ -251,6 +301,15 @@ GpuNumericResult run_gpu_numeric_factorization( const CSR& matrix,
                         d_level_perm.get(), level_prefix.data(), levels, matrix.Base(),
                         d_lu_av.get(), d_status.get(), stream.get() ),
                     "ILUBaseNumericFactorizationCachedAsync" );
+    }
+    else if ( gpu_numeric_mode == GpuNumericMode::WorkQueue )
+    {
+        check_cuda( matrix_utils::sparse_cuda::ILUBaseNumericFactorizationWorkQueueAsync<int, int, double>(
+                        matrix.rows, d_a_ai.get(), d_a_aj.get(), d_a_av.get(), d_lu_ai.get(), d_lu_aj.get(),
+                        d_lu_diag.get(), d_level_perm.get(), level_prefix.data(), levels, matrix.Base(),
+                        d_lu_av.get(), d_status.get(), d_level_row_counter.get(), workqueue_blocks_per_sm,
+                        stream.get() ),
+                    "ILUBaseNumericFactorizationWorkQueueAsync" );
     }
     else
     {
@@ -422,6 +481,10 @@ int main( int argc, char** argv )
         "n,threads", "Number of threads for ILU symbolic setup",
         cxxopts::value<int>()->default_value( "1" ) )(
         "disable-gpu-update-cache", "Use the original GPU numeric path without the precomputed update cache" )(
+        "gpu-numeric-mode", "GPU numeric mode: cached, global, workqueue",
+        cxxopts::value<std::string>()->default_value( "cached" ) )(
+        "gpu-workqueue-blocks-per-sm", "Persistent workqueue blocks per SM",
+        cxxopts::value<int>()->default_value( "4" ) )(
         "h,help", "Print usage" );
 
     const auto parsed = options.parse( argc, argv );
@@ -434,7 +497,31 @@ int main( int argc, char** argv )
     const std::string file_path = parsed["file"].as<std::string>();
     const int level = parsed["level"].as<int>();
     const int threads = parsed["threads"].as<int>();
-    const bool use_gpu_update_cache = parsed.count( "disable-gpu-update-cache" ) == 0;
+#ifdef USE_CUDA
+    std::string gpu_numeric_mode_name = parsed["gpu-numeric-mode"].as<std::string>();
+    if ( parsed.count( "disable-gpu-update-cache" ) != 0 )
+    {
+        gpu_numeric_mode_name = "global";
+    }
+
+    GpuNumericMode gpu_numeric_mode = GpuNumericMode::Cached;
+    try
+    {
+        gpu_numeric_mode = parse_gpu_numeric_mode( gpu_numeric_mode_name );
+    }
+    catch ( const std::exception& e )
+    {
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+
+    const int gpu_workqueue_blocks_per_sm = parsed["gpu-workqueue-blocks-per-sm"].as<int>();
+    if ( gpu_workqueue_blocks_per_sm <= 0 )
+    {
+        std::cerr << "GPU workqueue blocks per SM must be positive\n";
+        return 1;
+    }
+#endif
     if ( level < 0 )
     {
         std::cerr << "ILU level must be non-negative\n";
@@ -507,7 +594,7 @@ int main( int argc, char** argv )
 
 #ifdef USE_CUDA
     matrix_utils::sparse_cuda::ILUUpdateCache<int> update_cache;
-    if ( use_gpu_update_cache )
+    if ( gpu_numeric_mode == GpuNumericMode::Cached )
     {
         update_cache = matrix_utils::sparse_cuda::BuildILUUpdateCache<int, int>(
             lu.rows, lu.AI(), lu.AJ(), lu.Diagonal(), lu.Base(), threads );
@@ -533,11 +620,12 @@ int main( int argc, char** argv )
     try
     {
         const GpuNumericResult gpu_result =
-            run_gpu_numeric_factorization( matrix, lu, permutation, level_prefix, levels,
-                                           use_gpu_update_cache ? &update_cache : nullptr );
+            run_gpu_numeric_factorization(
+                matrix, lu, permutation, level_prefix, levels, gpu_numeric_mode,
+                gpu_numeric_mode == GpuNumericMode::Cached ? &update_cache : nullptr,
+                gpu_workqueue_blocks_per_sm );
         std::cout << "ILU(" << level << ") GPU numeric factorization complete\n";
-        std::cout << ( use_gpu_update_cache ? "ILUBaseNumericFactorizationCachedAsync"
-                                            : "ILUBaseNumericFactorizationAsync" )
+        std::cout << gpu_numeric_mode_label( gpu_numeric_mode )
                   << " GPU event time: " << gpu_result.elapsed_ms << " ms\n";
         std::cout << "GPU vs CPU LU value check: mismatches=" << gpu_result.mismatches
                   << ", max abs diff=" << gpu_result.max_abs_diff << '\n';
