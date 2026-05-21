@@ -188,8 +188,7 @@ public:
         : _nthreads(nthreads),
           _visited(nthreads),
           _Q(nthreads),
-          _Q_next(nthreads),
-          _added(nthreads)
+          _Q_next(nthreads)
     {
     }
 
@@ -207,14 +206,13 @@ private:
     std::vector<std::vector<NodeInfo>> _visited;
     std::vector<std::vector<NodeInfo>> _Q;
     std::vector<std::vector<NodeInfo>> _Q_next;
-    std::vector<std::vector<COLTYPE>> _added;
     // Per-thread row outputs before final assembly.
     std::vector<std::vector<COLTYPE>> _L;
     std::vector<std::vector<COLTYPE>> _U;
 
     ROWTYPE BuildRow(const COLTYPE i, ROWTYPE const* ai, COLTYPE const* aj, const int lvl,
-                     const COLTYPE base, const COLTYPE invalid_peak,
-                     std::vector<NodeInfo>& visited_thread, std::vector<COLTYPE>& added_thread,
+                     const COLTYPE base,
+                     std::vector<NodeInfo>& visited_thread,
                      std::vector<NodeInfo>& Q_thread, std::vector<NodeInfo>& Q_next_thread);
 };
 

@@ -1083,9 +1083,7 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
     COLTYPE const* aj,
     const int lvl,
     const COLTYPE base,
-    const COLTYPE invalid_peak,
     std::vector<NodeInfo>& visited_thread,
-    std::vector<COLTYPE>& added_thread,
     std::vector<NodeInfo>& Q_thread,
     std::vector<NodeInfo>& Q_next_thread )
 {
@@ -1106,7 +1104,6 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
         auto& visited_col = visited_thread[col];
         visited_col.index = i;
         visited_col.peak = col;
-        added_thread[col] = i;
     }
 
     if constexpr ( Triangular == enums::matrix_utils::TriangularMatrix::LU )
@@ -1146,33 +1143,30 @@ typename ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::ROWTYPE 
                     }
                     continue;
                 }
+                const COLTYPE new_peak = std::max( peak, k );
                 // k < i : candidate for L_i
                 auto& visited_k = visited_thread[k];
                 if ( visited_k.index != i )
                 {
                     visited_k.index = i;
-                    visited_k.peak = invalid_peak;
+                }
+                else
+                {
+                    if ( new_peak >= visited_k.peak )
+                        continue; // no improvement in peak
                 }
 
-                // Skip if we've already found a path with smaller or equal peak
-                if ( visited_k.peak <= peak )
-                    continue;
+                visited_k.peak = new_peak;
 
-                // Update peak for this node
-                visited_k.peak = peak;
-                const bool is_new = ( added_thread[k] != i );
-
-                // Add to result if this is a new node and k > peak (k is the max in path)
-                if ( is_new && k > peak )
+                // Add to result only when k is the max in the accepted fill path.
+                if ( k == new_peak )
                 {
-                    added_thread[k] = i;
                     L_i.push_back( k + base );
                 }
 
                 // Only build a next frontier when another expansion level will consume it.
                 if ( build_next_frontier )
                 {
-                    const COLTYPE new_peak = std::max( peak, k );
                     Q_next_thread.push_back( { k, new_peak } );
                 }
             }
@@ -1223,16 +1217,12 @@ bool ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::operator()( 
     const int reserve_size = 512;
     const int chunk_size = 128;
     const COLTYPE not_visited = std::numeric_limits<COLTYPE>::max();
-    const COLTYPE invalid_peak = std::numeric_limits<COLTYPE>::max();
 
 #pragma omp parallel num_threads( _nthreads )
     {
         const int tid = omp_get_thread_num();
         auto& visited_thread = _visited[tid];
         visited_thread.resize( size );
-
-        auto& added_thread = _added[tid];
-        added_thread.resize( size );
 
         auto& Q_thread = _Q[tid];
         auto& Q_next_thread = _Q_next[tid];
@@ -1242,15 +1232,14 @@ bool ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::operator()( 
         for ( auto& node : visited_thread )
         {
             node.index = not_visited;
-            node.peak = invalid_peak;
+            node.peak = not_visited;
         }
-        std::fill( added_thread.begin(), added_thread.end(), not_visited );
 
 #pragma omp for schedule( dynamic, chunk_size )
         for ( COLTYPE i = 0; i < size; i++ )
         {
-            const ROWTYPE row_size = BuildRow( i, ai, aj, lvl, base, invalid_peak, visited_thread,
-                                               added_thread, Q_thread, Q_next_thread );
+            const ROWTYPE row_size = BuildRow( i, ai, aj, lvl, base, visited_thread,
+                                               Q_thread, Q_next_thread );
             l_ai[i + 1] = row_size;
         }
     }
@@ -1340,21 +1329,24 @@ void ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::BuildMerge
         merge_cursors.push_back( { col, std::max( node.peak, col ), row_begin, row_end, node.peak } );
     }
 
-    const auto cursor_greater = []( const MergeCursor& lhs, const MergeCursor& rhs ) {
+    const auto cursor_greater = []( const MergeCursor& lhs, const MergeCursor& rhs )
+    {
         if ( lhs.index != rhs.index )
             return lhs.index > rhs.index;
         return lhs.peak > rhs.peak;
     };
     std::make_heap( merge_cursors.begin(), merge_cursors.end(), cursor_greater );
 
-    auto pop_cursor = [&]() {
+    auto pop_cursor = [&]()
+    {
         std::pop_heap( merge_cursors.begin(), merge_cursors.end(), cursor_greater );
         MergeCursor cursor = merge_cursors.back();
         merge_cursors.pop_back();
         return cursor;
     };
 
-    auto advance_and_push = [&]( MergeCursor& cursor ) {
+    auto advance_and_push = [&]( MergeCursor& cursor )
+    {
         ++cursor.pos;
         if ( cursor.pos == cursor.end )
             return;
@@ -1394,7 +1386,8 @@ void ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::MergeCandi
     visited_next.clear();
     op_next.clear();
 
-    auto enqueue_if_expandable = [&]( const NodeInfo& node ) {
+    auto enqueue_if_expandable = [&]( const NodeInfo& node )
+    {
         if ( node.index <= i )
             op_next.push_back( node );
     };
@@ -1577,8 +1570,8 @@ bool ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::apply( con
     const ROWTYPE nnz_a = ai[size] - base;
     const std::size_t reserve_size =
         size == 0 ? std::size_t{ 1 }
-                  : std::max<std::size_t>( std::size_t{ 1 },
-                                           static_cast<std::size_t>( nnz_a ) / static_cast<std::size_t>( size ) );
+                  : std::max<std::size_t>( std::size_t{ 1 }, static_cast<std::size_t>( nnz_a ) /
+                                                                 static_cast<std::size_t>( size ) );
     const int chunk_size = 32;
 
 #pragma omp parallel num_threads( _nthreads )
@@ -1601,8 +1594,8 @@ bool ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::apply( con
 #pragma omp for schedule( dynamic, chunk_size )
         for ( COLTYPE i = 0; i < size; i++ )
         {
-            const ROWTYPE row_size = BuildRow( i, ai, aj, lvl, base, visited, visited_next, op, op_next,
-                                               candidates, merge_cursors );
+            const ROWTYPE row_size = BuildRow( i, ai, aj, lvl, base, visited, visited_next, op,
+                                               op_next, candidates, merge_cursors );
             ilu_ai[i + 1] = row_size;
         }
     }
@@ -1616,7 +1609,8 @@ bool ILULevelSymbolicParallelV2<CSRMatrixType, Triangular, keepdiag>::apply( con
 #pragma omp parallel num_threads( _nthreads )
     {
         const int tid = omp_get_thread_num();
-        auto [copy_start, copy_end] = utils::LoadPrefixBalancedPartitionPos( ilu_ai, ilu_ai + size, tid, _nthreads );
+        auto [copy_start, copy_end] =
+            utils::LoadPrefixBalancedPartitionPos( ilu_ai, ilu_ai + size, tid, _nthreads );
 
         for ( COLTYPE i = copy_start; i < copy_end; i++ )
         {
@@ -1655,10 +1649,7 @@ struct ParallelPolicy
 {
     std::atomic<std::int32_t>* ready;
 
-    ParallelPolicy( std::size_t size )
-        : ready( nullptr )
-    {
-    }
+    ParallelPolicy( std::size_t size ) : ready( nullptr ) {}
 
     void set_ready_array( std::atomic<std::int32_t>* ready_arr ) { ready = ready_arr; }
 
@@ -1688,11 +1679,7 @@ struct ILURowEliminator
     std::vector<ROWT> marker;
     Policy policy;
 
-    ILURowEliminator( COLT size )
-        : marker( size, MARKER_ABSENT ),
-          policy( size )
-    {
-    }
+    ILURowEliminator( COLT size ) : marker( size, MARKER_ABSENT ), policy( size ) {}
 
     // For parallel version: set the ready array
     void set_ready_array( std::atomic<std::int32_t>* ready_arr )
