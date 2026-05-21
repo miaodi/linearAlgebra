@@ -39,6 +39,39 @@ void eliminationTree(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
 }
 
 template <typename COLTYPE>
+COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
+                             const COLTYPE *parent, COLTYPE *first_child,
+                             COLTYPE *next_sibling, COLTYPE *roots,
+                             COLTYPE *child_count) {
+  std::fill(first_child, first_child + nnodes,
+            std::numeric_limits<COLTYPE>::max());
+  std::fill(next_sibling, next_sibling + nnodes,
+            std::numeric_limits<COLTYPE>::max());
+  if (child_count != nullptr) {
+    std::fill(child_count, child_count + nnodes, 0);
+  }
+
+  COLTYPE nroots = 0;
+  for (COLTYPE i = 0; i < nnodes; i++) {
+    auto parent_i = parent[i] - base;
+    if (parent_i != i) {
+      if (child_count != nullptr) {
+        child_count[parent_i]++;
+      }
+      auto parent_first_child = first_child[parent_i];
+      first_child[parent_i] = i;
+      next_sibling[i] = parent_first_child;
+    } else {
+      if (roots != nullptr) {
+        roots[nroots] = i;
+      }
+      nroots++;
+    }
+  }
+  return nroots;
+}
+
+template <typename COLTYPE>
 void PostOrder<COLTYPE>::buildChildren(const COLTYPE nnodes, const COLTYPE base,
                                        const COLTYPE *parent) {
   _childrenPrefix.resize(nnodes + 1);
@@ -126,30 +159,16 @@ void PostOrder<COLTYPE>::apply(const COLTYPE nnodes, const COLTYPE base,
 
 template <typename COLTYPE>
 void PostOrderNoRecur<COLTYPE>::apply(const COLTYPE nnodes, const COLTYPE base,
-                                      const COLTYPE *parent,
-                                      COLTYPE *permed_parent, COLTYPE *perm,
-                                      COLTYPE *iperm) {
-  _roots.clear();
-  _roots.reserve(nnodes);
+                                       const COLTYPE *parent,
+                                       COLTYPE *permed_parent, COLTYPE *perm,
+                                       COLTYPE *iperm) {
   _firstChild.resize(nnodes);
-  std::fill(_firstChild.begin(), _firstChild.end(),
-            std::numeric_limits<COLTYPE>::max());
   _nextSibling.resize(nnodes);
-  std::fill(_nextSibling.begin(), _nextSibling.end(),
-            std::numeric_limits<COLTYPE>::max());
-  for (COLTYPE i = 0; i < nnodes; i++) {
-    auto parent_i = parent[i] - base;
-    if (parent_i != i) {
-      // Insert i at the front of parent_i's child list. The previous first
-      // child becomes i's next sibling, giving a compact parent -> children
-      // representation without allocating one vector per parent.
-      auto parent_first_child = _firstChild[parent_i];
-      _firstChild[parent_i] = i;
-      _nextSibling[i] = parent_first_child;
-    } else {
-      _roots.push_back(i);
-    }
-  }
+  _roots.resize(nnodes);
+  const auto nroots = parentToChildSibling(nnodes, base, parent,
+                                          _firstChild.data(),
+                                          _nextSibling.data(), _roots.data());
+  _roots.resize(nroots);
   auto perm_cp = perm;
 
   // Iterative postorder traversal. A node is emitted only after all children
@@ -198,6 +217,10 @@ void subtreeSize(const COLTYPE nnodes, const COLTYPE base,
   template void eliminationTree<ROWTYPE, COLTYPE>(                             \
       const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,              \
       COLTYPE *parent, COLTYPE *ancestor);                                     \
+  template COLTYPE parentToChildSibling<COLTYPE>(                              \
+      const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
+      COLTYPE *first_child, COLTYPE *next_sibling, COLTYPE *roots,             \
+      COLTYPE *child_count);                                                   \
   template void subtreeSize<COLTYPE>(const COLTYPE nnodes, const COLTYPE base, \
                                      const COLTYPE *parent,                    \
                                      COLTYPE *subtree_size);                   \

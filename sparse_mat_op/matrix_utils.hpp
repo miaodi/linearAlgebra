@@ -539,6 +539,20 @@ void ParallelTranspose2(const COLTYPE rows, const COLTYPE cols,
   }
 }
 
+/// @brief Locate and optionally read the diagonal entries of a square CSR matrix.
+///
+/// `ai` and `aj` use the matrix base stored in `ai[0]` (usually 0 or 1), and
+/// each row's column indices must be sorted because this routine uses binary
+/// search. `av` may be null when only diagonal positions are requested.
+///
+/// If `diagpos` is non-null, `diagpos[i]` receives the base-indexed position of
+/// the diagonal entry in `aj`/`av`. If row `i` has no explicit diagonal,
+/// `diagpos[i]` receives `ai[i + 1]`.
+///
+/// If `diag` and `av` are non-null, `diag[i]` receives the diagonal value, or
+/// its reciprocal when `invert` is true. Missing diagonals write `VALTYPE{}`.
+///
+/// @return true when every row has an explicit diagonal entry.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 bool Diagonal(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av,
               ROWTYPE* diagpos, VALTYPE* diag, const bool invert = false)

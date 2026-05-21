@@ -20,6 +20,23 @@ template <typename ROWTYPE, typename COLTYPE>
 void eliminationTree(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
                      COLTYPE *parent, COLTYPE *ancestor);
 
+/// @brief Convert a parent array into first-child/next-sibling child lists.
+///
+/// Array positions are zero-based, while stored parent labels include base. A
+/// root is encoded as parent[i] == i + base. The output arrays must already be
+/// sized for nnodes entries. first_child[p] stores the first zero-based child of
+/// p and next_sibling[c] stores the next zero-based sibling of c, or
+/// numeric_limits<COLTYPE>::max() when absent. If roots is non-null, it is
+/// filled with zero-based roots. If child_count is non-null, it is filled with
+/// the number of children for each zero-based node.
+/// @tparam COLTYPE column index type
+/// @return number of roots in the tree or forest
+template <typename COLTYPE>
+COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
+                             const COLTYPE *parent, COLTYPE *first_child,
+                             COLTYPE *next_sibling, COLTYPE *roots = nullptr,
+                             COLTYPE *child_count = nullptr);
+
 /// @brief Compute a postorder permutation of an elimination tree.
 ///
 /// Array positions are zero-based, while stored node labels include base.
