@@ -3,6 +3,8 @@
 #include "sparse_mat_traits.hpp"
 #include <atomic>
 #include <condition_variable>
+#include <deque>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <vector>
@@ -82,7 +84,7 @@ public:
 
   SymbolicCholeskyCol(const int nthreads) : _nthreads(nthreads) {}
 
-  void apply(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
+  bool apply(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
              const COLTYPE *parent, CSRMatrixType &L);
 
 private:
@@ -97,9 +99,44 @@ private:
   std::vector<COLTYPE> _degrees;
   std::vector<COLTYPE> _firstChild;
   std::vector<COLTYPE> _nextSibling;
+  std::vector<COLTYPE> _visited;
   std::mutex _mutex;
   std::condition_variable _cv;
   utils::CircularBuffer<COLTYPE> _queue;
+  std::atomic<COLTYPE> _finished;
+};
+
+template <matrix_utils::ResizableCSR CSRMatrixType>
+class SymbolicCholeskyColV2 {
+public:
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+
+  SymbolicCholeskyColV2(const int nthreads) : _nthreads(nthreads) {}
+
+  bool apply(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
+             const COLTYPE *parent, CSRMatrixType &L);
+
+private:
+  void task(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
+            const COLTYPE *parent, const int tid, CSRMatrixType &L);
+  void pushReady(const int tid, const COLTYPE task);
+  bool popReady(const int tid, COLTYPE &task);
+
+private:
+  int _nthreads;
+  std::vector<ROWTYPE> _diag;
+  std::vector<std::vector<COLTYPE>> _aj;
+
+  std::vector<COLTYPE> _degrees;
+  std::vector<COLTYPE> _firstChild;
+  std::vector<COLTYPE> _nextSibling;
+  std::vector<COLTYPE> _visited;
+  std::vector<std::deque<COLTYPE>> _queues;
+  std::unique_ptr<std::mutex[]> _queueMutexes;
+  std::mutex _readyMutex;
+  std::condition_variable _readyCv;
+  std::atomic<COLTYPE> _readyTasks;
   std::atomic<COLTYPE> _finished;
 };
 } // namespace factorization

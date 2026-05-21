@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(factorization CXX)
 
-set(SRC Cholesky.cpp)
+set(SRC cholesky_symbolic.cpp)
 
 add_library(${PROJECT_NAME} STATIC ${SRC})
 

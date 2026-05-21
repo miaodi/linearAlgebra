@@ -1,5 +1,5 @@
 
-#include "Cholesky.hpp"
+#include "cholesky_symbolic.hpp"
 #include "tree.hpp"
 #include "sp_ops.hpp"
 #include "config.h"
