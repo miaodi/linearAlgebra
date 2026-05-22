@@ -1,6 +1,8 @@
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <filesystem>
 #include <type_traits>
 
 using namespace matrix_utils;
@@ -232,4 +234,38 @@ TEST_F(MatrixUtilsTest, MatricesAreSwappable) {
     EXPECT_TRUE((std::is_swappable_v<CSRMatrixRawPtr<int, int, double>>));
     EXPECT_TRUE((std::is_swappable_v<CSRMatrix<int, int, double>>));
     EXPECT_TRUE((std::is_swappable_v<CSRMatrixVec<int, int, double>>));
+}
+
+TEST_F(MatrixUtilsTest, MatrixPathIORoundTrip) {
+    CSRMatrixVec<int, int, double> mat;
+    mat.rows = 2;
+    mat.cols = 3;
+    mat.ai = {0, 2, 3};
+    mat.aj = {0, 2, 1};
+    mat.av = {1.5, 2.5, 3.5};
+
+    const auto tmp_dir = std::filesystem::temp_directory_path();
+    const auto mtx_path = tmp_dir / "linear_algebra_matrix_io_roundtrip.mtx";
+    const auto bin_path = tmp_dir / "linear_algebra_matrix_io_roundtrip.bin";
+
+    writeMatrix(mat, mtx_path.string(), MatrixDataType::MatrixMarket);
+    CSRMatrixVec<int, int, double> mtx_loaded;
+    readMatrix(mtx_path.string(), mtx_loaded, MatrixDataType::MatrixMarket);
+    EXPECT_EQ(mtx_loaded.rows, mat.rows);
+    EXPECT_EQ(mtx_loaded.cols, mat.cols);
+    EXPECT_EQ(mtx_loaded.ai, mat.ai);
+    EXPECT_EQ(mtx_loaded.aj, mat.aj);
+    EXPECT_EQ(mtx_loaded.av, mat.av);
+
+    writeMatrix(mat, bin_path.string(), MatrixDataType::Binary);
+    CSRMatrixVec<int, int, double> bin_loaded;
+    readMatrix(bin_path.string(), bin_loaded, MatrixDataType::Binary);
+    EXPECT_EQ(bin_loaded.rows, mat.rows);
+    EXPECT_EQ(bin_loaded.cols, mat.cols);
+    EXPECT_EQ(bin_loaded.ai, mat.ai);
+    EXPECT_EQ(bin_loaded.aj, mat.aj);
+    EXPECT_EQ(bin_loaded.av, mat.av);
+
+    std::filesystem::remove(mtx_path);
+    std::filesystem::remove(bin_path);
 }

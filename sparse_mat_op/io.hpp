@@ -3,8 +3,22 @@
 #include <fast_matrix_market/types.hpp>
 #include <istream>
 #include <ostream>
+#include <string>
 #include <vector>
 namespace matrix_utils {
+
+enum class MatrixDataType { MatrixMarket, Binary };
+
+template <typename CSRMatrixType>
+void readMatrix(const std::string &filename, CSRMatrixType &csr_matrix,
+                MatrixDataType data_type,
+                const fast_matrix_market::read_options &options = {});
+
+template <typename CSRMatrixType>
+void writeMatrix(const CSRMatrixType &csr_matrix, const std::string &filename,
+                 MatrixDataType data_type,
+                 const fast_matrix_market::write_options &options = {});
+
 template <typename CSRMatrixType>
 void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
                       const fast_matrix_market::read_options &options = {});

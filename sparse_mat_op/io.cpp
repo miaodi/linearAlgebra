@@ -6,9 +6,190 @@
 #include <fast_matrix_market/app/Eigen.hpp>
 #include <fast_matrix_market/app/triplet.hpp>
 #include <algorithm>
+#include <cstdint>
+#include <fstream>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <tuple>
 #include <utility>
 
 namespace matrix_utils {
+
+namespace {
+template <typename T>
+void readBinaryValue(std::istream &stream, T &value, const std::string &filename) {
+  if (!stream.read(reinterpret_cast<char *>(&value), sizeof value)) {
+    throw std::runtime_error("Failed to read binary matrix file: " + filename);
+  }
+}
+
+template <typename T>
+void writeBinaryValue(std::ostream &stream, const T &value,
+                      const std::string &filename) {
+  if (!stream.write(reinterpret_cast<const char *>(&value), sizeof value)) {
+    throw std::runtime_error("Failed to write binary matrix file: " + filename);
+  }
+}
+
+template <typename T>
+std::int32_t toBinaryIndex(const T value) {
+  if (value < static_cast<T>(std::numeric_limits<std::int32_t>::min()) ||
+      value > static_cast<T>(std::numeric_limits<std::int32_t>::max())) {
+    throw std::overflow_error("Matrix index does not fit binary matrix format");
+  }
+  return static_cast<std::int32_t>(value);
+}
+
+template <ResizableCSR CSRMatrixType>
+void readBinaryMatrix(const std::string &filename, CSRMatrixType &csr_matrix) {
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  using VALTYPE = typename CSRMatrixType::VALTYPE;
+
+  std::ifstream file(filename, std::ios::in | std::ios::binary);
+  if (!file) {
+    throw std::runtime_error("Cannot open binary matrix file: " + filename);
+  }
+
+  std::int64_t nnz64 = 0;
+  readBinaryValue(file, nnz64, filename);
+  if (nnz64 < 0 || static_cast<std::uint64_t>(nnz64) >
+                       static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+    throw std::runtime_error("Invalid binary matrix nonzero count: " + filename);
+  }
+
+  const auto nnz = static_cast<std::size_t>(nnz64);
+  std::vector<COLTYPE> rows(nnz);
+  std::vector<COLTYPE> cols(nnz);
+  std::vector<VALTYPE> vals(nnz);
+  COLTYPE nrows = 0;
+  COLTYPE ncols = 0;
+
+  for (std::size_t i = 0; i < nnz; ++i) {
+    std::tuple<std::int32_t, std::int32_t, double> entry;
+    readBinaryValue(file, entry, filename);
+
+    const auto row = std::get<0>(entry);
+    const auto col = std::get<1>(entry);
+    if (row <= 0 || col <= 0) {
+      throw std::runtime_error("Binary matrix uses invalid one-based index: " + filename);
+    }
+
+    rows[i] = static_cast<COLTYPE>(row - 1);
+    cols[i] = static_cast<COLTYPE>(col - 1);
+    vals[i] = static_cast<VALTYPE>(std::get<2>(entry));
+    nrows = std::max(nrows, static_cast<COLTYPE>(row));
+    ncols = std::max(ncols, static_cast<COLTYPE>(col));
+  }
+
+  std::vector<std::size_t> order(nnz);
+  for (std::size_t i = 0; i < nnz; ++i) {
+    order[i] = i;
+  }
+  std::sort(order.begin(), order.end(), [&rows, &cols](const auto lhs, const auto rhs) {
+    if (rows[lhs] == rows[rhs]) {
+      return cols[lhs] < cols[rhs];
+    }
+    return rows[lhs] < rows[rhs];
+  });
+
+  csr_matrix.rows = nrows;
+  csr_matrix.cols = ncols;
+  auto *ai = csr_matrix.ResizeAI(static_cast<std::size_t>(nrows) + 1);
+  auto *aj = csr_matrix.ResizeAJ(nnz);
+  auto *av = csr_matrix.ResizeAV(nnz);
+  std::fill(ai, ai + static_cast<std::size_t>(nrows) + 1, ROWTYPE{});
+
+  for (const auto idx : order) {
+    ++ai[static_cast<std::size_t>(rows[idx]) + 1];
+  }
+  for (COLTYPE i = 0; i < nrows; ++i) {
+    ai[static_cast<std::size_t>(i) + 1] += ai[i];
+  }
+  for (std::size_t i = 0; i < nnz; ++i) {
+    const auto idx = order[i];
+    aj[i] = cols[idx];
+    av[i] = vals[idx];
+  }
+}
+
+template <CSR CSRMatrixType>
+void writeBinaryMatrix(const CSRMatrixType &csr_matrix, const std::string &filename) {
+  std::ofstream file(filename, std::ios::out | std::ios::binary);
+  if (!file) {
+    throw std::runtime_error("Cannot open binary matrix file for writing: " + filename);
+  }
+
+  const auto rows = csr_matrix.rows;
+  const auto base = csr_matrix.Base();
+  const auto nnz = csr_matrix.NNZ();
+  if (nnz < 0) {
+    throw std::runtime_error("Cannot write binary matrix with negative nonzero count");
+  }
+  const auto nnz64 = static_cast<std::int64_t>(nnz);
+  writeBinaryValue(file, nnz64, filename);
+
+  const auto *ai = csr_matrix.AI();
+  const auto *aj = csr_matrix.AJ();
+  const auto *av = csr_matrix.AV();
+  if (nnz > 0 && (!ai || !aj || !av)) {
+    throw std::runtime_error("Cannot write binary matrix with null CSR storage");
+  }
+
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+  for (COLTYPE row = 0; row < rows; ++row) {
+    for (auto pos = ai[row] - base; pos < ai[row + 1] - base; ++pos) {
+      const std::tuple<std::int32_t, std::int32_t, double> entry{
+          toBinaryIndex(row + 1), toBinaryIndex(aj[pos] - base + 1),
+          static_cast<double>(av[pos])};
+      writeBinaryValue(file, entry, filename);
+    }
+  }
+}
+} // namespace
+
+template <ResizableCSR CSRMatrixType>
+void readMatrix(const std::string &filename, CSRMatrixType &csr_matrix,
+                const MatrixDataType data_type,
+                const fast_matrix_market::read_options &options) {
+  switch (data_type) {
+  case MatrixDataType::MatrixMarket: {
+    std::ifstream stream(filename);
+    if (!stream) {
+      throw std::runtime_error("Cannot open MatrixMarket file: " + filename);
+    }
+    readMatrixMarket(stream, csr_matrix, options);
+    return;
+  }
+  case MatrixDataType::Binary:
+    readBinaryMatrix(filename, csr_matrix);
+    return;
+  }
+
+  throw std::invalid_argument("Unsupported matrix data type");
+}
+
+template <CSR CSRMatrixType>
+void writeMatrix(const CSRMatrixType &csr_matrix, const std::string &filename,
+                 const MatrixDataType data_type,
+                 const fast_matrix_market::write_options &options) {
+  switch (data_type) {
+  case MatrixDataType::MatrixMarket: {
+    std::ofstream stream(filename);
+    if (!stream) {
+      throw std::runtime_error("Cannot open MatrixMarket file for writing: " + filename);
+    }
+    writeMatrixMarket(csr_matrix, stream, options);
+    return;
+  }
+  case MatrixDataType::Binary:
+    writeBinaryMatrix(csr_matrix, filename);
+    return;
+  }
+
+  throw std::invalid_argument("Unsupported matrix data type");
+}
 
 template <ResizableCSR CSRMatrixType>
 void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
@@ -161,6 +342,16 @@ void readMatrixMarketVec(std::istream &instream, std::vector<T> &vec,
   template void readMatrixMarket<CSRMatrixType>(                               \
       std::istream & instream, CSRMatrixType & csr_matrix,                     \
       const fast_matrix_market::read_options &options);
+#define INSTANTIATE_READMATRIX(CSRMatrixType)                                  \
+  template void readMatrix<CSRMatrixType>(                                     \
+      const std::string &filename, CSRMatrixType &csr_matrix,                  \
+      const MatrixDataType data_type,                                          \
+      const fast_matrix_market::read_options &options);
+#define INSTANTIATE_WRITEMATRIX(CSRMatrixType)                                 \
+  template void writeMatrix<CSRMatrixType>(                                    \
+      const CSRMatrixType &csr_matrix, const std::string &filename,            \
+      const MatrixDataType data_type,                                          \
+      const fast_matrix_market::write_options &options);
 #define INSTANTIATE_READMATRIXMARKET_CSR_VECTORS(ROWTYPE, COLTYPE, VALTYPE)    \
   template void readMatrixMarket<ROWTYPE, COLTYPE, VALTYPE>(                   \
       std::istream & instream, std::vector<ROWTYPE> & ai,                      \
@@ -182,18 +373,30 @@ void readMatrixMarketVec(std::istream &instream, std::vector<T> &vec,
 
 using CSRMatrixTypeDouble = matrix_utils::CSRMatrix<int, int, double>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeDouble);
+INSTANTIATE_READMATRIX(CSRMatrixTypeDouble);
+INSTANTIATE_WRITEMATRIX(CSRMatrixTypeDouble);
 using CSRMatrixTypeFloat = matrix_utils::CSRMatrix<int, int, float>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeFloat);
+INSTANTIATE_READMATRIX(CSRMatrixTypeFloat);
+INSTANTIATE_WRITEMATRIX(CSRMatrixTypeFloat);
 using CSRMatrixTypeInt = matrix_utils::CSRMatrix<int, int, int>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeInt);
+INSTANTIATE_READMATRIX(CSRMatrixTypeInt);
+INSTANTIATE_WRITEMATRIX(CSRMatrixTypeInt);
 
 // Add instantiations for CSRMatrixVec types
 using CSRMatrixVecTypeDouble = matrix_utils::CSRMatrixVec<int, int, double>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeDouble);
+INSTANTIATE_READMATRIX(CSRMatrixVecTypeDouble);
+INSTANTIATE_WRITEMATRIX(CSRMatrixVecTypeDouble);
 using CSRMatrixVecTypeFloat = matrix_utils::CSRMatrixVec<int, int, float>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeFloat);
+INSTANTIATE_READMATRIX(CSRMatrixVecTypeFloat);
+INSTANTIATE_WRITEMATRIX(CSRMatrixVecTypeFloat);
 using CSRMatrixVecTypeInt = matrix_utils::CSRMatrixVec<int, int, int>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeInt);
+INSTANTIATE_READMATRIX(CSRMatrixVecTypeInt);
+INSTANTIATE_WRITEMATRIX(CSRMatrixVecTypeInt);
 
 INSTANTIATE_READMATRIXMARKET_CSR_VECTORS(int, int, double);
 INSTANTIATE_READMATRIXMARKET_CSR_VECTORS(int, int, float);
