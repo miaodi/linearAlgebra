@@ -60,17 +60,21 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
    add_executable(${TARGET_NAME} ${ONE_BENCH_CPP})
    set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_BENCH_EXEC})
    
-   target_link_libraries(${TARGET_NAME} PRIVATE
-      benchmark::benchmark
-      reordering
-      graph
-      utils
+    target_link_libraries(${TARGET_NAME} PRIVATE
+       benchmark::benchmark
+       reordering
+       graph
+       utils
       sparse_mat_op
       OpenMP::OpenMP_CXX
-      cxxopts
-   )
+       cxxopts
+    )
 
-   # CUDA benchmarks keep the normal benchmark dependencies and add CUDA usage.
+    if(ONE_BENCH_FILENAME STREQUAL "cholesky_symbolic_bench.cpp")
+       target_link_libraries(${TARGET_NAME} PRIVATE factorization)
+    endif()
+
+    # CUDA benchmarks keep the normal benchmark dependencies and add CUDA usage.
    if(IS_CUDA_BENCH)
       if(BENCH_EXT STREQUAL ".cu")
          set_target_properties(${TARGET_NAME} PROPERTIES 
