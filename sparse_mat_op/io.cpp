@@ -43,6 +43,19 @@ std::int32_t toBinaryIndex(const T value) {
   return static_cast<std::int32_t>(value);
 }
 
+MatrixDataType dataTypeFromFilename(const std::string &filename) {
+  if (filename.size() >= 4 &&
+      filename.compare(filename.size() - 4, 4, ".mtx") == 0) {
+    return MatrixDataType::MatrixMarket;
+  }
+  if (filename.size() >= 4 &&
+      filename.compare(filename.size() - 4, 4, ".bin") == 0) {
+    return MatrixDataType::Binary;
+  }
+  throw std::invalid_argument(
+      "Unsupported matrix file extension, expected .mtx or .bin: " + filename);
+}
+
 template <ResizableCSR CSRMatrixType>
 void readBinaryMatrix(const std::string &filename, CSRMatrixType &csr_matrix) {
   using ROWTYPE = typename CSRMatrixType::ROWTYPE;
@@ -153,6 +166,12 @@ void writeBinaryMatrix(const CSRMatrixType &csr_matrix, const std::string &filen
 
 template <ResizableCSR CSRMatrixType>
 void readMatrix(const std::string &filename, CSRMatrixType &csr_matrix,
+                const fast_matrix_market::read_options &options) {
+  readMatrix(filename, csr_matrix, dataTypeFromFilename(filename), options);
+}
+
+template <ResizableCSR CSRMatrixType>
+void readMatrix(const std::string &filename, CSRMatrixType &csr_matrix,
                 const MatrixDataType data_type,
                 const fast_matrix_market::read_options &options) {
   switch (data_type) {
@@ -170,6 +189,12 @@ void readMatrix(const std::string &filename, CSRMatrixType &csr_matrix,
   }
 
   throw std::invalid_argument("Unsupported matrix data type");
+}
+
+template <CSR CSRMatrixType>
+void writeMatrix(const CSRMatrixType &csr_matrix, const std::string &filename,
+                 const fast_matrix_market::write_options &options) {
+  writeMatrix(csr_matrix, filename, dataTypeFromFilename(filename), options);
 }
 
 template <CSR CSRMatrixType>
@@ -401,10 +426,18 @@ void readMatrixMarketVec(std::istream &instream, std::vector<T> &vec,
       const std::string &filename, CSRMatrixType &csr_matrix,                  \
       const MatrixDataType data_type,                                          \
       const fast_matrix_market::read_options &options);
+#define INSTANTIATE_READMATRIX_DEDUCED(CSRMatrixType)                          \
+  template void readMatrix<CSRMatrixType>(                                     \
+      const std::string &filename, CSRMatrixType &csr_matrix,                  \
+      const fast_matrix_market::read_options &options);
 #define INSTANTIATE_WRITEMATRIX(CSRMatrixType)                                 \
   template void writeMatrix<CSRMatrixType>(                                    \
       const CSRMatrixType &csr_matrix, const std::string &filename,            \
       const MatrixDataType data_type,                                          \
+      const fast_matrix_market::write_options &options);
+#define INSTANTIATE_WRITEMATRIX_DEDUCED(CSRMatrixType)                         \
+  template void writeMatrix<CSRMatrixType>(                                    \
+      const CSRMatrixType &csr_matrix, const std::string &filename,            \
       const fast_matrix_market::write_options &options);
 #define INSTANTIATE_READMATRIXMARKET_CSR_VECTORS(ROWTYPE, COLTYPE, VALTYPE)    \
   template void readMatrixMarket<ROWTYPE, COLTYPE, VALTYPE>(                   \
@@ -432,29 +465,41 @@ void readMatrixMarketVec(std::istream &instream, std::vector<T> &vec,
 
 using CSRMatrixTypeDouble = matrix_utils::CSRMatrix<int, int, double>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeDouble);
+INSTANTIATE_READMATRIX_DEDUCED(CSRMatrixTypeDouble);
 INSTANTIATE_READMATRIX(CSRMatrixTypeDouble);
+INSTANTIATE_WRITEMATRIX_DEDUCED(CSRMatrixTypeDouble);
 INSTANTIATE_WRITEMATRIX(CSRMatrixTypeDouble);
 using CSRMatrixTypeFloat = matrix_utils::CSRMatrix<int, int, float>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeFloat);
+INSTANTIATE_READMATRIX_DEDUCED(CSRMatrixTypeFloat);
 INSTANTIATE_READMATRIX(CSRMatrixTypeFloat);
+INSTANTIATE_WRITEMATRIX_DEDUCED(CSRMatrixTypeFloat);
 INSTANTIATE_WRITEMATRIX(CSRMatrixTypeFloat);
 using CSRMatrixTypeInt = matrix_utils::CSRMatrix<int, int, int>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixTypeInt);
+INSTANTIATE_READMATRIX_DEDUCED(CSRMatrixTypeInt);
 INSTANTIATE_READMATRIX(CSRMatrixTypeInt);
+INSTANTIATE_WRITEMATRIX_DEDUCED(CSRMatrixTypeInt);
 INSTANTIATE_WRITEMATRIX(CSRMatrixTypeInt);
 
 // Add instantiations for CSRMatrixVec types
 using CSRMatrixVecTypeDouble = matrix_utils::CSRMatrixVec<int, int, double>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeDouble);
+INSTANTIATE_READMATRIX_DEDUCED(CSRMatrixVecTypeDouble);
 INSTANTIATE_READMATRIX(CSRMatrixVecTypeDouble);
+INSTANTIATE_WRITEMATRIX_DEDUCED(CSRMatrixVecTypeDouble);
 INSTANTIATE_WRITEMATRIX(CSRMatrixVecTypeDouble);
 using CSRMatrixVecTypeFloat = matrix_utils::CSRMatrixVec<int, int, float>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeFloat);
+INSTANTIATE_READMATRIX_DEDUCED(CSRMatrixVecTypeFloat);
 INSTANTIATE_READMATRIX(CSRMatrixVecTypeFloat);
+INSTANTIATE_WRITEMATRIX_DEDUCED(CSRMatrixVecTypeFloat);
 INSTANTIATE_WRITEMATRIX(CSRMatrixVecTypeFloat);
 using CSRMatrixVecTypeInt = matrix_utils::CSRMatrixVec<int, int, int>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeInt);
+INSTANTIATE_READMATRIX_DEDUCED(CSRMatrixVecTypeInt);
 INSTANTIATE_READMATRIX(CSRMatrixVecTypeInt);
+INSTANTIATE_WRITEMATRIX_DEDUCED(CSRMatrixVecTypeInt);
 INSTANTIATE_WRITEMATRIX(CSRMatrixVecTypeInt);
 
 INSTANTIATE_READMATRIXMARKET_CSR_VECTORS(int, int, double);
