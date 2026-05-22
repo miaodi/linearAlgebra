@@ -28,6 +28,9 @@ target_link_libraries(precond_debug PRIVATE ${libs} OpenMP::OpenMP_CXX)
 add_executable(test_ilum test_ilum.cpp)
 target_link_libraries(test_ilum PRIVATE ${libs} OpenMP::OpenMP_CXX)
 
+add_executable(mtx_to_binary mtx_to_binary.cpp)
+target_link_libraries(mtx_to_binary PRIVATE ${libs} OpenMP::OpenMP_CXX)
+
 # CUDA executables (only build if CUDA is enabled)
 if(USE_CUDA)
   add_executable(cuda_spsv_test cuda_spsv_test.cu)
