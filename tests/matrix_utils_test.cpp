@@ -269,3 +269,20 @@ TEST_F(MatrixUtilsTest, MatrixPathIORoundTrip) {
     std::filesystem::remove(mtx_path);
     std::filesystem::remove(bin_path);
 }
+
+TEST_F(MatrixUtilsTest, WriteSparsityPNG) {
+    CSRMatrixVec<int, int, double> mat;
+    mat.rows = 3;
+    mat.cols = 4;
+    mat.ai = {0, 2, 3, 5};
+    mat.aj = {0, 3, 1, 0, 2};
+    mat.av = {1.0, 2.0, 3.0, 4.0, 5.0};
+
+    const auto png_path = std::filesystem::temp_directory_path() /
+                          "linear_algebra_sparsity_pattern.png";
+    writePNG(mat, png_path.string(), 16);
+
+    ASSERT_TRUE(std::filesystem::exists(png_path));
+    EXPECT_GT(std::filesystem::file_size(png_path), 8u);
+    std::filesystem::remove(png_path);
+}

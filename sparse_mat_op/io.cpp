@@ -5,8 +5,10 @@
 #include <fast_matrix_market/fast_matrix_market.hpp>
 #include <fast_matrix_market/app/Eigen.hpp>
 #include <fast_matrix_market/app/triplet.hpp>
+#include <stb_image_write.h>
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -330,6 +332,58 @@ void writeSVG(const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,
   outstream << "</svg>\n";
 }
 
+template <typename ROWTYPE, typename COLTYPE>
+void writePNG(const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,
+              const COLTYPE *aj, const std::string &filename,
+              const COLTYPE max_display_size) {
+  if (rows <= 0 || cols <= 0) {
+    throw std::invalid_argument("Cannot write PNG for an empty matrix");
+  }
+  if (max_display_size <= 0) {
+    throw std::invalid_argument("PNG max_display_size must be positive");
+  }
+
+  const COLTYPE image_rows = std::min(rows, max_display_size);
+  const COLTYPE image_cols = std::min(cols, max_display_size);
+  const std::size_t pixel_count =
+      static_cast<std::size_t>(image_rows) * static_cast<std::size_t>(image_cols);
+  std::vector<std::uint32_t> counts(pixel_count, 0);
+
+  const ROWTYPE base = ai[0];
+  std::uint32_t max_count = 0;
+  for (COLTYPE row = 0; row < rows; ++row) {
+    const auto y = static_cast<std::size_t>(row) * image_rows / rows;
+    for (ROWTYPE pos = ai[row] - base; pos < ai[row + 1] - base; ++pos) {
+      const COLTYPE col = aj[pos] - base;
+      if (col < 0 || col >= cols) {
+        continue;
+      }
+      const auto x = static_cast<std::size_t>(col) * image_cols / cols;
+      auto &count = counts[y * image_cols + x];
+      ++count;
+      max_count = std::max(max_count, count);
+    }
+  }
+
+  std::vector<unsigned char> image(pixel_count, 255);
+  if (max_count > 0) {
+    const double max_log = std::log1p(static_cast<double>(max_count));
+    for (std::size_t i = 0; i < pixel_count; ++i) {
+      if (counts[i] == 0) {
+        continue;
+      }
+      const double density = std::log1p(static_cast<double>(counts[i])) / max_log;
+      image[i] = static_cast<unsigned char>(255.0 * (1.0 - density));
+    }
+  }
+
+  const int width = static_cast<int>(image_cols);
+  const int height = static_cast<int>(image_rows);
+  if (!stbi_write_png(filename.c_str(), width, height, 1, image.data(), width)) {
+    throw std::runtime_error("Failed to write PNG file: " + filename);
+  }
+}
+
 template <typename T>
 void readMatrixMarketVec(std::istream &instream, std::vector<T> &vec,
                          const fast_matrix_market::read_options &options) {
@@ -366,6 +420,11 @@ void readMatrixMarketVec(std::istream &instream, std::vector<T> &vec,
   template void writeSVG<ROWTYPE, COLTYPE>(                                    \
       const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,               \
       const COLTYPE *aj, std::ostream &outstream, const COLTYPE max_display_size);
+#define INSTANTIATE_WRITEPNG(ROWTYPE, COLTYPE)                                 \
+  template void writePNG<ROWTYPE, COLTYPE>(                                    \
+      const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,               \
+      const COLTYPE *aj, const std::string &filename,                          \
+      const COLTYPE max_display_size);
 #define INSTANTIATE_READMATRIXMARKETVEC(T)                                     \
   template void readMatrixMarketVec<T>(                                        \
       std::istream & instream, std::vector<T> & vec,                           \
@@ -407,6 +466,7 @@ INSTANTIATE_WRITEMATRIXMARKET(int, int, float);
 INSTANTIATE_WRITEMATRIXMARKET(int, int, int);
 
 INSTANTIATE_WRITESVG(int, int);
+INSTANTIATE_WRITEPNG(int, int);
 
 INSTANTIATE_READMATRIXMARKETVEC(double);
 INSTANTIATE_READMATRIXMARKETVEC(float);
