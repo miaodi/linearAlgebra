@@ -84,7 +84,7 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(fast_matrix_market)
-find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(Eigen3 REQUIRED NO_MODULE)
 
 FetchContent_Declare(
   Spectra
@@ -162,8 +162,22 @@ if(ENABLE_TESTS OR ENABLE_DATA_DOWNLOADS OR BUILD_DATA)
   )
 
   if(NOT SSGETPY_RESULT EQUAL 0)
-      message(FATAL_ERROR "Python package 'ssgetpy' not found. 
-Please install it with: pip install ssgetpy")
+      message(FATAL_ERROR
+        "Python package 'ssgetpy' was not found in the selected Python interpreter:\n"
+        "  Python3_EXECUTABLE='${Python3_EXECUTABLE}'\n"
+        "\n"
+        "SuiteSparse matrix downloads require a Python environment with ssgetpy installed.\n"
+        "Choose one of the following fixes:\n"
+        "  1. Install ssgetpy into this interpreter:\n"
+        "       ${Python3_EXECUTABLE} -m pip install ssgetpy\n"
+        "  2. Reconfigure with an interpreter that already has ssgetpy:\n"
+        "       cmake -S . -B build -DPython3_EXECUTABLE=/path/to/python\n"
+        "  3. Or set the helper environment variable before configuring:\n"
+        "       export PYTHONWITHSSGETPY=/path/to/python\n"
+        "       cmake -S . -B build\n"
+        "\n"
+        "If you do not need tests or matrix downloads for this configure, disable them with:\n"
+        "  cmake -S . -B build -DENABLE_TESTS=OFF -DENABLE_DATA_DOWNLOADS=OFF")
   endif()
 endif()
 
