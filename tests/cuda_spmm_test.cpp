@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "cuda_spmm.cuh"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "spgemm.hpp"
 #include "utils.h"
@@ -29,7 +30,7 @@ TEST_P(CudaSpMM, SpMMStruct_AA)
     std::vector<int> ai;
     std::vector<int> aj;
     std::vector<double> av;
-    utils::read_matrix_market_csr(f, ai, aj, av);
+    matrix_utils::readMatrixMarket(f, ai, aj, av);
     f.close();
 
     const int n = static_cast<int>(ai.size()) - 1;

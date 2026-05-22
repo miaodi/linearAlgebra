@@ -3,6 +3,7 @@
 #if defined(USE_CUDA) && defined(USE_CUDSS)
 
 #include "cudss_wrapper.h"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "mkl_solver.h"
 #include "mkl_sparse_mat.h"
@@ -24,7 +25,7 @@ TEST(Solve, pardiso_vs_cudss) {
     f.seekg(0, std::ios::beg);
     std::vector<MKL_INT> csr_rows, csr_cols;
     std::vector<double> csr_vals;
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
 
     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                     csr_rows, csr_cols, csr_vals);

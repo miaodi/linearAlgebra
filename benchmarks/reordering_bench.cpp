@@ -37,7 +37,7 @@ public:
       // f.seekg(0, std::ios::beg);
       // std::vector<MKL_INT> csr_rows, csr_cols;
       // std::vector<double> csr_vals;
-      // utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+      // matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
 
       const MKL_INT size = csr_rows.size() - 1;
       mat.reset(new mkl_wrapper::mkl_sparse_mat(

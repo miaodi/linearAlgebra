@@ -1,4 +1,5 @@
 #include "incomplete_lu.h"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "spmv.hpp"
 #include "utils.h"
@@ -449,7 +450,7 @@ int main(int argc, char **argv) {
     std::ifstream f(file);
     f.clear();
     f.seekg(0, std::ios::beg);
-    utils::read_matrix_market_csr(f, mat_double.ai, mat_double.aj, mat_double.av);
+    matrix_utils::readMatrixMarket(f, mat_double.ai, mat_double.aj, mat_double.av);
     mat_double.rows = mat_double.ai.size() - 1;
   }
   

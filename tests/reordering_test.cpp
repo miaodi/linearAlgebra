@@ -95,7 +95,7 @@ TEST(MinDegreeNode, tie_breaking) {
 //     f.seekg(0, std::ios::beg);
 //     std::vector<MKL_INT> csr_rows, csr_cols;
 //     std::vector<double> csr_vals;
-//     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+//     matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
 //     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
 //                                     csr_rows, csr_cols, csr_vals);
 
@@ -126,7 +126,7 @@ TEST(MinDegreeNode, tie_breaking) {
 //     f.seekg(0, std::ios::beg);
 //     std::vector<MKL_INT> csr_rows, csr_cols;
 //     std::vector<double> csr_vals;
-//     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+//     matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
 //     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
 //                                     csr_rows, csr_cols, csr_vals);
 //     std::vector<MKL_INT> degrees0;
@@ -154,7 +154,7 @@ TEST(MinDegreeNode, tie_breaking) {
 //     f.seekg(0, std::ios::beg);
 //     std::vector<MKL_INT> csr_rows, csr_cols;
 //     std::vector<double> csr_vals;
-//     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+//     matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
 //     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
 //                                     csr_rows, csr_cols, csr_vals);
 //     const MKL_INT base = mat.mkl_base();
@@ -189,7 +189,7 @@ TEST(MinDegreeNode, tie_breaking) {
 //     f.seekg(0, std::ios::beg);
 //     std::vector<MKL_INT> csr_rows, csr_cols;
 //     std::vector<double> csr_vals;
-//     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+//     matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
 //     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
 //                                     csr_rows, csr_cols, csr_vals);
 
@@ -451,7 +451,7 @@ TEST(UnionFind, rem_vs_parrank)
 //     f.seekg(0, std::ios::beg);
 //     std::vector<MKL_INT> csr_rows, csr_cols;
 //     std::vector<double> csr_vals;
-//     utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+//     matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
 
 //     mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
 //                                     csr_rows, csr_cols, csr_vals);

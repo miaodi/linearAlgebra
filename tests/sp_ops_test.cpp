@@ -1,3 +1,4 @@
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "sp_ops.hpp"
 #include "spadd.hpp"
@@ -691,7 +692,7 @@ TEST_F( SymmetricOpsTest, LargerMatrix_FromFile )
         GTEST_SKIP() << "Test matrix data/ex5.mtx not found";
     }
 
-    utils::read_matrix_market_csr( f, ai, aj, av );
+    matrix_utils::readMatrixMarket( f, ai, aj, av );
     f.close();
 
     if ( ai.size() == 0 )
@@ -912,7 +913,7 @@ TEST_F( SymmetricOpsTest, AllCMakeMatrices )
 
         std::vector<int32_t> ai, aj;
         std::vector<double> av;
-        utils::read_matrix_market_csr( f, ai, aj, av );
+        matrix_utils::readMatrixMarket( f, ai, aj, av );
         f.close();
 
         if ( ai.size() == 0 )
@@ -1296,7 +1297,7 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
 
         std::vector<int> ai, aj;
         std::vector<double> av;
-        utils::read_matrix_market_csr( f, ai, aj, av );
+        matrix_utils::readMatrixMarket( f, ai, aj, av );
         f.close();
 
         if ( ai.empty() || ai.size() == 1 )
@@ -1500,7 +1501,7 @@ TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
 
         std::vector<int> ai, aj;
         std::vector<double> av;
-        utils::read_matrix_market_csr( f, ai, aj, av );
+        matrix_utils::readMatrixMarket( f, ai, aj, av );
         f.close();
 
         if ( ai.empty() || ai.size() == 1 )
@@ -2203,7 +2204,7 @@ TEST_F( SpADDTest, LargerMatrices )
 
         std::vector<int32_t> A_ai, A_aj;
         std::vector<double> A_av;
-        utils::read_matrix_market_csr( f, A_ai, A_aj, A_av );
+        matrix_utils::readMatrixMarket( f, A_ai, A_aj, A_av );
         f.close();
 
         if ( A_ai.size() == 0 )

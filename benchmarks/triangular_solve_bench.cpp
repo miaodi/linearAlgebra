@@ -7,6 +7,7 @@
 //  - LevelBackward: LevelScheduleTriangularSubstitution<U>
 
 #include "../config.h"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "triangle_solve.hpp"
 #include "precond.hpp" // for ILULevelSymbolic / ILULevelNumeric
@@ -45,7 +46,7 @@ BenchmarkData& getData() {
         if (!f.good()) {
             throw std::runtime_error("Cannot open data/thermal2.mtx");
         }
-        utils::read_matrix_market_csr(f, data.ai, data.aj, data.av); // produces ai size n+1
+        matrix_utils::readMatrixMarket(f, data.ai, data.aj, data.av); // produces ai size n+1
         data.n = static_cast<int>(data.ai.size()) - 1;
         // Build ILU(k) factors for k in {0,1,2}
         const std::vector<int> klevels = {0,1,2};

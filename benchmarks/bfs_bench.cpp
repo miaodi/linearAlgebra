@@ -1,4 +1,5 @@
 #include "BFS.h"
+#include "io.hpp"
 #include "Reordering.h"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
@@ -21,7 +22,7 @@ static void load_bfs_matrix_once() {
   }
   std::vector<MKL_INT> csr_rows, csr_cols;
   std::vector<double> csr_vals;
-  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+  matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
   ptr.reset(new mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
                                             csr_rows.size() - 1, csr_rows,
                                             csr_cols, csr_vals));

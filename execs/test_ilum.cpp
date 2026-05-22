@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
 
     std::vector<int> ai, aj;
     std::vector<double> av;
-    utils::read_matrix_market_csr(f, ai, aj, av);
+    matrix_utils::readMatrixMarket(f, ai, aj, av);
     f.close();
 
     if (ai.size() == 0) {

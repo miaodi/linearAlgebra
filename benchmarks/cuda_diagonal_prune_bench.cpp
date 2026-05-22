@@ -1,4 +1,5 @@
 #include "cuda_csr_utils.cuh"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "utils.h"
 #include <benchmark/benchmark.h>
@@ -280,7 +281,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    utils::read_matrix_market_csr(f, g_ai, g_aj, g_av);
+    matrix_utils::readMatrixMarket(f, g_ai, g_aj, g_av);
     f.close();
     
     g_rows = g_ai.size() - 1;

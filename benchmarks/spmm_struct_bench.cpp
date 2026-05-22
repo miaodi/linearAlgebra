@@ -1,5 +1,6 @@
 #include "cuda_spmm.cuh"
 #include "cuda_csr_utils.cuh"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "utils.h"
 #include <benchmark/benchmark.h>
@@ -37,7 +38,7 @@ struct MatrixCache {
             throw std::runtime_error("Failed to open matrix file: " + file);
         }
         
-        utils::read_matrix_market_csr(f, mat.ai, mat.aj, mat.av);
+        matrix_utils::readMatrixMarket(f, mat.ai, mat.aj, mat.av);
         f.close();
         
         mat.rows = static_cast<int>(mat.ai.size()) - 1;

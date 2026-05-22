@@ -1,5 +1,6 @@
 
 #include "incomplete_cholesky.h"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "mkl_sparse_mat.h"
 #include "precond.hpp"
@@ -33,7 +34,7 @@ protected:
 
     std::ifstream f;
     f.open("data/nos5.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.push_back({mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
                                                 csr_rows.size() - 1, csr_rows,
@@ -43,7 +44,7 @@ protected:
     csr_cols.clear();
     csr_vals.clear();
     f.open("data/bcsstk17.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.push_back({mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
                                                 csr_rows.size() - 1, csr_rows,
@@ -53,7 +54,7 @@ protected:
     csr_cols.clear();
     csr_vals.clear();
     f.open("data/ex27.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.push_back({mkl_wrapper::mkl_sparse_mat(csr_rows.size() - 1,
                                                 csr_rows.size() - 1, csr_rows,

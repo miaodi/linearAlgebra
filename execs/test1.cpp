@@ -1,5 +1,6 @@
 #include "../mkl_wrapper/incomplete_cholesky.h"
 #include "../mkl_wrapper/incomplete_lu.h"
+#include "../sparse_mat_op/io.hpp"
 #include "../sparse_mat_op/matrix_utils.hpp"
 #include "../mkl_wrapper/mkl_solver.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
@@ -142,7 +143,7 @@ int main() {
   f.seekg(0, std::ios::beg);
   std::vector<MKL_INT> csr_rows, csr_cols;
   std::vector<double> csr_vals;
-  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+  matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
   mkl_wrapper::mkl_sparse_mat mat(csr_rows.size() - 1, csr_rows.size() - 1,
                                   csr_rows, csr_cols, csr_vals);
 

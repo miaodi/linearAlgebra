@@ -1,3 +1,4 @@
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "sp_ops.hpp"
 #include "utils.h"
@@ -30,7 +31,7 @@ static BenchInputs loadMatrix( const std::string& path )
         throw std::runtime_error( "Cannot open matrix file: " + path );
     }
 
-    utils::read_matrix_market_csr( f, bi.A.ai, bi.A.aj, bi.A.av );
+    matrix_utils::readMatrixMarket( f, bi.A.ai, bi.A.aj, bi.A.av );
     bi.A.rows = static_cast<int32_t>( bi.A.ai.size() ) - 1;
     bi.A.cols = bi.A.rows;
     bi.size = bi.A.rows;

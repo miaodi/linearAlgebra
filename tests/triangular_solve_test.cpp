@@ -1,5 +1,6 @@
 
 #include "precond.hpp"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "triangle_solve.hpp"
 #include "utils.h"
@@ -52,7 +53,7 @@ protected:
             csr_rows.clear();
             csr_cols.clear();
             csr_vals.clear();
-            utils::read_matrix_market_csr( f, csr_rows, csr_cols, csr_vals );
+            matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
             f.close();
             _mats.push_back( createMatrixFromVectors( csr_rows, csr_cols, csr_vals ) );
         };

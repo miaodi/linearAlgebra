@@ -1,3 +1,4 @@
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "precond.hpp"
 #include "utils.h"
@@ -30,7 +31,7 @@ public:
       std::ifstream f("data/thermal2.mtx");
       f.clear();
       f.seekg(0, std::ios::beg);
-      utils::read_matrix_market_csr(f, mat->ai, mat->aj, mat->av);
+      matrix_utils::readMatrixMarket(f, mat->ai, mat->aj, mat->av);
       mat->rows = mat->ai.size() - 1;
       std::cout << "matrix size: " << mat->rows << "\n";
     }

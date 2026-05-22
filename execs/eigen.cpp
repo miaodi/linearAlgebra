@@ -33,7 +33,7 @@ int main() {
 
   std::vector<MKL_INT> k_csr_rows, k_csr_cols;
   std::vector<double> k_csr_vals;
-  // utils::read_matrix_market_csr(fk, k_csr_rows, k_csr_cols, k_csr_vals);
+  // matrix_utils::readMatrixMarket(fk, k_csr_rows, k_csr_cols, k_csr_vals);
   utils::ReadFromBinaryCSR(k_mat, k_csr_rows, k_csr_cols, k_csr_vals,
                            SPARSE_INDEX_BASE_ONE);
   std::shared_ptr<MKL_INT[]> k_csr_rows_ptr(k_csr_rows.data(),
@@ -44,7 +44,7 @@ int main() {
 
   std::vector<MKL_INT> m_csr_rows, m_csr_cols;
   std::vector<double> m_csr_vals;
-  // utils::read_matrix_market_csr(fm, m_csr_rows, m_csr_cols, m_csr_vals);
+  // matrix_utils::readMatrixMarket(fm, m_csr_rows, m_csr_cols, m_csr_vals);
   utils::ReadFromBinaryCSR(m_mat, m_csr_rows, m_csr_cols, m_csr_vals,
                            SPARSE_INDEX_BASE_ONE);
   std::shared_ptr<MKL_INT[]> m_csr_rows_ptr(m_csr_rows.data(),

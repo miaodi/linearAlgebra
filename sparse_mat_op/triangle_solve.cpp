@@ -9,6 +9,7 @@
 #include <memory>
 #include <numeric>
 #include <algorithm>
+#include <cassert>
 #include <omp.h>
 #include <tuple>
 #include <type_traits>

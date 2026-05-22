@@ -1,4 +1,5 @@
 #include "bfs.hpp"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "utils.h"
 #include <algorithm>
@@ -101,7 +102,7 @@ TEST(bfs, serial_vs_parallel) {
     std::ifstream f(fn);
     std::vector<int> ai, aj;
     std::vector<double> av;
-    utils::read_matrix_market_csr(f, ai, aj, av);
+    matrix_utils::readMatrixMarket(f, ai, aj, av);
     
     const int n = ai.size() - 1;
     auto [ai_1based, aj_1based] = std::make_pair(ai, aj);

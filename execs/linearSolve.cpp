@@ -2,6 +2,7 @@
 #include "../config.h"
 #include "../mkl_wrapper/mkl_solver.h"
 #include "../mkl_wrapper/mkl_sparse_mat.h"
+#include "../sparse_mat_op/io.hpp"
 #ifdef USE_MUMPS_LIB
 #include "../mkl_wrapper/mumps_solver.h"
 #endif
@@ -68,7 +69,7 @@ int main() {
   f.seekg(0, std::ios::beg);
   std::vector<MKL_INT> csr_rows, csr_cols;
   std::vector<double> csr_vals;
-  utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+  matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
   SpMatMap mat_csr(csr_rows.size() - 1, csr_rows.size() - 1, csr_cols.size(),
                    csr_rows.data(), csr_cols.data(), csr_vals.data());
 

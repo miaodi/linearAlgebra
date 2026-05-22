@@ -53,7 +53,7 @@ TEST(CudaILUSymbolicSpMM, SmallMatrix_Level0)
     std::vector<double> csr_vals;
 
     std::ifstream f("data/ex5.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
 
     int n = static_cast<int>(csr_rows.size()) - 1;
@@ -114,7 +114,7 @@ TEST(CudaILUSymbolicSpMM, SmallMatrix_Level1)
     std::vector<double> csr_vals;
 
     std::ifstream f("data/ex5.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
 
     int n = static_cast<int>(csr_rows.size()) - 1;
@@ -176,7 +176,7 @@ TEST(CudaILUSymbolicSpMM, MediumMatrix_Level10)
     std::vector<double> csr_vals;
 
     std::ifstream f("data/bcsstk17.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
 
     int n = static_cast<int>(csr_rows.size()) - 1;
@@ -257,7 +257,7 @@ TEST(CudaILUSymbolic, SmallMatrix_Level0)
     std::vector<double> csr_vals;
 
     std::ifstream f("data/ex5.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
 
     int n = csr_rows.size() - 1;
@@ -330,7 +330,7 @@ TEST(CudaILUSymbolic, SmallMatrix_Level1)
     std::vector<double> csr_vals;
 
     std::ifstream f("data/ex5.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
 
     int n = csr_rows.size() - 1;
@@ -400,7 +400,7 @@ TEST(CudaILUSymbolic, MediumMatrix_Level10)
     std::vector<double> csr_vals;
 
     std::ifstream f("data/bcsstk17.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
 
     int n = csr_rows.size() - 1;
@@ -487,7 +487,7 @@ TEST(CudaILUSymbolicLU, SmallMatrix_Level0)
     std::vector<double> csr_vals;
 
     std::ifstream f("data/ex5.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
 
     int n = csr_rows.size() - 1;
@@ -557,7 +557,7 @@ TEST(CudaILUSymbolicLU, SmallMatrix_Level1)
     std::vector<double> csr_vals;
 
     std::ifstream f("data/ex5.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
 
     int n = csr_rows.size() - 1;
@@ -626,7 +626,7 @@ TEST(CudaILUSymbolicLU, MediumMatrix_Level10)
     std::vector<double> csr_vals;
 
     std::ifstream f("data/bcsstk17.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
 
     int n = csr_rows.size() - 1;

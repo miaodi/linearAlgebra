@@ -1,5 +1,6 @@
 #include "cuda_ilu_base.cuh"
 #include "graph_algs.hpp"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "precond.hpp"
 #include "utils.h"
@@ -49,7 +50,7 @@ TEST(CudaILUBase, MatchesCPULevel0Ex5)
 
     std::ifstream f = open_test_matrix("ex5.mtx");
     ASSERT_TRUE(f.is_open());
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
 
     const int n = static_cast<int>(csr_rows.size()) - 1;
     const int nnz = static_cast<int>(csr_cols.size());

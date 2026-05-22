@@ -68,7 +68,7 @@ int main(int argc, char **argv) {
   std::vector<int> rows;
   std::vector<int> cols;
   std::vector<double> vals;
-  utils::read_matrix_market_csr(f, rows, cols, vals);
+  matrix_utils::readMatrixMarket(f, rows, cols, vals);
   f.close();
   
   matrix_utils::CSRMatrix<int, int, double> A;

@@ -3,6 +3,7 @@
 #include "utils.h"
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <cmath>
 #include <deque>
 #include <iomanip>

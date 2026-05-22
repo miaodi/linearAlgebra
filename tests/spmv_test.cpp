@@ -1,5 +1,6 @@
 
 #include "matrix_utils.hpp"
+#include "io.hpp"
 #include "spmv.hpp"
 #include "utils.h"
 #include <algorithm>
@@ -25,7 +26,7 @@ protected:
 
     std::ifstream f;
     f.open("data/ex5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.emplace_back();
     _mats.back().rows = csr_rows.size() - 1;
@@ -34,7 +35,7 @@ protected:
     _mats.back().av = std::move(csr_vals);
 
     f.open("data/nos5.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.emplace_back();
     _mats.back().rows = csr_rows.size() - 1;
@@ -43,7 +44,7 @@ protected:
     _mats.back().av = std::move(csr_vals);
 
     f.open("data/s3rmt3m3.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.emplace_back();
     _mats.back().rows = csr_rows.size() - 1;
@@ -52,7 +53,7 @@ protected:
     _mats.back().av = std::move(csr_vals);
 
     f.open("data/rdist1.mtx");
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
     f.close();
     _mats.emplace_back();
     _mats.back().rows = csr_rows.size() - 1;

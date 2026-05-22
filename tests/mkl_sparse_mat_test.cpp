@@ -1,4 +1,5 @@
 #include "../utils/utils.h"
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "mkl_solver.h"
 #include "mkl_sparse_mat.h"
@@ -39,7 +40,7 @@ protected:
     avB.reset(new double[6]{1, 2, 4, 3, 5, 6});
 
     std::ifstream f("data/ex5.mtx"); // https://sparse.tamu.edu/FIDAP/ex5
-    utils::read_matrix_market_csr(f, csr_rows, csr_cols, csr_vals);
+    matrix_utils::readMatrixMarket(f, csr_rows, csr_cols, csr_vals);
   }
 
   ~sparse_matrix_Test() override {

@@ -5,6 +5,8 @@
 #include <fast_matrix_market/fast_matrix_market.hpp>
 #include <fast_matrix_market/app/Eigen.hpp>
 #include <fast_matrix_market/app/triplet.hpp>
+#include <algorithm>
+#include <utility>
 
 namespace matrix_utils {
 
@@ -20,6 +22,7 @@ void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
 
   Eigen::SparseMatrix<VALTYPE, Eigen::RowMajor, COLTYPE> mat;
   fast_matrix_market::read_matrix_market_eigen(instream, mat, options);
+  mat.makeCompressed();
   csr_matrix.rows = mat.rows();
   csr_matrix.cols = mat.cols();
 
@@ -32,6 +35,17 @@ void readMatrixMarket(std::istream &instream, CSRMatrixType &csr_matrix,
   std::copy(mat.innerIndexPtr(), mat.innerIndexPtr() + mat.nonZeros(),
             csr_matrix.AJ());
   std::copy(mat.valuePtr(), mat.valuePtr() + mat.nonZeros(), csr_matrix.AV());
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void readMatrixMarket(std::istream &instream, std::vector<ROWTYPE> &ai,
+                      std::vector<COLTYPE> &aj, std::vector<VALTYPE> &av,
+                      const fast_matrix_market::read_options &options) {
+  CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> matrix;
+  readMatrixMarket(instream, matrix, options);
+  ai = std::move(matrix.ai);
+  aj = std::move(matrix.aj);
+  av = std::move(matrix.av);
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
@@ -147,6 +161,11 @@ void readMatrixMarketVec(std::istream &instream, std::vector<T> &vec,
   template void readMatrixMarket<CSRMatrixType>(                               \
       std::istream & instream, CSRMatrixType & csr_matrix,                     \
       const fast_matrix_market::read_options &options);
+#define INSTANTIATE_READMATRIXMARKET_CSR_VECTORS(ROWTYPE, COLTYPE, VALTYPE)    \
+  template void readMatrixMarket<ROWTYPE, COLTYPE, VALTYPE>(                   \
+      std::istream & instream, std::vector<ROWTYPE> & ai,                      \
+      std::vector<COLTYPE> & aj, std::vector<VALTYPE> & av,                    \
+      const fast_matrix_market::read_options &options);
 #define INSTANTIATE_WRITEMATRIXMARKET(ROWTYPE, COLTYPE, VALTYPE)               \
   template void writeMatrixMarket<ROWTYPE, COLTYPE, VALTYPE>(                  \
       const COLTYPE rows, const COLTYPE cols, const ROWTYPE *ai,               \
@@ -175,6 +194,10 @@ using CSRMatrixVecTypeFloat = matrix_utils::CSRMatrixVec<int, int, float>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeFloat);
 using CSRMatrixVecTypeInt = matrix_utils::CSRMatrixVec<int, int, int>;
 INSTANTIATE_READMATRIXMARKET(CSRMatrixVecTypeInt);
+
+INSTANTIATE_READMATRIXMARKET_CSR_VECTORS(int, int, double);
+INSTANTIATE_READMATRIXMARKET_CSR_VECTORS(int, int, float);
+INSTANTIATE_READMATRIXMARKET_CSR_VECTORS(int, int, int);
 
 INSTANTIATE_WRITEMATRIXMARKET(int, int, double);
 INSTANTIATE_WRITEMATRIXMARKET(int, int, float);

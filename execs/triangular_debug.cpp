@@ -1,3 +1,4 @@
+#include "io.hpp"
 #include "matrix_utils.hpp"
 #include "precond.hpp" // for ILULevelSymbolic / ILULevelNumeric / SplitLDU
 #include "triangle_solve.hpp"
@@ -19,7 +20,7 @@ static CSRMatrix<int, int, double> loadMatrix( const std::string& path )
     std::vector<int> rows;
     std::vector<int> cols;
     std::vector<double> vals;
-    utils::read_matrix_market_csr( f, rows, cols, vals );
+    matrix_utils::readMatrixMarket( f, rows, cols, vals );
     CSRMatrix<int, int, double> M;
     M.rows = rows.size() - 1;
     M.cols = M.rows;
