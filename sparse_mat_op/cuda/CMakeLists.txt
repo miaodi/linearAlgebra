@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(sparse_mat_op_cuda CUDA CXX)
 
+find_package(BLAS REQUIRED)
+
+if(TARGET BLAS::BLAS)
+    set(LINEAR_ALGEBRA_BLAS_LIB BLAS::BLAS)
+else()
+    set(LINEAR_ALGEBRA_BLAS_LIB ${BLAS_LIBRARIES})
+endif()
+
 set(CUDA_SOURCES
     cuda_gmres.cu
     cuda_bicgstab.cu
@@ -36,6 +44,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     CUDA::cusparse
     CUDA::cublas
     CUDA::cudart
+    ${LINEAR_ALGEBRA_BLAS_LIB}
     LAPACK::LAPACK
     cuco
 )

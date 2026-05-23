@@ -3,7 +3,12 @@
 #include <algorithm>
 #include <iomanip>
 #include <stdexcept>
-#include <mkl_cblas.h>  // Include MKL CBLAS for CPU BLAS routines
+
+extern "C" {
+void dtrsv_(const char *uplo, const char *trans, const char *diag,
+            const int *n, const double *a, const int *lda, double *x,
+            const int *incx);
+}
 
 namespace matrix_utils::sparse_cuda
 {
@@ -457,18 +462,21 @@ void CudaGMRES::solve_least_squares(int j)
     // Solve upper triangular system H * y = g using CPU BLAS DTRSV
     // H is stored in column-major format in host memory
     // DTRSV parameters:
-    // - CBLAS_ORDER: CblasColMajor (column-major storage)
-    // - CBLAS_UPLO: CblasUpper (upper triangular)
-    // - CBLAS_TRANSPOSE: CblasNoTrans (no transpose)
-    // - CBLAS_DIAG: CblasNonUnit (non-unit diagonal)
+    // - UPLO: U (upper triangular)
+    // - TRANS: N (no transpose)
+    // - DIAG: N (non-unit diagonal)
     // - N: size of the system (j)
     // - A: Hessenberg matrix (_h_H)
     // - lda: leading dimension (_current_restart)
     // - X: right-hand side and solution vector (_h_g)
     // - incX: increment for X (1)
-    
-    cblas_dtrsv(CblasColMajor, CblasUpper, CblasNoTrans, CblasNonUnit,
-                j, _h_H.data(), _current_restart, _h_g.data(), 1);
+    const char uplo = 'U';
+    const char trans = 'N';
+    const char diag = 'N';
+    const int incx = 1;
+
+    dtrsv_(&uplo, &trans, &diag, &j, _h_H.data(), &_current_restart,
+           _h_g.data(), &incx);
 }
 
 void CudaGMRES::update_solution(DeviceVectorView& d_x, int j)
