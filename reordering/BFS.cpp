@@ -2,8 +2,8 @@
 #include "BitVector.hpp"
 #include <algorithm>
 #include <cstdint>
-#include <execution>
 #include <iostream>
+#include <numeric>
 #include <omp.h>
 
 namespace reordering {
@@ -63,7 +63,10 @@ bool PBFS_Fn(COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
              std::vector<COLTYPE> &levels, std::vector<COLTYPE> &lastLevel) {
   if constexpr (RECORDLEVEL) {
     levels.resize(rows);
-    std::fill_n(std::execution::par_unseq, levels.begin(), levels.size(), -1);
+#pragma omp parallel for
+    for (COLTYPE i = 0; i < rows; ++i) {
+      levels[i] = -1;
+    }
   }
   const COLTYPE base = static_cast<COLTYPE>(ai[0]);
   bool stat = true;

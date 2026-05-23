@@ -101,6 +101,7 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(cxxopts)
+find_package(OpenMP REQUIRED)
 
 # FetchContent_Declare(
 #   cereal
@@ -139,7 +140,6 @@ if(USE_MKL)
   set(MKL_LINK static)
   find_package(MKL CONFIG REQUIRED)
   find_package(TBB REQUIRED)
-  find_package(OpenMP REQUIRED)
   
   # add_compile_definitions(USE_MKL)
   message(STATUS "MKL enabled with interface: ${MKL_INTERFACE}, threading: ${MKL_THREADING}")
@@ -278,7 +278,9 @@ add_subdirectory(utils)
 add_subdirectory(third_party/stb)
 add_subdirectory(sparse_mat_op)
 add_subdirectory(graph)
-add_subdirectory(mkl_wrapper)
+if(USE_MKL)
+  add_subdirectory(mkl_wrapper)
+endif()
 add_subdirectory(reordering)
 add_subdirectory(factorization)
 add_subdirectory(solver)

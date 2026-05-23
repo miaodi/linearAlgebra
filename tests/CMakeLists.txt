@@ -26,6 +26,22 @@ if(NOT USE_CUDA)
    list(APPEND EXCLUDED_TESTS "cuda_ilu_symbolic_test.cpp" "cuda_ilu_base_test.cpp" "cuda_csr_utils_test.cu")
 endif()
 
+set(MKL_REQUIRED_TESTS
+   "mkl_sparse_mat_test.cpp"
+   "precond_test.cpp"
+   "solver_test.cpp"
+   "uncatergorized_test.cpp"
+)
+
+if(NOT USE_MKL)
+   list(APPEND EXCLUDED_TESTS ${MKL_REQUIRED_TESTS})
+endif()
+
+set(TEST_LIBS GTest::gtest_main GTest::gmock_main solver utils reordering factorization OpenMP::OpenMP_CXX ${LAPACK_LIBRARIES})
+if(USE_MKL)
+   list(APPEND TEST_LIBS mkl_wrapper)
+endif()
+
 foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
    get_filename_component(ONE_TEST_EXEC ${ONE_TEST_CPP} NAME_WE)
    get_filename_component(ONE_TEST_FILENAME ${ONE_TEST_CPP} NAME)
@@ -52,7 +68,7 @@ foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
    set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_TEST_EXEC})
    
    # Link standard libraries
-   target_link_libraries(${TARGET_NAME} PRIVATE GTest::gtest_main GTest::gmock_main solver mkl_wrapper utils reordering factorization OpenMP::OpenMP_CXX ${LAPACK_LIBRARIES})
+   target_link_libraries(${TARGET_NAME} PRIVATE ${TEST_LIBS})
    
    # Add CUDA-specific dependencies if this is a CUDA test
    if(IS_CUDA_TEST GREATER -1 AND USE_CUDA)

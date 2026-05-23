@@ -1,5 +1,7 @@
 #pragma once
 
+#include "config.h"
+
 #ifdef USE_MKL
 #include <mkl_spblas.h>
 #include <mkl_types.h>

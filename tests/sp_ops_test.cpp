@@ -4,7 +4,6 @@
 #include "spadd.hpp"
 #include "graph_algs.hpp"
 #include "utils.h"
-#include "mkl_sparse_mat.h"
 #include <algorithm>
 #include <array>
 #include <fstream>

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5...3.20)
 project(execs)
 
-set(libs utils fast_matrix_market::fast_matrix_market Eigen3::Eigen mkl_wrapper reordering sparse_mat_op graph factorization cxxopts)
+set(libs utils fast_matrix_market::fast_matrix_market Eigen3::Eigen reordering sparse_mat_op graph factorization cxxopts)
 
 add_executable(test_chol test_chol.cpp)
 target_link_libraries(test_chol PRIVATE ${libs})

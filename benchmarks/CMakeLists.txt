@@ -13,15 +13,17 @@ endif()
 
 # List of benchmarks to exclude due to compilation issues
 set(EXCLUDED_BENCHMARKS 
-    "precond_bench.cpp"
     "reordering_bench.cpp"
     "unionfind_bench.cpp"
 )
 
 set(CUDA_REQUIRED_BENCHMARKS
-    "spmv_bench.cpp"
     "spmv_reorder_bench.cpp"
     "spmm_struct_bench.cpp"
+)
+
+set(CUDA_OPTIONAL_BENCHMARKS
+    "spmv_bench.cpp"
 )
 
 foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
@@ -45,6 +47,10 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
    endif()
    list(FIND CUDA_REQUIRED_BENCHMARKS ${ONE_BENCH_FILENAME} REQUIRES_CUDA)
    if(REQUIRES_CUDA GREATER -1)
+      set(IS_CUDA_BENCH TRUE)
+   endif()
+   list(FIND CUDA_OPTIONAL_BENCHMARKS ${ONE_BENCH_FILENAME} USES_CUDA_WHEN_AVAILABLE)
+   if(USES_CUDA_WHEN_AVAILABLE GREATER -1 AND USE_CUDA)
       set(IS_CUDA_BENCH TRUE)
    endif()
 
@@ -74,7 +80,7 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
        target_link_libraries(${TARGET_NAME} PRIVATE factorization)
     endif()
 
-    # CUDA benchmarks keep the normal benchmark dependencies and add CUDA usage.
+     # CUDA benchmarks keep the normal benchmark dependencies and add CUDA usage.
    if(IS_CUDA_BENCH)
       if(BENCH_EXT STREQUAL ".cu")
          set_target_properties(${TARGET_NAME} PROPERTIES 

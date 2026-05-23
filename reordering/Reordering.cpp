@@ -2,7 +2,6 @@
 #include "UnionFind.h"
 #include "utils.h"
 #include <algorithm>
-#include <execution>
 #include <iostream>
 #include <span>
 #ifdef USE_METIS_LIB
