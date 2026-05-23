@@ -72,6 +72,59 @@ COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
 }
 
 template <typename COLTYPE>
+COLTYPE parentTopologicalOrder(const COLTYPE nnodes, const COLTYPE base,
+                               const COLTYPE *parent,
+                               const COLTYPE *child_count, COLTYPE *scratch,
+                               COLTYPE *perm, COLTYPE *prefix) {
+  prefix[0] = base;
+  if (nnodes == 0) {
+    return 0;
+  }
+
+  std::copy(child_count, child_count + nnodes, scratch);
+
+  COLTYPE processed = 0;
+  COLTYPE level = 0;
+  for (COLTYPE i = 0; i < nnodes; i++) {
+    if (scratch[i] == 0) {
+      perm[processed++] = i + base;
+    }
+  }
+  prefix[1] = processed + base;
+
+  while (processed != nnodes) {
+    const auto level_begin = prefix[level] - base;
+    const auto level_end = prefix[level + 1] - base;
+    if (level_begin == level_end) {
+      return level + 1;
+    }
+
+    for (auto pos = level_begin; pos < level_end; pos++) {
+      const auto node = perm[pos] - base;
+      const auto parent_label = parent[node];
+      if (parent_label < base) {
+        return level + 1;
+      }
+      const auto parent_node = parent_label - base;
+      if (parent_node == node) {
+        continue;
+      }
+      if (parent_node >= nnodes) {
+        return level + 1;
+      }
+      if (--scratch[parent_node] == 0) {
+        perm[processed++] = parent_label;
+      }
+    }
+
+    ++level;
+    prefix[level + 1] = processed + base;
+  }
+
+  return level + 1;
+}
+
+template <typename COLTYPE>
 void PostOrder<COLTYPE>::buildChildren(const COLTYPE nnodes, const COLTYPE base,
                                        const COLTYPE *parent) {
   _childrenPrefix.resize(nnodes + 1);
@@ -221,6 +274,10 @@ void subtreeSize(const COLTYPE nnodes, const COLTYPE base,
       const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
       COLTYPE *first_child, COLTYPE *next_sibling, COLTYPE *roots,             \
       COLTYPE *child_count);                                                   \
+  template COLTYPE parentTopologicalOrder<COLTYPE>(                            \
+      const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
+      const COLTYPE *child_count, COLTYPE *scratch, COLTYPE *perm,             \
+      COLTYPE *prefix);                                                        \
   template void subtreeSize<COLTYPE>(const COLTYPE nnodes, const COLTYPE base, \
                                      const COLTYPE *parent,                    \
                                      COLTYPE *subtree_size);                   \

@@ -37,6 +37,22 @@ COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
                              COLTYPE *next_sibling, COLTYPE *roots = nullptr,
                              COLTYPE *child_count = nullptr);
 
+/// @brief Compute bottom-up topological levels from a parent-array forest.
+///
+/// Array positions are zero-based, while stored parent labels include base. A
+/// root is encoded as parent[i] == i + base. child_count must contain the
+/// number of children for each zero-based node, scratch must hold nnodes
+/// entries, perm receives labels in child-before-parent order, and prefix
+/// receives level boundaries using the same base. The caller can detect an
+/// invalid parent forest by checking prefix[levels] - base == nnodes.
+/// @tparam COLTYPE column index type
+/// @return number of computed levels
+template <typename COLTYPE>
+COLTYPE parentTopologicalOrder(const COLTYPE nnodes, const COLTYPE base,
+                               const COLTYPE *parent,
+                               const COLTYPE *child_count, COLTYPE *scratch,
+                               COLTYPE *perm, COLTYPE *prefix);
+
 /// @brief Compute a postorder permutation of an elimination tree.
 ///
 /// Array positions are zero-based, while stored node labels include base.

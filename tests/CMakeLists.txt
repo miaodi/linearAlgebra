@@ -52,7 +52,7 @@ foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
    set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${ONE_TEST_EXEC})
    
    # Link standard libraries
-   target_link_libraries(${TARGET_NAME} PRIVATE GTest::gtest_main GTest::gmock_main solver mkl_wrapper utils reordering OpenMP::OpenMP_CXX ${LAPACK_LIBRARIES})
+   target_link_libraries(${TARGET_NAME} PRIVATE GTest::gtest_main GTest::gmock_main solver mkl_wrapper utils reordering factorization OpenMP::OpenMP_CXX ${LAPACK_LIBRARIES})
    
    # Add CUDA-specific dependencies if this is a CUDA test
    if(IS_CUDA_TEST GREATER -1 AND USE_CUDA)

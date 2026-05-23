@@ -84,6 +84,15 @@ public:
 
   SymbolicCholeskyCol(const int nthreads) : _nthreads(nthreads) {}
 
+  /// @brief Column-oriented symbolic Cholesky using Theorem 4.8 of
+  /// @cite scott2023algorithms.
+  ///
+  /// For each column j, the pattern of L(:,j) is the adjacency of the
+  /// elimination-tree subtree T(j). Equivalently, Algorithm 4.4 computes it as
+  /// the union of the original adjacency of j and the already-computed patterns
+  /// of j's children in the elimination tree. This version schedules ready
+  /// columns through one shared queue: leaves are ready initially, and a parent
+  /// becomes ready after all of its children have been processed.
   bool apply(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
              const COLTYPE *parent, CSRMatrixType &L);
 
@@ -114,6 +123,13 @@ public:
 
   SymbolicCholeskyColV2(const int nthreads) : _nthreads(nthreads) {}
 
+  /// @brief Work-stealing variant of the Theorem 4.8/Algorithm 4.4 symbolic
+  /// Cholesky column pattern construction.
+  ///
+  /// The computed pattern is the same as SymbolicCholeskyCol: merge the
+  /// structural column of A with child column patterns in the elimination tree.
+  /// This version keeps per-thread ready queues to reduce contention; a worker
+  /// pops locally first and steals from other queues when needed.
   bool apply(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
              const COLTYPE *parent, CSRMatrixType &L);
 
@@ -138,5 +154,44 @@ private:
   std::condition_variable _readyCv;
   std::atomic<COLTYPE> _readyTasks;
   std::atomic<COLTYPE> _finished;
+};
+
+template <matrix_utils::ResizableCSR CSRMatrixType>
+class SymbolicCholeskyColV3 {
+public:
+  using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+  using COLTYPE = typename CSRMatrixType::COLTYPE;
+
+  SymbolicCholeskyColV3(const int nthreads) : _nthreads(nthreads) {}
+
+  /// @brief Topological-order variant of the Theorem 4.8/Algorithm 4.4
+  /// symbolic Cholesky column pattern construction.
+  ///
+  /// The topological order gives a dependency-respecting traversal of the
+  /// elimination tree. Threads claim columns from that order and spin only on
+  /// children that have not finished yet, then merge the child patterns to form
+  /// colL{j} as in Theorem 4.8.
+  bool apply(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
+             const COLTYPE *parent, CSRMatrixType &L);
+
+private:
+  void task(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
+            const int tid, CSRMatrixType &L);
+
+private:
+  int _nthreads;
+  std::vector<ROWTYPE> _diag;
+  std::vector<std::vector<COLTYPE>> _aj;
+
+  std::vector<COLTYPE> _degrees;
+  std::vector<COLTYPE> _firstChild;
+  std::vector<COLTYPE> _nextSibling;
+  std::vector<COLTYPE> _visited;
+  std::vector<std::vector<COLTYPE>> _pendingChildren;
+  std::vector<COLTYPE> _topoPerm;
+  std::vector<COLTYPE> _topoPrefix;
+  std::unique_ptr<std::atomic<int>[]> _ready;
+  COLTYPE _readySize{0};
+  std::atomic<COLTYPE> _nextTask;
 };
 } // namespace factorization

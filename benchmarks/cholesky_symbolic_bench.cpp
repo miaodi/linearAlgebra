@@ -102,6 +102,26 @@ static void BM_SymbolicCholeskyColV2( benchmark::State& state, const BenchInput*
     setCounters( state, input->matrix, &factor );
 }
 
+static void BM_SymbolicCholeskyColV3( benchmark::State& state, const BenchInput* input )
+{
+    const int nthreads = static_cast<int>( state.range( 0 ) );
+    factorization::SymbolicCholeskyColV3<CSRMatrixType> symbolic_cholesky( nthreads );
+    CSRMatrixType factor;
+
+    for ( auto _ : state )
+    {
+        if ( !symbolic_cholesky.apply( input->matrix.rows, input->matrix.AI(), input->matrix.AJ(),
+                                       input->parent.data(), factor ) )
+        {
+            state.SkipWithError( "matrix is missing explicit diagonal entries" );
+            break;
+        }
+        benchmark::DoNotOptimize( factor.AI() );
+        benchmark::DoNotOptimize( factor.AJ() );
+    }
+    setCounters( state, input->matrix, &factor );
+}
+
 int main( int argc, char** argv )
 {
     cxxopts::Options options( "cholesky_symbolic_bench",
@@ -129,6 +149,7 @@ int main( int argc, char** argv )
 
     benchmark::RegisterBenchmark( "SymbolicCholeskyCol", BM_SymbolicCholeskyCol, &input )->Arg( nthreads );
     benchmark::RegisterBenchmark( "SymbolicCholeskyColV2", BM_SymbolicCholeskyColV2, &input )->Arg( nthreads );
+    benchmark::RegisterBenchmark( "SymbolicCholeskyColV3", BM_SymbolicCholeskyColV3, &input )->Arg( nthreads );
 
     benchmark::Initialize( &argc, argv );
     benchmark::RunSpecifiedBenchmarks();

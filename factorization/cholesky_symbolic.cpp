@@ -2,8 +2,10 @@
 #include "tree.hpp"
 #include "matrix_utils.hpp"
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <numeric>
@@ -194,6 +196,8 @@ bool SymbolicCholeskyCol<CSRMatrixType>::apply(const COLTYPE nnodes,
   L.rows = nnodes;
   L.cols = nnodes;
 
+  // Children in the elimination tree are exactly the child{j} sets used by
+  // Algorithm 4.4; _degrees counts unprocessed children for ready scheduling.
   _degrees.resize(nnodes);
   _firstChild.resize(nnodes);
   _nextSibling.resize(nnodes);
@@ -229,9 +233,10 @@ bool SymbolicCholeskyCol<CSRMatrixType>::apply(const COLTYPE nnodes,
     auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
         L.AI(), L.AI() + nnodes, tid, _nthreads);
     for (auto i = start; i < end; i++) {
-      for (auto j = L.AI()[i] - base; j < L.AI()[i + 1] - base; j++) {
-        L.AJ()[j] = _aj[i][j - (L.AI()[i] - base)];
-      }
+      assert(_aj[i].size() ==
+             static_cast<std::size_t>(L.AI()[i + 1] - L.AI()[i]));
+      std::memcpy(L.AJ() + L.AI()[i] - base, _aj[i].data(),
+                  _aj[i].size() * sizeof(COLTYPE));
     }
   }
   return true;
@@ -258,10 +263,15 @@ void SymbolicCholeskyCol<CSRMatrixType>::task(const COLTYPE nnodes,
       }
     };
 
+    // Start with adj_G(A){task} restricted to the lower triangle, including the
+    // diagonal. For a symmetric pattern this is the structural column of A.
     for (auto j = _diag[task] - base; j < ai[task + 1] - base; j++) {
       appendIfNew(aj[j]);
     }
 
+    // Theorem 4.8 / Algorithm 4.4: colL{task} is the union of A's structural
+    // column and all already-computed child column patterns, excluding task
+    // itself from each child pattern by skipping the child's diagonal entry.
     auto child = _firstChild[task];
     while (child != std::numeric_limits<COLTYPE>::max()) {
       auto start = _aj[child].data() + 1; // skip diagonal
@@ -275,7 +285,7 @@ void SymbolicCholeskyCol<CSRMatrixType>::task(const COLTYPE nnodes,
     L.AI()[task + 1] = _aj[task].size();
   };
 
-  std::cout << "thread " << tid << " starting..." << std::endl;
+  // std::cout << "thread " << tid << " starting..." << std::endl;
   while (true) {
     COLTYPE task;
     {
@@ -292,7 +302,8 @@ void SymbolicCholeskyCol<CSRMatrixType>::task(const COLTYPE nnodes,
     // process the task
     work(task);
 
-    // update the queue
+    // A parent becomes ready exactly when all child column patterns needed by
+    // the union above have been computed.
     auto parent_task = parent[task] - base;
     COLTYPE deg;
     if (parent_task != task) {
@@ -358,6 +369,8 @@ bool SymbolicCholeskyColV2<CSRMatrixType>::apply(const COLTYPE nnodes,
   L.rows = nnodes;
   L.cols = nnodes;
 
+  // Children in the elimination tree are exactly the child{j} sets used by
+  // Algorithm 4.4; _degrees counts unprocessed children for ready scheduling.
   _degrees.resize(nnodes);
   _firstChild.resize(nnodes);
   _nextSibling.resize(nnodes);
@@ -395,9 +408,10 @@ bool SymbolicCholeskyColV2<CSRMatrixType>::apply(const COLTYPE nnodes,
     auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
         L.AI(), L.AI() + nnodes, tid, _nthreads);
     for (auto i = start; i < end; i++) {
-      for (auto j = L.AI()[i] - base; j < L.AI()[i + 1] - base; j++) {
-        L.AJ()[j] = _aj[i][j - (L.AI()[i] - base)];
-      }
+      assert(_aj[i].size() ==
+             static_cast<std::size_t>(L.AI()[i + 1] - L.AI()[i]));
+      std::memcpy(L.AJ() + L.AI()[i] - base, _aj[i].data(),
+                  _aj[i].size() * sizeof(COLTYPE));
     }
   }
   return true;
@@ -466,10 +480,16 @@ void SymbolicCholeskyColV2<CSRMatrixType>::task(
       }
     };
 
+    // Start with adj_G(A){task} restricted to the lower triangle, including the
+    // diagonal. For a symmetric pattern this is the structural column of A.
     for (auto j = _diag[task] - base; j < ai[task + 1] - base; j++) {
       appendIfNew(aj[j]);
     }
 
+    // Theorem 4.8 / Algorithm 4.4: merge the already-computed patterns of the
+    // children of task in the elimination tree. Skipping the first child entry
+    // removes the child's diagonal, so only the off-diagonal column pattern is
+    // propagated upward.
     auto child = _firstChild[task];
     while (child != std::numeric_limits<COLTYPE>::max()) {
       auto start = _aj[child].data() + 1; // skip diagonal
@@ -515,6 +535,192 @@ void SymbolicCholeskyColV2<CSRMatrixType>::task(
   }
 }
 
+template <matrix_utils::ResizableCSR CSRMatrixType>
+bool SymbolicCholeskyColV3<CSRMatrixType>::apply(const COLTYPE nnodes,
+                                                 const ROWTYPE *ai,
+                                                 const COLTYPE *aj,
+                                                 const COLTYPE *parent,
+                                                 CSRMatrixType &L) {
+  if (_nthreads <= 0) {
+    return false;
+  }
+  const auto base = ai[0];
+
+  _diag.resize(nnodes);
+  const bool has_diagonal = matrix_utils::Diagonal(
+      nnodes, ai, aj, (double *)nullptr, _diag.data(), (double *)nullptr);
+  if (!has_diagonal) {
+    return false;
+  }
+
+  _aj.resize(nnodes);
+  const auto thread_workspace_size = static_cast<std::size_t>(_nthreads) *
+                                     static_cast<std::size_t>(nnodes);
+  _visited.resize(thread_workspace_size);
+  _pendingChildren.resize(_nthreads);
+
+  L.ResizeAI(nnodes + 1);
+  L.AI()[0] = base;
+  L.rows = nnodes;
+  L.cols = nnodes;
+
+  // Children in the elimination tree are exactly the child{j} sets used by
+  // Algorithm 4.4. V3 also reuses _degrees for child counts while merging.
+  _degrees.resize(nnodes);
+  _firstChild.resize(nnodes);
+  _nextSibling.resize(nnodes);
+  graph::parentToChildSibling(nnodes, base, parent, _firstChild.data(),
+                              _nextSibling.data(),
+                              static_cast<COLTYPE *>(nullptr),
+                              _degrees.data());
+
+  // Any topological order of the elimination tree is valid: a column only needs
+  // its children processed before their patterns can be merged.
+  _topoPerm.resize(nnodes);
+  _topoPrefix.resize(nnodes + 1);
+  const auto levels = graph::parentTopologicalOrder(
+      nnodes, base, parent, _degrees.data(), _visited.data(), _topoPerm.data(),
+      _topoPrefix.data());
+  if (_topoPrefix[levels] - base != nnodes) {
+    return false;
+  }
+
+  const auto unvisited = std::numeric_limits<COLTYPE>::max();
+#pragma omp parallel for num_threads(_nthreads)
+  for (std::ptrdiff_t i = 0;
+       i < static_cast<std::ptrdiff_t>(thread_workspace_size); i++) {
+    const auto idx = static_cast<std::size_t>(i);
+    _visited[idx] = unvisited;
+  }
+
+  if (_readySize < nnodes) {
+    _ready.reset(new std::atomic<int>[nnodes]);
+    _readySize = nnodes;
+  }
+#pragma omp parallel for num_threads(_nthreads)
+  for (std::ptrdiff_t i = 0; i < static_cast<std::ptrdiff_t>(nnodes); i++) {
+    _ready[static_cast<std::size_t>(i)].store(0, std::memory_order_relaxed);
+  }
+  _nextTask.store(0, std::memory_order_relaxed);
+
+  std::vector<std::thread> threads;
+  for (int i = 0; i < _nthreads; i++) {
+    threads.emplace_back(&SymbolicCholeskyColV3<CSRMatrixType>::task, this,
+                         nnodes, ai, aj, i, std::ref(L));
+  }
+  for (auto &thread : threads) {
+    thread.join();
+  }
+
+  std::inclusive_scan(L.AI(), L.AI() + nnodes + 1, L.AI());
+  L.ResizeAJ(L.AI()[nnodes] - base);
+  L.ResizeAV(L.AI()[nnodes] - base);
+
+#pragma omp parallel num_threads(_nthreads)
+  {
+    const int tid = omp_get_thread_num();
+    auto [start, end] = utils::LoadPrefixBalancedPartitionPos(
+        L.AI(), L.AI() + nnodes, tid, _nthreads);
+    for (auto i = start; i < end; i++) {
+      assert(_aj[i].size() ==
+             static_cast<std::size_t>(L.AI()[i + 1] - L.AI()[i]));
+      std::memcpy(L.AJ() + L.AI()[i] - base, _aj[i].data(),
+                  _aj[i].size() * sizeof(COLTYPE));
+    }
+  }
+  return true;
+}
+
+template <matrix_utils::ResizableCSR CSRMatrixType>
+void SymbolicCholeskyColV3<CSRMatrixType>::task(
+    const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj, const int tid,
+    CSRMatrixType &L) {
+  const auto base = ai[0];
+  auto *visited = _visited.data() + static_cast<std::size_t>(tid) *
+                                        static_cast<std::size_t>(nnodes);
+  auto &pending_children = _pendingChildren[tid];
+
+  auto work = [&, this](const COLTYPE task) {
+    _aj[task].clear();
+
+    auto appendIfNew = [&](const COLTYPE node) {
+      const auto node_id = node - base;
+      if (visited[node_id] != task) {
+        visited[node_id] = task;
+        _aj[task].push_back(node);
+      }
+    };
+
+    // Start with adj_G(A){task} restricted to the lower triangle, including the
+    // diagonal. For a symmetric pattern this is the structural column of A.
+    for (auto j = _diag[task] - base; j < ai[task + 1] - base; j++) {
+      appendIfNew(aj[j]);
+    }
+
+    auto mergeChild = [&](const COLTYPE child) {
+      // Skip the child diagonal so the child contributes its off-diagonal
+      // column pattern, matching the child-pattern union in (4.6).
+      auto start = _aj[child].data() + 1; // skip diagonal
+      auto end = _aj[child].data() + _aj[child].size();
+      for (auto it = start; it < end; it++) {
+        appendIfNew(*it);
+      }
+    };
+
+    // Claiming tasks in topological order is cheap, but threads can overtake
+    // one another; wait only for the children that are not ready yet.
+    const auto child_count = static_cast<std::size_t>(_degrees[task]);
+    if (pending_children.capacity() < child_count) {
+      pending_children.reserve(child_count);
+    }
+    pending_children.clear();
+    auto child = _firstChild[task];
+    while (child != std::numeric_limits<COLTYPE>::max()) {
+      if (_ready[child].load(std::memory_order_acquire) != 0) {
+        mergeChild(child);
+      } else {
+        pending_children.push_back(child);
+      }
+      child = _nextSibling[child];
+    }
+
+    COLTYPE spin_count = 0;
+    while (!pending_children.empty()) {
+      bool merged_any = false;
+      std::size_t write = 0;
+      const auto pending_count = pending_children.size();
+      for (std::size_t read = 0; read < pending_count; read++) {
+        const auto child = pending_children[read];
+        if (_ready[child].load(std::memory_order_acquire) != 0) {
+          mergeChild(child);
+          merged_any = true;
+        } else {
+          pending_children[write++] = child;
+        }
+      }
+      pending_children.resize(write);
+
+      if (merged_any) {
+        spin_count = 0;
+      } else if (++spin_count % 64 == 0) {
+        std::this_thread::yield();
+      }
+    }
+
+    std::sort(_aj[task].begin(), _aj[task].end());
+    L.AI()[task + 1] = _aj[task].size();
+    _ready[task].store(1, std::memory_order_release);
+  };
+
+  while (true) {
+    const auto task_pos = _nextTask.fetch_add(1, std::memory_order_relaxed);
+    if (task_pos >= nnodes) {
+      break;
+    }
+    work(_topoPerm[task_pos] - base);
+  }
+}
+
 // instantiate for common types
 #define INSTANTIATE_CHOLESKY(ROWTYPE, COLTYPE)                                 \
   template void nnzCount<ROWTYPE, COLTYPE>(                                    \
@@ -540,5 +746,9 @@ template class SymbolicCholeskyCol<
 template class SymbolicCholeskyColV2<
     ::matrix_utils::CSRMatrix<std::int32_t, std::int32_t, double>>;
 template class SymbolicCholeskyColV2<
+    ::matrix_utils::CSRMatrix<std::int64_t, std::int64_t, double>>;
+template class SymbolicCholeskyColV3<
+    ::matrix_utils::CSRMatrix<std::int32_t, std::int32_t, double>>;
+template class SymbolicCholeskyColV3<
     ::matrix_utils::CSRMatrix<std::int64_t, std::int64_t, double>>;
 } // namespace factorization
