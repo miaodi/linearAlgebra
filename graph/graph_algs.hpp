@@ -162,10 +162,26 @@ void BuildPermutationFromSccLevels(COLTYPE num_sccs,
 template <typename ROWTYPE, typename COLTYPE>
 struct KahnSerial
 {
+    /// @brief Compute topological sort from a successor graph and dependency counts
+    /// @param nodes Number of nodes in the graph
+    /// @param successor_ai Row pointers for outgoing edges (node -> dependent nodes)
+    /// @param successor_aj Column indices for outgoing edges
+    /// @param in_degree Number of incoming dependencies for each node (self-loops excluded)
+    /// @param perm Output array for topological ordering (size = nodes)
+    /// @param prefix Output array for level set boundaries (size = num_levels + 1)
+    /// @note Self-loop entries in successor_aj are ignored.
+    /// @return Number of levels in the topological ordering
+    COLTYPE fromSuccessors( const COLTYPE nodes,
+                            ROWTYPE const* successor_ai,
+                            COLTYPE const* successor_aj,
+                            COLTYPE const* in_degree,
+                            COLTYPE* perm,
+                            COLTYPE* prefix );
+
     /// @brief Compute topological sort using Kahn's algorithm
     /// @param nodes Number of nodes in the graph
-    /// @param ai Row pointers array (ai[0] contains the base indexing)
-    /// @param aj Column indices array
+    /// @param ai Row pointers array for incoming dependencies (ai[0] contains the base indexing)
+    /// @param aj Column indices array for incoming dependencies
     /// @param perm Output array for topological ordering (size = nodes)
     /// @param prefix Output array for level set boundaries (size = num_levels + 1)
     /// @note Self-loop entries are ignored.
@@ -177,6 +193,7 @@ struct KahnSerial
                         COLTYPE* prefix );
 
     std::vector<COLTYPE> _degrees;    // In-degree of each node
+    std::vector<COLTYPE> _initial_degrees; // Reusable storage for dependency counts
     std::vector<ROWTYPE> _t_ai;       // Transpose graph row pointers
     std::vector<COLTYPE> _t_aj;       // Transpose graph column indices
 };
@@ -200,11 +217,27 @@ struct KahnParallel
           _threads_prefix( _nthreads + 1 )
     {
     }
-    
+
+    /// @brief Compute topological sort from a successor graph and dependency counts
+    /// @param nodes Number of nodes in the graph
+    /// @param successor_ai Row pointers for outgoing edges (node -> dependent nodes)
+    /// @param successor_aj Column indices for outgoing edges
+    /// @param in_degree Number of incoming dependencies for each node (self-loops excluded)
+    /// @param perm Output array for topological ordering (size = nodes)
+    /// @param prefix Output array for level set boundaries (size = num_levels + 1)
+    /// @note Self-loop entries in successor_aj are ignored.
+    /// @return Number of levels in the topological ordering
+    COLTYPE fromSuccessors( const COLTYPE nodes,
+                            ROWTYPE const* successor_ai,
+                            COLTYPE const* successor_aj,
+                            COLTYPE const* in_degree,
+                            COLTYPE* perm,
+                            COLTYPE* prefix );
+
     /// @brief Compute topological sort using parallel Kahn's algorithm
     /// @param nodes Number of nodes in the graph
-    /// @param ai Row pointers array (ai[0] contains the base indexing)
-    /// @param aj Column indices array
+    /// @param ai Row pointers array for incoming dependencies (ai[0] contains the base indexing)
+    /// @param aj Column indices array for incoming dependencies
     /// @param perm Output array for topological ordering (size = nodes)
     /// @param prefix Output array for level set boundaries (size = num_levels + 1)
     /// @note Self-loop entries are ignored.
@@ -218,6 +251,7 @@ struct KahnParallel
     int _nthreads;                                      // Number of threads
     std::unique_ptr<std::atomic<COLTYPE>[]> _degrees;  // Atomic in-degrees for parallel updates
     COLTYPE _degrees_size{ 0 };                        // Current size of _degrees array
+    std::vector<COLTYPE> _initial_degrees;              // Reusable storage for dependency counts
     std::vector<ROWTYPE> _t_ai;                        // Transpose graph row pointers
     std::vector<COLTYPE> _t_aj;                        // Transpose graph column indices
     std::vector<std::vector<COLTYPE>> _threads_nodes;  // Per-thread queue of nodes to process

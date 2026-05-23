@@ -549,6 +549,60 @@ TEST(TopologicalSort, IgnoresSelfLoops)
     }
 }
 
+TEST(TopologicalSort, KahnFromSuccessors)
+{
+    auto expect_level = []( const std::vector<int>& perm,
+                            const std::vector<int>& prefix,
+                            int base,
+                            int level,
+                            std::vector<int> expected )
+    {
+        std::vector<int> actual( perm.begin() + prefix[level] - base,
+                                 perm.begin() + prefix[level + 1] - base );
+        for ( auto& node : expected )
+        {
+            node += base;
+        }
+        std::sort( actual.begin(), actual.end() );
+        std::sort( expected.begin(), expected.end() );
+        EXPECT_EQ( actual, expected );
+    };
+
+    for ( int base = 0; base <= 1; ++base )
+    {
+        const int nodes = 4;
+        const std::vector<int> successor_ai{ base, base + 3, base + 5, base + 7, base + 8 };
+        const std::vector<int> successor_aj{ base,     base + 1, base + 2,
+                                             base + 1, base + 3,
+                                             base + 2, base + 3,
+                                             base + 3 };
+        const std::vector<int> in_degree{ 0, 1, 1, 2 };
+
+        std::vector<int> perm( nodes );
+        std::vector<int> prefix( nodes + 1 );
+
+        graph::KahnSerial<int, int> kahn;
+        EXPECT_EQ( kahn.fromSuccessors( nodes, successor_ai.data(), successor_aj.data(), in_degree.data(),
+                                        perm.data(), prefix.data() ),
+                   3 );
+        EXPECT_EQ( prefix[0], base );
+        EXPECT_EQ( prefix[3] - base, nodes );
+        expect_level( perm, prefix, base, 0, { 0 } );
+        expect_level( perm, prefix, base, 1, { 1, 2 } );
+        expect_level( perm, prefix, base, 2, { 3 } );
+
+        graph::KahnParallel<int, int> kahn_parallel( 2 );
+        EXPECT_EQ( kahn_parallel.fromSuccessors( nodes, successor_ai.data(), successor_aj.data(), in_degree.data(),
+                                                 perm.data(), prefix.data() ),
+                   3 );
+        EXPECT_EQ( prefix[0], base );
+        EXPECT_EQ( prefix[3] - base, nodes );
+        expect_level( perm, prefix, base, 0, { 0 } );
+        expect_level( perm, prefix, base, 1, { 1, 2 } );
+        expect_level( perm, prefix, base, 2, { 3 } );
+    }
+}
+
 TEST(TopologicalSort, U)
 {
     const int size = 1003;

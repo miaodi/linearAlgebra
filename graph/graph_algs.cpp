@@ -556,45 +556,23 @@ void BuildPermutationFromSccLevels( COLTYPE num_sccs,
 }
 
 template <typename ROWTYPE, typename COLTYPE>
-COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
-                                                  ROWTYPE const* ai,
-                                                  COLTYPE const* aj,
-                                                  COLTYPE* perm,
-                                                  COLTYPE* prefix )
+COLTYPE KahnSerial<ROWTYPE, COLTYPE>::fromSuccessors( const COLTYPE nodes,
+                                                      ROWTYPE const* successor_ai,
+                                                      COLTYPE const* successor_aj,
+                                                      COLTYPE const* in_degree,
+                                                      COLTYPE* perm,
+                                                      COLTYPE* prefix )
 {
     _degrees.resize( nodes );
-    const auto base = ai[0];
-    const auto nnz = ai[nodes] - base;
-
-    _t_ai.resize( nodes + 1 );
-    _t_aj.resize( nnz );
+    std::copy( in_degree, in_degree + nodes, _degrees.begin() );
+    const auto base = successor_ai[0];
     COLTYPE processed = 0;
     COLTYPE level = 0;
 
-    // reverse graph to get out edges
-    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr, _t_ai.data(),
-                                      _t_aj.data(), (double*)nullptr );
-
     prefix[0] = base;
-
-    auto degree_for = [&]( const COLTYPE i )
-    {
-        COLTYPE degree = 0;
-        const auto row_start = ai[i] - base;
-        const auto row_end = ai[i + 1] - base;
-        for ( auto pos = row_start; pos < row_end; ++pos )
-        {
-            if ( aj[pos] - base != i )
-            {
-                ++degree;
-            }
-        }
-        return degree;
-    };
 
     for ( COLTYPE i = 0; i < nodes; ++i )
     {
-        _degrees[i] = degree_for( i );
         if ( _degrees[i] == 0 )
         {
             perm[processed++] = i + base;
@@ -605,15 +583,15 @@ COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
 
     auto process_row = [&]( const COLTYPE idx, const auto& handle_neighbor )
     {
-        const auto row_start = _t_ai[idx] - base;
-        const auto row_end = _t_ai[idx + 1] - base;
+        const auto row_start = successor_ai[idx] - base;
+        const auto row_end = successor_ai[idx + 1] - base;
         for ( auto pos = row_start; pos < row_end; ++pos )
         {
-            if ( _t_aj[pos] - base == idx )
+            if ( successor_aj[pos] - base == idx )
             {
                 continue;
             }
-            handle_neighbor( _t_aj[pos] );
+            handle_neighbor( successor_aj[pos] );
         }
     };
 
@@ -640,30 +618,18 @@ COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
 }
 
 template <typename ROWTYPE, typename COLTYPE>
-COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
-                                                    ROWTYPE const* ai,
-                                                    COLTYPE const* aj,
-                                                    COLTYPE* perm,
-                                                    COLTYPE* prefix )
+COLTYPE KahnSerial<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
+                                                  ROWTYPE const* ai,
+                                                  COLTYPE const* aj,
+                                                  COLTYPE* perm,
+                                                  COLTYPE* prefix )
 {
-    if ( _degrees_size < nodes )
-    {
-        _degrees.reset( new std::atomic<COLTYPE>[nodes] );
-        _degrees_size = nodes;
-    }
     const auto base = ai[0];
     const auto nnz = ai[nodes] - base;
 
+    _initial_degrees.resize( nodes );
     _t_ai.resize( nodes + 1 );
     _t_aj.resize( nnz );
-    COLTYPE processed = 0;
-    COLTYPE level = 0;
-
-    // reverse graph
-    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr, _t_ai.data(),
-                                      _t_aj.data(), (double*)nullptr );
-
-    prefix[0] = base;
 
     auto degree_for = [&]( const COLTYPE i )
     {
@@ -680,17 +646,49 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
         return degree;
     };
 
+    for ( COLTYPE i = 0; i < nodes; ++i )
+    {
+        _initial_degrees[i] = degree_for( i );
+    }
+
+    // Rows in ai/aj list incoming dependencies. Kahn's update step needs the
+    // successor graph instead, so transpose once and reuse the successor core.
+    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr, _t_ai.data(),
+                                      _t_aj.data(), (double*)nullptr );
+
+    return fromSuccessors( nodes, _t_ai.data(), _t_aj.data(), _initial_degrees.data(), perm, prefix );
+}
+
+template <typename ROWTYPE, typename COLTYPE>
+COLTYPE KahnParallel<ROWTYPE, COLTYPE>::fromSuccessors( const COLTYPE nodes,
+                                                        ROWTYPE const* successor_ai,
+                                                        COLTYPE const* successor_aj,
+                                                        COLTYPE const* in_degree,
+                                                        COLTYPE* perm,
+                                                        COLTYPE* prefix )
+{
+    if ( _degrees_size < nodes )
+    {
+        _degrees.reset( new std::atomic<COLTYPE>[nodes] );
+        _degrees_size = nodes;
+    }
+    const auto base = successor_ai[0];
+    COLTYPE processed = 0;
+    COLTYPE level = 0;
+
+    prefix[0] = base;
+
     auto process_row = [&]( const COLTYPE idx, const auto& handle_neighbor )
     {
-        const auto row_start = _t_ai[idx] - base;
-        const auto row_end = _t_ai[idx + 1] - base;
+        const auto row_start = successor_ai[idx] - base;
+        const auto row_end = successor_ai[idx + 1] - base;
         for ( auto pos = row_start; pos < row_end; ++pos )
         {
-            if ( _t_aj[pos] - base == idx )
+            if ( successor_aj[pos] - base == idx )
             {
                 continue;
             }
-            handle_neighbor( _t_aj[pos] );
+            handle_neighbor( successor_aj[pos] );
         }
     };
 
@@ -705,8 +703,8 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
 
         for ( COLTYPE i = chunk_begin; i < chunk_end; ++i )
         {
-            _degrees[i] = degree_for( i );
-            if ( _degrees[i] == 0 )
+            _degrees[i].store( in_degree[i], std::memory_order_relaxed );
+            if ( in_degree[i] == 0 )
             {
                 _threads_nodes[thread_id].push_back( i + base );
             }
@@ -773,6 +771,44 @@ COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
     }
 
     return level + 1;
+}
+
+template <typename ROWTYPE, typename COLTYPE>
+COLTYPE KahnParallel<ROWTYPE, COLTYPE>::operator()( const COLTYPE nodes,
+                                                    ROWTYPE const* ai,
+                                                    COLTYPE const* aj,
+                                                    COLTYPE* perm,
+                                                    COLTYPE* prefix )
+{
+    const auto base = ai[0];
+    const auto nnz = ai[nodes] - base;
+
+    _initial_degrees.resize( nodes );
+    _t_ai.resize( nodes + 1 );
+    _t_aj.resize( nnz );
+
+#pragma omp parallel for num_threads( _nthreads )
+    for ( COLTYPE i = 0; i < nodes; ++i )
+    {
+        COLTYPE degree = 0;
+        const auto row_start = ai[i] - base;
+        const auto row_end = ai[i + 1] - base;
+        for ( auto pos = row_start; pos < row_end; ++pos )
+        {
+            if ( aj[pos] - base != i )
+            {
+                ++degree;
+            }
+        }
+        _initial_degrees[i] = degree;
+    }
+
+    // Rows in ai/aj list incoming dependencies. Kahn's update step needs the
+    // successor graph instead, so transpose once and reuse the successor core.
+    matrix_utils::ParallelTranspose2( nodes, nodes, ai, aj, (double*)nullptr, _t_ai.data(),
+                                      _t_aj.data(), (double*)nullptr );
+
+    return fromSuccessors( nodes, _t_ai.data(), _t_aj.data(), _initial_degrees.data(), perm, prefix );
 }
 
 template <typename ROWTYPE, typename COLTYPE, TriangularMatrix TS>
