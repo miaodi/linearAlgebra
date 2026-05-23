@@ -7,10 +7,6 @@
 #include <type_traits>
 #include <variant>
 
-namespace mkl_wrapper {
-class mkl_sparse_mat;
-}
-
 namespace reordering {
 
 template <typename T> T Find(T *parents, const T x);

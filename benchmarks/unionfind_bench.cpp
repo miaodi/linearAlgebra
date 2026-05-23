@@ -1,5 +1,4 @@
 #include "UnionFind.h"
-#include "BFS.h"
 #include "mkl_sparse_mat.h"
 #include "utils.h"
 #include <benchmark/benchmark.h>

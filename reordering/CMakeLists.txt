@@ -5,7 +5,7 @@ set(REORDERING_SRC BFS.cpp Reordering.cpp UnionFind.cpp MinimumDegree.cpp quotie
 
 add_library(${PROJECT_NAME} STATIC ${REORDERING_SRC})
 
-set(DEPENDENCIES mkl_wrapper utils OpenMP::OpenMP_CXX)
+set(DEPENDENCIES utils graph sparse_mat_op OpenMP::OpenMP_CXX)
 
 if(USE_METIS_LIB)
   set(DEPENDENCIES ${DEPENDENCIES} METIS::METIS)

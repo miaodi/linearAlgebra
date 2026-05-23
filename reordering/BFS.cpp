@@ -1,35 +1,34 @@
 #include "BFS.h"
 #include "BitVector.hpp"
-#include "mkl_sparse_mat.h"
 #include <algorithm>
+#include <cstdint>
 #include <execution>
 #include <iostream>
 #include <omp.h>
 
 namespace reordering {
-template <bool LASTLEVEL>
-bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
-            int shortCutWidth, MKL_INT &height, MKL_INT &width,
-            std::vector<MKL_INT> &levels, std::vector<MKL_INT> &lastLevel) {
-  levels.resize(mat->rows());
+template <bool LASTLEVEL, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+bool BFS_Fn(COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
+            [[maybe_unused]] VALTYPE const *av, COLTYPE source,
+            COLTYPE shortCutWidth, COLTYPE &height, COLTYPE &width,
+            std::vector<COLTYPE> &levels, std::vector<COLTYPE> &lastLevel) {
+  levels.resize(rows);
   lastLevel.resize(0);
   height = 0;
   std::fill_n(levels.begin(), levels.size(), -1);
-  auto ai = mat->get_ai();
-  auto aj = mat->get_aj();
-  const MKL_INT base = mat->mkl_base();
+  const COLTYPE base = static_cast<COLTYPE>(ai[0]);
 
-  utils::CircularBuffer<MKL_INT> cb(
-      std::max(1, static_cast<MKL_INT>(mat->rows() * .2)));
+  utils::CircularBuffer<COLTYPE> cb(
+      std::max<COLTYPE>(1, static_cast<COLTYPE>(rows * .2)));
   cb.push_back(source - base);
   levels[source - base] = 0;
   if constexpr (LASTLEVEL)
     lastLevel.push_back(source);
-  int widthCounter = 1;
+  COLTYPE widthCounter = 1;
   while (!cb.empty()) {
     auto u = cb.first();
     cb.pop_front();
-    for (MKL_INT i = ai[u] - base; i < ai[u + 1] - base; i++) {
+    for (ROWTYPE i = ai[u] - base; i < ai[u + 1] - base; i++) {
       auto v = aj[i] - base;
       if (levels[v] == -1) {
         if (height < levels[u] + 1) {
@@ -56,38 +55,38 @@ bool BFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
   return true;
 }
 
-template <bool LASTLEVEL, bool RECORDLEVEL>
-bool PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
-             int shortCutWidth, MKL_INT &height, MKL_INT &width,
-             std::vector<MKL_INT> &levels, std::vector<MKL_INT> &lastLevel) {
+template <bool LASTLEVEL, bool RECORDLEVEL, typename ROWTYPE, typename COLTYPE,
+          typename VALTYPE>
+bool PBFS_Fn(COLTYPE rows, ROWTYPE const *ai, COLTYPE const *aj,
+             [[maybe_unused]] VALTYPE const *av, COLTYPE source,
+             COLTYPE shortCutWidth, COLTYPE &height, COLTYPE &width,
+             std::vector<COLTYPE> &levels, std::vector<COLTYPE> &lastLevel) {
   if constexpr (RECORDLEVEL) {
-    levels.resize(mat->rows());
+    levels.resize(rows);
     std::fill_n(std::execution::par_unseq, levels.begin(), levels.size(), -1);
   }
-  auto ai = mat->get_ai();
-  auto aj = mat->get_aj();
-  const MKL_INT base = mat->mkl_base();
+  const COLTYPE base = static_cast<COLTYPE>(ai[0]);
   bool stat = true;
   int max_threads = omp_get_max_threads();
-  static std::vector<std::vector<MKL_INT>> bvc;
-  static std::vector<std::vector<MKL_INT>> bvn;
+  static std::vector<std::vector<COLTYPE>> bvc;
+  static std::vector<std::vector<COLTYPE>> bvn;
   bvc.resize(max_threads);
   bvn.resize(max_threads);
 
-  // std::vector<bool> visited(mat->rows(), false);
-  utils::BitVector visited(mat->rows());
-  std::vector<MKL_INT> count_per_thread(max_threads + 1, 0);
-  std::vector<MKL_INT> count_per_thread_prev(max_threads + 1, 0);
+  // std::vector<bool> visited(rows, false);
+  utils::BitVector visited(rows);
+  std::vector<COLTYPE> count_per_thread(max_threads + 1, 0);
+  std::vector<COLTYPE> count_per_thread_prev(max_threads + 1, 0);
   height = 0;
   if constexpr (RECORDLEVEL) {
     levels[source - base] = 0;
   }
   bvn[0].push_back(source - base);
-  // visited[source - mat->mkl_base()] = true;
+  // visited[source - base] = true;
   visited.set(source - base);
   count_per_thread[1] = 1;
-  MKL_INT total_work;
-  MKL_INT total_work_prev;
+  COLTYPE total_work;
+  COLTYPE total_work_prev;
   int nthreads;
   std::vector<std::pair<int, int>> chunck_pos_pairs(max_threads + 1);
   chunck_pos_pairs[0] = std::make_pair(0, 0);
@@ -108,7 +107,7 @@ bool PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
         total_work = count_per_thread[nthreads];
         width = std::max(width, total_work);
         int pos = 0;
-        MKL_INT target = 0;
+        COLTYPE target = 0;
         for (int i = 0; i < nthreads; i++) {
           target +=
               total_work / nthreads + ((total_work % nthreads) > i ? 1 : 0);
@@ -152,7 +151,7 @@ bool PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
                       ? chunck_pos_pairs[tid + 1].second
                       : bvc[i].size();
         for (int j = start; j < end; j++) {
-          for (MKL_INT k = ai[bvc[i][j]] - base; k < ai[bvc[i][j] + 1] - base;
+          for (ROWTYPE k = ai[bvc[i][j]] - base; k < ai[bvc[i][j] + 1] - base;
                k++) {
             auto v = aj[k] - base;
             if constexpr (RECORDLEVEL) {
@@ -179,34 +178,57 @@ bool PBFS_Fn(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
   return stat;
 }
 
-template bool BFS_Fn<true>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                           int source, int shortCut, MKL_INT &level,
-                           MKL_INT &width, std::vector<MKL_INT> &levels,
-                           std::vector<MKL_INT> &lastLevel);
+template bool BFS_Fn<true, int, int, double>(
+    int, int const *, int const *, double const *, int, int, int &, int &,
+    std::vector<int> &, std::vector<int> &);
 
-template bool BFS_Fn<false>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                            int source, int shortCut, MKL_INT &level,
-                            MKL_INT &width, std::vector<MKL_INT> &levels,
-                            std::vector<MKL_INT> &lastLevel);
+template bool BFS_Fn<false, int, int, double>(
+    int, int const *, int const *, double const *, int, int, int &, int &,
+    std::vector<int> &, std::vector<int> &);
 
-template bool PBFS_Fn<true, true>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                                  int source, int shortCut, MKL_INT &level,
-                                  MKL_INT &width, std::vector<MKL_INT> &levels,
-                                  std::vector<MKL_INT> &lastLevel);
+template bool PBFS_Fn<true, true, int, int, double>(
+    int, int const *, int const *, double const *, int, int, int &, int &,
+    std::vector<int> &, std::vector<int> &);
 
-template bool PBFS_Fn<true, false>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                                   int source, int shortCut, MKL_INT &level,
-                                   MKL_INT &width, std::vector<MKL_INT> &levels,
-                                   std::vector<MKL_INT> &lastLevel);
+template bool PBFS_Fn<true, false, int, int, double>(
+    int, int const *, int const *, double const *, int, int, int &, int &,
+    std::vector<int> &, std::vector<int> &);
 
-template bool PBFS_Fn<false, true>(mkl_wrapper::mkl_sparse_mat const *const mat,
-                                   int source, int shortCut, MKL_INT &level,
-                                   MKL_INT &width, std::vector<MKL_INT> &levels,
-                                   std::vector<MKL_INT> &lastLevel);
+template bool PBFS_Fn<false, true, int, int, double>(
+    int, int const *, int const *, double const *, int, int, int &, int &,
+    std::vector<int> &, std::vector<int> &);
 
-template bool
-PBFS_Fn<false, false>(mkl_wrapper::mkl_sparse_mat const *const mat, int source,
-                      int shortCut, MKL_INT &level, MKL_INT &width,
-                      std::vector<MKL_INT> &levels,
-                      std::vector<MKL_INT> &lastLevel);
+template bool PBFS_Fn<false, false, int, int, double>(
+    int, int const *, int const *, double const *, int, int, int &, int &,
+    std::vector<int> &, std::vector<int> &);
+
+template bool BFS_Fn<true, int64_t, int64_t, double>(
+    int64_t, int64_t const *, int64_t const *, double const *, int64_t,
+    int64_t, int64_t &, int64_t &, std::vector<int64_t> &,
+    std::vector<int64_t> &);
+
+template bool BFS_Fn<false, int64_t, int64_t, double>(
+    int64_t, int64_t const *, int64_t const *, double const *, int64_t,
+    int64_t, int64_t &, int64_t &, std::vector<int64_t> &,
+    std::vector<int64_t> &);
+
+template bool PBFS_Fn<true, true, int64_t, int64_t, double>(
+    int64_t, int64_t const *, int64_t const *, double const *, int64_t,
+    int64_t, int64_t &, int64_t &, std::vector<int64_t> &,
+    std::vector<int64_t> &);
+
+template bool PBFS_Fn<true, false, int64_t, int64_t, double>(
+    int64_t, int64_t const *, int64_t const *, double const *, int64_t,
+    int64_t, int64_t &, int64_t &, std::vector<int64_t> &,
+    std::vector<int64_t> &);
+
+template bool PBFS_Fn<false, true, int64_t, int64_t, double>(
+    int64_t, int64_t const *, int64_t const *, double const *, int64_t,
+    int64_t, int64_t &, int64_t &, std::vector<int64_t> &,
+    std::vector<int64_t> &);
+
+template bool PBFS_Fn<false, false, int64_t, int64_t, double>(
+    int64_t, int64_t const *, int64_t const *, double const *, int64_t,
+    int64_t, int64_t &, int64_t &, std::vector<int64_t> &,
+    std::vector<int64_t> &);
 } // namespace reordering

@@ -1,5 +1,4 @@
 #include "UnionFind.h"
-#include "mkl_sparse_mat.h"
 #include "utils.h"
 #include <iostream>
 #include <numeric>
@@ -16,8 +15,6 @@ template <typename T> T Find(T *parents, T x) {
   }
   return x;
 };
-
-template MKL_INT Find(MKL_INT *parents, MKL_INT x);
 
 template <typename T> T UniteByRank(T *rank, T *parent, const T i, const T j) {
   T pi = Find(parent, i);
@@ -37,9 +34,6 @@ template <typename T> T UniteByRank(T *rank, T *parent, const T i, const T j) {
   }
 }
 
-template MKL_INT UniteByRank(MKL_INT *rank, MKL_INT *parent, const MKL_INT i,
-                             const MKL_INT j);
-
 template <typename T> T Unite(T *parents, const T i, const T j) {
   T pi = Find(parents, i);
   T pj = Find(parents, j);
@@ -48,7 +42,6 @@ template <typename T> T Unite(T *parents, const T i, const T j) {
   parents[pj] = pi;
   return pi;
 }
-template int Unite(int *parent, const int i, const int j);
 
 template <typename T, bool Rank>
 UnionFind<T, Rank>::UnionFind(T size) : _parents(size) {
@@ -73,9 +66,6 @@ template <typename T, bool Rank> void UnionFind<T, Rank>::reset(const T size) {
       _ranks[i] = 0;
   }
 }
-
-template class UnionFind<int, false>;
-template class UnionFind<int, true>;
 
 template <typename ROWTYPE, typename COLTYPE>
 void UnionFindRank(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents) {
@@ -366,23 +356,30 @@ void ComponentsStat(const T* parents, T size, const T base, std::vector<T>& comp
     }
 }
 
-// Explicit template instantiations for common types
-template void UnionFindRank<int, int>(int rows, int const* ai, int const* aj, int* parents);
-template void UnionFindRank<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj, int64_t* parents);
+// Explicit template instantiations for supported CSR index types.
+#define INSTANTIATE_UNION_FIND_INDEX_TYPE(T)                                  \
+  template T Find(T *parents, T x);                                           \
+  template T UniteByRank(T *rank, T *parent, const T i, const T j);            \
+  template T Unite(T *parent, const T i, const T j);                           \
+  template class UnionFind<T, false>;                                         \
+  template class UnionFind<T, true>;                                          \
+  template void UnionFindRank<T, T>(T rows, T const *ai, T const *aj,          \
+                                    T *parents);                              \
+  template void UnionFindRem<T, T>(T rows, T const *ai, T const *aj,           \
+                                   T *parents);                               \
+  template void ParUnionFindRem<T, T>(T rows, T const *ai, T const *aj,        \
+                                      T *parents, int);                       \
+  template void DisjointSets::execute<T, T>(T rows, T const *ai,              \
+                                            T const *aj);                     \
+  template T CountComponents<T>(T *parents, T size);                          \
+  template void ComponentsStat<T>(const T *parents, T size, const T base,      \
+                                  std::vector<T> &compRoots,                  \
+                                  std::vector<T> &sortedComp,                 \
+                                  std::vector<T> &compPrefSum, int numThreads)
 
-template void UnionFindRem<int, int>(int rows, int const* ai, int const* aj, int* parents);
-template void UnionFindRem<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj, int64_t* parents);
+INSTANTIATE_UNION_FIND_INDEX_TYPE(int32_t);
+INSTANTIATE_UNION_FIND_INDEX_TYPE(int64_t);
 
-template void ParUnionFindRem<int, int>(int rows, int const* ai, int const* aj, int* parents, int);
-template void ParUnionFindRem<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj, int64_t* parents, int);
-
-template void DisjointSets::execute<int, int>(int rows, int const* ai, int const* aj);
-template void DisjointSets::execute<int64_t, int64_t>(int64_t rows, int64_t const* ai, int64_t const* aj);
-
-template int CountComponents<int>(int* parents, int size);
-template int64_t CountComponents<int64_t>(int64_t* parents, int64_t size);
-
-template void ComponentsStat<int>(const int* parents, int size, const int base, std::vector<int> &compRoots, std::vector<int> &sortedComp, std::vector<int> &compPrefSum, int numThreads);
-template void ComponentsStat<int64_t>(const int64_t* parents, int64_t size, const int64_t base, std::vector<int64_t> &compRoots, std::vector<int64_t> &sortedComp, std::vector<int64_t> &compPrefSum, int numThreads);
+#undef INSTANTIATE_UNION_FIND_INDEX_TYPE
 
 } // namespace reordering
