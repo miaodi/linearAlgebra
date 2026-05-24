@@ -58,7 +58,7 @@ option(USE_BOOST_LIB "Use boost library" OFF)
 
 option(USE_SPECTRA_LIB "Use Spectra library for eigenvalue problems" OFF)
 
-option(USE_MKL "Use Intel MKL for optimized linear algebra operations" ON)
+option(USE_MKL "Use Intel MKL for optimized linear algebra operations" OFF)
 
 option(USE_CUDA "Use cuda" OFF)
 
