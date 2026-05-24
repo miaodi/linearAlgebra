@@ -31,11 +31,32 @@ void eliminationTree(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
 /// the number of children for each zero-based node.
 /// @tparam COLTYPE column index type
 /// @return number of roots in the tree or forest
+template <bool FillRoots, typename COLTYPE>
+COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
+                             const COLTYPE *parent, COLTYPE *first_child,
+                             COLTYPE *next_sibling, COLTYPE *roots = nullptr,
+                             COLTYPE *child_count = nullptr);
+
 template <typename COLTYPE>
 COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
                              const COLTYPE *parent, COLTYPE *first_child,
                              COLTYPE *next_sibling, COLTYPE *roots = nullptr,
                              COLTYPE *child_count = nullptr);
+
+/// @brief Convert a parent array into grouped child adjacency in CSR form.
+///
+/// Array positions are zero-based, while stored parent labels include base. A
+/// root is encoded as parent[i] == i + base. child_offsets must hold nnodes + 1
+/// entries, and children must hold at least nnodes minus the number of roots.
+/// The children of node i occupy children[child_offsets[i]:child_offsets[i+1]).
+/// If FillRoots is true, roots is filled with zero-based roots.
+/// @tparam FillRoots whether to fill the roots output array
+/// @tparam COLTYPE column index type
+/// @return number of roots in the tree or forest
+template <bool FillRoots, typename COLTYPE>
+COLTYPE parentToChildCSR(const COLTYPE nnodes, const COLTYPE base,
+                         const COLTYPE *parent, COLTYPE *child_offsets,
+                         COLTYPE *children, COLTYPE *roots = nullptr);
 
 /// @brief Compute bottom-up topological levels from a parent-array forest.
 ///

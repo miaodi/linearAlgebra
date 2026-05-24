@@ -197,14 +197,16 @@ bool SymbolicCholeskyCol<CSRMatrixType>::apply(const COLTYPE nnodes,
   L.cols = nnodes;
 
   // Children in the elimination tree are exactly the child{j} sets used by
-  // Algorithm 4.4; _degrees counts unprocessed children for ready scheduling.
+  // Algorithm 4.4; CSR offsets keep each child set contiguous, and _degrees
+  // counts unprocessed children for ready scheduling.
   _degrees.resize(nnodes);
-  _firstChild.resize(nnodes);
-  _nextSibling.resize(nnodes);
-  graph::parentToChildSibling(nnodes, base, parent, _firstChild.data(),
-                              _nextSibling.data(),
-                              static_cast<COLTYPE *>(nullptr),
-                              _degrees.data());
+  _childOffsets.resize(nnodes + 1);
+  _children.resize(nnodes);
+  graph::parentToChildCSR<false>(nnodes, base, parent, _childOffsets.data(),
+                                 _children.data());
+  for (COLTYPE i = 0; i < nnodes; i++) {
+    _degrees[i] = _childOffsets[i + 1] - _childOffsets[i];
+  }
 
   for (COLTYPE i = 0; i < nnodes; i++) {
     if (_degrees[i] == 0) {
@@ -272,14 +274,14 @@ void SymbolicCholeskyCol<CSRMatrixType>::task(const COLTYPE nnodes,
     // Theorem 4.8 / Algorithm 4.4: colL{task} is the union of A's structural
     // column and all already-computed child column patterns, excluding task
     // itself from each child pattern by skipping the child's diagonal entry.
-    auto child = _firstChild[task];
-    while (child != std::numeric_limits<COLTYPE>::max()) {
+    for (auto child_pos = _childOffsets[task];
+         child_pos < _childOffsets[task + 1]; child_pos++) {
+      const auto child = _children[child_pos];
       auto start = _aj[child].data() + 1; // skip diagonal
       auto end = _aj[child].data() + _aj[child].size();
       for (auto it = start; it < end; it++) {
         appendIfNew(*it);
       }
-      child = _nextSibling[child];
     }
     std::sort(_aj[task].begin(), _aj[task].end());
     L.AI()[task + 1] = _aj[task].size();
@@ -320,8 +322,13 @@ void SymbolicCholeskyCol<CSRMatrixType>::task(const COLTYPE nnodes,
       }
     }
 
-    // if finished notify all threads
-    auto finished = _finished.fetch_add(1);
+    // Update the wait predicate while holding the queue mutex so waiters cannot
+    // miss the final notification.
+    COLTYPE finished;
+    {
+      std::unique_lock<std::mutex> lock(_mutex);
+      finished = _finished++;
+    }
     if (finished + 1 == nnodes) {
       _cv.notify_all();
       break;
@@ -370,14 +377,16 @@ bool SymbolicCholeskyColV2<CSRMatrixType>::apply(const COLTYPE nnodes,
   L.cols = nnodes;
 
   // Children in the elimination tree are exactly the child{j} sets used by
-  // Algorithm 4.4; _degrees counts unprocessed children for ready scheduling.
+  // Algorithm 4.4; CSR offsets keep each child set contiguous, and _degrees
+  // counts unprocessed children for ready scheduling.
   _degrees.resize(nnodes);
-  _firstChild.resize(nnodes);
-  _nextSibling.resize(nnodes);
-  graph::parentToChildSibling(nnodes, base, parent, _firstChild.data(),
-                              _nextSibling.data(),
-                              static_cast<COLTYPE *>(nullptr),
-                              _degrees.data());
+  _childOffsets.resize(nnodes + 1);
+  _children.resize(nnodes);
+  graph::parentToChildCSR<false>(nnodes, base, parent, _childOffsets.data(),
+                                 _children.data());
+  for (COLTYPE i = 0; i < nnodes; i++) {
+    _degrees[i] = _childOffsets[i + 1] - _childOffsets[i];
+  }
 
   COLTYPE ready_tasks = 0;
   for (COLTYPE i = 0; i < nnodes; i++) {
@@ -387,6 +396,7 @@ bool SymbolicCholeskyColV2<CSRMatrixType>::apply(const COLTYPE nnodes,
     }
   }
   _readyTasks = ready_tasks;
+  _readyEpoch = 0;
   _finished = 0;
 
   std::vector<std::thread> threads;
@@ -420,12 +430,13 @@ bool SymbolicCholeskyColV2<CSRMatrixType>::apply(const COLTYPE nnodes,
 template <matrix_utils::ResizableCSR CSRMatrixType>
 void SymbolicCholeskyColV2<CSRMatrixType>::pushReady(const int tid,
                                                      const COLTYPE task) {
-  _readyTasks.fetch_add(1, std::memory_order_release);
   {
     std::lock_guard<std::mutex> lock(_queueMutexes[tid]);
     _queues[tid].push_back(task);
   }
-  _readyCv.notify_one();
+  _readyTasks.fetch_add(1, std::memory_order_release);
+  _readyEpoch.fetch_add(1, std::memory_order_release);
+  _readyEpoch.notify_one();
 }
 
 template <matrix_utils::ResizableCSR CSRMatrixType>
@@ -436,6 +447,7 @@ bool SymbolicCholeskyColV2<CSRMatrixType>::popReady(const int tid,
     if (_queues[queue_id].empty()) {
       return false;
     }
+    _readyTasks.fetch_sub(1, std::memory_order_acq_rel);
     if (local) {
       task = _queues[queue_id].back();
       _queues[queue_id].pop_back();
@@ -447,14 +459,12 @@ bool SymbolicCholeskyColV2<CSRMatrixType>::popReady(const int tid,
   };
 
   if (popFrom(tid, true)) {
-    _readyTasks.fetch_sub(1, std::memory_order_acq_rel);
     return true;
   }
 
   for (int i = 1; i < _nthreads; i++) {
     const int victim = (tid + i) % _nthreads;
     if (popFrom(victim, false)) {
-      _readyTasks.fetch_sub(1, std::memory_order_acq_rel);
       return true;
     }
   }
@@ -490,14 +500,14 @@ void SymbolicCholeskyColV2<CSRMatrixType>::task(
     // children of task in the elimination tree. Skipping the first child entry
     // removes the child's diagonal, so only the off-diagonal column pattern is
     // propagated upward.
-    auto child = _firstChild[task];
-    while (child != std::numeric_limits<COLTYPE>::max()) {
+    for (auto child_pos = _childOffsets[task];
+         child_pos < _childOffsets[task + 1]; child_pos++) {
+      const auto child = _children[child_pos];
       auto start = _aj[child].data() + 1; // skip diagonal
       auto end = _aj[child].data() + _aj[child].size();
       for (auto it = start; it < end; it++) {
         appendIfNew(*it);
       }
-      child = _nextSibling[child];
     }
     std::sort(_aj[task].begin(), _aj[task].end());
     L.AI()[task + 1] = _aj[task].size();
@@ -506,13 +516,13 @@ void SymbolicCholeskyColV2<CSRMatrixType>::task(
   while (true) {
     COLTYPE task;
     if (!popReady(tid, task)) {
-      std::unique_lock<std::mutex> lock(_readyMutex);
-      _readyCv.wait(lock, [this, nnodes] {
-        return _readyTasks.load(std::memory_order_acquire) > 0 ||
-               _finished.load(std::memory_order_acquire) == nnodes;
-      });
       if (_finished.load(std::memory_order_acquire) == nnodes) {
         break;
+      }
+      const auto epoch = _readyEpoch.load(std::memory_order_acquire);
+      if (_readyTasks.load(std::memory_order_acquire) == 0 &&
+          _finished.load(std::memory_order_acquire) != nnodes) {
+        _readyEpoch.wait(epoch, std::memory_order_acquire);
       }
       continue;
     }
@@ -527,9 +537,10 @@ void SymbolicCholeskyColV2<CSRMatrixType>::task(
       }
     }
 
-    auto finished = _finished.fetch_add(1, std::memory_order_acq_rel);
+    const auto finished = _finished.fetch_add(1, std::memory_order_acq_rel);
     if (finished + 1 == nnodes) {
-      _readyCv.notify_all();
+      _readyEpoch.fetch_add(1, std::memory_order_release);
+      _readyEpoch.notify_all();
       break;
     }
   }
@@ -565,14 +576,16 @@ bool SymbolicCholeskyColV3<CSRMatrixType>::apply(const COLTYPE nnodes,
   L.cols = nnodes;
 
   // Children in the elimination tree are exactly the child{j} sets used by
-  // Algorithm 4.4. V3 also reuses _degrees for child counts while merging.
+  // Algorithm 4.4. CSR offsets keep each child set contiguous; V3 also reuses
+  // _degrees for child counts while merging.
   _degrees.resize(nnodes);
-  _firstChild.resize(nnodes);
-  _nextSibling.resize(nnodes);
-  graph::parentToChildSibling(nnodes, base, parent, _firstChild.data(),
-                              _nextSibling.data(),
-                              static_cast<COLTYPE *>(nullptr),
-                              _degrees.data());
+  _childOffsets.resize(nnodes + 1);
+  _children.resize(nnodes);
+  graph::parentToChildCSR<false>(nnodes, base, parent, _childOffsets.data(),
+                                 _children.data());
+  for (COLTYPE i = 0; i < nnodes; i++) {
+    _degrees[i] = _childOffsets[i + 1] - _childOffsets[i];
+  }
 
   // Any topological order of the elimination tree is valid: a column only needs
   // its children processed before their patterns can be merged.
@@ -674,14 +687,14 @@ void SymbolicCholeskyColV3<CSRMatrixType>::task(
       pending_children.reserve(child_count);
     }
     pending_children.clear();
-    auto child = _firstChild[task];
-    while (child != std::numeric_limits<COLTYPE>::max()) {
+    for (auto child_pos = _childOffsets[task];
+         child_pos < _childOffsets[task + 1]; child_pos++) {
+      const auto child = _children[child_pos];
       if (_ready[child].load(std::memory_order_acquire) != 0) {
         mergeChild(child);
       } else {
         pending_children.push_back(child);
       }
-      child = _nextSibling[child];
     }
 
     COLTYPE spin_count = 0;

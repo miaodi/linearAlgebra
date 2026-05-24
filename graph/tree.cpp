@@ -38,11 +38,15 @@ void eliminationTree(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
   }
 }
 
-template <typename COLTYPE>
+template <bool FillRoots, typename COLTYPE>
 COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
                              const COLTYPE *parent, COLTYPE *first_child,
                              COLTYPE *next_sibling, COLTYPE *roots,
                              COLTYPE *child_count) {
+  if constexpr (FillRoots) {
+    assert(roots != nullptr);
+  }
+
   std::fill(first_child, first_child + nnodes,
             std::numeric_limits<COLTYPE>::max());
   std::fill(next_sibling, next_sibling + nnodes,
@@ -62,12 +66,66 @@ COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
       first_child[parent_i] = i;
       next_sibling[i] = parent_first_child;
     } else {
-      if (roots != nullptr) {
+      if constexpr (FillRoots) {
         roots[nroots] = i;
       }
       nroots++;
     }
   }
+  return nroots;
+}
+
+template <typename COLTYPE>
+COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
+                             const COLTYPE *parent, COLTYPE *first_child,
+                             COLTYPE *next_sibling, COLTYPE *roots,
+                             COLTYPE *child_count) {
+  if (roots != nullptr) {
+    return parentToChildSibling<true>(nnodes, base, parent, first_child,
+                                      next_sibling, roots, child_count);
+  }
+  return parentToChildSibling<false>(nnodes, base, parent, first_child,
+                                     next_sibling, roots, child_count);
+}
+
+template <bool FillRoots, typename COLTYPE>
+COLTYPE parentToChildCSR(const COLTYPE nnodes, const COLTYPE base,
+                         const COLTYPE *parent, COLTYPE *child_offsets,
+                         COLTYPE *children, COLTYPE *roots) {
+  if constexpr (FillRoots) {
+    assert(roots != nullptr);
+  }
+
+  std::fill(child_offsets, child_offsets + nnodes + 1, 0);
+
+  COLTYPE nroots = 0;
+  for (COLTYPE i = 0; i < nnodes; i++) {
+    const auto parent_i = parent[i] - base;
+    if (parent_i != i) {
+      child_offsets[parent_i + 1]++;
+    } else {
+      if constexpr (FillRoots) {
+        roots[nroots] = i;
+      }
+      nroots++;
+    }
+  }
+
+  std::inclusive_scan(child_offsets, child_offsets + nnodes + 1,
+                      child_offsets);
+
+  for (COLTYPE i = 0; i < nnodes; i++) {
+    const auto parent_i = parent[i] - base;
+    if (parent_i != i) {
+      children[child_offsets[parent_i]++] = i;
+    }
+  }
+
+  std::rotate(std::reverse_iterator(child_offsets + nnodes + 1),
+              std::reverse_iterator(child_offsets + nnodes),
+              std::reverse_iterator(child_offsets));
+  child_offsets[0] = 0;
+
   return nroots;
 }
 
@@ -218,9 +276,9 @@ void PostOrderNoRecur<COLTYPE>::apply(const COLTYPE nnodes, const COLTYPE base,
   _firstChild.resize(nnodes);
   _nextSibling.resize(nnodes);
   _roots.resize(nnodes);
-  const auto nroots = parentToChildSibling(nnodes, base, parent,
-                                          _firstChild.data(),
-                                          _nextSibling.data(), _roots.data());
+  const auto nroots = parentToChildSibling<true>(
+      nnodes, base, parent, _firstChild.data(), _nextSibling.data(),
+      _roots.data());
   _roots.resize(nroots);
   auto perm_cp = perm;
 
@@ -274,6 +332,20 @@ void subtreeSize(const COLTYPE nnodes, const COLTYPE base,
       const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
       COLTYPE *first_child, COLTYPE *next_sibling, COLTYPE *roots,             \
       COLTYPE *child_count);                                                   \
+  template COLTYPE parentToChildSibling<true, COLTYPE>(                        \
+      const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
+      COLTYPE *first_child, COLTYPE *next_sibling, COLTYPE *roots,             \
+      COLTYPE *child_count);                                                   \
+  template COLTYPE parentToChildSibling<false, COLTYPE>(                       \
+      const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
+      COLTYPE *first_child, COLTYPE *next_sibling, COLTYPE *roots,             \
+      COLTYPE *child_count);                                                   \
+  template COLTYPE parentToChildCSR<true, COLTYPE>(                            \
+      const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
+      COLTYPE *child_offsets, COLTYPE *children, COLTYPE *roots);              \
+  template COLTYPE parentToChildCSR<false, COLTYPE>(                           \
+      const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
+      COLTYPE *child_offsets, COLTYPE *children, COLTYPE *roots);              \
   template COLTYPE parentTopologicalOrder<COLTYPE>(                            \
       const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
       const COLTYPE *child_count, COLTYPE *scratch, COLTYPE *perm,             \

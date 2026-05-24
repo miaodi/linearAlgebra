@@ -50,7 +50,7 @@ void expectSamePattern(const CSRMatrixType &expected,
 }
 } // namespace
 
-TEST(SymbolicCholeskyColV3, MatchesV2OnSmallSymmetricMatrix) {
+TEST(SymbolicCholeskyColVariants, MatchOnSmallSymmetricMatrix) {
   for (int base = 0; base <= 1; base++) {
     const auto matrix = makeSymmetricMatrix(base);
     std::vector<int> parent(matrix.rows);
@@ -58,17 +58,23 @@ TEST(SymbolicCholeskyColV3, MatchesV2OnSmallSymmetricMatrix) {
     graph::eliminationTree(matrix.rows, matrix.AI(), matrix.AJ(),
                            parent.data(), ancestor.data());
 
-    factorization::SymbolicCholeskyColV2<CSRMatrixType> symbolic_v2(2);
+    factorization::SymbolicCholeskyCol<CSRMatrixType> symbolic_v1(2);
     CSRMatrixType expected;
-    ASSERT_TRUE(symbolic_v2.apply(matrix.rows, matrix.AI(), matrix.AJ(),
+    ASSERT_TRUE(symbolic_v1.apply(matrix.rows, matrix.AI(), matrix.AJ(),
                                   parent.data(), expected));
 
     for (const int nthreads : {1, 2, 4}) {
+      factorization::SymbolicCholeskyColV2<CSRMatrixType> symbolic_v2(nthreads);
+      CSRMatrixType actual_v2;
+      ASSERT_TRUE(symbolic_v2.apply(matrix.rows, matrix.AI(), matrix.AJ(),
+                                    parent.data(), actual_v2));
+      expectSamePattern(expected, actual_v2);
+
       factorization::SymbolicCholeskyColV3<CSRMatrixType> symbolic_v3(nthreads);
-      CSRMatrixType actual;
+      CSRMatrixType actual_v3;
       ASSERT_TRUE(symbolic_v3.apply(matrix.rows, matrix.AI(), matrix.AJ(),
-                                    parent.data(), actual));
-      expectSamePattern(expected, actual);
+                                    parent.data(), actual_v3));
+      expectSamePattern(expected, actual_v3);
     }
   }
 }

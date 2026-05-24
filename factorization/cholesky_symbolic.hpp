@@ -106,13 +106,13 @@ private:
   std::vector<std::vector<COLTYPE>> _aj;
 
   std::vector<COLTYPE> _degrees;
-  std::vector<COLTYPE> _firstChild;
-  std::vector<COLTYPE> _nextSibling;
+  std::vector<COLTYPE> _childOffsets;
+  std::vector<COLTYPE> _children;
   std::vector<COLTYPE> _visited;
   std::mutex _mutex;
   std::condition_variable _cv;
   utils::CircularBuffer<COLTYPE> _queue;
-  std::atomic<COLTYPE> _finished;
+  COLTYPE _finished{0};
 };
 
 template <matrix_utils::ResizableCSR CSRMatrixType>
@@ -145,14 +145,13 @@ private:
   std::vector<std::vector<COLTYPE>> _aj;
 
   std::vector<COLTYPE> _degrees;
-  std::vector<COLTYPE> _firstChild;
-  std::vector<COLTYPE> _nextSibling;
+  std::vector<COLTYPE> _childOffsets;
+  std::vector<COLTYPE> _children;
   std::vector<COLTYPE> _visited;
   std::vector<std::deque<COLTYPE>> _queues;
   std::unique_ptr<std::mutex[]> _queueMutexes;
-  std::mutex _readyMutex;
-  std::condition_variable _readyCv;
   std::atomic<COLTYPE> _readyTasks;
+  std::atomic<COLTYPE> _readyEpoch;
   std::atomic<COLTYPE> _finished;
 };
 
@@ -184,8 +183,8 @@ private:
   std::vector<std::vector<COLTYPE>> _aj;
 
   std::vector<COLTYPE> _degrees;
-  std::vector<COLTYPE> _firstChild;
-  std::vector<COLTYPE> _nextSibling;
+  std::vector<COLTYPE> _childOffsets;
+  std::vector<COLTYPE> _children;
   std::vector<COLTYPE> _visited;
   std::vector<std::vector<COLTYPE>> _pendingChildren;
   std::vector<COLTYPE> _topoPerm;
