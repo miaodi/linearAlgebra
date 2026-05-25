@@ -74,6 +74,71 @@ COLTYPE parentTopologicalOrder(const COLTYPE nnodes, const COLTYPE base,
                                const COLTYPE *child_count, COLTYPE *scratch,
                                COLTYPE *perm, COLTYPE *prefix);
 
+/// @brief Elimination-tree analysis and scheduling data for sparse Cholesky.
+///
+/// `compute()` expects a square symmetric matrix pattern stored as full CSR or
+/// lower-triangular CSR. Row column indices must be sorted in ascending order
+/// because the underlying elimination-tree routine scans each row until it
+/// reaches the diagonal/upper triangle. Upper-triangular-only CSR is not valid
+/// input for computing the tree with this routine.
+///
+/// Stored labels use the same base as `ai[0]`. A root is encoded as
+/// `parent[i] == i + base`.
+template <typename COLTYPE> class EliminationTree {
+public:
+  COLTYPE nnodes() const { return _nnodes; }
+  COLTYPE base() const { return _base; }
+  COLTYPE nroots() const { return _nroots; }
+  COLTYPE topologicalLevels() const { return _topologicalLevels; }
+
+  COLTYPE const *parent() const { return _parent.data(); }
+  COLTYPE const *roots() const { return _roots.data(); }
+  COLTYPE const *childOffsets() const { return _childOffsets.data(); }
+  COLTYPE const *children() const { return _children.data(); }
+  COLTYPE const *childCounts() const { return _childCounts.data(); }
+  COLTYPE const *topologicalOrder() const { return _topologicalOrder.data(); }
+  COLTYPE const *topologicalPrefix() const {
+    return _topologicalPrefix.data();
+  }
+
+  /// @brief Compute parent from matrix structure, then analyze the tree.
+  template <typename ROWTYPE>
+  bool compute(const COLTYPE nnodes_in, const ROWTYPE *ai,
+               const COLTYPE *aj) {
+    if (ai == nullptr || aj == nullptr) {
+      return false;
+    }
+
+    std::vector<COLTYPE> ancestor(nnodes_in);
+    _parent.resize(nnodes_in);
+    eliminationTree(nnodes_in, ai, aj, _parent.data(), ancestor.data());
+    return analyze(nnodes_in, static_cast<COLTYPE>(ai[0]), _parent.data());
+  }
+
+  /// @brief Build child and schedule data from an existing parent array.
+  ///
+  /// `parent_in` must contain `nnodes` base-labeled entries. Every parent label
+  /// must be in `[base, base + nnodes)`. Roots must satisfy
+  /// `parent_in[i] == i + base`. Cycles or invalid forests are rejected when the
+  /// child-before-parent topological order cannot cover all nodes.
+  bool analyze(const COLTYPE nnodes_in, const COLTYPE base_in,
+               const COLTYPE *parent_in);
+
+private:
+  COLTYPE _nnodes{};
+  COLTYPE _base{};
+  COLTYPE _nroots{};
+  COLTYPE _topologicalLevels{};
+  std::vector<COLTYPE> _parent;
+  std::vector<COLTYPE> _roots;
+  std::vector<COLTYPE> _childOffsets;
+  std::vector<COLTYPE> _children;
+  std::vector<COLTYPE> _childCounts;
+  std::vector<COLTYPE> _topologicalOrder;
+  std::vector<COLTYPE> _topologicalPrefix;
+  std::vector<COLTYPE> _scratch;
+};
+
 /// @brief Compute a postorder permutation of an elimination tree.
 ///
 /// Array positions are zero-based, while stored node labels include base.

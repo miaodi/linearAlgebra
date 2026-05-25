@@ -1,6 +1,7 @@
 #pragma once
 #include "circularbuffer.hpp"
 #include "sparse_mat_traits.hpp"
+#include "tree.hpp"
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -96,18 +97,20 @@ public:
   bool apply(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
              const COLTYPE *parent, CSRMatrixType &L);
 
+  const graph::EliminationTree<COLTYPE> &eliminationTree() const {
+    return _etree;
+  }
+
 private:
   void task(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
-            const COLTYPE *parent, const int tid, CSRMatrixType &L);
+            const int tid, CSRMatrixType &L);
 
 private:
   int _nthreads;
   std::vector<ROWTYPE> _diag;
   std::vector<std::vector<COLTYPE>> _aj;
-
   std::vector<COLTYPE> _degrees;
-  std::vector<COLTYPE> _childOffsets;
-  std::vector<COLTYPE> _children;
+  graph::EliminationTree<COLTYPE> _etree;
   std::vector<COLTYPE> _visited;
   std::mutex _mutex;
   std::condition_variable _cv;
@@ -133,9 +136,13 @@ public:
   bool apply(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
              const COLTYPE *parent, CSRMatrixType &L);
 
+  const graph::EliminationTree<COLTYPE> &eliminationTree() const {
+    return _etree;
+  }
+
 private:
   void task(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
-            const COLTYPE *parent, const int tid, CSRMatrixType &L);
+            const int tid, CSRMatrixType &L);
   void pushReady(const int tid, const COLTYPE task);
   bool popReady(const int tid, COLTYPE &task);
 
@@ -145,8 +152,7 @@ private:
   std::vector<std::vector<COLTYPE>> _aj;
 
   std::vector<COLTYPE> _degrees;
-  std::vector<COLTYPE> _childOffsets;
-  std::vector<COLTYPE> _children;
+  graph::EliminationTree<COLTYPE> _etree;
   std::vector<COLTYPE> _visited;
   std::vector<std::deque<COLTYPE>> _queues;
   std::unique_ptr<std::mutex[]> _queueMutexes;
@@ -173,6 +179,10 @@ public:
   bool apply(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
              const COLTYPE *parent, CSRMatrixType &L);
 
+  const graph::EliminationTree<COLTYPE> &eliminationTree() const {
+    return _etree;
+  }
+
 private:
   void task(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
             const int tid, CSRMatrixType &L);
@@ -181,14 +191,9 @@ private:
   int _nthreads;
   std::vector<ROWTYPE> _diag;
   std::vector<std::vector<COLTYPE>> _aj;
-
-  std::vector<COLTYPE> _degrees;
-  std::vector<COLTYPE> _childOffsets;
-  std::vector<COLTYPE> _children;
+  graph::EliminationTree<COLTYPE> _etree;
   std::vector<COLTYPE> _visited;
   std::vector<std::vector<COLTYPE>> _pendingChildren;
-  std::vector<COLTYPE> _topoPerm;
-  std::vector<COLTYPE> _topoPrefix;
   std::unique_ptr<std::atomic<int>[]> _ready;
   COLTYPE _readySize{0};
   std::atomic<COLTYPE> _nextTask;

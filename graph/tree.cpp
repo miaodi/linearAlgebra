@@ -183,6 +183,56 @@ COLTYPE parentTopologicalOrder(const COLTYPE nnodes, const COLTYPE base,
 }
 
 template <typename COLTYPE>
+bool EliminationTree<COLTYPE>::analyze(const COLTYPE nnodes_in,
+                                       const COLTYPE base_in,
+                                       const COLTYPE *parent_in) {
+  if (parent_in == nullptr) {
+    return false;
+  }
+
+  _nnodes = nnodes_in;
+  _base = base_in;
+  _nroots = 0;
+  _topologicalLevels = 0;
+  if (parent_in != _parent.data()) {
+    _parent.assign(parent_in, parent_in + _nnodes);
+  }
+
+  for (COLTYPE i = 0; i < _nnodes; i++) {
+    const auto parent_node = _parent[i] - _base;
+    if (parent_node < 0 || parent_node >= _nnodes) {
+      return false;
+    }
+  }
+
+  _childOffsets.resize(static_cast<std::size_t>(_nnodes) + 1);
+  _children.resize(_nnodes);
+  _roots.resize(_nnodes);
+  _nroots = parentToChildCSR<true>(_nnodes, _base, _parent.data(),
+                                   _childOffsets.data(), _children.data(),
+                                   _roots.data());
+  _children.resize(_childOffsets[_nnodes]);
+  _roots.resize(_nroots);
+
+  _childCounts.resize(_nnodes);
+  for (COLTYPE i = 0; i < _nnodes; i++) {
+    _childCounts[i] = _childOffsets[i + 1] - _childOffsets[i];
+  }
+
+  _scratch.resize(_nnodes);
+  _topologicalOrder.resize(_nnodes);
+  _topologicalPrefix.resize(static_cast<std::size_t>(_nnodes) + 1);
+  _topologicalLevels = parentTopologicalOrder(
+      _nnodes, _base, _parent.data(), _childCounts.data(), _scratch.data(),
+      _topologicalOrder.data(), _topologicalPrefix.data());
+  if (_topologicalPrefix[_topologicalLevels] - _base != _nnodes) {
+    return false;
+  }
+  _topologicalPrefix.resize(static_cast<std::size_t>(_topologicalLevels) + 1);
+  return true;
+}
+
+template <typename COLTYPE>
 void PostOrder<COLTYPE>::buildChildren(const COLTYPE nnodes, const COLTYPE base,
                                        const COLTYPE *parent) {
   _childrenPrefix.resize(nnodes + 1);
@@ -350,6 +400,7 @@ void subtreeSize(const COLTYPE nnodes, const COLTYPE base,
       const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,         \
       const COLTYPE *child_count, COLTYPE *scratch, COLTYPE *perm,             \
       COLTYPE *prefix);                                                        \
+  template struct EliminationTree<COLTYPE>;                                    \
   template void subtreeSize<COLTYPE>(const COLTYPE nnodes, const COLTYPE base, \
                                      const COLTYPE *parent,                    \
                                      COLTYPE *subtree_size);                   \

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <limits>
 #include <vector>
 
@@ -14,6 +15,10 @@ std::vector<int> makeParent(const int base) {
     parent[i] = zero_based_parent[i] + base;
   }
   return parent;
+}
+
+std::vector<int> makeVector(const int *data, const int size) {
+  return std::vector<int>(data, data + size);
 }
 
 } // namespace
@@ -55,6 +60,55 @@ TEST(ParentToChildCSR, FillRootsFalseDoesNotWriteRoots) {
 
   EXPECT_EQ(nroots, 2);
   EXPECT_EQ(roots, std::vector<int>({untouched, untouched}));
+}
+
+TEST(EliminationTree, AnalyzesParentChildListsAndTopologicalOrder) {
+  constexpr int nnodes = 6;
+  const auto parent = makeParent(0);
+
+  graph::EliminationTree<int> etree;
+  ASSERT_TRUE(etree.analyze(nnodes, 0, parent.data()));
+
+  EXPECT_EQ(etree.nnodes(), nnodes);
+  EXPECT_EQ(etree.base(), 0);
+  EXPECT_EQ(etree.nroots(), 2);
+  EXPECT_EQ(makeVector(etree.parent(), nnodes), parent);
+  EXPECT_EQ(makeVector(etree.childOffsets(), nnodes + 1),
+            std::vector<int>({0, 1, 1, 1, 4, 4, 4}));
+  EXPECT_EQ(makeVector(etree.children(), 4), std::vector<int>({5, 1, 2, 4}));
+  EXPECT_EQ(makeVector(etree.childCounts(), nnodes),
+            std::vector<int>({1, 0, 0, 3, 0, 0}));
+  EXPECT_EQ(makeVector(etree.roots(), etree.nroots()), std::vector<int>({0, 3}));
+
+  const auto topo = makeVector(etree.topologicalOrder(), nnodes);
+  for (int node = 0; node < nnodes; node++) {
+    const auto parent_node = parent[node];
+    if (parent_node == node) {
+      continue;
+    }
+    const auto node_pos =
+        std::find(topo.begin(), topo.end(), node) - topo.begin();
+    const auto parent_pos =
+        std::find(topo.begin(), topo.end(), parent_node) - topo.begin();
+    EXPECT_LT(node_pos, parent_pos);
+  }
+}
+
+TEST(EliminationTree, ComputesParentFromMatrixStructure) {
+  constexpr int nnodes = 3;
+  const std::vector<int> ai{0, 1, 3, 5};
+  const std::vector<int> aj{0, 0, 1, 1, 2};
+
+  graph::EliminationTree<int> etree;
+  ASSERT_TRUE(etree.compute(nnodes, ai.data(), aj.data()));
+
+  EXPECT_EQ(makeVector(etree.parent(), nnodes), std::vector<int>({1, 2, 2}));
+  EXPECT_EQ(makeVector(etree.roots(), etree.nroots()), std::vector<int>({2}));
+  EXPECT_EQ(makeVector(etree.childOffsets(), nnodes + 1),
+            std::vector<int>({0, 0, 1, 2}));
+  EXPECT_EQ(makeVector(etree.children(), 2), std::vector<int>({0, 1}));
+  EXPECT_EQ(makeVector(etree.topologicalOrder(), nnodes),
+            std::vector<int>({0, 1, 2}));
 }
 
 TEST(ParentToChildSibling, TemplateRootFillControlsRootWrites) {
