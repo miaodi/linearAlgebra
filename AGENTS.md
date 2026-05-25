@@ -38,22 +38,24 @@ optionally for GPU sparse operations and experiments.
 
 The project uses CMake.
 
+The common local build directory is `release/`.
+
 Common configure command:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake -S . -B release -DCMAKE_BUILD_TYPE=RelWithDebInfo
 ```
 
 Common build command:
 
 ```sh
-cmake --build build -j
+cmake --build release -j
 ```
 
 Run tests:
 
 ```sh
-ctest --test-dir build --output-on-failure
+ctest --test-dir release --output-on-failure
 ```
 
 Useful CMake options:
@@ -84,6 +86,9 @@ interpreter selected by CMake.
 - For CUDA code, consider memory coalescing, occupancy, synchronization,
   launch overhead, and host-device transfer costs.
 - For CMake changes, preserve optional dependency behavior.
+- For Cholesky symbolic or multifrontal work, keep elimination-tree ordering,
+  postorder mappings, frontal matrix assembly, and sparse index invariants
+  explicit. Verify with the focused Cholesky tests when possible.
 - Avoid changing benchmark behavior unless explicitly requested.
 - Treat `execs/` and `scratch/` as experimental code unless the task explicitly
   says otherwise.
@@ -93,6 +98,14 @@ interpreter selected by CMake.
 When using an AI tool on this project, provide the specific target area and the
 verification expectation. Good requests include the files, algorithm, benchmark,
 or failing test involved.
+
+## AGENTS.md Maintenance Policy
+
+When making major code changes, update `AGENTS.md` in the same change if the
+work changes repository structure, build/test commands, important dependencies,
+algorithm ownership, verification expectations, or project-specific development
+guidance. Keep these updates focused on durable guidance rather than temporary
+implementation notes.
 
 Examples:
 
