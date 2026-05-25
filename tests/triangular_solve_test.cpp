@@ -393,6 +393,82 @@ TEST_F( triangular_solve_Test, level_scheduled_backward_substitution )
     for(size_t i=0;i<_mats.size();++i) checkLevelBackward(i);
 }
 
+TEST( triangular_solve_csr_Test, backward_substitution_unit_diagonal )
+{
+    const int n = 3;
+    const std::vector<int> row_ptr{ 0, 2, 3, 3 };
+    const std::vector<int> col_idx{ 1, 2, 2 };
+    const std::vector<double> values{ 2.0, 3.0, 4.0 };
+    const std::vector<double> b{ 14.0, 14.0, 3.0 };
+    const std::vector<double> expected{ 1.0, 2.0, 3.0 };
+    std::vector<double> x( n, 0.0 );
+
+    TriangularSolve<TriangularMatrix::U>(
+        n,
+        row_ptr.data(),
+        col_idx.data(),
+        values.data(),
+        static_cast<const double*>( nullptr ),
+        b.data(),
+        x.data() );
+
+    for ( int i = 0; i < n; ++i )
+    {
+        EXPECT_NEAR( x[i], expected[i], 1e-12 );
+    }
+}
+
+TEST( triangular_solve_csc_Test, forward_substitution_unit_diagonal )
+{
+    const int n = 3;
+    const std::vector<int> col_ptr{ 0, 2, 3, 3 };
+    const std::vector<int> row_idx{ 1, 2, 2 };
+    const std::vector<double> values{ 2.0, 3.0, 4.0 };
+    const std::vector<double> b{ 1.0, 4.0, 14.0 };
+    const std::vector<double> expected{ 1.0, 2.0, 3.0 };
+    std::vector<double> x( n, 0.0 );
+
+    TriangularSolveCSC<TriangularMatrix::L>(
+        n,
+        col_ptr.data(),
+        row_idx.data(),
+        values.data(),
+        static_cast<const double*>( nullptr ),
+        b.data(),
+        x.data() );
+
+    for ( int i = 0; i < n; ++i )
+    {
+        EXPECT_NEAR( x[i], expected[i], 1e-12 );
+    }
+}
+
+TEST( triangular_solve_csc_Test, backward_substitution_base_one )
+{
+    const int n = 3;
+    const std::vector<int> col_ptr{ 1, 1, 2, 4 };
+    const std::vector<int> row_idx{ 1, 1, 2 };
+    const std::vector<double> values{ 3.0, 5.0, 6.0 };
+    const std::vector<double> diag{ 2.0, 4.0, 7.0 };
+    const std::vector<double> b{ 23.0, 26.0, 21.0 };
+    const std::vector<double> expected{ 1.0, 2.0, 3.0 };
+    std::vector<double> x( n, 0.0 );
+
+    TriangularSolveCSC<TriangularMatrix::U>(
+        n,
+        col_ptr.data(),
+        row_idx.data(),
+        values.data(),
+        diag.data(),
+        b.data(),
+        x.data() );
+
+    for ( int i = 0; i < n; ++i )
+    {
+        EXPECT_NEAR( x[i], expected[i], 1e-12 );
+    }
+}
+
 // Disabled: OptimizedTriangularSolve
 // TEST_F( triangular_solve_Test, optimized_forward_substitution_barrier )
 // {

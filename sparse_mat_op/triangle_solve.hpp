@@ -42,6 +42,27 @@ void TriangularSolve( const COLTYPE size,
                       VALTYPE const* const b,
                       VALTYPE* const x );
 
+/// @brief Combined triangular solve function using TriangularMatrix enum with standard CSC format
+/// @tparam TM TriangularMatrix::L for forward substitution, TriangularMatrix::U for backward substitution
+/// @tparam ROWTYPE Column pointer type
+/// @tparam COLTYPE Row index type
+/// @tparam VALTYPE Value type
+/// @param size Matrix dimension
+/// @param col_ptr Column pointers (col_ptr[j] to col_ptr[j+1]-1 are indices for column j, col_ptr[0] is base)
+/// @param row_idx Row indices
+/// @param av Matrix values
+/// @param diag Diagonal values (nullptr for unit diagonal)
+/// @param b Right-hand side vector
+/// @param x Solution vector
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void TriangularSolveCSC( const COLTYPE size,
+                         ROWTYPE const* col_ptr,
+                         COLTYPE const* row_idx,
+                         VALTYPE const* av,
+                         VALTYPE const* diag,
+                         VALTYPE const* const b,
+                         VALTYPE* const x );
+
 /// @brief Level-scheduled triangular substitution with OpenMP parallelization
 /// @tparam TM TriangularMatrix::L for forward substitution, TriangularMatrix::U for backward substitution
 /// @tparam ROWTYPE Row pointer type

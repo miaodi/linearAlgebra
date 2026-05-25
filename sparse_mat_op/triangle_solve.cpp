@@ -31,11 +31,6 @@ void TriangularSolve( const COLTYPE size,
                       VALTYPE const* const b,
                       VALTYPE* const x )
 {
-    if constexpr ( TM == TriangularMatrix::U )
-    {
-        assert( diag != nullptr &&
-                "Diagonal must be provided for backward substitution." );
-    }
     // Extract base from ai[0]
     const ROWTYPE base = ai[0];
 
@@ -90,6 +85,64 @@ void TriangularSolve( const COLTYPE size,
         for ( COLTYPE i = size; i > 0; i-- )
         {
             process_row( i - 1 );
+        }
+    }
+}
+
+
+/// @brief Combined triangular solve function using TriangularMatrix enum with standard CSC format
+template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+void TriangularSolveCSC( const COLTYPE size,
+                         ROWTYPE const* col_ptr,
+                         COLTYPE const* row_idx,
+                         VALTYPE const* av,
+                         VALTYPE const* diag,
+                         VALTYPE const* const b,
+                         VALTYPE* const x )
+{
+    const ROWTYPE base = col_ptr[0];
+    std::copy( b, b + size, x );
+
+    auto process_column = [&]( const COLTYPE col )
+    {
+        if ( diag )
+        {
+            x[col] /= diag[col];
+        }
+
+        const VALTYPE x_col = x[col];
+        for ( ROWTYPE p = col_ptr[col] - base; p < col_ptr[col + 1] - base; ++p )
+        {
+            const COLTYPE row = row_idx[p] - base;
+            if constexpr ( TM == TriangularMatrix::L )
+            {
+                if ( row > col )
+                {
+                    x[row] -= av[p] * x_col;
+                }
+            }
+            else // TM == TriangularMatrix::U
+            {
+                if ( row < col )
+                {
+                    x[row] -= av[p] * x_col;
+                }
+            }
+        }
+    };
+
+    if constexpr ( TM == TriangularMatrix::L )
+    {
+        for ( COLTYPE col = 0; col < size; ++col )
+        {
+            process_column( col );
+        }
+    }
+    else // TM == TriangularMatrix::U
+    {
+        for ( COLTYPE col = size; col > 0; --col )
+        {
+            process_column( col - 1 );
         }
     }
 }
@@ -1910,6 +1963,12 @@ template void TriangularSolve<TriangularMatrix::L, int, int, double>(
     const int, int const*, int const*, double const*, double const*, double const*, double* );
 
 template void TriangularSolve<TriangularMatrix::U, int, int, double>(
+    const int, int const*, int const*, double const*, double const*, double const*, double* );
+
+template void TriangularSolveCSC<TriangularMatrix::L, int, int, double>(
+    const int, int const*, int const*, double const*, double const*, double const*, double* );
+
+template void TriangularSolveCSC<TriangularMatrix::U, int, int, double>(
     const int, int const*, int const*, double const*, double const*, double const*, double* );
 
 template class LevelScheduleTriangularSubstitution<TriangularMatrix::L, int, int, double>;
