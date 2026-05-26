@@ -12,6 +12,44 @@
 namespace factorization
 {
 
+template <typename COLTYPE, typename VALTYPE>
+struct FrontalNode
+{
+    using DenseMatrix = Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>;
+
+    DenseMatrix V;
+    std::vector<COLTYPE> map_to_parent;
+};
+
+template <typename COLTYPE, typename VALTYPE>
+struct FrontalWorker
+{
+    using DenseMatrix = Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>;
+    using DenseMap = Eigen::Map<DenseMatrix>;
+
+    std::unique_ptr<VALTYPE[]> F;
+    COLTYPE active_size = 0;
+    COLTYPE capacity = 0;
+
+    void ensureSize( const COLTYPE size )
+    {
+        if ( size > capacity )
+        {
+            const auto n = static_cast<std::size_t>( size );
+            F = std::make_unique<VALTYPE[]>( n * n );
+            capacity = size;
+        }
+        active_size = size;
+    }
+
+    DenseMap front()
+    {
+        const auto n = static_cast<Eigen::Index>( active_size );
+        // Map the active front as a contiguous prefix, not with capacity stride.
+        return DenseMap( F.get(), n, n );
+    }
+};
+
 /// @brief Sequential basic multifrontal Cholesky factorization.
 ///
 /// This implements the one-column frontal method from Algorithm 5.8 in
@@ -48,40 +86,7 @@ public:
                 CSRMatrixType& L );
 
 private:
-    using DenseMap = Eigen::Map<DenseMatrix>;
-
-    struct FrontalNode
-    {
-        DenseMatrix V;
-        std::vector<COLTYPE> map_to_parent;
-    };
-
-    struct FrontalWorker
-    {
-        std::unique_ptr<VALTYPE[]> F;
-        COLTYPE active_size = 0;
-        COLTYPE capacity = 0;
-
-        void ensureSize( const COLTYPE size )
-        {
-            if ( size > capacity )
-            {
-                const auto n = static_cast<std::size_t>( size );
-                F = std::make_unique<VALTYPE[]>( n * n );
-                capacity = size;
-            }
-            active_size = size;
-        }
-
-        DenseMap front()
-        {
-            const auto n = static_cast<Eigen::Index>( active_size );
-            // Map the active front as a contiguous prefix, not with capacity stride.
-            return DenseMap( F.get(), n, n );
-        }
-    };
-
-    bool prepareNumericValues( CSRMatrixType& L );
+    void prepareNumericValues( CSRMatrixType& L );
     bool buildChildToParentMaps( const COLTYPE nnodes,
                                  const COLTYPE base,
                                  const graph::EliminationTree<COLTYPE>& etree,
@@ -94,19 +99,80 @@ private:
                       const VALTYPE* av,
                       const graph::EliminationTree<COLTYPE>& etree,
                       CSRMatrixType& L );
-    bool initializeFront( const COLTYPE node,
+    void initializeFront( const COLTYPE node,
                           const ROWTYPE* ai_begin,
                           const ROWTYPE* ai_end,
                           const COLTYPE* aj,
                           const VALTYPE* av,
-                          const CSRMatrixType& L,
-                          const COLTYPE front_size );
-    bool assembleChildren( const COLTYPE node, const graph::EliminationTree<COLTYPE>& etree );
+                          const CSRMatrixType& L );
+    void assembleChildren( const COLTYPE node, const graph::EliminationTree<COLTYPE>& etree );
     bool factorFront( const COLTYPE node, const graph::EliminationTree<COLTYPE>& etree, CSRMatrixType& L, const COLTYPE front_size );
-    static bool findLocalIndex( const COLTYPE* begin, const COLTYPE* end, const COLTYPE label, COLTYPE& local_index );
 
-    FrontalWorker _worker;
-    std::vector<FrontalNode> _nodes;
+    FrontalWorker<COLTYPE, VALTYPE> _worker;
+    std::vector<FrontalNode<COLTYPE, VALTYPE>> _nodes;
+};
+
+/// @brief Sequential supernodal multifrontal Cholesky factorization.
+///
+/// Supernodes are detected from Theorem 4.13 in @cite scott2023algorithms:
+/// adjacent columns j and j+1 are merged when j is a child of j+1 in the
+/// elimination tree and the column count drops by exactly one. `L` supplies the
+/// CSC symbolic pattern on input; this class updates only its numeric values.
+template <matrix_utils::ResizableCSR CSRMatrixType>
+class MultifrontalCholeskySuperNodal
+{
+public:
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+    using VALTYPE = typename CSRMatrixType::VALTYPE;
+    using DenseMatrix = Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>;
+    using RowMajorDenseMatrix = Eigen::Matrix<VALTYPE, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+
+    bool apply( const COLTYPE nnodes,
+                const ROWTYPE* ai_begin,
+                const ROWTYPE* ai_end,
+                const COLTYPE* aj,
+                const VALTYPE* av,
+                const graph::EliminationTree<COLTYPE>& etree,
+                CSRMatrixType& L );
+
+    bool analyzeSupernodes( const COLTYPE nnodes, const graph::EliminationTree<COLTYPE>& etree, const CSRMatrixType& L );
+
+    const std::vector<COLTYPE>& supernodePrefix() const { return _supernode_prefix; }
+
+    const std::vector<COLTYPE>& columnToSupernode() const { return _column_to_supernode; }
+
+    const graph::EliminationTree<COLTYPE>& assemblyTree() const { return _assembly_tree; }
+
+private:
+    void prepareNumericValues( CSRMatrixType& L );
+    void buildSupernodes( const COLTYPE nnodes,
+                          const COLTYPE base,
+                          const graph::EliminationTree<COLTYPE>& etree,
+                          const CSRMatrixType& L );
+    bool convertEliminationTreeToAssemblyTree( const graph::EliminationTree<COLTYPE>& etree );
+    void buildFrontalIndexListsAndChildMaps( const COLTYPE base, const CSRMatrixType& L );
+    bool processSupernode( const COLTYPE supernode,
+                           const ROWTYPE* ai_begin,
+                           const ROWTYPE* ai_end,
+                           const COLTYPE* aj,
+                           const VALTYPE* av,
+                           CSRMatrixType& L );
+    void initializeFront( const COLTYPE supernode,
+                          const ROWTYPE* ai_begin,
+                          const ROWTYPE* ai_end,
+                          const COLTYPE* aj,
+                          const VALTYPE* av,
+                          const CSRMatrixType& L );
+    void assembleChildren( const COLTYPE supernode );
+    bool factorFront( const COLTYPE supernode, CSRMatrixType& L, const COLTYPE front_size );
+
+    FrontalWorker<COLTYPE, VALTYPE> _worker;
+    std::vector<FrontalNode<COLTYPE, VALTYPE>> _nodes;
+    std::vector<COLTYPE> _supernode_prefix;
+    std::vector<COLTYPE> _column_to_supernode;
+    std::vector<COLTYPE> _assembly_parent;
+    graph::EliminationTree<COLTYPE> _assembly_tree;
 };
 
 } // namespace factorization
