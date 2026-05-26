@@ -151,7 +151,8 @@ bool metis_reorder_matrix( const CSR& matrix, CSR& reordered, const int threads 
     matrix_utils::APlusATPrefix<int, int, false>( matrix.rows, matrix.AI(), matrix.AJ(), xadj.data() );
     const int actual_edges = xadj[matrix.rows] - xadj[0];
     std::vector<int> adjncy( static_cast<std::size_t>( actual_edges ) );
-    matrix_utils::APlusATFill<int, int, false>( matrix.rows, matrix.AI(), matrix.AJ(), xadj.data(), adjncy.data() );
+    matrix_utils::APlusATFill<int, int, false>( matrix.rows, matrix.AI(), matrix.AJ(), xadj.data(),
+                                                adjncy.data() );
 
     std::vector<int> iperm( static_cast<std::size_t>( matrix.rows ) );
     std::vector<int> perm( static_cast<std::size_t>( matrix.rows ) );
@@ -185,9 +186,9 @@ bool metis_reorder_matrix( const CSR& matrix, CSR& reordered, const int threads 
     reordered.ResizeAI( matrix.rows + 1 );
     reordered.ResizeAJ( matrix.NNZ() );
     reordered.ResizeAV( matrix.NNZ() );
-    matrix_utils::permuteMat( matrix.rows, matrix.cols, perm.data(), iperm.data(),
-                              matrix.AI(), matrix.AJ(), matrix.AV(),
-                              reordered.AI(), reordered.AJ(), reordered.AV(), threads );
+    matrix_utils::permuteMat( matrix.rows, matrix.cols, perm.data(), iperm.data(), matrix.AI(),
+                              matrix.AJ(), matrix.AV(), reordered.AI(), reordered.AJ(),
+                              reordered.AV(), threads );
 
     return true;
 #endif
@@ -203,13 +204,10 @@ int main( int argc, char** argv )
         "f,file", "Matrix Market file path",
         cxxopts::value<std::string>()->default_value( "../../tests/data/ex5.mtx" ) )(
         "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )(
-        "n,threads", "Number of threads for ILU symbolic setup",
-        cxxopts::value<int>()->default_value( "1" ) )(
-        "symbolic-mode", "Symbolic setup mode: v1, v2",
-        cxxopts::value<std::string>()->default_value( "v2" ) )(
+        "n,threads", "Number of threads for ILU symbolic setup", cxxopts::value<int>()->default_value( "1" ) )(
+        "symbolic-mode", "Symbolic setup mode: v1, v2", cxxopts::value<std::string>()->default_value( "v2" ) )(
         "reorder", "Matrix reordering mode before ILU: none, metis",
-        cxxopts::value<std::string>()->default_value( "none" ) )(
-        "h,help", "Print usage" );
+        cxxopts::value<std::string>()->default_value( "none" ) )( "h,help", "Print usage" );
 
     const auto parsed = options.parse( argc, argv );
     if ( parsed.count( "help" ) )

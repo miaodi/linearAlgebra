@@ -18,7 +18,7 @@ using enums::matrix_utils::TriangularMatrix;
 /// @param aj Column indices array
 /// @return true if the graph is a DAG, false if it contains cycles
 template <typename ROWTYPE, typename COLTYPE>
-bool IsDAG(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj);
+bool IsDAG( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj );
 
 /// @brief Project an adjacency graph to a task graph based on task-to-work and work-to-task mappings
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
@@ -29,7 +29,7 @@ struct ProjectGraphToTaskGraph
 {
     /// @brief Constructor
     /// @param nthreads Number of threads to use for parallel computation
-    ProjectGraphToTaskGraph(const int nthreads = 1) : _nthreads(nthreads) {}
+    ProjectGraphToTaskGraph( const int nthreads = 1 ) : _nthreads( nthreads ) {}
 
     /// @brief Project work graph to task graph
     /// @param work_graph_rows Number of rows in the original work graph
@@ -42,9 +42,15 @@ struct ProjectGraphToTaskGraph
     /// @param task_ai Output row pointers for task adjacency graph (pre-allocated, size = num_tasks + 1)
     /// @param task_aj Output column indices for task adjacency graph (pre-allocated, sufficient size)
     /// @return Number of edges in the projected task graph
-    COLTYPE operator()(COLTYPE work_graph_rows, ROWTYPE const* work_ai, COLTYPE const* work_aj,
-                       COLTYPE num_tasks, COLTYPE const* task_prefix, COLTYPE const* task_to_node,
-                       COLTYPE const* node_to_task, ROWTYPE* task_ai, COLTYPE* task_aj);
+    COLTYPE operator()( COLTYPE work_graph_rows,
+                        ROWTYPE const* work_ai,
+                        COLTYPE const* work_aj,
+                        COLTYPE num_tasks,
+                        COLTYPE const* task_prefix,
+                        COLTYPE const* task_to_node,
+                        COLTYPE const* node_to_task,
+                        ROWTYPE* task_ai,
+                        COLTYPE* task_aj );
 
 private:
     // Data members for reusable memory allocation
@@ -58,12 +64,12 @@ private:
 template <typename ROWTYPE, typename COLTYPE>
 struct TransitiveReduction
 {
-    TransitiveReduction(int num_threads = omp_get_max_threads())
-        : _nthreads{std::max(1, num_threads)}
+    TransitiveReduction( int num_threads = omp_get_max_threads() )
+        : _nthreads{ std::max( 1, num_threads ) }
     {
     }
 
-    void set_num_threads(int num_threads) { _nthreads = std::max(1, num_threads); }
+    void set_num_threads( int num_threads ) { _nthreads = std::max( 1, num_threads ); }
 
     /// @brief Compute transitive reduction
     /// @param rows Number of rows in the graph
@@ -72,11 +78,10 @@ struct TransitiveReduction
     /// @param out_ai Output row pointers array (pre-allocated)
     /// @param out_aj Output column indices array (pre-allocated)
     /// @param has_self_loops If true, assumes every node has a self-loop in the input graph
-    void operator()(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* out_ai,
-                    COLTYPE* out_aj, bool has_self_loops = false);
+    void operator()( COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, ROWTYPE* out_ai, COLTYPE* out_aj, bool has_self_loops = false );
 
 private:
-    int _nthreads{1};
+    int _nthreads{ 1 };
     // Data members for reusable memory allocation
     mutable std::vector<std::vector<COLTYPE>> _reachable; // reachable[i] = list of nodes reachable from i
     mutable std::vector<std::vector<COLTYPE>> _reduced_edges; // reusable storage for reduced edges per row
@@ -101,7 +106,7 @@ private:
 /// @param perm Output permutation array (maps old index to new index)
 /// @param iperm Output inverse permutation array (maps new index to old index)
 template <typename ROWTYPE, typename COLTYPE>
-COLTYPE MISPerm(COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm);
+COLTYPE MISPerm( COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm );
 
 /// @brief Find Strongly Connected Components (SCCs) using Tarjan's algorithm
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
@@ -118,12 +123,12 @@ COLTYPE MISPerm(COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* per
 ///       scc_prefix[i] to scc_prefix[i+1]-1 gives the range of nodes in SCC i
 ///       scc_to_node contains the node IDs for each SCC
 template <typename ROWTYPE, typename COLTYPE>
-COLTYPE FindStronglyConnectedComponents(const COLTYPE rows,
-                                        ROWTYPE const* ai,
-                                        COLTYPE const* aj,
-                                        ROWTYPE* scc_prefix,
-                                        COLTYPE* scc_to_node,
-                                        COLTYPE* node_to_scc);
+COLTYPE FindStronglyConnectedComponents( const COLTYPE rows,
+                                         ROWTYPE const* ai,
+                                         COLTYPE const* aj,
+                                         ROWTYPE* scc_prefix,
+                                         COLTYPE* scc_to_node,
+                                         COLTYPE* node_to_scc );
 
 /// @brief Expand SCC level order into a node permutation.
 ///
@@ -142,14 +147,14 @@ COLTYPE FindStronglyConnectedComponents(const COLTYPE rows,
 /// @param node_iperm Optional inverse permutation over original nodes (size = rows),
 ///                   mapping original node id -> position in node_perm
 template <typename ROWTYPE, typename COLTYPE>
-void BuildPermutationFromSccLevels(COLTYPE num_sccs,
-                                   ROWTYPE const* scc_prefix,
-                                   COLTYPE const* scc_to_node,
-                                   COLTYPE const* scc_perm,
-                                   ROWTYPE const* scc_level_prefix,
-                                   COLTYPE scc_levels,
-                                   COLTYPE* node_perm,
-                                   COLTYPE* node_iperm = nullptr);
+void BuildPermutationFromSccLevels( COLTYPE num_sccs,
+                                    ROWTYPE const* scc_prefix,
+                                    COLTYPE const* scc_to_node,
+                                    COLTYPE const* scc_perm,
+                                    ROWTYPE const* scc_level_prefix,
+                                    COLTYPE scc_levels,
+                                    COLTYPE* node_perm,
+                                    COLTYPE* node_iperm = nullptr );
 
 /// @brief Serial implementation of Kahn's algorithm for topological sorting
 ///
@@ -186,16 +191,12 @@ struct KahnSerial
     /// @param prefix Output array for level set boundaries (size = num_levels + 1)
     /// @note Self-loop entries are ignored.
     /// @return Number of levels in the topological ordering
-    COLTYPE operator()( const COLTYPE nodes,
-                        ROWTYPE const* ai,
-                        COLTYPE const* aj,
-                        COLTYPE* perm,
-                        COLTYPE* prefix );
+    COLTYPE operator()( const COLTYPE nodes, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* prefix );
 
-    std::vector<COLTYPE> _degrees;    // In-degree of each node
+    std::vector<COLTYPE> _degrees;         // In-degree of each node
     std::vector<COLTYPE> _initial_degrees; // Reusable storage for dependency counts
-    std::vector<ROWTYPE> _t_ai;       // Transpose graph row pointers
-    std::vector<COLTYPE> _t_aj;       // Transpose graph column indices
+    std::vector<ROWTYPE> _t_ai;            // Transpose graph row pointers
+    std::vector<COLTYPE> _t_aj;            // Transpose graph column indices
 };
 
 /// @brief Parallel implementation of Kahn's algorithm for topological sorting
@@ -212,9 +213,7 @@ struct KahnParallel
     /// @brief Constructor
     /// @param nthreads Number of threads to use for parallel computation
     KahnParallel( int nthreads )
-        : _nthreads( std::max( 1, nthreads ) ),
-          _threads_nodes( _nthreads ),
-          _threads_prefix( _nthreads + 1 )
+        : _nthreads( std::max( 1, nthreads ) ), _threads_nodes( _nthreads ), _threads_prefix( _nthreads + 1 )
     {
     }
 
@@ -242,20 +241,16 @@ struct KahnParallel
     /// @param prefix Output array for level set boundaries (size = num_levels + 1)
     /// @note Self-loop entries are ignored.
     /// @return Number of levels in the topological ordering
-    COLTYPE operator()( const COLTYPE nodes,
-                        ROWTYPE const* ai,
-                        COLTYPE const* aj,
-                        COLTYPE* perm,
-                        COLTYPE* prefix );
+    COLTYPE operator()( const COLTYPE nodes, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* prefix );
 
-    int _nthreads;                                      // Number of threads
-    std::unique_ptr<std::atomic<COLTYPE>[]> _degrees;  // Atomic in-degrees for parallel updates
-    COLTYPE _degrees_size{ 0 };                        // Current size of _degrees array
-    std::vector<COLTYPE> _initial_degrees;              // Reusable storage for dependency counts
-    std::vector<ROWTYPE> _t_ai;                        // Transpose graph row pointers
-    std::vector<COLTYPE> _t_aj;                        // Transpose graph column indices
-    std::vector<std::vector<COLTYPE>> _threads_nodes;  // Per-thread queue of nodes to process
-    std::vector<COLTYPE> _threads_prefix;              // Per-thread prefix sums for output positions
+    int _nthreads;                                    // Number of threads
+    std::unique_ptr<std::atomic<COLTYPE>[]> _degrees; // Atomic in-degrees for parallel updates
+    COLTYPE _degrees_size{ 0 };                       // Current size of _degrees array
+    std::vector<COLTYPE> _initial_degrees;            // Reusable storage for dependency counts
+    std::vector<ROWTYPE> _t_ai;                       // Transpose graph row pointers
+    std::vector<COLTYPE> _t_aj;                       // Transpose graph column indices
+    std::vector<std::vector<COLTYPE>> _threads_nodes; // Per-thread queue of nodes to process
+    std::vector<COLTYPE> _threads_prefix;             // Per-thread prefix sums for output positions
 };
 
 /// @brief Topological sort using dependency-depth level ordering
@@ -281,25 +276,21 @@ struct TopologicalSort2
     ///               After sorting, the base of prefix matches ai[0]
     /// @note Self-loop entries are ignored.
     /// @return Number of levels in the topological ordering
-    COLTYPE operator()( const COLTYPE nodes,
-                        ROWTYPE const* ai,
-                        COLTYPE const* aj,
-                        COLTYPE* perm,
-                        COLTYPE* prefix );
-                        
-    std::vector<COLTYPE> _depths;  // Dependency depth of each node
+    COLTYPE operator()( const COLTYPE nodes, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* prefix );
+
+    std::vector<COLTYPE> _depths; // Dependency depth of each node
 };
 
 /**
  * @brief Compute Jaccard similarity between two CSR structures
- * 
+ *
  * Jaccard similarity = |A ∩ B| / |A ∪ B|
  * Where A and B are the sets of non-zero positions in the matrices.
- * 
+ *
  * This function treats both matrices as binary (presence/absence of entries),
  * computes their union using SpADD with all values set to 1, and then
  * calculates the ratio of overlapping entries to total unique entries.
- * 
+ *
  * @tparam ROWTYPE Type for row pointers
  * @tparam COLTYPE Type for column indices
  * @param A_rows Number of rows in matrix A

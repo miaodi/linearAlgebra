@@ -20,32 +20,25 @@ protected:
 
     // Helper function to verify CSR structure validity
     template <typename ROWTYPE, typename COLTYPE>
-    void verifyCsrStructure( const COLTYPE size,
-                             const ROWTYPE* ai,
-                             const COLTYPE* aj,
-                             const ROWTYPE base = 0 )
+    void verifyCsrStructure( const COLTYPE size, const ROWTYPE* ai, const COLTYPE* aj, const ROWTYPE base = 0 )
     {
         ASSERT_EQ( ai[0], base ) << "Row pointer should start with base";
 
         for ( COLTYPE i = 0; i < size; i++ )
         {
-            ASSERT_LE( ai[i], ai[i + 1] )
-                << "Row pointers must be non-decreasing";
+            ASSERT_LE( ai[i], ai[i + 1] ) << "Row pointers must be non-decreasing";
 
             // Check column indices are sorted
             for ( ROWTYPE j = ai[i] - base; j < ai[i + 1] - base - 1; j++ )
             {
-                ASSERT_LT( aj[j], aj[j + 1] )
-                    << "Column indices must be sorted and unique";
+                ASSERT_LT( aj[j], aj[j + 1] ) << "Column indices must be sorted and unique";
             }
         }
     }
 
     // Helper function to compute A+A^T naively for verification
     template <typename ROWTYPE, typename COLTYPE, bool KEEPDIAG>
-    CSRStructVec<ROWTYPE, COLTYPE> computeAPlusATNaive( const COLTYPE size,
-                                                        const ROWTYPE* ai,
-                                                        const COLTYPE* aj )
+    CSRStructVec<ROWTYPE, COLTYPE> computeAPlusATNaive( const COLTYPE size, const ROWTYPE* ai, const COLTYPE* aj )
     {
         const ROWTYPE base = ai[0];
 
@@ -129,8 +122,7 @@ protected:
         const ROWTYPE nnz = ai1[size] - base;
         for ( ROWTYPE j = 0; j < nnz; j++ )
         {
-            ASSERT_EQ( aj1[j], aj2[j] )
-                << msg << ": Column index mismatch at position " << j;
+            ASSERT_EQ( aj1[j], aj2[j] ) << msg << ": Column index mismatch at position " << j;
         }
     }
 };
@@ -147,21 +139,19 @@ TEST( PartitionOpsTest, Partition1xNZeroBased )
     // row2: (0,70) (5,80)
     std::vector<int32_t> ai = { 0, 3, 6, 8 };
     std::vector<int32_t> aj = { 0, 2, 4, 1, 2, 3, 0, 5 };
-    std::vector<double>   av = { 10, 20, 30, 40, 50, 60, 70, 80 };
+    std::vector<double> av = { 10, 20, 30, 40, 50, 60, 70, 80 };
 
     // Split columns into [0,2), [2,4), [4,6)
     constexpr int N = 3;
     std::array<int32_t, N + 1> col_splits{ 0, 2, 4, 6 };
 
     CSRMatrixVec<int32_t, int32_t, double> blocks[N];
-    partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
-                     col_splits.data(), base, blocks, /*nthreads=*/1 );
+    partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N, col_splits.data(), base,
+                     blocks, /*nthreads=*/1 );
 
     auto expect_block = [&]( const CSRMatrixVec<int32_t, int32_t, double>& blk,
-                             int32_t expected_cols,
-                             std::vector<int32_t> expected_ai,
-                             std::vector<int32_t> expected_aj,
-                             std::vector<double> expected_av )
+                             int32_t expected_cols, std::vector<int32_t> expected_ai,
+                             std::vector<int32_t> expected_aj, std::vector<double> expected_av )
     {
         ASSERT_EQ( blk.rows, rows );
         ASSERT_EQ( blk.cols, expected_cols );
@@ -175,22 +165,13 @@ TEST( PartitionOpsTest, Partition1xNZeroBased )
     };
 
     // Block 0: columns [0,2)
-    expect_block( blocks[0], 2,
-                  { 0, 1, 2, 3 },
-                  { 0, 1, 0 },
-                  { 10, 40, 70 } );
+    expect_block( blocks[0], 2, { 0, 1, 2, 3 }, { 0, 1, 0 }, { 10, 40, 70 } );
 
     // Block 1: columns [2,4) shifted to 0-based
-    expect_block( blocks[1], 2,
-                  { 0, 1, 3, 3 },
-                  { 0, 0, 1 },
-                  { 20, 50, 60 } );
+    expect_block( blocks[1], 2, { 0, 1, 3, 3 }, { 0, 0, 1 }, { 20, 50, 60 } );
 
     // Block 2: columns [4,6) shifted to 0-based
-    expect_block( blocks[2], 2,
-                  { 0, 1, 1, 2 },
-                  { 0, 1 },
-                  { 30, 80 } );
+    expect_block( blocks[2], 2, { 0, 1, 1, 2 }, { 0, 1 }, { 30, 80 } );
 }
 
 TEST( PartitionOpsTest, Partition1xNOneBased )
@@ -202,20 +183,18 @@ TEST( PartitionOpsTest, Partition1xNOneBased )
     // Same pattern as zero-based test but shifted to base=1
     std::vector<int32_t> ai = { 1, 4, 7, 9 };
     std::vector<int32_t> aj = { 1, 3, 5, 2, 3, 4, 1, 6 };
-    std::vector<double>   av = { 10, 20, 30, 40, 50, 60, 70, 80 };
+    std::vector<double> av = { 10, 20, 30, 40, 50, 60, 70, 80 };
 
     constexpr int N = 3;
     std::array<int32_t, N + 1> col_splits{ 1, 3, 5, 7 }; // includes start/end with base
 
     CSRMatrixVec<int32_t, int32_t, double> blocks[N];
-    partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
-                     col_splits.data(), base, blocks, /*nthreads=*/1 );
+    partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N, col_splits.data(), base,
+                     blocks, /*nthreads=*/1 );
 
     auto expect_block = [&]( const CSRMatrixVec<int32_t, int32_t, double>& blk,
-                             int32_t expected_cols,
-                             std::vector<int32_t> expected_ai,
-                             std::vector<int32_t> expected_aj,
-                             std::vector<double> expected_av )
+                             int32_t expected_cols, std::vector<int32_t> expected_ai,
+                             std::vector<int32_t> expected_aj, std::vector<double> expected_av )
     {
         ASSERT_EQ( blk.rows, rows );
         ASSERT_EQ( blk.cols, expected_cols );
@@ -229,22 +208,13 @@ TEST( PartitionOpsTest, Partition1xNOneBased )
     };
 
     // Block 0: columns [1,3)
-    expect_block( blocks[0], 2,
-                  { 1, 2, 3, 4 },
-                  { 1, 2, 1 },
-                  { 10, 40, 70 } );
+    expect_block( blocks[0], 2, { 1, 2, 3, 4 }, { 1, 2, 1 }, { 10, 40, 70 } );
 
     // Block 1: columns [3,5) shifted to base=1
-    expect_block( blocks[1], 2,
-                  { 1, 2, 4, 4 },
-                  { 1, 1, 2 },
-                  { 20, 50, 60 } );
+    expect_block( blocks[1], 2, { 1, 2, 4, 4 }, { 1, 1, 2 }, { 20, 50, 60 } );
 
     // Block 2: columns [5,7) shifted to base=1
-    expect_block( blocks[2], 2,
-                  { 1, 2, 2, 3 },
-                  { 1, 2 },
-                  { 30, 80 } );
+    expect_block( blocks[2], 2, { 1, 2, 2, 3 }, { 1, 2 }, { 30, 80 } );
 }
 
 TEST( PartitionOpsTest, Partition1xNLargeRecompose )
@@ -256,19 +226,19 @@ TEST( PartitionOpsTest, Partition1xNLargeRecompose )
     // Construct a moderately sized, sorted CSR
     std::vector<int32_t> ai = { 0, 3, 5, 9, 11, 14 };
     std::vector<int32_t> aj = { 0, 3, 7, 1, 2, 0, 2, 4, 6, 1, 5, 3, 4, 7 };
-    std::vector<double>   av = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
+    std::vector<double> av = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
 
     constexpr int N = 4;
     std::array<int32_t, N + 1> col_splits{ 0, 2, 4, 6, 8 };
 
     CSRMatrixVec<int32_t, int32_t, double> blocks[N];
-    partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
-                     col_splits.data(), base, blocks, /*nthreads=*/1 );
+    partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N, col_splits.data(), base,
+                     blocks, /*nthreads=*/1 );
 
     // Recompose the original matrix from blocks and ensure it matches input
     std::vector<int32_t> rec_ai( rows + 1, 0 );
     std::vector<int32_t> rec_aj;
-    std::vector<double>  rec_av;
+    std::vector<double> rec_av;
     rec_ai[0] = base;
 
     for ( int32_t r = 0; r < rows; ++r )
@@ -281,7 +251,7 @@ TEST( PartitionOpsTest, Partition1xNLargeRecompose )
             auto* av_b = blocks[b].AV();
 
             const int32_t start = ai_b[r] - base;
-            const int32_t end   = ai_b[r + 1] - base;
+            const int32_t end = ai_b[r + 1] - base;
             for ( int32_t k = start; k < end; ++k )
             {
                 rec_aj.push_back( aj_b[k] + col_shift );
@@ -304,7 +274,7 @@ TEST( PartitionOpsTest, Partition1xNParallelRecompose )
 
     std::vector<int32_t> ai = { 0, 3, 5, 9, 11, 14 };
     std::vector<int32_t> aj = { 0, 3, 7, 1, 2, 0, 2, 4, 6, 1, 5, 3, 4, 7 };
-    std::vector<double>   av = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
+    std::vector<double> av = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
 
     constexpr int N = 4;
     std::array<int32_t, N + 1> col_splits{ 0, 2, 4, 6, 8 };
@@ -312,12 +282,11 @@ TEST( PartitionOpsTest, Partition1xNParallelRecompose )
     for ( int nthreads = 2; nthreads <= max_threads; ++nthreads )
     {
         CSRMatrixVec<int32_t, int32_t, double> blocks[N];
-        partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
-                         col_splits.data(), base, blocks, nthreads );
+        partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N, col_splits.data(), base, blocks, nthreads );
 
         std::vector<int32_t> rec_ai( rows + 1, base );
         std::vector<int32_t> rec_aj;
-        std::vector<double>  rec_av;
+        std::vector<double> rec_av;
 
         for ( int32_t r = 0; r < rows; ++r )
         {
@@ -329,7 +298,7 @@ TEST( PartitionOpsTest, Partition1xNParallelRecompose )
                 auto* av_b = blocks[b].AV();
 
                 const int32_t start = ai_b[r] - base;
-                const int32_t end   = ai_b[r + 1] - base;
+                const int32_t end = ai_b[r + 1] - base;
                 for ( int32_t k = start; k < end; ++k )
                 {
                     rec_aj.push_back( aj_b[k] + col_shift );
@@ -357,7 +326,7 @@ TEST( PartitionOpsTest, Partition1xNBoundaryCases )
     // row2: (3,4)
     std::vector<int32_t> ai = { 0, 2, 3, 4 };
     std::vector<int32_t> aj = { 0, 2, 1, 3 };
-    std::vector<double>   av = { 1, 2, 3, 4 };
+    std::vector<double> av = { 1, 2, 3, 4 };
 
     // N=1 should return the same matrix; test threads 1..8
     for ( int nthreads = 1; nthreads <= 8; ++nthreads )
@@ -365,8 +334,7 @@ TEST( PartitionOpsTest, Partition1xNBoundaryCases )
         constexpr int N = 1;
         std::array<int32_t, N + 1> col_splits{ base, cols + base };
         CSRMatrixVec<int32_t, int32_t, double> blocks[N];
-        partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
-                         col_splits.data(), base, blocks, nthreads );
+        partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N, col_splits.data(), base, blocks, nthreads );
         EXPECT_EQ( blocks[0].rows, rows );
         EXPECT_EQ( blocks[0].cols, cols );
         EXPECT_EQ( blocks[0].ai, ai );
@@ -379,16 +347,17 @@ TEST( PartitionOpsTest, Partition1xNBoundaryCases )
     {
         const int N = cols;
         std::vector<int32_t> col_splits( static_cast<size_t>( N + 1 ) );
-        for ( int i = 0; i <= N; ++i ) col_splits[i] = base + i;
+        for ( int i = 0; i <= N; ++i )
+            col_splits[i] = base + i;
 
         std::vector<CSRMatrixVec<int32_t, int32_t, double>> blocks( static_cast<size_t>( N ) );
-        partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N,
-                         col_splits.data(), base, blocks.data(), nthreads );
+        partitionCSR1xN( rows, cols, ai.data(), aj.data(), av.data(), N, col_splits.data(), base,
+                         blocks.data(), nthreads );
 
         // Recompose and compare
         std::vector<int32_t> rec_ai( rows + 1, base );
         std::vector<int32_t> rec_aj;
-        std::vector<double>  rec_av;
+        std::vector<double> rec_av;
 
         for ( int32_t r = 0; r < rows; ++r )
         {
@@ -401,7 +370,7 @@ TEST( PartitionOpsTest, Partition1xNBoundaryCases )
                 auto* av_b = blk.AV();
 
                 const int start = ai_b[r] - base;
-                const int end   = ai_b[r + 1] - base;
+                const int end = ai_b[r + 1] - base;
                 for ( int k = start; k < end; ++k )
                 {
                     rec_aj.push_back( aj_b[k] + col_shift );
@@ -444,9 +413,8 @@ TEST_F( SymmetricOpsTest, SmallMatrix_KeepDiag )
     aplusatOp( size, ai.data(), aj.data(), result_ai.data(), result_aj.data() );
 
     verifyCsrStructure( size, result_ai.data(), result_aj.data(), base );
-    compareCsrStructures( size, expected_ai.data(), expected_aj.data(),
-                          result_ai.data(), result_aj.data(),
-                          "SmallMatrix_KeepDiag" );
+    compareCsrStructures( size, expected_ai.data(), expected_aj.data(), result_ai.data(),
+                          result_aj.data(), "SmallMatrix_KeepDiag" );
 }
 
 // Test without keeping diagonal
@@ -473,9 +441,8 @@ TEST_F( SymmetricOpsTest, SmallMatrix_NoDiag )
     aplusatOp( size, ai.data(), aj.data(), result_ai.data(), result_aj.data() );
 
     verifyCsrStructure( size, result_ai.data(), result_aj.data(), base );
-    compareCsrStructures( size, expected_ai.data(), expected_aj.data(),
-                          result_ai.data(), result_aj.data(),
-                          "SmallMatrix_NoDiag" );
+    compareCsrStructures( size, expected_ai.data(), expected_aj.data(), result_ai.data(),
+                          result_aj.data(), "SmallMatrix_NoDiag" );
 }
 
 // Test with 1-based indexing
@@ -499,9 +466,8 @@ TEST_F( SymmetricOpsTest, OneBased_KeepDiag )
     aplusatOp( size, ai.data(), aj.data(), result_ai.data(), result_aj.data() );
 
     verifyCsrStructure( size, result_ai.data(), result_aj.data(), base );
-    compareCsrStructures( size, expected_ai.data(), expected_aj.data(),
-                          result_ai.data(), result_aj.data(),
-                          "OneBased_KeepDiag" );
+    compareCsrStructures( size, expected_ai.data(), expected_aj.data(), result_ai.data(),
+                          result_aj.data(), "OneBased_KeepDiag" );
 }
 
 // Test memory reuse across multiple calls
@@ -525,8 +491,8 @@ TEST_F( SymmetricOpsTest, MemoryReuse )
     aplusatOp( size, ai.data(), aj.data(), result_ai2.data(), result_aj2.data() );
 
     // Results should be identical
-    compareCsrStructures( size, result_ai1.data(), result_aj1.data(),
-                          result_ai2.data(), result_aj2.data(), "MemoryReuse" );
+    compareCsrStructures( size, result_ai1.data(), result_aj1.data(), result_ai2.data(),
+                          result_aj2.data(), "MemoryReuse" );
 }
 
 // Test with diagonal-only matrix
@@ -546,8 +512,8 @@ TEST_F( SymmetricOpsTest, DiagonalMatrix_KeepDiag )
     aplusatOp( size, ai.data(), aj.data(), result_ai.data(), result_aj.data() );
 
     verifyCsrStructure( size, result_ai.data(), result_aj.data(), base );
-    compareCsrStructures( size, ai.data(), aj.data(), result_ai.data(),
-                          result_aj.data(), "DiagonalMatrix_KeepDiag" );
+    compareCsrStructures( size, ai.data(), aj.data(), result_ai.data(), result_aj.data(),
+                          "DiagonalMatrix_KeepDiag" );
 }
 
 // Test with diagonal-only matrix without keeping diagonal
@@ -621,8 +587,7 @@ TEST_F( SymmetricOpsTest, ThreadCountSetting )
         std::vector<int32_t> result_ai( size + 1 );
         std::vector<int32_t> result_aj( 10 );
 
-        ASSERT_NO_THROW( aplusatOp( size, ai.data(), aj.data(),
-                                    result_ai.data(), result_aj.data() ) )
+        ASSERT_NO_THROW( aplusatOp( size, ai.data(), aj.data(), result_ai.data(), result_aj.data() ) )
             << "Should work with " << nthreads << " threads";
 
         verifyCsrStructure( size, result_ai.data(), result_aj.data(), base );
@@ -674,8 +639,8 @@ TEST_F( SymmetricOpsTest, Int64Types )
     aplusatOp( size, ai.data(), aj.data(), result_ai.data(), result_aj.data() );
 
     verifyCsrStructure( size, result_ai.data(), result_aj.data(), base );
-    compareCsrStructures( size, expected_ai.data(), expected_aj.data(),
-                          result_ai.data(), result_aj.data(), "Int64Types" );
+    compareCsrStructures( size, expected_ai.data(), expected_aj.data(), result_ai.data(),
+                          result_aj.data(), "Int64Types" );
 }
 
 // Test with larger matrix from file
@@ -717,12 +682,10 @@ TEST_F( SymmetricOpsTest, LargerMatrix_FromFile )
     verifyCsrStructure( size, result_ai.data(), result_aj.data(), base );
 
     // Verify against naive implementation
-    auto expected =
-        computeAPlusATNaive<int32_t, int32_t, true>( size, ai.data(), aj.data() );
+    auto expected = computeAPlusATNaive<int32_t, int32_t, true>( size, ai.data(), aj.data() );
 
-    compareCsrStructures( size, expected.ai.data(), expected.aj.data(),
-                          result_ai.data(), result_aj.data(),
-                          "LargerMatrix_FromFile" );
+    compareCsrStructures( size, expected.ai.data(), expected.aj.data(), result_ai.data(),
+                          result_aj.data(), "LargerMatrix_FromFile" );
 }
 
 // Test correctness against naive implementation
@@ -757,34 +720,30 @@ TEST_F( SymmetricOpsTest, CorrectnessCheck_Various )
         // Test with KEEPDIAG=true
         {
             APlusATStruct<int32_t, int32_t, true> aplusatOp( 1 );
-            auto expected = computeAPlusATNaive<int32_t, int32_t, true>(
-                tc.size, tc.ai.data(), tc.aj.data() );
+            auto expected =
+                computeAPlusATNaive<int32_t, int32_t, true>( tc.size, tc.ai.data(), tc.aj.data() );
 
             std::vector<int32_t> result_ai( tc.size + 1 );
             std::vector<int32_t> result_aj( expected.aj.size() );
 
-            aplusatOp( tc.size, tc.ai.data(), tc.aj.data(), result_ai.data(),
-                       result_aj.data() );
+            aplusatOp( tc.size, tc.ai.data(), tc.aj.data(), result_ai.data(), result_aj.data() );
 
-            compareCsrStructures( tc.size, expected.ai.data(),
-                                  expected.aj.data(), result_ai.data(),
+            compareCsrStructures( tc.size, expected.ai.data(), expected.aj.data(), result_ai.data(),
                                   result_aj.data(), tc.name + "_KeepDiag" );
         }
 
         // Test with KEEPDIAG=false
         {
             APlusATStruct<int32_t, int32_t, false> aplusatOp( 1 );
-            auto expected = computeAPlusATNaive<int32_t, int32_t, false>(
-                tc.size, tc.ai.data(), tc.aj.data() );
+            auto expected =
+                computeAPlusATNaive<int32_t, int32_t, false>( tc.size, tc.ai.data(), tc.aj.data() );
 
             std::vector<int32_t> result_ai( tc.size + 1 );
             std::vector<int32_t> result_aj( expected.aj.size() );
 
-            aplusatOp( tc.size, tc.ai.data(), tc.aj.data(), result_ai.data(),
-                       result_aj.data() );
+            aplusatOp( tc.size, tc.ai.data(), tc.aj.data(), result_ai.data(), result_aj.data() );
 
-            compareCsrStructures( tc.size, expected.ai.data(),
-                                  expected.aj.data(), result_ai.data(),
+            compareCsrStructures( tc.size, expected.ai.data(), expected.aj.data(), result_ai.data(),
                                   result_aj.data(), tc.name + "_NoDiag" );
         }
     }
@@ -799,19 +758,15 @@ TEST_F( SymmetricOpsTest, APlusATPrefix_AsAPlusATPrefix )
     std::vector<int32_t> ai = { 0, 2, 3, 5 };
     std::vector<int32_t> aj = { 0, 2, 1, 0, 2 };
 
-    auto expected_keep = computeAPlusATNaive<int32_t, int32_t, true>(
-        size, ai.data(), aj.data() );
-    auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>(
-        size, ai.data(), aj.data() );
+    auto expected_keep = computeAPlusATNaive<int32_t, int32_t, true>( size, ai.data(), aj.data() );
+    auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>( size, ai.data(), aj.data() );
 
     std::vector<int32_t> ai_AAT( size + 1 );
 
-    APlusATPrefix<int32_t, int32_t, true>( size, ai.data(), aj.data(),
-                                           ai_AAT.data() );
+    APlusATPrefix<int32_t, int32_t, true>( size, ai.data(), aj.data(), ai_AAT.data() );
     ASSERT_EQ( ai_AAT, expected_keep.ai );
 
-    APlusATPrefix<int32_t, int32_t, false>( size, ai.data(), aj.data(),
-                                            ai_AAT.data() );
+    APlusATPrefix<int32_t, int32_t, false>( size, ai.data(), aj.data(), ai_AAT.data() );
     ASSERT_EQ( ai_AAT, expected_nodiag.ai );
 }
 
@@ -823,37 +778,29 @@ TEST_F( SymmetricOpsTest, APlusATFill_AsAPlusATColumns )
     std::vector<int32_t> ai = { 0, 2, 3, 5 };
     std::vector<int32_t> aj = { 0, 2, 1, 0, 2 };
 
-    auto expected_keep = computeAPlusATNaive<int32_t, int32_t, true>(
-        size, ai.data(), aj.data() );
-    auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>(
-        size, ai.data(), aj.data() );
+    auto expected_keep = computeAPlusATNaive<int32_t, int32_t, true>( size, ai.data(), aj.data() );
+    auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>( size, ai.data(), aj.data() );
 
     // KEEPDIAG = true
     std::vector<int32_t> ai_AAT( size + 1 );
-    APlusATPrefix<int32_t, int32_t, true>( size, ai.data(), aj.data(),
-                                           ai_AAT.data() );
+    APlusATPrefix<int32_t, int32_t, true>( size, ai.data(), aj.data(), ai_AAT.data() );
     ASSERT_EQ( ai_AAT, expected_keep.ai );
 
     std::vector<int32_t> aj_AAT( expected_keep.aj.size() );
-    APlusATFill<int32_t, int32_t, true>( size, ai.data(), aj.data(),
-                                         ai_AAT.data(), aj_AAT.data() );
+    APlusATFill<int32_t, int32_t, true>( size, ai.data(), aj.data(), ai_AAT.data(), aj_AAT.data() );
     verifyCsrStructure( size, ai_AAT.data(), aj_AAT.data(), base );
-    compareCsrStructures( size, expected_keep.ai.data(), expected_keep.aj.data(),
-                          ai_AAT.data(), aj_AAT.data(),
-                          "APlusATFill_KeepDiag" );
+    compareCsrStructures( size, expected_keep.ai.data(), expected_keep.aj.data(), ai_AAT.data(),
+                          aj_AAT.data(), "APlusATFill_KeepDiag" );
 
     // KEEPDIAG = false
-    APlusATPrefix<int32_t, int32_t, false>( size, ai.data(), aj.data(),
-                                            ai_AAT.data() );
+    APlusATPrefix<int32_t, int32_t, false>( size, ai.data(), aj.data(), ai_AAT.data() );
     ASSERT_EQ( ai_AAT, expected_nodiag.ai );
 
     aj_AAT.assign( expected_nodiag.aj.size(), 0 );
-    APlusATFill<int32_t, int32_t, false>( size, ai.data(), aj.data(),
-                                          ai_AAT.data(), aj_AAT.data() );
+    APlusATFill<int32_t, int32_t, false>( size, ai.data(), aj.data(), ai_AAT.data(), aj_AAT.data() );
     verifyCsrStructure( size, ai_AAT.data(), aj_AAT.data(), base );
-    compareCsrStructures( size, expected_nodiag.ai.data(), expected_nodiag.aj.data(),
-                          ai_AAT.data(), aj_AAT.data(),
-                          "APlusATFill_NoDiag" );
+    compareCsrStructures( size, expected_nodiag.ai.data(), expected_nodiag.aj.data(), ai_AAT.data(),
+                          aj_AAT.data(), "APlusATFill_NoDiag" );
 }
 
 // Validate combined APlusATSerial helper produces A+A^T structure
@@ -865,34 +812,29 @@ TEST_F( SymmetricOpsTest, APlusATSerial_AsAPlusAT )
     std::vector<int32_t> aj = { 0, 2, 1, 0, 2 };
 
     // KEEPDIAG = true
-    auto expected_keep = computeAPlusATNaive<int32_t, int32_t, true>(
-        size, ai.data(), aj.data() );
+    auto expected_keep = computeAPlusATNaive<int32_t, int32_t, true>( size, ai.data(), aj.data() );
     std::vector<int32_t> ai_out( size + 1 );
     std::vector<int32_t> aj_out( expected_keep.aj.size() );
 
-    APlusATSerial<int32_t, int32_t, true>( size, ai.data(), aj.data(),
-                                           ai_out.data(), aj_out.data() );
-    compareCsrStructures( size, expected_keep.ai.data(), expected_keep.aj.data(),
-                          ai_out.data(), aj_out.data(), "APlusATSerial_KeepDiag" );
+    APlusATSerial<int32_t, int32_t, true>( size, ai.data(), aj.data(), ai_out.data(), aj_out.data() );
+    compareCsrStructures( size, expected_keep.ai.data(), expected_keep.aj.data(), ai_out.data(),
+                          aj_out.data(), "APlusATSerial_KeepDiag" );
 
     // KEEPDIAG = false
-    auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>(
-        size, ai.data(), aj.data() );
+    auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>( size, ai.data(), aj.data() );
     ai_out.assign( size + 1, 0 );
     aj_out.assign( expected_nodiag.aj.size(), 0 );
 
-    APlusATSerial<int32_t, int32_t, false>( size, ai.data(), aj.data(),
-                                            ai_out.data(), aj_out.data() );
-    compareCsrStructures( size, expected_nodiag.ai.data(), expected_nodiag.aj.data(),
-                          ai_out.data(), aj_out.data(), "APlusATSerial_NoDiag" );
+    APlusATSerial<int32_t, int32_t, false>( size, ai.data(), aj.data(), ai_out.data(), aj_out.data() );
+    compareCsrStructures( size, expected_nodiag.ai.data(), expected_nodiag.aj.data(), ai_out.data(),
+                          aj_out.data(), "APlusATSerial_NoDiag" );
 }
 
 // Test all matrices from CMakeLists.txt with different thread counts
 TEST_F( SymmetricOpsTest, AllCMakeMatrices )
 {
-    std::vector<std::string> matrix_names = {
-        "bcsstk17", "s3rmt3m3", "ex5", "jgl009", "rdist1", "nos5"
-    };
+    std::vector<std::string> matrix_names = { "bcsstk17", "s3rmt3m3", "ex5",
+                                              "jgl009",   "rdist1",   "nos5" };
 
     std::vector<int> thread_counts = { 1, 2, 3, 4, 5, 6, 7, 8 };
 
@@ -925,19 +867,19 @@ TEST_F( SymmetricOpsTest, AllCMakeMatrices )
         const int32_t base = ai[0];
         const int32_t nnz = ai[size] - base;
 
-        std::cout << "Matrix " << name << ": size=" << size << ", nnz=" << nnz
-                  << ", base=" << base << std::endl;
+        std::cout << "Matrix " << name << ": size=" << size << ", nnz=" << nnz << ", base=" << base
+                  << std::endl;
 
-        auto run_all_checks = [&]( std::vector<int32_t>& ai_cur,
-                                   std::vector<int32_t>& aj_cur,
-                                   const std::string& suffix ) {
+        auto run_all_checks = [&]( std::vector<int32_t>& ai_cur, std::vector<int32_t>& aj_cur,
+                                   const std::string& suffix )
+        {
             const int32_t cur_base = ai_cur[0];
 
             // Compute expected result once (using naive method)
-            auto expected_keepdiag = computeAPlusATNaive<int32_t, int32_t, true>(
-                size, ai_cur.data(), aj_cur.data() );
-            auto expected_nodiag = computeAPlusATNaive<int32_t, int32_t, false>(
-                size, ai_cur.data(), aj_cur.data() );
+            auto expected_keepdiag =
+                computeAPlusATNaive<int32_t, int32_t, true>( size, ai_cur.data(), aj_cur.data() );
+            auto expected_nodiag =
+                computeAPlusATNaive<int32_t, int32_t, false>( size, ai_cur.data(), aj_cur.data() );
 
             // Also validate the serial helper once per matrix
             {
@@ -945,17 +887,15 @@ TEST_F( SymmetricOpsTest, AllCMakeMatrices )
                 std::vector<int32_t> aj_serial( expected_keepdiag.aj.size() );
                 APlusATSerial<int32_t, int32_t, true>( size, ai_cur.data(), aj_cur.data(),
                                                        ai_serial.data(), aj_serial.data() );
-                compareCsrStructures( size, expected_keepdiag.ai.data(),
-                                      expected_keepdiag.aj.data(), ai_serial.data(),
-                                      aj_serial.data(), name + "_Serial_KeepDiag" + suffix );
+                compareCsrStructures( size, expected_keepdiag.ai.data(), expected_keepdiag.aj.data(),
+                                      ai_serial.data(), aj_serial.data(), name + "_Serial_KeepDiag" + suffix );
 
                 ai_serial.assign( size + 1, 0 );
                 aj_serial.assign( expected_nodiag.aj.size(), 0 );
                 APlusATSerial<int32_t, int32_t, false>( size, ai_cur.data(), aj_cur.data(),
                                                         ai_serial.data(), aj_serial.data() );
-                compareCsrStructures( size, expected_nodiag.ai.data(),
-                                      expected_nodiag.aj.data(), ai_serial.data(),
-                                      aj_serial.data(), name + "_Serial_NoDiag" + suffix );
+                compareCsrStructures( size, expected_nodiag.ai.data(), expected_nodiag.aj.data(),
+                                      ai_serial.data(), aj_serial.data(), name + "_Serial_NoDiag" + suffix );
             }
 
             // Test with different thread counts
@@ -974,17 +914,15 @@ TEST_F( SymmetricOpsTest, AllCMakeMatrices )
                     aplusatOp( size, ai_cur.data(), aj_cur.data(), result_ai.data(), result_aj.data() );
 
                     // Verify CSR structure is valid
-                    verifyCsrStructure( size, result_ai.data(), result_aj.data(),
-                                        cur_base );
+                    verifyCsrStructure( size, result_ai.data(), result_aj.data(), cur_base );
 
                     // Verify against expected computation
-                    compareCsrStructures( size, expected_keepdiag.ai.data(),
-                                          expected_keepdiag.aj.data(), result_ai.data(),
-                                          result_aj.data(),
-                                          name + "_KeepDiag_" + std::to_string( nthreads ) + "threads" + suffix );
+                    compareCsrStructures(
+                        size, expected_keepdiag.ai.data(), expected_keepdiag.aj.data(),
+                        result_ai.data(), result_aj.data(),
+                        name + "_KeepDiag_" + std::to_string( nthreads ) + "threads" + suffix );
 
-                    std::cout << "    KEEPDIAG=true: result nnz="
-                              << ( result_ai[size] - result_ai[0] )
+                    std::cout << "    KEEPDIAG=true: result nnz=" << ( result_ai[size] - result_ai[0] )
                               << ", symmetric=true, matches expected=true" << std::endl;
                 }
 
@@ -999,17 +937,15 @@ TEST_F( SymmetricOpsTest, AllCMakeMatrices )
                     aplusatOp( size, ai_cur.data(), aj_cur.data(), result_ai.data(), result_aj.data() );
 
                     // Verify CSR structure is valid
-                    verifyCsrStructure( size, result_ai.data(), result_aj.data(),
-                                        cur_base );
+                    verifyCsrStructure( size, result_ai.data(), result_aj.data(), cur_base );
 
                     // Verify against expected computation
-                    compareCsrStructures( size, expected_nodiag.ai.data(),
-                                          expected_nodiag.aj.data(), result_ai.data(),
-                                          result_aj.data(),
-                                          name + "_NoDiag_" + std::to_string( nthreads ) + "threads" + suffix );
+                    compareCsrStructures(
+                        size, expected_nodiag.ai.data(), expected_nodiag.aj.data(),
+                        result_ai.data(), result_aj.data(),
+                        name + "_NoDiag_" + std::to_string( nthreads ) + "threads" + suffix );
 
-                    std::cout << "    KEEPDIAG=false: result nnz="
-                              << ( result_ai[size] - result_ai[0] )
+                    std::cout << "    KEEPDIAG=false: result nnz=" << ( result_ai[size] - result_ai[0] )
                               << ", symmetric=true, matches expected=true" << std::endl;
                 }
             }
@@ -1039,9 +975,9 @@ TEST_F( PartitionTest, PartitionCSRMxN_Basic )
     // [ 3 4 5 0 ]
     // [ 0 6 7 8 ]
     // [ 0 0 9 10]
-    std::vector<int> ai = {0, 2, 5, 8, 10};
-    std::vector<int> aj = {0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
-    std::vector<double> av = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    std::vector<int> ai = { 0, 2, 5, 8, 10 };
+    std::vector<int> aj = { 0, 1, 0, 1, 2, 1, 2, 3, 2, 3 };
+    std::vector<double> av = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
     const int rows = 4, cols = 4;
     const int base = ai[0];
     const int M = 2, N = 2;
@@ -1049,19 +985,22 @@ TEST_F( PartitionTest, PartitionCSRMxN_Basic )
     int col_splits[N + 1] = { base, 2 + base, 4 + base };
 
     CSRMatrixVec<int, int, double> blocks[M * N];
-    partitionCSRMxN<CSRMatrixVec<int, int, double>>(
-        rows, cols, ai.data(), aj.data(), av.data(),
-        M, row_splits, N, col_splits, blocks, /*nthreads=*/2 );
+    partitionCSRMxN<CSRMatrixVec<int, int, double>>( rows, cols, ai.data(), aj.data(), av.data(), M,
+                                                     row_splits, N, col_splits, blocks, /*nthreads=*/2 );
 
     auto& A11 = blocks[0];
     auto& A12 = blocks[1];
     auto& A21 = blocks[2];
     auto& A22 = blocks[3];
 
-    EXPECT_EQ( A11.rows, 2 ); EXPECT_EQ( A11.cols, 2 );
-    EXPECT_EQ( A12.rows, 2 ); EXPECT_EQ( A12.cols, 2 );
-    EXPECT_EQ( A21.rows, 2 ); EXPECT_EQ( A21.cols, 2 );
-    EXPECT_EQ( A22.rows, 2 ); EXPECT_EQ( A22.cols, 2 );
+    EXPECT_EQ( A11.rows, 2 );
+    EXPECT_EQ( A11.cols, 2 );
+    EXPECT_EQ( A12.rows, 2 );
+    EXPECT_EQ( A12.cols, 2 );
+    EXPECT_EQ( A21.rows, 2 );
+    EXPECT_EQ( A21.cols, 2 );
+    EXPECT_EQ( A22.rows, 2 );
+    EXPECT_EQ( A22.cols, 2 );
 
     EXPECT_EQ( A11.NNZ(), 4 );
     EXPECT_EQ( A12.NNZ(), 1 );
@@ -1072,9 +1011,9 @@ TEST_F( PartitionTest, PartitionCSRMxN_Basic )
 TEST_F( PartitionTest, PartitionCSRMxN_MixedSplits )
 {
     // 5x5 matrix with non-uniform splits
-    std::vector<int> ai = {0, 3, 5, 8, 10, 12};
-    std::vector<int> aj = {0, 1, 2, 1, 3, 0, 2, 4, 1, 3, 2, 4};
-    std::vector<double> av(12, 1.0);
+    std::vector<int> ai = { 0, 3, 5, 8, 10, 12 };
+    std::vector<int> aj = { 0, 1, 2, 1, 3, 0, 2, 4, 1, 3, 2, 4 };
+    std::vector<double> av( 12, 1.0 );
     const int rows = 5, cols = 5;
     const int base = ai[0];
     const int M = 3, N = 2;
@@ -1082,9 +1021,8 @@ TEST_F( PartitionTest, PartitionCSRMxN_MixedSplits )
     int col_splits[N + 1] = { base, 2 + base, 5 + base };
 
     CSRMatrixVec<int, int, double> blocks[M * N];
-    partitionCSRMxN<CSRMatrixVec<int, int, double>>(
-        rows, cols, ai.data(), aj.data(), av.data(),
-        M, row_splits, N, col_splits, blocks, /*nthreads=*/2 );
+    partitionCSRMxN<CSRMatrixVec<int, int, double>>( rows, cols, ai.data(), aj.data(), av.data(), M,
+                                                     row_splits, N, col_splits, blocks, /*nthreads=*/2 );
 
     int total_nnz = 0;
     for ( int i = 0; i < M * N; ++i )
@@ -1102,18 +1040,16 @@ TEST_F( PartitionTest, PartitionCSR2x2_Basic )
     // [ 3 4 5 0 ]
     // [ 0 6 7 8 ]
     // [ 0 0 9 10]
-    std::vector<int> ai = {0, 2, 5, 8, 10};
-    std::vector<int> aj = {0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
-    std::vector<double> av = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    std::vector<int> ai = { 0, 2, 5, 8, 10 };
+    std::vector<int> aj = { 0, 1, 0, 1, 2, 1, 2, 3, 2, 3 };
+    std::vector<double> av = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
     int rows = 4, cols = 4;
     int row_split = 2, col_split = 2;
     int nthreads = 2;
 
     CSRMatrixVec<int, int, double> A11, A12, A21, A22;
-    partitionCSR2x2<CSRMatrixVec<int, int, double>>(
-        rows, cols, ai.data(), aj.data(), av.data(),
-        row_split, col_split,
-        A11, A12, A21, A22, nthreads );
+    partitionCSR2x2<CSRMatrixVec<int, int, double>>( rows, cols, ai.data(), aj.data(), av.data(),
+                                                     row_split, col_split, A11, A12, A21, A22, nthreads );
 
     // Check dimensions
     EXPECT_EQ( A11.rows, 2 );
@@ -1182,18 +1118,16 @@ TEST_F( PartitionTest, PartitionCSR2x2_Basic )
 TEST_F( PartitionTest, PartitionCSR2x2_DifferentSplits )
 {
     // 5x5 matrix with non-uniform split
-    std::vector<int> ai = {0, 3, 5, 8, 10, 12};
-    std::vector<int> aj = {0, 1, 2, 1, 3, 0, 2, 4, 1, 3, 2, 4};
-    std::vector<double> av(12, 1.0);
+    std::vector<int> ai = { 0, 3, 5, 8, 10, 12 };
+    std::vector<int> aj = { 0, 1, 2, 1, 3, 0, 2, 4, 1, 3, 2, 4 };
+    std::vector<double> av( 12, 1.0 );
     int rows = 5, cols = 5;
     int row_split = 3, col_split = 2;
     int nthreads = 2;
 
     CSRMatrixVec<int, int, double> A11, A12, A21, A22;
-    partitionCSR2x2<CSRMatrixVec<int, int, double>>(
-        rows, cols, ai.data(), aj.data(), av.data(),
-        row_split, col_split,
-        A11, A12, A21, A22, nthreads );
+    partitionCSR2x2<CSRMatrixVec<int, int, double>>( rows, cols, ai.data(), aj.data(), av.data(),
+                                                     row_split, col_split, A11, A12, A21, A22, nthreads );
 
     // Check dimensions
     EXPECT_EQ( A11.rows, 3 );
@@ -1216,18 +1150,16 @@ TEST_F( PartitionTest, PartitionCSR2x2_EmptyBlocks )
     // [ 3 4 0 0 ]
     // [ 0 0 0 0 ]
     // [ 0 0 0 0 ]
-    std::vector<int> ai = {0, 2, 4, 4, 4};
-    std::vector<int> aj = {0, 1, 0, 1};
-    std::vector<double> av = {1, 2, 3, 4};
+    std::vector<int> ai = { 0, 2, 4, 4, 4 };
+    std::vector<int> aj = { 0, 1, 0, 1 };
+    std::vector<double> av = { 1, 2, 3, 4 };
     int rows = 4, cols = 4;
     int row_split = 2, col_split = 2;
     int nthreads = 1;
 
     CSRMatrixVec<int, int, double> A11, A12, A21, A22;
-    partitionCSR2x2<CSRMatrixVec<int, int, double>>(
-        rows, cols, ai.data(), aj.data(), av.data(),
-        row_split, col_split,
-        A11, A12, A21, A22, nthreads );
+    partitionCSR2x2<CSRMatrixVec<int, int, double>>( rows, cols, ai.data(), aj.data(), av.data(),
+                                                     row_split, col_split, A11, A12, A21, A22, nthreads );
 
     // Check dimensions
     EXPECT_EQ( A11.rows, 2 );
@@ -1254,9 +1186,9 @@ TEST_F( PartitionTest, PartitionCSRMxN_EmptyBlocks )
     // [ 3 4 0 0 ]
     // [ 0 0 0 0 ]
     // [ 0 0 0 0 ]
-    std::vector<int> ai = {0, 2, 4, 4, 4};
-    std::vector<int> aj = {0, 1, 0, 1};
-    std::vector<double> av = {1, 2, 3, 4};
+    std::vector<int> ai = { 0, 2, 4, 4, 4 };
+    std::vector<int> aj = { 0, 1, 0, 1 };
+    std::vector<double> av = { 1, 2, 3, 4 };
     const int rows = 4, cols = 4;
     const int base = ai[0];
     const int M = 2, N = 2;
@@ -1264,9 +1196,8 @@ TEST_F( PartitionTest, PartitionCSRMxN_EmptyBlocks )
     int col_splits[N + 1] = { base, 2 + base, 4 + base };
     CSRMatrixVec<int, int, double> blocks[M * N];
 
-    partitionCSRMxN<CSRMatrixVec<int, int, double>>(
-        rows, cols, ai.data(), aj.data(), av.data(),
-        M, row_splits, N, col_splits, blocks, /*nthreads=*/1 );
+    partitionCSRMxN<CSRMatrixVec<int, int, double>>( rows, cols, ai.data(), aj.data(), av.data(), M,
+                                                     row_splits, N, col_splits, blocks, /*nthreads=*/1 );
 
     EXPECT_EQ( blocks[0].NNZ(), 4 );
     EXPECT_EQ( blocks[1].NNZ(), 0 );
@@ -1277,11 +1208,8 @@ TEST_F( PartitionTest, PartitionCSRMxN_EmptyBlocks )
 TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
 {
     // Test with real matrices from tests/data
-    std::vector<std::string> test_matrices = {
-        "data/ex5.mtx",
-        "data/bcsstk17.mtx",
-        "data/s3rmt3m3.mtx"
-    };
+    std::vector<std::string> test_matrices = { "data/ex5.mtx", "data/bcsstk17.mtx",
+                                               "data/s3rmt3m3.mtx" };
 
     for ( const auto& matrix_file : test_matrices )
     {
@@ -1311,13 +1239,14 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
 
         // Test different split positions and thread counts
         std::vector<std::pair<int, int>> splits = {
-            { size / 2, size / 2 },     // Mid-mid
-            { size / 3, size / 3 },     // One-third
+            { size / 2, size / 2 },         // Mid-mid
+            { size / 3, size / 3 },         // One-third
             { 2 * size / 3, 2 * size / 3 }, // Two-thirds
-            { size / 4, 3 * size / 4 }  // Asymmetric
+            { size / 4, 3 * size / 4 }      // Asymmetric
         };
         std::vector<int> thread_counts;
-        for ( int t = 1; t <= 8; ++t ) thread_counts.push_back( t );
+        for ( int t = 1; t <= 8; ++t )
+            thread_counts.push_back( t );
 
         for ( const auto& [row_split, col_split] : splits )
         {
@@ -1326,18 +1255,16 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
 
             for ( int nthreads : thread_counts )
             {
-                std::cout << "  Matrix size: " << size << "x" << size
-                          << ", NNZ: " << nnz
+                std::cout << "  Matrix size: " << size << "x" << size << ", NNZ: " << nnz
                           << ", split: (" << row_split << ", " << col_split << ")"
                           << ", threads: " << nthreads << std::endl;
 
                 CSRMatrixVec<int, int, double> A11, A12, A21, A22;
-                
+
                 // Partition the matrix
-                partitionCSR2x2<CSRMatrixVec<int, int, double>>(
-                    size, size, ai.data(), aj.data(), av.data(),
-                    row_split, col_split,
-                    A11, A12, A21, A22, nthreads );
+                partitionCSR2x2<CSRMatrixVec<int, int, double>>( size, size, ai.data(), aj.data(),
+                                                                 av.data(), row_split, col_split,
+                                                                 A11, A12, A21, A22, nthreads );
 
                 // Verify dimensions
                 EXPECT_EQ( A11.rows, row_split );
@@ -1362,15 +1289,15 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
                 const int* a11_ai = A11.AI();
                 const int* a11_aj = A11.AJ();
                 const double* a11_av = A11.AV();
-                
+
                 const int* a12_ai = A12.AI();
                 const int* a12_aj = A12.AJ();
                 const double* a12_av = A12.AV();
-                
+
                 const int* a21_ai = A21.AI();
                 const int* a21_aj = A21.AJ();
                 const double* a21_av = A21.AV();
-                
+
                 const int* a22_ai = A22.AI();
                 const int* a22_aj = A22.AJ();
                 const double* a22_av = A22.AV();
@@ -1382,24 +1309,24 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
                     {
                         const int col = aj[j_idx];
                         const double val = av[j_idx];
-                        
+
                         // Determine which block this element belongs to
                         const bool in_top_rows = ( i < row_split );
                         const bool in_left_cols = ( col < col_split + base );
-                        
+
                         if ( in_top_rows && in_left_cols )
                         {
                             // Should be in A11
                             const int local_row = i;
                             const int expected_col = col;
-                            
+
                             // Find this entry in A11
                             bool found = false;
                             for ( int k = a11_ai[local_row] - base; k < a11_ai[local_row + 1] - base; k++ )
                             {
                                 if ( a11_aj[k] == expected_col )
                                 {
-                                    EXPECT_DOUBLE_EQ( a11_av[k], val ) 
+                                    EXPECT_DOUBLE_EQ( a11_av[k], val )
                                         << "Value mismatch in A11 at row " << i << ", col " << col;
                                     found = true;
                                     break;
@@ -1412,14 +1339,14 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
                             // Should be in A12
                             const int local_row = i;
                             const int expected_col = col - col_split; // Column index is shifted
-                            
+
                             // Find this entry in A12
                             bool found = false;
                             for ( int k = a12_ai[local_row] - base; k < a12_ai[local_row + 1] - base; k++ )
                             {
                                 if ( a12_aj[k] == expected_col )
                                 {
-                                    EXPECT_DOUBLE_EQ( a12_av[k], val ) 
+                                    EXPECT_DOUBLE_EQ( a12_av[k], val )
                                         << "Value mismatch in A12 at row " << i << ", col " << col;
                                     found = true;
                                     break;
@@ -1432,14 +1359,14 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
                             // Should be in A21
                             const int local_row = i - row_split; // Row index is shifted
                             const int expected_col = col;
-                            
+
                             // Find this entry in A21
                             bool found = false;
                             for ( int k = a21_ai[local_row] - base; k < a21_ai[local_row + 1] - base; k++ )
                             {
                                 if ( a21_aj[k] == expected_col )
                                 {
-                                    EXPECT_DOUBLE_EQ( a21_av[k], val ) 
+                                    EXPECT_DOUBLE_EQ( a21_av[k], val )
                                         << "Value mismatch in A21 at row " << i << ", col " << col;
                                     found = true;
                                     break;
@@ -1450,16 +1377,16 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
                         else
                         {
                             // Should be in A22
-                            const int local_row = i - row_split; // Row index is shifted
+                            const int local_row = i - row_split;      // Row index is shifted
                             const int expected_col = col - col_split; // Column index is shifted
-                            
+
                             // Find this entry in A22
                             bool found = false;
                             for ( int k = a22_ai[local_row] - base; k < a22_ai[local_row + 1] - base; k++ )
                             {
                                 if ( a22_aj[k] == expected_col )
                                 {
-                                    EXPECT_DOUBLE_EQ( a22_av[k], val ) 
+                                    EXPECT_DOUBLE_EQ( a22_av[k], val )
                                         << "Value mismatch in A22 at row " << i << ", col " << col;
                                     found = true;
                                     break;
@@ -1470,7 +1397,9 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
                     }
                 }
 
-                std::cout << "    ✓ All elements verified in correct sub-matrices with correct values" << std::endl;
+                std::cout
+                    << "    ✓ All elements verified in correct sub-matrices with correct values"
+                    << std::endl;
             }
         }
 
@@ -1480,11 +1409,8 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
 
 TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
 {
-    std::vector<std::string> test_matrices = {
-        "data/ex5.mtx",
-        "data/bcsstk17.mtx",
-        "data/s3rmt3m3.mtx"
-    };
+    std::vector<std::string> test_matrices = { "data/ex5.mtx", "data/bcsstk17.mtx",
+                                               "data/s3rmt3m3.mtx" };
     constexpr int max_grids = 5;
 
     for ( const auto& matrix_file : test_matrices )
@@ -1522,11 +1448,13 @@ TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
             }
         }
         std::vector<int> thread_counts;
-        for ( int t = 1; t <= 4; ++t ) thread_counts.push_back( t );
+        for ( int t = 1; t <= 4; ++t )
+            thread_counts.push_back( t );
 
         for ( const auto& [M, N] : grid_shapes )
         {
-            if ( M <= 0 || N <= 0 ) continue;
+            if ( M <= 0 || N <= 0 )
+                continue;
 
             std::vector<int> row_splits( static_cast<size_t>( M + 1 ) );
             std::vector<int> col_splits( static_cast<size_t>( N + 1 ) );
@@ -1545,12 +1473,11 @@ TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
 
             for ( int nthreads : thread_counts )
             {
-
                 std::vector<CSRMatrixVec<int, int, double>> blocks( static_cast<size_t>( M * N ) );
 
                 partitionCSRMxN<CSRMatrixVec<int, int, double>>(
-                    size, size, ai.data(), aj.data(), av.data(),
-                    M, row_splits.data(), N, col_splits.data(), blocks.data(), nthreads );
+                    size, size, ai.data(), aj.data(), av.data(), M, row_splits.data(), N,
+                    col_splits.data(), blocks.data(), nthreads );
 
                 int total_nnz = 0;
                 for ( int idx = 0; idx < M * N; ++idx )
@@ -1579,7 +1506,7 @@ TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
                             auto* av_b = blk.AV();
 
                             const int start = ai_b[local_r] - base;
-                            const int end   = ai_b[local_r + 1] - base;
+                            const int end = ai_b[local_r + 1] - base;
                             for ( int k = start; k < end; ++k )
                             {
                                 combined_aj.push_back( aj_b[k] + col_shift );
@@ -1603,11 +1530,11 @@ TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
                         const double val = av[j_idx];
 
                         const int rb = static_cast<int>(
-                            std::upper_bound( row_splits.begin(), row_splits.end(), i + base )
-                            - row_splits.begin() - 1 );
-                        const int cb = static_cast<int>(
-                            std::upper_bound( col_splits.begin(), col_splits.end(), col )
-                            - col_splits.begin() - 1 );
+                            std::upper_bound( row_splits.begin(), row_splits.end(), i + base ) -
+                            row_splits.begin() - 1 );
+                        const int cb =
+                            static_cast<int>( std::upper_bound( col_splits.begin(), col_splits.end(), col ) -
+                                              col_splits.begin() - 1 );
 
                         auto& blk = blocks[rb * N + cb];
                         auto* ai_b = blk.AI();
@@ -1627,9 +1554,8 @@ TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
                                 break;
                             }
                         }
-                        EXPECT_TRUE( found ) << "Element (" << i << "," << col
-                                             << ") not found in block (" << rb << "," << cb
-                                             << ") for grid " << M << "x" << N;
+                        EXPECT_TRUE( found ) << "Element (" << i << "," << col << ") not found in block ("
+                                             << rb << "," << cb << ") for grid " << M << "x" << N;
                     }
                 }
             }
@@ -1637,58 +1563,58 @@ TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
     }
 }
 
-TEST(Block, Submatrix)
+TEST( Block, Submatrix )
 {
-    for (int nthreads = 1; nthreads <= 4; nthreads++)
+    for ( int nthreads = 1; nthreads <= 4; nthreads++ )
     {
-        omp_set_num_threads(nthreads);
+        omp_set_num_threads( nthreads );
         constexpr int rows = 1000;
         constexpr int nnz_per_row = 15;
 
         matrix_utils::CSRMatrix<int, int, double> mat;
         mat.rows = rows;
         mat.cols = rows;
-        mat.ResizeAI(rows + 1);
-        mat.ResizeAJ(static_cast<std::size_t>(rows) * nnz_per_row);
-        mat.ResizeAV(static_cast<std::size_t>(rows) * nnz_per_row);
+        mat.ResizeAI( rows + 1 );
+        mat.ResizeAJ( static_cast<std::size_t>( rows ) * nnz_per_row );
+        mat.ResizeAV( static_cast<std::size_t>( rows ) * nnz_per_row );
 
-        for (int iter = 0; iter < 4; iter++)
+        for ( int iter = 0; iter < 4; iter++ )
         {
-            const int base = (iter % 2 == 0) ? 1 : 0;
+            const int base = ( iter % 2 == 0 ) ? 1 : 0;
             auto* ai = mat.AI();
             ai[0] = base;
-            for (int r = 0; r < rows; ++r)
+            for ( int r = 0; r < rows; ++r )
             {
                 ai[r + 1] = ai[r] + nnz_per_row;
             }
-            matrix_utils::RandomCSR(rows, rows, mat.AI(), mat.AJ(), mat.AV());
+            matrix_utils::RandomCSR( rows, rows, mat.AI(), mat.AJ(), mat.AV() );
 
             const int start_row = 20;
             const int start_col = 32;
-            const int p  = 123;
+            const int p = 123;
             const int q = 234;
             matrix_utils::CSRMatrix<int, int, double> block;
-            matrix_utils::Block(mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), start_row,
-                                start_col, p, q, block);
+            matrix_utils::Block( mat.rows, mat.Base(), mat.AI(), mat.AJ(), mat.AV(), start_row,
+                                 start_col, p, q, block );
 
             auto* aj = mat.AJ();
             auto* av = mat.AV();
-            EXPECT_EQ(block.rows, p);
-            EXPECT_EQ(block.cols, q);
-            EXPECT_EQ(block.Base(), base);
+            EXPECT_EQ( block.rows, p );
+            EXPECT_EQ( block.cols, q );
+            EXPECT_EQ( block.Base(), base );
 
-            for (int i = 0; i < block.rows; i++)
+            for ( int i = 0; i < block.rows; i++ )
             {
-                if (block.ai[i] != block.ai[i + 1])
+                if ( block.ai[i] != block.ai[i + 1] )
                 {
-                    EXPECT_LT(block.aj[block.ai[i + 1] - 1 - block.Base()] - block.Base(), q);
+                    EXPECT_LT( block.aj[block.ai[i + 1] - 1 - block.Base()] - block.Base(), q );
                 }
-                auto* it = std::lower_bound(aj + ai[start_row + i] - base,
-                                            aj + ai[start_row + i + 1] - base, start_col + base);
-                for (int j = block.ai[i] - base; j < block.ai[i + 1] - base; j++)
+                auto* it = std::lower_bound( aj + ai[start_row + i] - base,
+                                             aj + ai[start_row + i + 1] - base, start_col + base );
+                for ( int j = block.ai[i] - base; j < block.ai[i + 1] - base; j++ )
                 {
-                    EXPECT_EQ(block.aj[j], *it - start_col);
-                    EXPECT_EQ(block.av[j], av[it - aj]);
+                    EXPECT_EQ( block.aj[j], *it - start_col );
+                    EXPECT_EQ( block.av[j], av[it - aj] );
                     it++;
                 }
             }
@@ -1708,7 +1634,7 @@ protected:
     {
         using ROWTYPE = typename CSRMatrixType::ROWTYPE;
         using COLTYPE = typename CSRMatrixType::COLTYPE;
-        
+
         const ROWTYPE* ai = mat.AI();
         const COLTYPE* aj = mat.AJ();
         const ROWTYPE base = ai[0];
@@ -1729,11 +1655,18 @@ protected:
 
     // Helper function to compute C = alpha*A + beta*B naively
     template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> computeSpAddNaive(
-        const COLTYPE A_rows, const COLTYPE A_cols,
-        const ROWTYPE* A_ai, const COLTYPE* A_aj, const VALTYPE* A_av, const VALTYPE alpha,
-        const COLTYPE B_rows, const COLTYPE B_cols,
-        const ROWTYPE* B_ai, const COLTYPE* B_aj, const VALTYPE* B_av, const VALTYPE beta )
+    CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> computeSpAddNaive( const COLTYPE A_rows,
+                                                               const COLTYPE A_cols,
+                                                               const ROWTYPE* A_ai,
+                                                               const COLTYPE* A_aj,
+                                                               const VALTYPE* A_av,
+                                                               const VALTYPE alpha,
+                                                               const COLTYPE B_rows,
+                                                               const COLTYPE B_cols,
+                                                               const ROWTYPE* B_ai,
+                                                               const COLTYPE* B_aj,
+                                                               const VALTYPE* B_av,
+                                                               const VALTYPE beta )
     {
         EXPECT_EQ( A_rows, B_rows );
         EXPECT_EQ( A_cols, B_cols );
@@ -1839,24 +1772,21 @@ TEST_F( SpADDTest, SmallMatrix_ZeroBased )
     const double alpha = 1.0, beta = 1.0;
 
     // Compute expected result
-    auto expected = computeSpAddNaive( rows, cols,
-                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                       rows, cols,
-                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+    auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta );
 
     // Test with SpADD
     SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
     CSRMatrixVec<int32_t, int32_t, double> C;
 
     // Analysis phase
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
 
     verifyCsrMatrix( C );
 
     // Numerical phase
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C );
 
     verifyCsrMatrix( C );
     compareCsrMatrices( expected, C, "SmallMatrix_ZeroBased" );
@@ -1878,18 +1808,15 @@ TEST_F( SpADDTest, SmallMatrix_OneBased )
 
     const double alpha = 1.0, beta = 1.0;
 
-    auto expected = computeSpAddNaive( rows, cols,
-                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                       rows, cols,
-                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+    auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta );
 
     SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
     CSRMatrixVec<int32_t, int32_t, double> C;
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C );
 
     verifyCsrMatrix( C );
     compareCsrMatrices( expected, C, "SmallMatrix_OneBased" );
@@ -1909,18 +1836,15 @@ TEST_F( SpADDTest, DifferentScalars )
 
     const double alpha = 2.0, beta = -1.0;
 
-    auto expected = computeSpAddNaive( rows, cols,
-                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                       rows, cols,
-                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+    auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta );
 
     SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
     CSRMatrixVec<int32_t, int32_t, double> C;
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C );
 
     verifyCsrMatrix( C );
     compareCsrMatrices( expected, C, "DifferentScalars" );
@@ -1930,7 +1854,7 @@ TEST_F( SpADDTest, DifferentScalars )
 TEST_F( SpADDTest, DisjointPatterns )
 {
     const int32_t rows = 3, cols = 3;
-    
+
     // A has entries in upper triangle
     std::vector<int32_t> A_ai = { 0, 2, 3, 3 };
     std::vector<int32_t> A_aj = { 0, 1, 2 };
@@ -1943,18 +1867,15 @@ TEST_F( SpADDTest, DisjointPatterns )
 
     const double alpha = 1.0, beta = 1.0;
 
-    auto expected = computeSpAddNaive( rows, cols,
-                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                       rows, cols,
-                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+    auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta );
 
     SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
     CSRMatrixVec<int32_t, int32_t, double> C;
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C );
 
     verifyCsrMatrix( C );
     compareCsrMatrices( expected, C, "DisjointPatterns" );
@@ -1964,7 +1885,7 @@ TEST_F( SpADDTest, DisjointPatterns )
 TEST_F( SpADDTest, IdenticalPatterns )
 {
     const int32_t rows = 3, cols = 3;
-    
+
     std::vector<int32_t> A_ai = { 0, 2, 4, 5 };
     std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2 };
     std::vector<double> A_av = { 1, 2, 3, 4, 5 };
@@ -1975,18 +1896,15 @@ TEST_F( SpADDTest, IdenticalPatterns )
 
     const double alpha = 1.0, beta = 1.0;
 
-    auto expected = computeSpAddNaive( rows, cols,
-                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                       rows, cols,
-                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+    auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta );
 
     SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
     CSRMatrixVec<int32_t, int32_t, double> C;
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C );
 
     verifyCsrMatrix( C );
     compareCsrMatrices( expected, C, "IdenticalPatterns" );
@@ -1996,7 +1914,7 @@ TEST_F( SpADDTest, IdenticalPatterns )
 TEST_F( SpADDTest, EmptyMatrices )
 {
     const int32_t rows = 3, cols = 3;
-    
+
     std::vector<int32_t> A_ai = { 0, 0, 0, 0 };
     std::vector<int32_t> A_aj = {};
     std::vector<double> A_av = {};
@@ -2010,10 +1928,9 @@ TEST_F( SpADDTest, EmptyMatrices )
     SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
     CSRMatrixVec<int32_t, int32_t, double> C;
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C );
 
     verifyCsrMatrix( C );
     EXPECT_EQ( C.NNZ(), 0 );
@@ -2023,7 +1940,7 @@ TEST_F( SpADDTest, EmptyMatrices )
 TEST_F( SpADDTest, OneEmptyMatrix )
 {
     const int32_t rows = 2, cols = 2;
-    
+
     std::vector<int32_t> A_ai = { 0, 0, 0 };
     std::vector<int32_t> A_aj = {};
     std::vector<double> A_av = {};
@@ -2034,18 +1951,15 @@ TEST_F( SpADDTest, OneEmptyMatrix )
 
     const double alpha = 1.0, beta = 2.0;
 
-    auto expected = computeSpAddNaive( rows, cols,
-                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                       rows, cols,
-                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+    auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta );
 
     SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
     CSRMatrixVec<int32_t, int32_t, double> C;
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C );
 
     verifyCsrMatrix( C );
     compareCsrMatrices( expected, C, "OneEmptyMatrix" );
@@ -2055,7 +1969,7 @@ TEST_F( SpADDTest, OneEmptyMatrix )
 TEST_F( SpADDTest, MultipleThreads )
 {
     const int32_t rows = 4, cols = 4;
-    
+
     std::vector<int32_t> A_ai = { 0, 2, 4, 6, 7 };
     std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2, 3, 3 };
     std::vector<double> A_av = { 1, 2, 3, 4, 5, 6, 7 };
@@ -2066,20 +1980,17 @@ TEST_F( SpADDTest, MultipleThreads )
 
     const double alpha = 1.5, beta = -0.5;
 
-    auto expected = computeSpAddNaive( rows, cols,
-                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                       rows, cols,
-                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+    auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta );
 
     for ( int nthreads : { 1, 2, 4, 8 } )
     {
         SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( nthreads );
         CSRMatrixVec<int32_t, int32_t, double> C;
 
-        spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                        rows, cols, B_ai.data(), B_aj.data(), C );
-        spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-               rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+        spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
+        spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+               B_aj.data(), B_av.data(), beta, C );
 
         verifyCsrMatrix( C );
         compareCsrMatrices( expected, C, "MultipleThreads_" + std::to_string( nthreads ) );
@@ -2090,7 +2001,7 @@ TEST_F( SpADDTest, MultipleThreads )
 TEST_F( SpADDTest, SetNumThreads )
 {
     const int32_t rows = 3, cols = 3;
-    
+
     std::vector<int32_t> A_ai = { 0, 2, 4, 5 };
     std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2 };
     std::vector<double> A_av = { 1, 2, 3, 4, 5 };
@@ -2104,18 +2015,16 @@ TEST_F( SpADDTest, SetNumThreads )
     SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 2 );
     CSRMatrixVec<int32_t, int32_t, double> C1, C2;
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C1 );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C1 );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C1 );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C1 );
 
     // Change thread count
     spadd.setNumThreads( 4 );
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C2 );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C2 );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C2 );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C2 );
 
     verifyCsrMatrix( C1 );
     verifyCsrMatrix( C2 );
@@ -2126,7 +2035,7 @@ TEST_F( SpADDTest, SetNumThreads )
 TEST_F( SpADDTest, Int64Types )
 {
     const int64_t rows = 3, cols = 3;
-    
+
     std::vector<int64_t> A_ai = { 0, 2, 4, 5 };
     std::vector<int64_t> A_aj = { 0, 1, 1, 2, 2 };
     std::vector<double> A_av = { 1, 2, 3, 4, 5 };
@@ -2137,18 +2046,15 @@ TEST_F( SpADDTest, Int64Types )
 
     const double alpha = 1.0, beta = 1.0;
 
-    auto expected = computeSpAddNaive( rows, cols,
-                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                       rows, cols,
-                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+    auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta );
 
     SpADD<CSRMatrixVec<int64_t, int64_t, double>> spadd( 1 );
     CSRMatrixVec<int64_t, int64_t, double> C;
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C );
 
     verifyCsrMatrix( C );
     compareCsrMatrices( expected, C, "Int64Types" );
@@ -2158,7 +2064,7 @@ TEST_F( SpADDTest, Int64Types )
 TEST_F( SpADDTest, FloatTypes )
 {
     const int32_t rows = 2, cols = 2;
-    
+
     std::vector<int32_t> A_ai = { 0, 2, 3 };
     std::vector<int32_t> A_aj = { 0, 1, 1 };
     std::vector<float> A_av = { 1.5f, 2.5f, 3.5f };
@@ -2169,18 +2075,15 @@ TEST_F( SpADDTest, FloatTypes )
 
     const float alpha = 2.0f, beta = -1.0f;
 
-    auto expected = computeSpAddNaive( rows, cols,
-                                       A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                       rows, cols,
-                                       B_ai.data(), B_aj.data(), B_av.data(), beta );
+    auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                       rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta );
 
     SpADD<CSRMatrixVec<int32_t, int32_t, float>> spadd( 1 );
     CSRMatrixVec<int32_t, int32_t, float> C;
 
-    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                    rows, cols, B_ai.data(), B_aj.data(), C );
-    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-           rows, cols, B_ai.data(), B_aj.data(), B_av.data(), beta, C );
+    spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, B_ai.data(), B_aj.data(), C );
+    spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols, B_ai.data(),
+           B_aj.data(), B_av.data(), beta, C );
 
     verifyCsrMatrix( C );
     compareCsrMatrices( expected, C, "FloatTypes" );
@@ -2218,14 +2121,12 @@ TEST_F( SpADDTest, LargerMatrices )
         // Use same matrix for A and B with different scalars
         const double alpha = 1.5, beta = -0.5;
 
-        std::cout << "\nTesting SpADD with matrix: " << name
-                  << " (size=" << rows << ", nnz=" << A_ai[rows] - A_ai[0] << ")" << std::endl;
+        std::cout << "\nTesting SpADD with matrix: " << name << " (size=" << rows
+                  << ", nnz=" << A_ai[rows] - A_ai[0] << ")" << std::endl;
 
         // Compute expected result
-        auto expected = computeSpAddNaive( rows, cols,
-                                           A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                                           rows, cols,
-                                           A_ai.data(), A_aj.data(), A_av.data(), beta );
+        auto expected = computeSpAddNaive( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
+                                           rows, cols, A_ai.data(), A_aj.data(), A_av.data(), beta );
 
         // Test with different thread counts
         for ( int nthreads : { 1, 2, 4, 8 } )
@@ -2235,10 +2136,9 @@ TEST_F( SpADDTest, LargerMatrices )
             SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( nthreads );
             CSRMatrixVec<int32_t, int32_t, double> C;
 
-            spadd.analysis( rows, cols, A_ai.data(), A_aj.data(),
-                            rows, cols, A_ai.data(), A_aj.data(), C );
-            spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha,
-                   rows, cols, A_ai.data(), A_aj.data(), A_av.data(), beta, C );
+            spadd.analysis( rows, cols, A_ai.data(), A_aj.data(), rows, cols, A_ai.data(), A_aj.data(), C );
+            spadd( rows, cols, A_ai.data(), A_aj.data(), A_av.data(), alpha, rows, cols,
+                   A_ai.data(), A_aj.data(), A_av.data(), beta, C );
 
             verifyCsrMatrix( C );
             compareCsrMatrices( expected, C, name + "_" + std::to_string( nthreads ) + "threads" );
@@ -2261,46 +2161,24 @@ TEST_F( SpADDTest, CorrectnessCheck_Various )
     };
 
     std::vector<TestCase> cases = {
-        {
-            "Dense_2x2",
-            { 0, 2, 4 }, { 0, 1, 0, 1 }, { 0, 2, 4 }, { 0, 1, 0, 1 },
-            { 1, 2, 3, 4 }, { 5, 6, 7, 8 },
-            2, 2, 1.0, 1.0
-        },
-        {
-            "Diagonal",
-            { 0, 1, 2, 3 }, { 0, 1, 2 }, { 0, 1, 2, 3 }, { 0, 1, 2 },
-            { 1, 2, 3 }, { 4, 5, 6 },
-            3, 3, 2.0, -1.0
-        },
-        {
-            "UpperLower",
-            { 0, 2, 3, 3 }, { 0, 1, 2 }, { 0, 0, 1, 2 }, { 0, 1 },
-            { 1, 2, 3 }, { 4, 5 },
-            3, 3, 1.0, 1.0
-        },
-        {
-            "Cancellation",
-            { 0, 1, 2 }, { 0, 1 }, { 0, 1, 2 }, { 0, 1 },
-            { 5, 10 }, { 5, 10 },
-            2, 2, 1.0, -1.0
-        }
-    };
+        { "Dense_2x2", { 0, 2, 4 }, { 0, 1, 0, 1 }, { 0, 2, 4 }, { 0, 1, 0, 1 }, { 1, 2, 3, 4 }, { 5, 6, 7, 8 }, 2, 2, 1.0, 1.0 },
+        { "Diagonal", { 0, 1, 2, 3 }, { 0, 1, 2 }, { 0, 1, 2, 3 }, { 0, 1, 2 }, { 1, 2, 3 }, { 4, 5, 6 }, 3, 3, 2.0, -1.0 },
+        { "UpperLower", { 0, 2, 3, 3 }, { 0, 1, 2 }, { 0, 0, 1, 2 }, { 0, 1 }, { 1, 2, 3 }, { 4, 5 }, 3, 3, 1.0, 1.0 },
+        { "Cancellation", { 0, 1, 2 }, { 0, 1 }, { 0, 1, 2 }, { 0, 1 }, { 5, 10 }, { 5, 10 }, 2, 2, 1.0, -1.0 } };
 
     for ( const auto& tc : cases )
     {
-        auto expected = computeSpAddNaive( tc.rows, tc.cols,
-                                           tc.A_ai.data(), tc.A_aj.data(), tc.A_av.data(), tc.alpha,
-                                           tc.rows, tc.cols,
+        auto expected = computeSpAddNaive( tc.rows, tc.cols, tc.A_ai.data(), tc.A_aj.data(),
+                                           tc.A_av.data(), tc.alpha, tc.rows, tc.cols,
                                            tc.B_ai.data(), tc.B_aj.data(), tc.B_av.data(), tc.beta );
 
         SpADD<CSRMatrixVec<int32_t, int32_t, double>> spadd( 1 );
         CSRMatrixVec<int32_t, int32_t, double> C;
 
-        spadd.analysis( tc.rows, tc.cols, tc.A_ai.data(), tc.A_aj.data(),
-                        tc.rows, tc.cols, tc.B_ai.data(), tc.B_aj.data(), C );
-        spadd( tc.rows, tc.cols, tc.A_ai.data(), tc.A_aj.data(), tc.A_av.data(), tc.alpha,
-               tc.rows, tc.cols, tc.B_ai.data(), tc.B_aj.data(), tc.B_av.data(), tc.beta, C );
+        spadd.analysis( tc.rows, tc.cols, tc.A_ai.data(), tc.A_aj.data(), tc.rows, tc.cols,
+                        tc.B_ai.data(), tc.B_aj.data(), C );
+        spadd( tc.rows, tc.cols, tc.A_ai.data(), tc.A_aj.data(), tc.A_av.data(), tc.alpha, tc.rows,
+               tc.cols, tc.B_ai.data(), tc.B_aj.data(), tc.B_av.data(), tc.beta, C );
 
         verifyCsrMatrix( C );
         compareCsrMatrices( expected, C, tc.name );
@@ -2318,21 +2196,22 @@ protected:
 TEST_F( JaccardSimilarityTest, IdenticalMatrices )
 {
     const int32_t rows = 3, cols = 3;
-    
+
     std::vector<int32_t> ai = { 0, 2, 4, 5 };
     std::vector<int32_t> aj = { 0, 1, 1, 2, 2 };
 
-    double similarity = graph::jaccardSimilarity( rows, cols, ai.data(), aj.data(),
-                                           rows, cols, ai.data(), aj.data(), 1 );
+    double similarity =
+        graph::jaccardSimilarity( rows, cols, ai.data(), aj.data(), rows, cols, ai.data(), aj.data(), 1 );
 
-    EXPECT_NEAR( similarity, 1.0, _tol ) << "Identical matrices should have Jaccard similarity of 1.0";
+    EXPECT_NEAR( similarity, 1.0, _tol )
+        << "Identical matrices should have Jaccard similarity of 1.0";
 }
 
 // Test completely disjoint matrices (should give 0.0)
 TEST_F( JaccardSimilarityTest, DisjointMatrices )
 {
     const int32_t rows = 3, cols = 3;
-    
+
     // A has entries in upper triangle
     std::vector<int32_t> A_ai = { 0, 2, 3, 3 };
     std::vector<int32_t> A_aj = { 0, 1, 2 };
@@ -2341,17 +2220,18 @@ TEST_F( JaccardSimilarityTest, DisjointMatrices )
     std::vector<int32_t> B_ai = { 0, 0, 1, 2 };
     std::vector<int32_t> B_aj = { 0, 1 };
 
-    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
-                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(), rows, cols,
+                                                  B_ai.data(), B_aj.data(), 1 );
 
-    EXPECT_NEAR( similarity, 0.0, _tol ) << "Disjoint matrices should have Jaccard similarity of 0.0";
+    EXPECT_NEAR( similarity, 0.0, _tol )
+        << "Disjoint matrices should have Jaccard similarity of 0.0";
 }
 
 // Test partial overlap
 TEST_F( JaccardSimilarityTest, PartialOverlap )
 {
     const int32_t rows = 3, cols = 3;
-    
+
     // A = [1 1 0]
     //     [0 1 1]
     //     [0 0 1]
@@ -2369,51 +2249,54 @@ TEST_F( JaccardSimilarityTest, PartialOverlap )
     // Jaccard = 2/7
     double expected = 2.0 / 7.0;
 
-    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
-                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(), rows, cols,
+                                                  B_ai.data(), B_aj.data(), 1 );
 
-    EXPECT_NEAR( similarity, expected, _tol ) << "Partial overlap should give correct Jaccard similarity";
+    EXPECT_NEAR( similarity, expected, _tol )
+        << "Partial overlap should give correct Jaccard similarity";
 }
 
 // Test with one empty matrix
 TEST_F( JaccardSimilarityTest, OneEmptyMatrix )
 {
     const int32_t rows = 2, cols = 2;
-    
+
     std::vector<int32_t> A_ai = { 0, 0, 0 };
     std::vector<int32_t> A_aj = {};
 
     std::vector<int32_t> B_ai = { 0, 1, 3 };
     std::vector<int32_t> B_aj = { 0, 0, 1 };
 
-    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
-                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(), rows, cols,
+                                                  B_ai.data(), B_aj.data(), 1 );
 
-    EXPECT_NEAR( similarity, 0.0, _tol ) << "One empty matrix should give Jaccard similarity of 0.0";
+    EXPECT_NEAR( similarity, 0.0, _tol )
+        << "One empty matrix should give Jaccard similarity of 0.0";
 }
 
 // Test with both empty matrices
 TEST_F( JaccardSimilarityTest, BothEmptyMatrices )
 {
     const int32_t rows = 2, cols = 2;
-    
+
     std::vector<int32_t> A_ai = { 0, 0, 0 };
     std::vector<int32_t> A_aj = {};
 
     std::vector<int32_t> B_ai = { 0, 0, 0 };
     std::vector<int32_t> B_aj = {};
 
-    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
-                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(), rows, cols,
+                                                  B_ai.data(), B_aj.data(), 1 );
 
-    EXPECT_NEAR( similarity, 1.0, _tol ) << "Both empty matrices should give Jaccard similarity of 1.0";
+    EXPECT_NEAR( similarity, 1.0, _tol )
+        << "Both empty matrices should give Jaccard similarity of 1.0";
 }
 
 // Test with 1-based indexing
 TEST_F( JaccardSimilarityTest, OneBasedIndexing )
 {
     const int32_t rows = 3, cols = 3;
-    
+
     std::vector<int32_t> A_ai = { 1, 3, 5, 6 };
     std::vector<int32_t> A_aj = { 1, 2, 2, 3, 3 };
 
@@ -2425,8 +2308,8 @@ TEST_F( JaccardSimilarityTest, OneBasedIndexing )
     // Jaccard = 2/7
     double expected = 2.0 / 7.0;
 
-    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
-                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(), rows, cols,
+                                                  B_ai.data(), B_aj.data(), 1 );
 
     EXPECT_NEAR( similarity, expected, _tol ) << "One-based indexing should work correctly";
 }
@@ -2435,7 +2318,7 @@ TEST_F( JaccardSimilarityTest, OneBasedIndexing )
 TEST_F( JaccardSimilarityTest, Int64Types )
 {
     const int64_t rows = 2, cols = 2;
-    
+
     std::vector<int64_t> A_ai = { 0, 2, 3 };
     std::vector<int64_t> A_aj = { 0, 1, 1 };
 
@@ -2447,8 +2330,8 @@ TEST_F( JaccardSimilarityTest, Int64Types )
     // Jaccard = 2/4 = 0.5
     double expected = 0.5;
 
-    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
-                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(), rows, cols,
+                                                  B_ai.data(), B_aj.data(), 1 );
 
     EXPECT_NEAR( similarity, expected, _tol ) << "int64_t types should work correctly";
 }
@@ -2457,7 +2340,7 @@ TEST_F( JaccardSimilarityTest, Int64Types )
 TEST_F( JaccardSimilarityTest, MultipleThreads )
 {
     const int32_t rows = 4, cols = 4;
-    
+
     std::vector<int32_t> A_ai = { 0, 2, 4, 6, 7 };
     std::vector<int32_t> A_aj = { 0, 1, 1, 2, 2, 3, 3 };
 
@@ -2465,16 +2348,16 @@ TEST_F( JaccardSimilarityTest, MultipleThreads )
     std::vector<int32_t> B_aj = { 0, 1, 0, 2, 1, 3 };
 
     // Compute with 1 thread as reference
-    double ref_similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
-                                               rows, cols, B_ai.data(), B_aj.data(), 1 );
+    double ref_similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(), rows,
+                                                      cols, B_ai.data(), B_aj.data(), 1 );
 
     // Test with different thread counts
     for ( int nthreads : { 2, 4, 8 } )
     {
-        double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
-                                               rows, cols, B_ai.data(), B_aj.data(), nthreads );
+        double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(), rows,
+                                                      cols, B_ai.data(), B_aj.data(), nthreads );
 
-        EXPECT_NEAR( similarity, ref_similarity, _tol ) 
+        EXPECT_NEAR( similarity, ref_similarity, _tol )
             << "Results should be consistent with " << nthreads << " threads";
     }
 }
@@ -2483,7 +2366,7 @@ TEST_F( JaccardSimilarityTest, MultipleThreads )
 TEST_F( JaccardSimilarityTest, SubsetRelationship )
 {
     const int32_t rows = 3, cols = 3;
-    
+
     // A is subset of B
     std::vector<int32_t> A_ai = { 0, 1, 2, 3 };
     std::vector<int32_t> A_aj = { 0, 1, 2 };
@@ -2496,10 +2379,11 @@ TEST_F( JaccardSimilarityTest, SubsetRelationship )
     // Jaccard = 3/6 = 0.5
     double expected = 0.5;
 
-    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(),
-                                           rows, cols, B_ai.data(), B_aj.data(), 1 );
+    double similarity = graph::jaccardSimilarity( rows, cols, A_ai.data(), A_aj.data(), rows, cols,
+                                                  B_ai.data(), B_aj.data(), 1 );
 
-    EXPECT_NEAR( similarity, expected, _tol ) << "Subset relationship should give correct Jaccard similarity";
+    EXPECT_NEAR( similarity, expected, _tol )
+        << "Subset relationship should give correct Jaccard similarity";
 }
 
 int main( int argc, char** argv )

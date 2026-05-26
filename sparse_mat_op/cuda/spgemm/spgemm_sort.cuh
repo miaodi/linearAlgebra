@@ -22,16 +22,14 @@ bool SpGEMMSortExpandedProductsByColumn( const SpGEMMSymbolicResult<ROWTYPE, COL
                                          SpGEMMExpandedProducts<COLTYPE, VALTYPE>& sorted,
                                          cudaStream_t stream = nullptr );
 
-extern template bool SpGEMMSortExpandedProductsByColumn<int, int, float>(
-    const SpGEMMSymbolicResult<int, int>&,
-    SpGEMMExpandedProducts<int, float>&,
-    SpGEMMExpandedProducts<int, float>&,
-    cudaStream_t );
+extern template bool SpGEMMSortExpandedProductsByColumn<int, int, float>( const SpGEMMSymbolicResult<int, int>&,
+                                                                          SpGEMMExpandedProducts<int, float>&,
+                                                                          SpGEMMExpandedProducts<int, float>&,
+                                                                          cudaStream_t );
 
-extern template bool SpGEMMSortExpandedProductsByColumn<int, int, double>(
-    const SpGEMMSymbolicResult<int, int>&,
-    SpGEMMExpandedProducts<int, double>&,
-    SpGEMMExpandedProducts<int, double>&,
-    cudaStream_t );
+extern template bool SpGEMMSortExpandedProductsByColumn<int, int, double>( const SpGEMMSymbolicResult<int, int>&,
+                                                                           SpGEMMExpandedProducts<int, double>&,
+                                                                           SpGEMMExpandedProducts<int, double>&,
+                                                                           cudaStream_t );
 
 } // namespace matrix_utils::sparse_cuda

@@ -1,6 +1,5 @@
 #pragma once
 
-
 namespace enums::matrix_utils
 {
 
@@ -13,4 +12,3 @@ enum TriangularMatrix
 };
 
 } // namespace enums::matrix_utils
-

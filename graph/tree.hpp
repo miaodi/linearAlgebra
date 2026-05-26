@@ -2,7 +2,8 @@
 
 #include <vector>
 
-namespace graph {
+namespace graph
+{
 
 /// @brief Compute the elimination tree of a symmetric matrix. The input matrix
 /// should be either the full matrix or the lower triangular part.
@@ -17,8 +18,7 @@ namespace graph {
 /// @param parent parent vector, output
 /// @param ancestor ancestor vector, helper for path compression
 template <typename ROWTYPE, typename COLTYPE>
-void eliminationTree(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
-                     COLTYPE *parent, COLTYPE *ancestor);
+void eliminationTree( const COLTYPE nnodes, const ROWTYPE* ai, const COLTYPE* aj, COLTYPE* parent, COLTYPE* ancestor );
 
 /// @brief Convert a parent array into first-child/next-sibling child lists.
 ///
@@ -32,16 +32,22 @@ void eliminationTree(const COLTYPE nnodes, const ROWTYPE *ai, const COLTYPE *aj,
 /// @tparam COLTYPE column index type
 /// @return number of roots in the tree or forest
 template <bool FillRoots, typename COLTYPE>
-COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
-                             const COLTYPE *parent, COLTYPE *first_child,
-                             COLTYPE *next_sibling, COLTYPE *roots = nullptr,
-                             COLTYPE *child_count = nullptr);
+COLTYPE parentToChildSibling( const COLTYPE nnodes,
+                              const COLTYPE base,
+                              const COLTYPE* parent,
+                              COLTYPE* first_child,
+                              COLTYPE* next_sibling,
+                              COLTYPE* roots = nullptr,
+                              COLTYPE* child_count = nullptr );
 
 template <typename COLTYPE>
-COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
-                             const COLTYPE *parent, COLTYPE *first_child,
-                             COLTYPE *next_sibling, COLTYPE *roots = nullptr,
-                             COLTYPE *child_count = nullptr);
+COLTYPE parentToChildSibling( const COLTYPE nnodes,
+                              const COLTYPE base,
+                              const COLTYPE* parent,
+                              COLTYPE* first_child,
+                              COLTYPE* next_sibling,
+                              COLTYPE* roots = nullptr,
+                              COLTYPE* child_count = nullptr );
 
 /// @brief Convert a parent array into grouped child adjacency in CSR form.
 ///
@@ -54,9 +60,12 @@ COLTYPE parentToChildSibling(const COLTYPE nnodes, const COLTYPE base,
 /// @tparam COLTYPE column index type
 /// @return number of roots in the tree or forest
 template <bool FillRoots, typename COLTYPE>
-COLTYPE parentToChildCSR(const COLTYPE nnodes, const COLTYPE base,
-                         const COLTYPE *parent, COLTYPE *child_offsets,
-                         COLTYPE *children, COLTYPE *roots = nullptr);
+COLTYPE parentToChildCSR( const COLTYPE nnodes,
+                          const COLTYPE base,
+                          const COLTYPE* parent,
+                          COLTYPE* child_offsets,
+                          COLTYPE* children,
+                          COLTYPE* roots = nullptr );
 
 /// @brief Compute bottom-up topological levels from a parent-array forest.
 ///
@@ -69,10 +78,13 @@ COLTYPE parentToChildCSR(const COLTYPE nnodes, const COLTYPE base,
 /// @tparam COLTYPE column index type
 /// @return number of computed levels
 template <typename COLTYPE>
-COLTYPE parentTopologicalOrder(const COLTYPE nnodes, const COLTYPE base,
-                               const COLTYPE *parent,
-                               const COLTYPE *child_count, COLTYPE *scratch,
-                               COLTYPE *perm, COLTYPE *prefix);
+COLTYPE parentTopologicalOrder( const COLTYPE nnodes,
+                                const COLTYPE base,
+                                const COLTYPE* parent,
+                                const COLTYPE* child_count,
+                                COLTYPE* scratch,
+                                COLTYPE* perm,
+                                COLTYPE* prefix );
 
 /// @brief Elimination-tree analysis and scheduling data for sparse Cholesky.
 ///
@@ -84,59 +96,59 @@ COLTYPE parentTopologicalOrder(const COLTYPE nnodes, const COLTYPE base,
 ///
 /// Stored labels use the same base as `ai[0]`. A root is encoded as
 /// `parent[i] == i + base`.
-template <typename COLTYPE> class EliminationTree {
+template <typename COLTYPE>
+class EliminationTree
+{
 public:
-  COLTYPE nnodes() const { return _nnodes; }
-  COLTYPE base() const { return _base; }
-  COLTYPE nroots() const { return _nroots; }
-  COLTYPE topologicalLevels() const { return _topologicalLevels; }
+    COLTYPE nnodes() const { return _nnodes; }
+    COLTYPE base() const { return _base; }
+    COLTYPE nroots() const { return _nroots; }
+    COLTYPE topologicalLevels() const { return _topologicalLevels; }
 
-  COLTYPE const *parent() const { return _parent.data(); }
-  COLTYPE const *roots() const { return _roots.data(); }
-  COLTYPE const *childOffsets() const { return _childOffsets.data(); }
-  COLTYPE const *children() const { return _children.data(); }
-  COLTYPE const *childCounts() const { return _childCounts.data(); }
-  COLTYPE const *topologicalOrder() const { return _topologicalOrder.data(); }
-  COLTYPE const *topologicalPrefix() const {
-    return _topologicalPrefix.data();
-  }
+    COLTYPE const* parent() const { return _parent.data(); }
+    COLTYPE const* roots() const { return _roots.data(); }
+    COLTYPE const* childOffsets() const { return _childOffsets.data(); }
+    COLTYPE const* children() const { return _children.data(); }
+    COLTYPE const* childCounts() const { return _childCounts.data(); }
+    COLTYPE const* topologicalOrder() const { return _topologicalOrder.data(); }
+    COLTYPE const* topologicalPrefix() const { return _topologicalPrefix.data(); }
 
-  /// @brief Compute parent from matrix structure, then analyze the tree.
-  template <typename ROWTYPE>
-  bool compute(const COLTYPE nnodes_in, const ROWTYPE *ai,
-               const COLTYPE *aj) {
-    if (ai == nullptr || aj == nullptr) {
-      return false;
+    /// @brief Compute parent from matrix structure, then analyze the tree.
+    template <typename ROWTYPE>
+    bool compute( const COLTYPE nnodes_in, const ROWTYPE* ai, const COLTYPE* aj )
+    {
+        if ( ai == nullptr || aj == nullptr )
+        {
+            return false;
+        }
+
+        std::vector<COLTYPE> ancestor( nnodes_in );
+        _parent.resize( nnodes_in );
+        eliminationTree( nnodes_in, ai, aj, _parent.data(), ancestor.data() );
+        return analyze( nnodes_in, static_cast<COLTYPE>( ai[0] ), _parent.data() );
     }
 
-    std::vector<COLTYPE> ancestor(nnodes_in);
-    _parent.resize(nnodes_in);
-    eliminationTree(nnodes_in, ai, aj, _parent.data(), ancestor.data());
-    return analyze(nnodes_in, static_cast<COLTYPE>(ai[0]), _parent.data());
-  }
-
-  /// @brief Build child and schedule data from an existing parent array.
-  ///
-  /// `parent_in` must contain `nnodes` base-labeled entries. Every parent label
-  /// must be in `[base, base + nnodes)`. Roots must satisfy
-  /// `parent_in[i] == i + base`. Cycles or invalid forests are rejected when the
-  /// child-before-parent topological order cannot cover all nodes.
-  bool analyze(const COLTYPE nnodes_in, const COLTYPE base_in,
-               const COLTYPE *parent_in);
+    /// @brief Build child and schedule data from an existing parent array.
+    ///
+    /// `parent_in` must contain `nnodes` base-labeled entries. Every parent label
+    /// must be in `[base, base + nnodes)`. Roots must satisfy
+    /// `parent_in[i] == i + base`. Cycles or invalid forests are rejected when the
+    /// child-before-parent topological order cannot cover all nodes.
+    bool analyze( const COLTYPE nnodes_in, const COLTYPE base_in, const COLTYPE* parent_in );
 
 private:
-  COLTYPE _nnodes{};
-  COLTYPE _base{};
-  COLTYPE _nroots{};
-  COLTYPE _topologicalLevels{};
-  std::vector<COLTYPE> _parent;
-  std::vector<COLTYPE> _roots;
-  std::vector<COLTYPE> _childOffsets;
-  std::vector<COLTYPE> _children;
-  std::vector<COLTYPE> _childCounts;
-  std::vector<COLTYPE> _topologicalOrder;
-  std::vector<COLTYPE> _topologicalPrefix;
-  std::vector<COLTYPE> _scratch;
+    COLTYPE _nnodes{};
+    COLTYPE _base{};
+    COLTYPE _nroots{};
+    COLTYPE _topologicalLevels{};
+    std::vector<COLTYPE> _parent;
+    std::vector<COLTYPE> _roots;
+    std::vector<COLTYPE> _childOffsets;
+    std::vector<COLTYPE> _children;
+    std::vector<COLTYPE> _childCounts;
+    std::vector<COLTYPE> _topologicalOrder;
+    std::vector<COLTYPE> _topologicalPrefix;
+    std::vector<COLTYPE> _scratch;
 };
 
 /// @brief Compute a postorder permutation of an elimination tree.
@@ -146,32 +158,43 @@ private:
 /// position new_id. iperm[old_id] = new_id + base is the inverse map.
 /// permed_parent[new_id] stores the new parent's label, also with base.
 /// @tparam COLTYPE column index type
-template <typename COLTYPE> class PostOrder {
+template <typename COLTYPE>
+class PostOrder
+{
 public:
-  void apply(const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,
-             COLTYPE *permed_parent, COLTYPE *perm, COLTYPE *iperm);
+    void apply( const COLTYPE nnodes,
+                const COLTYPE base,
+                const COLTYPE* parent,
+                COLTYPE* permed_parent,
+                COLTYPE* perm,
+                COLTYPE* iperm );
 
 private:
-  void buildChildren(const COLTYPE nnodes, const COLTYPE base,
-                     const COLTYPE *parent);
+    void buildChildren( const COLTYPE nnodes, const COLTYPE base, const COLTYPE* parent );
 
-  void dfs(const COLTYPE root, const COLTYPE base, COLTYPE *&post);
+    void dfs( const COLTYPE root, const COLTYPE base, COLTYPE*& post );
 
-  // internal data, 0-based indexing
-  std::vector<COLTYPE> _childrenPrefix;
-  std::vector<COLTYPE> _children;
-  std::vector<COLTYPE> _roots;
+    // internal data, 0-based indexing
+    std::vector<COLTYPE> _childrenPrefix;
+    std::vector<COLTYPE> _children;
+    std::vector<COLTYPE> _roots;
 };
 
-template <typename COLTYPE> class PostOrderNoRecur {
+template <typename COLTYPE>
+class PostOrderNoRecur
+{
 public:
-  void apply(const COLTYPE nnodes, const COLTYPE base, const COLTYPE *parent,
-             COLTYPE *permed_parent, COLTYPE *perm, COLTYPE *iperm);
+    void apply( const COLTYPE nnodes,
+                const COLTYPE base,
+                const COLTYPE* parent,
+                COLTYPE* permed_parent,
+                COLTYPE* perm,
+                COLTYPE* iperm );
 
-  // internal data, 0-based indexing
-  std::vector<COLTYPE> _roots;
-  std::vector<COLTYPE> _firstChild;
-  std::vector<COLTYPE> _nextSibling;
+    // internal data, 0-based indexing
+    std::vector<COLTYPE> _roots;
+    std::vector<COLTYPE> _firstChild;
+    std::vector<COLTYPE> _nextSibling;
 };
 
 /// @brief Compute the subtree size of each node in the elimination tree
@@ -188,7 +211,6 @@ public:
 /// @param subtree_size output vector containing the subtree size of each node
 /// (including the node itself)
 template <typename COLTYPE>
-void subtreeSize(const COLTYPE nnodes, const COLTYPE base,
-                 const COLTYPE *parent, COLTYPE *subtree_size);
+void subtreeSize( const COLTYPE nnodes, const COLTYPE base, const COLTYPE* parent, COLTYPE* subtree_size );
 
 } // namespace graph

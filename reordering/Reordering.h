@@ -11,55 +11,65 @@
 #include "UnionFind.h"
 #include <iostream>
 
-namespace reordering {
+namespace reordering
+{
 
 // Modern interface with raw CSR pointers
 template <typename ROWTYPE, typename COLTYPE>
-void NodeDegree(COLTYPE rows, const ROWTYPE* ai, COLTYPE* degrees, int numthreads = 1);
+void NodeDegree( COLTYPE rows, const ROWTYPE* ai, COLTYPE* degrees, int numthreads = 1 );
 
 template <typename T>
-void PairReduce(std::pair<T, T> &inout, const std::pair<T, T> &in) {
-  if (in.second < inout.second) {
-    inout = in;
-  } else if (in.second == inout.second) {
-    inout.first = std::min(in.first, inout.first);
-  }
+void PairReduce( std::pair<T, T>& inout, const std::pair<T, T>& in )
+{
+    if ( in.second < inout.second )
+    {
+        inout = in;
+    }
+    else if ( in.second == inout.second )
+    {
+        inout.first = std::min( in.first, inout.first );
+    }
 }
 
 // returns node index and degree
 template <typename Iter>
-auto MinDegreeNode(const typename std::iterator_traits<Iter>::value_type* degrees, 
-                   const typename std::iterator_traits<Iter>::value_type base, 
-                   Iter begin, Iter end, int numthreads = 1)
+auto MinDegreeNode( const typename std::iterator_traits<Iter>::value_type* degrees,
+                    const typename std::iterator_traits<Iter>::value_type base,
+                    Iter begin,
+                    Iter end,
+                    int numthreads = 1 )
 {
     using T = typename std::iterator_traits<Iter>::value_type;
     // Initialize with sentinels for unsigned-safe operation
     constexpr T INVALID = std::numeric_limits<T>::max();
     constexpr T DEG_MAX = std::numeric_limits<T>::max();
-    std::pair<T, T> res(INVALID, DEG_MAX);
-    
-    if (numthreads == 1) {
+    std::pair<T, T> res( INVALID, DEG_MAX );
+
+    if ( numthreads == 1 )
+    {
         // Serial path
-        for (auto it = begin; it != end; ++it)
+        for ( auto it = begin; it != end; ++it )
         {
             const T i = *it;
-            if (degrees[i - base] < res.second)
+            if ( degrees[i - base] < res.second )
             {
                 res.first = i;
                 res.second = degrees[i - base];
             }
         }
-    } else {
+    }
+    else
+    {
         // Parallel path
-#pragma omp declare reduction(                                                 \
-        pairreduce : std::pair<T, T> : PairReduce<T>(                          \
-                omp_out, omp_in)) initializer(omp_priv = omp_orig)
+#pragma omp declare reduction( pairreduce : std::pair<T, T> : PairReduce<T>( omp_out, omp_in ) ) \
+    initializer( omp_priv = omp_orig )
 
-        const std::size_t n = std::distance(begin, end);
-#pragma omp parallel for num_threads(numthreads) reduction(pairreduce : res)
-        for (std::size_t idx = 0; idx < n; ++idx) {
-            const T i = *(begin + idx);
-            PairReduce(res, std::make_pair(i, degrees[i - base]));
+        const std::size_t n = std::distance( begin, end );
+#pragma omp parallel for num_threads( numthreads ) reduction( pairreduce : res )
+        for ( std::size_t idx = 0; idx < n; ++idx )
+        {
+            const T i = *( begin + idx );
+            PairReduce( res, std::make_pair( i, degrees[i - base] ) );
         }
     }
     return res;
@@ -83,66 +93,73 @@ auto MinDegreeNode(const typename std::iterator_traits<Iter>::value_type* degree
 /// @param numthreads Number of threads for parallel operations
 /// @return Pseudo-diameter length
 template <typename ROWTYPE, typename COLTYPE, typename Iter>
-COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* degrees,
-                       COLTYPE base, Iter begin, Iter end, COLTYPE& source, COLTYPE& target,
-                       int numthreads = 1)
+COLTYPE PseudoDiameter( COLTYPE rows,
+                        ROWTYPE const* ai,
+                        COLTYPE const* aj,
+                        COLTYPE* degrees,
+                        COLTYPE base,
+                        Iter begin,
+                        Iter end,
+                        COLTYPE& source,
+                        COLTYPE& target,
+                        int numthreads = 1 )
 {
     const COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
-    source = MinDegreeNode(degrees, base, begin, end, numthreads).first;
+    source = MinDegreeNode( degrees, base, begin, end, numthreads ).first;
     target = INVALID;
     std::vector<COLTYPE> chosen;
     COLTYPE diameter;
     COLTYPE forwardWidth;
     COLTYPE backwardWidth;
-    
-    while (target == INVALID)
+
+    while ( target == INVALID )
     {
-        chosen.resize(0);
-        
+        chosen.resize( 0 );
+
         // BFS from current source
         COLTYPE height = 0;
         COLTYPE width = 0;
         std::vector<COLTYPE> levels;
         std::vector<COLTYPE> lastLevel;
-        
-        graph::BFSFunc<ROWTYPE, COLTYPE, true, true>(rows, ai, aj, source, 
-            INVALID, height, width, levels, lastLevel, numthreads);
-        
+
+        graph::BFSFunc<ROWTYPE, COLTYPE, true, true>( rows, ai, aj, source, INVALID, height, width,
+                                                      levels, lastLevel, numthreads );
+
         diameter = height;
         forwardWidth = width;
 
         // First five strategy: select up to 5 min-degree nodes from last level
-        while (chosen.size() < 5)
+        while ( chosen.size() < 5 )
         {
             COLTYPE minDeg = INVALID;
             COLTYPE sel = INVALID;
-            for (auto i : lastLevel)
+            for ( auto i : lastLevel )
             {
-                if (degrees[i - base] < minDeg)
+                if ( degrees[i - base] < minDeg )
                 {
                     minDeg = degrees[i - base];
                     sel = i;
                 }
-                else if (degrees[i - base] == minDeg)
+                else if ( degrees[i - base] == minDeg )
                 {
                     // Ensure deterministic tie-breaking
-                    sel = std::min(sel, i);
+                    sel = std::min( sel, i );
                 }
             }
-            if (minDeg == INVALID)
+            if ( minDeg == INVALID )
                 break;
 
-            chosen.push_back(sel);
+            chosen.push_back( sel );
             degrees[sel - base] = INVALID; // mark-off selected node
-            
+
             // Mark off neighbors of selected node
-            for (ROWTYPE k = ai[sel - base] - base; k < ai[sel - base + 1] - base; k++)
+            for ( ROWTYPE k = ai[sel - base] - base; k < ai[sel - base + 1] - base; k++ )
             {
                 degrees[aj[k] - base] = INVALID;
             }
         }
 
-        if (chosen.size() == 0)
+        if ( chosen.size() == 0 )
         {
             // No candidates found - end of search
             target = source;
@@ -150,21 +167,21 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
         }
 
         backwardWidth = INVALID;
-        for (auto i : chosen)
+        for ( auto i : chosen )
         {
             // BFS from candidate with shortcut
-            if (!graph::BFSFunc<ROWTYPE, COLTYPE, false, true>(
-                    rows, ai, aj, i, backwardWidth, height, width, levels, lastLevel, numthreads))
+            if ( !graph::BFSFunc<ROWTYPE, COLTYPE, false, true>(
+                     rows, ai, aj, i, backwardWidth, height, width, levels, lastLevel, numthreads ) )
                 continue; // short-circuited
-            
-            if (height > diameter)
+
+            if ( height > diameter )
             {
                 // Found a farther node - restart from it
                 source = i;
                 target = INVALID;
                 break;
             }
-            else if (width < backwardWidth)
+            else if ( width < backwardWidth )
             {
                 // Same diameter, narrower width - better peripheral node
                 backwardWidth = width;
@@ -172,15 +189,16 @@ COLTYPE PseudoDiameter(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTY
             }
         }
     }
-    
-    if (forwardWidth > backwardWidth)
-        std::swap(source, target);
+
+    if ( forwardWidth > backwardWidth )
+        std::swap( source, target );
 
     return diameter;
 }
 
 /// @brief RCM kernel selection policies
-enum class RCMKernel {
+enum class RCMKernel
+{
     /// @brief Parallel-friendly global sort (sorts all nodes by level then degree)
     ParallelSort,
     /// @brief Traditional serial BFS (sorts neighbors at each node expansion)
@@ -190,44 +208,50 @@ enum class RCMKernel {
 /// @brief RCM kernel: Parallel-friendly global sort implementation
 /// @details Performs single BFS to get levels, then globally sorts by (level, degree)
 template <typename ROWTYPE, typename COLTYPE>
-struct RCMKernel_ParallelSort {
-    static void execute(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-                       COLTYPE base, COLTYPE const* degrees, COLTYPE source,
-                       COLTYPE comp_size, std::vector<COLTYPE>& cm_ordering,
-                       int numthreads)
+struct RCMKernel_ParallelSort
+{
+    static void execute( COLTYPE rows,
+                         ROWTYPE const* ai,
+                         COLTYPE const* aj,
+                         COLTYPE base,
+                         COLTYPE const* degrees,
+                         COLTYPE source,
+                         COLTYPE comp_size,
+                         std::vector<COLTYPE>& cm_ordering,
+                         int numthreads )
     {
         // BFS from source to get level structure
         COLTYPE height, width;
         std::vector<COLTYPE> levels;
         std::vector<COLTYPE> lastLevel;
-        graph::BFSFunc<ROWTYPE, COLTYPE, false, false>(rows, ai, aj, source,
-            std::numeric_limits<COLTYPE>::max(), height, width, levels, lastLevel, numthreads);
+        graph::BFSFunc<ROWTYPE, COLTYPE, false, false>( rows, ai, aj, source,
+                                                        std::numeric_limits<COLTYPE>::max(), height,
+                                                        width, levels, lastLevel, numthreads );
 #ifdef RCM_DEBUG
-        std::cerr << "[RCM_Par] BFS from source=" << source 
-                  << " height=" << height 
+        std::cerr << "[RCM_Par] BFS from source=" << source << " height=" << height
                   << " width=" << width << std::endl;
 #endif
-        
-        // Create (level, degree, node) tuples for all nodes
-        std::vector<std::tuple<COLTYPE, COLTYPE, COLTYPE>> level_degree_node(comp_size);
 
-#pragma omp parallel for num_threads(numthreads)
-        for (COLTYPE idx = 0; idx < comp_size; ++idx)
+        // Create (level, degree, node) tuples for all nodes
+        std::vector<std::tuple<COLTYPE, COLTYPE, COLTYPE>> level_degree_node( comp_size );
+
+#pragma omp parallel for num_threads( numthreads )
+        for ( COLTYPE idx = 0; idx < comp_size; ++idx )
         {
-            COLTYPE node = cm_ordering[idx];  // cm_ordering initially contains component nodes
-            level_degree_node[idx] = std::make_tuple(levels[node - base], degrees[node - base], node);
+            COLTYPE node = cm_ordering[idx]; // cm_ordering initially contains component nodes
+            level_degree_node[idx] = std::make_tuple( levels[node - base], degrees[node - base], node );
         }
 
         // Sort by level, then by degree (ascending), then by node index
-        utils::sort(level_degree_node.begin(), level_degree_node.end(), numthreads);
+        utils::sort( level_degree_node.begin(), level_degree_node.end(), numthreads );
 #ifdef RCM_DEBUG
         std::cerr << "[RCM_Par] Sorted " << comp_size << " nodes by (level, degree)" << std::endl;
 #endif
-        
+
         // Extract sorted nodes into cm_ordering
-        for (COLTYPE i = 0; i < comp_size; ++i)
+        for ( COLTYPE i = 0; i < comp_size; ++i )
         {
-            cm_ordering[i] = std::get<2>(level_degree_node[i]);
+            cm_ordering[i] = std::get<2>( level_degree_node[i] );
         }
     }
 };
@@ -235,75 +259,82 @@ struct RCMKernel_ParallelSort {
 /// @brief RCM kernel: Traditional serial BFS implementation
 /// @details Performs level-by-level BFS with neighbor sorting at each expansion
 template <typename ROWTYPE, typename COLTYPE>
-struct RCMKernel_Traditional {
-    static void execute(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-                       COLTYPE base, COLTYPE const* degrees, COLTYPE source,
-                       COLTYPE comp_size, std::vector<COLTYPE>& cm_ordering,
-                       int numthreads)
+struct RCMKernel_Traditional
+{
+    static void execute( COLTYPE rows,
+                         ROWTYPE const* ai,
+                         COLTYPE const* aj,
+                         COLTYPE base,
+                         COLTYPE const* degrees,
+                         COLTYPE source,
+                         COLTYPE comp_size,
+                         std::vector<COLTYPE>& cm_ordering,
+                         int numthreads )
     {
         const COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
-        
+
         // Traditional Cuthill-McKee: level-by-level BFS with sorting within each level
-        std::vector<COLTYPE> visited(rows, 0);
+        std::vector<COLTYPE> visited( rows, 0 );
         cm_ordering.clear();
-        cm_ordering.reserve(comp_size);
-        
+        cm_ordering.reserve( comp_size );
+
         std::vector<COLTYPE> current_level;
         std::vector<COLTYPE> next_level;
-        
+
         // Start from source
-        current_level.push_back(source);
+        current_level.push_back( source );
         visited[source - base] = 1;
-        cm_ordering.push_back(source);
-        
+        cm_ordering.push_back( source );
+
         COLTYPE level_num = 0;
-        while (!current_level.empty())
+        while ( !current_level.empty() )
         {
 #ifdef RCM_DEBUG
-            if (level_num < 5) {
-                std::cerr << "[RCM_Trad] Level " << level_num 
-                          << " size=" << current_level.size() << std::endl;
+            if ( level_num < 5 )
+            {
+                std::cerr << "[RCM_Trad] Level " << level_num << " size=" << current_level.size() << std::endl;
             }
 #endif
             next_level.clear();
-            
+
             // For each node in current level (in the order they were added)
-            for (COLTYPE u : current_level)
+            for ( COLTYPE u : current_level )
             {
                 // Collect unvisited neighbors
                 std::vector<COLTYPE> neighbors;
-                for (ROWTYPE k = ai[u - base] - base; k < ai[u - base + 1] - base; k++)
+                for ( ROWTYPE k = ai[u - base] - base; k < ai[u - base + 1] - base; k++ )
                 {
                     COLTYPE v = aj[k];
-                    if (visited[v - base] == 0)
+                    if ( visited[v - base] == 0 )
                     {
                         visited[v - base] = 1;
-                        neighbors.push_back(v);
+                        neighbors.push_back( v );
                     }
                 }
-                
+
                 // Sort neighbors by degree (ascending)
-                std::sort(neighbors.begin(), neighbors.end(),
-                          [&degrees, base](COLTYPE a, COLTYPE b) {
-                              return degrees[a - base] < degrees[b - base] ||
-                                     (degrees[a - base] == degrees[b - base] && a < b);
-                          });
-                
+                std::sort( neighbors.begin(), neighbors.end(),
+                           [&degrees, base]( COLTYPE a, COLTYPE b )
+                           {
+                               return degrees[a - base] < degrees[b - base] ||
+                                      ( degrees[a - base] == degrees[b - base] && a < b );
+                           } );
+
                 // Add sorted neighbors to ordering and next level
-                for (COLTYPE v : neighbors)
+                for ( COLTYPE v : neighbors )
                 {
-                    cm_ordering.push_back(v);
-                    next_level.push_back(v);
+                    cm_ordering.push_back( v );
+                    next_level.push_back( v );
                 }
             }
-            
-            current_level = std::move(next_level);
+
+            current_level = std::move( next_level );
             level_num++;
         }
-        
+
 #ifdef RCM_DEBUG
-        std::cerr << "[RCM_Trad] Cuthill-McKee complete, size=" 
-                  << cm_ordering.size() << ", levels=" << level_num << std::endl;
+        std::cerr << "[RCM_Trad] Cuthill-McKee complete, size=" << cm_ordering.size()
+                  << ", levels=" << level_num << std::endl;
 #endif
     }
 };
@@ -327,57 +358,67 @@ struct RCMKernel_Traditional {
 /// @param perm_offset Starting offset for this component's permutation
 /// @param numthreads Number of threads for parallel operations
 template <RCMKernel Kernel, typename ROWTYPE, typename COLTYPE, typename Iter>
-void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-                   COLTYPE base, COLTYPE const* degrees,
-                   Iter comp_begin, Iter comp_end,
-                   COLTYPE* perm, COLTYPE* iperm, COLTYPE perm_offset, int numthreads = 1)
+void RCM_Component( COLTYPE rows,
+                    ROWTYPE const* ai,
+                    COLTYPE const* aj,
+                    COLTYPE base,
+                    COLTYPE const* degrees,
+                    Iter comp_begin,
+                    Iter comp_end,
+                    COLTYPE* perm,
+                    COLTYPE* iperm,
+                    COLTYPE perm_offset,
+                    int numthreads = 1 )
 {
-    COLTYPE comp_size = std::distance(comp_begin, comp_end);
+    COLTYPE comp_size = std::distance( comp_begin, comp_end );
 #ifdef RCM_DEBUG
-    const char* kernel_name = (Kernel == RCMKernel::ParallelSort) ? "ParallelSort" : "Traditional";
+    const char* kernel_name = ( Kernel == RCMKernel::ParallelSort ) ? "ParallelSort" : "Traditional";
     std::cerr << "start RCM_Component<" << kernel_name << ">: comp_size=" << comp_size << std::endl;
 #endif
-    
+
     // PseudoDiameter modifies degrees array, so make a copy for it
-    std::vector<COLTYPE> degrees_scratch(degrees, degrees + rows);
+    std::vector<COLTYPE> degrees_scratch( degrees, degrees + rows );
 
     // Find pseudo-peripheral node for this component
     COLTYPE source, target;
-    PseudoDiameter(rows, ai, aj, degrees_scratch.data(), base, 
-                   comp_begin, comp_end, source, target, numthreads);
+    PseudoDiameter( rows, ai, aj, degrees_scratch.data(), base, comp_begin, comp_end, source, target, numthreads );
 #ifdef RCM_DEBUG
-    std::cerr << "[RCM] PseudoDiameter chosen source=" << source 
-              << " target=" << target << std::endl;
+    std::cerr << "[RCM] PseudoDiameter chosen source=" << source << " target=" << target << std::endl;
 #endif
 
     // Build Cuthill-McKee ordering using selected kernel
     std::vector<COLTYPE> cm_ordering;
-    if constexpr (Kernel == RCMKernel::ParallelSort) {
+    if constexpr ( Kernel == RCMKernel::ParallelSort )
+    {
         // Initialize with component nodes for ParallelSort kernel
-        cm_ordering.reserve(comp_size);
-        for (auto it = comp_begin; it != comp_end; ++it) {
-            cm_ordering.push_back(*it);
+        cm_ordering.reserve( comp_size );
+        for ( auto it = comp_begin; it != comp_end; ++it )
+        {
+            cm_ordering.push_back( *it );
         }
-        RCMKernel_ParallelSort<ROWTYPE, COLTYPE>::execute(
-            rows, ai, aj, base, degrees, source, comp_size, cm_ordering, numthreads);
-    } else {
-        // Traditional kernel builds cm_ordering from scratch
-        RCMKernel_Traditional<ROWTYPE, COLTYPE>::execute(
-            rows, ai, aj, base, degrees, source, comp_size, cm_ordering, numthreads);
+        RCMKernel_ParallelSort<ROWTYPE, COLTYPE>::execute( rows, ai, aj, base, degrees, source,
+                                                           comp_size, cm_ordering, numthreads );
     }
-    
+    else
+    {
+        // Traditional kernel builds cm_ordering from scratch
+        RCMKernel_Traditional<ROWTYPE, COLTYPE>::execute( rows, ai, aj, base, degrees, source,
+                                                          comp_size, cm_ordering, numthreads );
+    }
+
     // Reverse to get RCM ordering and build perm/iperm
-#pragma omp parallel for num_threads(numthreads)
-    for (COLTYPE i = 0; i < comp_size; ++i)
+#pragma omp parallel for num_threads( numthreads )
+    for ( COLTYPE i = 0; i < comp_size; ++i )
     {
         COLTYPE old_node = cm_ordering[comp_size - 1 - i];
         COLTYPE new_pos = perm_offset + i;
         perm[new_pos + base] = old_node;
         iperm[old_node] = new_pos + base;
 #ifdef RCM_DEBUG
-        if (i < 5) {
-            std::cerr << "[RCM] perm[" << (new_pos + base) << "] = " << old_node
-                      << ", iperm[" << old_node << "] = " << (new_pos + base) << std::endl;
+        if ( i < 5 )
+        {
+            std::cerr << "[RCM] perm[" << ( new_pos + base ) << "] = " << old_node << ", iperm["
+                      << old_node << "] = " << ( new_pos + base ) << std::endl;
         }
 #endif
     }
@@ -388,8 +429,8 @@ void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// with nodes at each level sorted by increasing degree. Produces both
 /// permutation (perm) and inverse permutation (iperm) suitable for matrix
 /// permutation routines.
-/// 
-/// @tparam Kernel RCM kernel policy: ParallelSort (default, parallel-friendly) 
+///
+/// @tparam Kernel RCM kernel policy: ParallelSort (default, parallel-friendly)
 ///                or Traditional (classic serial algorithm)
 /// @tparam ROWTYPE Row pointer type
 /// @tparam COLTYPE Column index type
@@ -400,24 +441,23 @@ void RCM_Component(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// @param iperm Output: inverse permutation where iperm[old_node] = new_pos
 /// @param numthreads Number of threads for parallel operations
 template <RCMKernel Kernel = RCMKernel::ParallelSort, typename ROWTYPE, typename COLTYPE>
-void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-         COLTYPE* perm, COLTYPE* iperm, int numthreads = 1)
+void RCM( COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm, int numthreads = 1 )
 {
     const COLTYPE base = ai[0];
-    
+
     // Compute node degrees once for the entire graph
-    std::vector<COLTYPE> degrees(rows);
-    NodeDegree(rows, ai, degrees.data(), numthreads);
-    
+    std::vector<COLTYPE> degrees( rows );
+    NodeDegree( rows, ai, degrees.data(), numthreads );
+
     // Create component with all nodes
-    std::vector<COLTYPE> component(rows);
-    for (COLTYPE i = 0; i < rows; ++i) {
+    std::vector<COLTYPE> component( rows );
+    for ( COLTYPE i = 0; i < rows; ++i )
+    {
         component[i] = i + base;
     }
-    
-    RCM_Component<Kernel>(rows, ai, aj, base, degrees.data(),
-                          component.begin(), component.end(),
-                          perm, iperm, 0, numthreads);
+
+    RCM_Component<Kernel>( rows, ai, aj, base, degrees.data(), component.begin(), component.end(),
+                           perm, iperm, 0, numthreads );
 }
 
 /// @brief Reverse Cuthill-McKee (RCM) reordering for multi-component graphs
@@ -425,7 +465,7 @@ void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// processing each connected component separately. Nodes at each level are
 /// sorted by increasing degree. Produces both permutation (perm) and inverse
 /// permutation (iperm).
-/// 
+///
 /// @tparam Kernel RCM kernel policy: ParallelSort (default) or Traditional
 /// @tparam ROWTYPE Row pointer type
 /// @tparam COLTYPE Column index type
@@ -436,34 +476,33 @@ void RCM(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 /// @param iperm Output: inverse permutation where iperm[old_node] = new_pos
 /// @param numthreads Number of threads for parallel operations
 template <RCMKernel Kernel = RCMKernel::ParallelSort, typename ROWTYPE, typename COLTYPE>
-void RCM_MultiComponent(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-                        COLTYPE* perm, COLTYPE* iperm, int numthreads = 1)
+void RCM_MultiComponent( COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* perm, COLTYPE* iperm, int numthreads = 1 )
 {
     const COLTYPE base = ai[0];
-    
+
     // Compute node degrees once for the entire graph
-    std::vector<COLTYPE> degrees(rows);
-    NodeDegree(rows, ai, degrees.data(), numthreads);
-    
+    std::vector<COLTYPE> degrees( rows );
+    NodeDegree( rows, ai, degrees.data(), numthreads );
+
     // Find connected components using union-find
-    std::vector<COLTYPE> parents(rows);
-    ParUnionFindRem(rows, ai, aj, parents.data(), numthreads);
-    
+    std::vector<COLTYPE> parents( rows );
+    ParUnionFindRem( rows, ai, aj, parents.data(), numthreads );
+
     std::vector<COLTYPE> compRoots, sortedComp, compPrefSum;
-    ComponentsStat(parents.data(), rows, base, compRoots, sortedComp, compPrefSum, numthreads);
-    
+    ComponentsStat( parents.data(), rows, base, compRoots, sortedComp, compPrefSum, numthreads );
+
     COLTYPE perm_offset = 0; // Offset from base (0, 1, 2, ...)
-    
+
     // Process each connected component separately
-    for (size_t comp = 0; comp < compRoots.size(); ++comp)
+    for ( size_t comp = 0; comp < compRoots.size(); ++comp )
     {
         COLTYPE comp_start = compPrefSum[comp];
         COLTYPE comp_size = compPrefSum[comp + 1] - comp_start;
-        
+
         // Skip small components (singletons, pairs, triples) - trivial ordering
-        if (comp_size <= 3)
+        if ( comp_size <= 3 )
         {
-            for (COLTYPE i = 0; i < comp_size; ++i)
+            for ( COLTYPE i = 0; i < comp_size; ++i )
             {
                 COLTYPE node = sortedComp[comp_start + i];
                 perm[perm_offset + i + base] = node;
@@ -472,16 +511,15 @@ void RCM_MultiComponent(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
             perm_offset += comp_size;
             continue;
         }
-        
+
         // Get component nodes as iterator range
         auto comp_begin = sortedComp.begin() + comp_start;
         auto comp_end = sortedComp.begin() + comp_start + comp_size;
-        
+
         // Apply RCM to this component using selected kernel
-        RCM_Component<Kernel>(rows, ai, aj, base, degrees.data(),
-                              comp_begin, comp_end,
-                              perm, iperm, perm_offset, numthreads);
-        
+        RCM_Component<Kernel>( rows, ai, aj, base, degrees.data(), comp_begin, comp_end, perm,
+                               iperm, perm_offset, numthreads );
+
         perm_offset += comp_size;
     }
 
@@ -490,41 +528,42 @@ void RCM_MultiComponent(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
 
 #ifdef USE_METIS_LIB
 /// @brief Configuration options for METIS nested dissection
-struct MetisNDOptions {
-  /// @brief Number of different separators to try (1-10+, default: 1)
-  /// Higher values may produce better quality orderings but take longer
-  int nseps = 1;
-  
-  /// @brief Number of refinement iterations (default: 10)
-  /// Higher values may produce better quality orderings but take longer
-  int niter = 10;
-  
-  /// @brief Random seed for reproducibility (default: -1 for random)
-  /// Set to a fixed value (e.g., 0, 42) for reproducible results
-  int seed = -1;
-  
-  /// @brief Compress graph by removing self-loops and duplicate edges (default: true)
-  bool compress = true;
-  
-  /// @brief Order connected components of the graph separately (default: false)
-  /// Useful for disconnected graphs
-  bool ccorder = false;
-  
-  /// @brief Coarsening type (default: 1 = METIS_CTYPE_SHEM - sorted heavy-edge matching)
-  /// 0 = METIS_CTYPE_RM (random matching)
-  /// 1 = METIS_CTYPE_SHEM (sorted heavy-edge matching, usually better)
-  int ctype = 1;
-  
-  /// @brief Refinement type (default: 3 = METIS_RTYPE_SEP1SIDED)
-  /// 0 = METIS_RTYPE_FM (Fiduccia-Mattheyses)
-  /// 1 = METIS_RTYPE_GREEDY
-  /// 2 = METIS_RTYPE_SEP2SIDED (2-sided separator refinement)
-  /// 3 = METIS_RTYPE_SEP1SIDED (1-sided separator refinement, usually best for ND)
-  int rtype = 3;
-  
-  /// @brief Debug level (default: 0 = no output)
-  /// Higher values produce more diagnostic output
-  int dbglvl = 0;
+struct MetisNDOptions
+{
+    /// @brief Number of different separators to try (1-10+, default: 1)
+    /// Higher values may produce better quality orderings but take longer
+    int nseps = 1;
+
+    /// @brief Number of refinement iterations (default: 10)
+    /// Higher values may produce better quality orderings but take longer
+    int niter = 10;
+
+    /// @brief Random seed for reproducibility (default: -1 for random)
+    /// Set to a fixed value (e.g., 0, 42) for reproducible results
+    int seed = -1;
+
+    /// @brief Compress graph by removing self-loops and duplicate edges (default: true)
+    bool compress = true;
+
+    /// @brief Order connected components of the graph separately (default: false)
+    /// Useful for disconnected graphs
+    bool ccorder = false;
+
+    /// @brief Coarsening type (default: 1 = METIS_CTYPE_SHEM - sorted heavy-edge matching)
+    /// 0 = METIS_CTYPE_RM (random matching)
+    /// 1 = METIS_CTYPE_SHEM (sorted heavy-edge matching, usually better)
+    int ctype = 1;
+
+    /// @brief Refinement type (default: 3 = METIS_RTYPE_SEP1SIDED)
+    /// 0 = METIS_RTYPE_FM (Fiduccia-Mattheyses)
+    /// 1 = METIS_RTYPE_GREEDY
+    /// 2 = METIS_RTYPE_SEP2SIDED (2-sided separator refinement)
+    /// 3 = METIS_RTYPE_SEP1SIDED (1-sided separator refinement, usually best for ND)
+    int rtype = 3;
+
+    /// @brief Debug level (default: 0 = no output)
+    /// Higher values produce more diagnostic output
+    int dbglvl = 0;
 };
 
 /// @brief METIS nested dissection reordering for general CSR matrices
@@ -539,9 +578,12 @@ struct MetisNDOptions {
 /// @param opts METIS options (optional, uses defaults if not provided)
 /// @return 0 on success, non-zero on failure
 template <typename ROWTYPE, typename COLTYPE>
-int MetisND(const COLTYPE nrows, const COLTYPE ncols,
-            const ROWTYPE* xadj, const COLTYPE* adjncy,
-            COLTYPE* perm, COLTYPE* iperm,
-            const MetisNDOptions& opts = MetisNDOptions());
+int MetisND( const COLTYPE nrows,
+             const COLTYPE ncols,
+             const ROWTYPE* xadj,
+             const COLTYPE* adjncy,
+             COLTYPE* perm,
+             COLTYPE* iperm,
+             const MetisNDOptions& opts = MetisNDOptions() );
 #endif
 } // namespace reordering

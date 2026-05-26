@@ -41,8 +41,15 @@ namespace matrix_utils::sparse_cuda
  * @return True if successful, false on error
  */
 template <typename ROWTYPE, typename COLTYPE>
-bool ILUSymbolicU_CUDA(COLTYPE n, const ROWTYPE* d_ai, const COLTYPE* d_aj, int lvl, COLTYPE base,
-                       bool keepdiag, ROWTYPE* d_u_ai, COLTYPE** d_u_aj, ROWTYPE* u_nnz);
+bool ILUSymbolicU_CUDA( COLTYPE n,
+                        const ROWTYPE* d_ai,
+                        const COLTYPE* d_aj,
+                        int lvl,
+                        COLTYPE base,
+                        bool keepdiag,
+                        ROWTYPE* d_u_ai,
+                        COLTYPE** d_u_aj,
+                        ROWTYPE* u_nnz );
 
 /**
  * @brief CUDA implementation of ILU(k) U-row symbolic factorization
@@ -65,39 +72,80 @@ bool ILUSymbolicU_CUDA(COLTYPE n, const ROWTYPE* d_ai, const COLTYPE* d_aj, int 
  * @return True if successful, false on error
  */
 template <typename ROWTYPE, typename COLTYPE>
-bool ILUSymbolicU_SpMM_CUDA(COLTYPE n, const ROWTYPE* d_ai, const COLTYPE* d_aj, int lvl,
-                            COLTYPE base, DeviceCSRMatrix<ROWTYPE, COLTYPE>& U_matrix);
+bool ILUSymbolicU_SpMM_CUDA( COLTYPE n,
+                             const ROWTYPE* d_ai,
+                             const COLTYPE* d_aj,
+                             int lvl,
+                             COLTYPE base,
+                             DeviceCSRMatrix<ROWTYPE, COLTYPE>& U_matrix );
 
 /**
  * @brief Warp-persistent CUDA implementation of ILU(k) U-row symbolic factorization
  */
 template <typename ROWTYPE, typename COLTYPE>
-bool ILUSymbolicU_CUDA_Persistent(COLTYPE n, const ROWTYPE* d_ai, const COLTYPE* d_aj, int lvl, COLTYPE base,
-                                  bool keepdiag, ROWTYPE* d_u_ai, COLTYPE** d_u_aj, ROWTYPE* u_nnz);
+bool ILUSymbolicU_CUDA_Persistent( COLTYPE n,
+                                   const ROWTYPE* d_ai,
+                                   const COLTYPE* d_aj,
+                                   int lvl,
+                                   COLTYPE base,
+                                   bool keepdiag,
+                                   ROWTYPE* d_u_ai,
+                                   COLTYPE** d_u_aj,
+                                   ROWTYPE* u_nnz );
 
 // Explicit instantiations
-extern template bool ILUSymbolicU_CUDA<int, int>(int n, const int* d_ai, const int* d_aj, int lvl, int base,
-                                                 bool keepdiag, int* d_u_ai, int** d_u_aj, int* u_nnz);
+extern template bool ILUSymbolicU_CUDA<int, int>( int n,
+                                                  const int* d_ai,
+                                                  const int* d_aj,
+                                                  int lvl,
+                                                  int base,
+                                                  bool keepdiag,
+                                                  int* d_u_ai,
+                                                  int** d_u_aj,
+                                                  int* u_nnz );
 
-extern template bool ILUSymbolicU_CUDA<int64_t, int>(int n, const int64_t* d_ai, const int* d_aj,
-                                                     int lvl, int base, bool keepdiag,
-                                                     int64_t* d_u_ai, int** d_u_aj, int64_t* u_nnz);
+extern template bool ILUSymbolicU_CUDA<int64_t, int>( int n,
+                                                      const int64_t* d_ai,
+                                                      const int* d_aj,
+                                                      int lvl,
+                                                      int base,
+                                                      bool keepdiag,
+                                                      int64_t* d_u_ai,
+                                                      int** d_u_aj,
+                                                      int64_t* u_nnz );
 
-extern template bool ILUSymbolicU_CUDA_Persistent<int, int>(int n, const int* d_ai, const int* d_aj,
-                                                            int lvl, int base, bool keepdiag,
-                                                            int* d_u_ai, int** d_u_aj, int* u_nnz);
+extern template bool ILUSymbolicU_CUDA_Persistent<int, int>( int n,
+                                                             const int* d_ai,
+                                                             const int* d_aj,
+                                                             int lvl,
+                                                             int base,
+                                                             bool keepdiag,
+                                                             int* d_u_ai,
+                                                             int** d_u_aj,
+                                                             int* u_nnz );
 
-extern template bool ILUSymbolicU_CUDA_Persistent<int64_t, int>(int n, const int64_t* d_ai,
-                                                                const int* d_aj, int lvl, int base,
-                                                                bool keepdiag, int64_t* d_u_ai,
-                                                                int** d_u_aj, int64_t* u_nnz);
+extern template bool ILUSymbolicU_CUDA_Persistent<int64_t, int>( int n,
+                                                                 const int64_t* d_ai,
+                                                                 const int* d_aj,
+                                                                 int lvl,
+                                                                 int base,
+                                                                 bool keepdiag,
+                                                                 int64_t* d_u_ai,
+                                                                 int** d_u_aj,
+                                                                 int64_t* u_nnz );
 
-extern template bool ILUSymbolicU_SpMM_CUDA<int, int>(int n, const int* d_ai, const int* d_aj,
-                                                      int lvl, int base,
-                                                      DeviceCSRMatrix<int, int>& U_matrix);
-extern template bool ILUSymbolicU_SpMM_CUDA<std::int64_t, int>(int n, const std::int64_t* d_ai,
-                                                               const int* d_aj, int lvl, int base,
-                                                               DeviceCSRMatrix<std::int64_t, int>& U_matrix);
+extern template bool ILUSymbolicU_SpMM_CUDA<int, int>( int n,
+                                                       const int* d_ai,
+                                                       const int* d_aj,
+                                                       int lvl,
+                                                       int base,
+                                                       DeviceCSRMatrix<int, int>& U_matrix );
+extern template bool ILUSymbolicU_SpMM_CUDA<std::int64_t, int>( int n,
+                                                                const std::int64_t* d_ai,
+                                                                const int* d_aj,
+                                                                int lvl,
+                                                                int base,
+                                                                DeviceCSRMatrix<std::int64_t, int>& U_matrix );
 
 /**
  * @brief CUDA implementation of full ILU(k) symbolic factorization (combined LU)
@@ -129,14 +177,31 @@ extern template bool ILUSymbolicU_SpMM_CUDA<std::int64_t, int>(int n, const std:
  * @return True if successful, false on error
  */
 template <typename ROWTYPE, typename COLTYPE>
-bool ILUSymbolic_CUDA(COLTYPE n, const ROWTYPE* d_ai, const COLTYPE* d_aj, int lvl, COLTYPE base,
-                      ROWTYPE* d_lu_ai, COLTYPE** d_lu_aj, ROWTYPE* lu_nnz);
+bool ILUSymbolic_CUDA( COLTYPE n,
+                       const ROWTYPE* d_ai,
+                       const COLTYPE* d_aj,
+                       int lvl,
+                       COLTYPE base,
+                       ROWTYPE* d_lu_ai,
+                       COLTYPE** d_lu_aj,
+                       ROWTYPE* lu_nnz );
 
-extern template bool ILUSymbolic_CUDA<int, int>(int n, const int* d_ai, const int* d_aj, int lvl,
-                                                int base, int* d_lu_ai, int** d_lu_aj, int* lu_nnz);
+extern template bool ILUSymbolic_CUDA<int, int>( int n,
+                                                 const int* d_ai,
+                                                 const int* d_aj,
+                                                 int lvl,
+                                                 int base,
+                                                 int* d_lu_ai,
+                                                 int** d_lu_aj,
+                                                 int* lu_nnz );
 
-extern template bool ILUSymbolic_CUDA<int64_t, int>(int n, const int64_t* d_ai, const int* d_aj,
-                                                    int lvl, int base, int64_t* d_lu_ai,
-                                                    int** d_lu_aj, int64_t* lu_nnz);
+extern template bool ILUSymbolic_CUDA<int64_t, int>( int n,
+                                                     const int64_t* d_ai,
+                                                     const int* d_aj,
+                                                     int lvl,
+                                                     int base,
+                                                     int64_t* d_lu_ai,
+                                                     int** d_lu_aj,
+                                                     int64_t* lu_nnz );
 
 } // namespace matrix_utils::sparse_cuda

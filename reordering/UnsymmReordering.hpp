@@ -19,11 +19,7 @@ namespace reordering
 /// Unmatched columns will have matching_col[j] =
 /// std::numeric_limits<COLTYPE>::max()
 template <typename ROWTYPE, typename COLTYPE>
-void MaximumMatching( const COLTYPE rows,
-                      ROWTYPE const* ai,
-                      COLTYPE const* aj,
-                      COLTYPE* matching_row,
-                      COLTYPE* matching_col );
+void MaximumMatching( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* matching_row, COLTYPE* matching_col );
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 class HungarianAlgorithm

@@ -14,28 +14,27 @@
 #include <string>
 #include <vector>
 
-#define CHECK_CUDA( call )                                                \
-    do                                                                    \
-    {                                                                     \
-        cudaError_t err = call;                                           \
-        if ( err != cudaSuccess )                                         \
-        {                                                                 \
-            std::cerr << "CUDA error at " << __FILE__ << ":" << __LINE__  \
-                      << " - " << cudaGetErrorString( err ) << std::endl; \
-            exit( 1 );                                                    \
-        }                                                                 \
+#define CHECK_CUDA( call )                                                        \
+    do                                                                            \
+    {                                                                             \
+        cudaError_t err = call;                                                   \
+        if ( err != cudaSuccess )                                                 \
+        {                                                                         \
+            std::cerr << "CUDA error at " << __FILE__ << ":" << __LINE__ << " - " \
+                      << cudaGetErrorString( err ) << std::endl;                  \
+            exit( 1 );                                                            \
+        }                                                                         \
     } while ( 0 )
 
-#define CHECK_CUSPARSE( call )                                               \
-    do                                                                       \
-    {                                                                        \
-        cusparseStatus_t err = call;                                         \
-        if ( err != CUSPARSE_STATUS_SUCCESS )                                \
-        {                                                                    \
-            std::cerr << "cuSPARSE error at " << __FILE__ << ":" << __LINE__ \
-                      << " - " << err << std::endl;                          \
-            exit( 1 );                                                       \
-        }                                                                    \
+#define CHECK_CUSPARSE( call )                                                                             \
+    do                                                                                                     \
+    {                                                                                                      \
+        cusparseStatus_t err = call;                                                                       \
+        if ( err != CUSPARSE_STATUS_SUCCESS )                                                              \
+        {                                                                                                  \
+            std::cerr << "cuSPARSE error at " << __FILE__ << ":" << __LINE__ << " - " << err << std::endl; \
+            exit( 1 );                                                                                     \
+        }                                                                                                  \
     } while ( 0 )
 
 // Use CSRMatrix from matrix_utils.hpp
@@ -163,8 +162,7 @@ public:
         std::vector<int> prefixL( h_L.rows + 1 );
 
         graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::L> kahnL;
-        auto levelL = kahnL( h_L.rows, h_L.AI(), h_L.AJ(),
-                             ipermL.data(), prefixL.data() );
+        auto levelL = kahnL( h_L.rows, h_L.AI(), h_L.AJ(), ipermL.data(), prefixL.data() );
         int maxL = 0;
         for ( int i = 0; i < levelL; ++i )
             if ( prefixL[i + 1] - prefixL[i] > maxL )
@@ -173,8 +171,7 @@ public:
         std::vector<int> ipermU( h_U.rows );
         std::vector<int> prefixU( h_U.rows + 1 );
         graph::TopologicalSort2<int, int, matrix_utils::TriangularMatrix::U> kahnU;
-        auto levelU = kahnU( h_U.rows, h_U.AI(), h_U.AJ(),
-                             ipermU.data(), prefixU.data() );
+        auto levelU = kahnU( h_U.rows, h_U.AI(), h_U.AJ(), ipermU.data(), prefixU.data() );
         int maxU = 0;
         for ( int i = 0; i < levelU; ++i )
             if ( prefixU[i + 1] - prefixU[i] > maxU )
@@ -183,18 +180,15 @@ public:
         // Validate dimensions
         if ( h_L.rows != h_U.rows )
         {
-            throw std::runtime_error(
-                "L and U matrices must have the same dimensions" );
+            throw std::runtime_error( "L and U matrices must have the same dimensions" );
         }
 
         n = h_L.rows;
         generateRandomRHS();
 
-        std::cout << "Read L matrix (" << h_L.rows << "x" << h_L.rows
-                  << ") from " << l_filename << std::endl;
+        std::cout << "Read L matrix (" << h_L.rows << "x" << h_L.rows << ") from " << l_filename << std::endl;
         std::cout << "L matrix: " << h_L.NNZ() << " non-zeros" << std::endl;
-        std::cout << "Read U matrix (" << h_U.rows << "x" << h_U.rows
-                  << ") from " << u_filename << std::endl;
+        std::cout << "Read U matrix (" << h_U.rows << "x" << h_U.rows << ") from " << u_filename << std::endl;
         std::cout << "U matrix: " << h_U.NNZ() << " non-zeros" << std::endl;
         std::cout << "L matrix levels: " << levelL << std::endl;
         std::cout << "U matrix levels: " << levelU << std::endl;
@@ -262,16 +256,13 @@ public:
         generateRandomRHS();
 
         std::cout << "Generated " << n << "x" << n << " LU matrices" << std::endl;
-        std::cout << "L matrix: " << h_L.NNZ()
-                  << " non-zeros (density: " << std::fixed << std::setprecision( 4 )
-                  << 100.0 * h_L.NNZ() / ( double( n ) * n ) << "%)" << std::endl;
-        std::cout << "U matrix: " << h_U.NNZ()
-                  << " non-zeros (density: " << std::fixed << std::setprecision( 4 )
-                  << 100.0 * h_U.NNZ() / ( double( n ) * n ) << "%)" << std::endl;
+        std::cout << "L matrix: " << h_L.NNZ() << " non-zeros (density: " << std::fixed
+                  << std::setprecision( 4 ) << 100.0 * h_L.NNZ() / ( double( n ) * n ) << "%)" << std::endl;
+        std::cout << "U matrix: " << h_U.NNZ() << " non-zeros (density: " << std::fixed
+                  << std::setprecision( 4 ) << 100.0 * h_U.NNZ() / ( double( n ) * n ) << "%)" << std::endl;
     }
 
-    void convertToCSR( const std::vector<std::vector<std::pair<int, double>>>& rows,
-                       CSRMatrix& matrix )
+    void convertToCSR( const std::vector<std::vector<std::pair<int, double>>>& rows, CSRMatrix& matrix )
     {
         matrix.ai.resize( n + 1 );
         matrix.ai[0] = 0;
@@ -324,20 +315,14 @@ public:
     void copyToDevice()
     {
         // Copy L matrix
-        CHECK_CUDA( cudaMemcpy( d_L_rowPtr, h_L.ai.data(), ( n + 1 ) * sizeof( int ),
-                                cudaMemcpyHostToDevice ) );
-        CHECK_CUDA( cudaMemcpy( d_L_colInd, h_L.aj.data(), h_L.NNZ() * sizeof( int ),
-                                cudaMemcpyHostToDevice ) );
-        CHECK_CUDA( cudaMemcpy( d_L_val, h_L.av.data(), h_L.NNZ() * sizeof( double ),
-                                cudaMemcpyHostToDevice ) );
+        CHECK_CUDA( cudaMemcpy( d_L_rowPtr, h_L.ai.data(), ( n + 1 ) * sizeof( int ), cudaMemcpyHostToDevice ) );
+        CHECK_CUDA( cudaMemcpy( d_L_colInd, h_L.aj.data(), h_L.NNZ() * sizeof( int ), cudaMemcpyHostToDevice ) );
+        CHECK_CUDA( cudaMemcpy( d_L_val, h_L.av.data(), h_L.NNZ() * sizeof( double ), cudaMemcpyHostToDevice ) );
 
         // Copy U matrix
-        CHECK_CUDA( cudaMemcpy( d_U_rowPtr, h_U.ai.data(), ( n + 1 ) * sizeof( int ),
-                                cudaMemcpyHostToDevice ) );
-        CHECK_CUDA( cudaMemcpy( d_U_colInd, h_U.aj.data(), h_U.NNZ() * sizeof( int ),
-                                cudaMemcpyHostToDevice ) );
-        CHECK_CUDA( cudaMemcpy( d_U_val, h_U.av.data(), h_U.NNZ() * sizeof( double ),
-                                cudaMemcpyHostToDevice ) );
+        CHECK_CUDA( cudaMemcpy( d_U_rowPtr, h_U.ai.data(), ( n + 1 ) * sizeof( int ), cudaMemcpyHostToDevice ) );
+        CHECK_CUDA( cudaMemcpy( d_U_colInd, h_U.aj.data(), h_U.NNZ() * sizeof( int ), cudaMemcpyHostToDevice ) );
+        CHECK_CUDA( cudaMemcpy( d_U_val, h_U.av.data(), h_U.NNZ() * sizeof( double ), cudaMemcpyHostToDevice ) );
 
         // Copy vectors
         CHECK_CUDA( cudaMemcpy( d_b, h_b.data(), n * sizeof( double ), cudaMemcpyHostToDevice ) );
@@ -346,13 +331,11 @@ public:
     void createSparseDescriptors()
     {
         // Create sparse matrix descriptors for L and U
-        CHECK_CUSPARSE( cusparseCreateCsr(
-            &matL, n, n, h_L.NNZ(), d_L_rowPtr, d_L_colInd, d_L_val, CUSPARSE_INDEX_32I,
-            CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F ) );
+        CHECK_CUSPARSE( cusparseCreateCsr( &matL, n, n, h_L.NNZ(), d_L_rowPtr, d_L_colInd, d_L_val, CUSPARSE_INDEX_32I,
+                                           CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F ) );
 
-        CHECK_CUSPARSE( cusparseCreateCsr(
-            &matU, n, n, h_U.NNZ(), d_U_rowPtr, d_U_colInd, d_U_val, CUSPARSE_INDEX_32I,
-            CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F ) );
+        CHECK_CUSPARSE( cusparseCreateCsr( &matU, n, n, h_U.NNZ(), d_U_rowPtr, d_U_colInd, d_U_val, CUSPARSE_INDEX_32I,
+                                           CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F ) );
 
         // Create dense vector descriptors
         CHECK_CUSPARSE( cusparseCreateDnVec( &vecB, n, d_b, CUDA_R_64F ) );
@@ -367,17 +350,13 @@ public:
         // Set matrix properties
         cusparseFillMode_t fillModeL = CUSPARSE_FILL_MODE_LOWER;
         cusparseDiagType_t diagTypeL = CUSPARSE_DIAG_TYPE_UNIT;
-        cusparseSpMatSetAttribute( matL, CUSPARSE_SPMAT_FILL_MODE, &fillModeL,
-                                   sizeof( cusparseFillMode_t ) );
-        cusparseSpMatSetAttribute( matL, CUSPARSE_SPMAT_DIAG_TYPE, &diagTypeL,
-                                   sizeof( cusparseDiagType_t ) );
+        cusparseSpMatSetAttribute( matL, CUSPARSE_SPMAT_FILL_MODE, &fillModeL, sizeof( cusparseFillMode_t ) );
+        cusparseSpMatSetAttribute( matL, CUSPARSE_SPMAT_DIAG_TYPE, &diagTypeL, sizeof( cusparseDiagType_t ) );
 
         cusparseFillMode_t fillModeU = CUSPARSE_FILL_MODE_UPPER;
         cusparseDiagType_t diagTypeU = CUSPARSE_DIAG_TYPE_NON_UNIT;
-        cusparseSpMatSetAttribute( matU, CUSPARSE_SPMAT_FILL_MODE, &fillModeU,
-                                   sizeof( cusparseFillMode_t ) );
-        cusparseSpMatSetAttribute( matU, CUSPARSE_SPMAT_DIAG_TYPE, &diagTypeU,
-                                   sizeof( cusparseDiagType_t ) );
+        cusparseSpMatSetAttribute( matU, CUSPARSE_SPMAT_FILL_MODE, &fillModeU, sizeof( cusparseFillMode_t ) );
+        cusparseSpMatSetAttribute( matU, CUSPARSE_SPMAT_DIAG_TYPE, &diagTypeU, sizeof( cusparseDiagType_t ) );
 
         // Create SpSV descriptors
         CHECK_CUSPARSE( cusparseSpSV_createDescr( &spsvDescrL ) );
@@ -389,26 +368,26 @@ public:
         const double alpha = 1.0;
 
         // Analyze L matrix for forward substitution
-        CHECK_CUSPARSE( cusparseSpSV_bufferSize(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matL, vecB,
-            vecY, CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrL, &bufferSizeL ) );
+        CHECK_CUSPARSE( cusparseSpSV_bufferSize( cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                 &alpha, matL, vecB, vecY, CUDA_R_64F,
+                                                 CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrL, &bufferSizeL ) );
 
         CHECK_CUDA( cudaMalloc( &externalBufferL, bufferSizeL ) );
 
-        CHECK_CUSPARSE( cusparseSpSV_analysis(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matL, vecB, vecY,
-            CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrL, externalBufferL ) );
+        CHECK_CUSPARSE( cusparseSpSV_analysis( cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+                                               matL, vecB, vecY, CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT,
+                                               spsvDescrL, externalBufferL ) );
 
         // Analyze U matrix for backward substitution
-        CHECK_CUSPARSE( cusparseSpSV_bufferSize(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matU, vecY,
-            vecX, CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrU, &bufferSizeU ) );
+        CHECK_CUSPARSE( cusparseSpSV_bufferSize( cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                 &alpha, matU, vecY, vecX, CUDA_R_64F,
+                                                 CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrU, &bufferSizeU ) );
 
         CHECK_CUDA( cudaMalloc( &externalBufferU, bufferSizeU ) );
 
-        CHECK_CUSPARSE( cusparseSpSV_analysis(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matU, vecY, vecX,
-            CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrU, externalBufferU ) );
+        CHECK_CUSPARSE( cusparseSpSV_analysis( cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+                                               matU, vecY, vecX, CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT,
+                                               spsvDescrU, externalBufferU ) );
     }
 
     void analyzeSpSM()
@@ -421,29 +400,25 @@ public:
 
         // Analyze L matrix for forward substitution (SpSM)
         CHECK_CUSPARSE( cusparseSpSM_bufferSize(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matL, matB, matY,
-            CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrL, &bufferSizeSML ) );
+            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+            matL, matB, matY, CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrL, &bufferSizeSML ) );
 
         CHECK_CUDA( cudaMalloc( &externalBufferSML, bufferSizeSML ) );
 
         CHECK_CUSPARSE( cusparseSpSM_analysis(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matL, matB, matY, CUDA_R_64F,
-            CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrL, externalBufferSML ) );
+            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+            matL, matB, matY, CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrL, externalBufferSML ) );
 
         // Analyze U matrix for backward substitution (SpSM)
         CHECK_CUSPARSE( cusparseSpSM_bufferSize(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matU, matY, matX,
-            CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrU, &bufferSizeSMU ) );
+            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+            matU, matY, matX, CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrU, &bufferSizeSMU ) );
 
         CHECK_CUDA( cudaMalloc( &externalBufferSMU, bufferSizeSMU ) );
 
         CHECK_CUSPARSE( cusparseSpSM_analysis(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matU, matY, matX, CUDA_R_64F,
-            CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrU, externalBufferSMU ) );
+            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha,
+            matU, matY, matX, CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrU, externalBufferSMU ) );
     }
 
     void cudaForwardBackwardSpSV()
@@ -455,14 +430,12 @@ public:
         CHECK_CUDA( cudaMemset( d_x, 0, n * sizeof( double ) ) );
 
         // Forward substitution: L * y = b using cuSPARSE SpSV
-        CHECK_CUSPARSE( cusparseSpSV_solve(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matL,
-            vecB, vecY, CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrL ) );
+        CHECK_CUSPARSE( cusparseSpSV_solve( cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matL,
+                                            vecB, vecY, CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrL ) );
 
         // Backward substitution: U * x = y using cuSPARSE SpSV
-        CHECK_CUSPARSE( cusparseSpSV_solve(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matU,
-            vecY, vecX, CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrU ) );
+        CHECK_CUSPARSE( cusparseSpSV_solve( cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matU,
+                                            vecY, vecX, CUDA_R_64F, CUSPARSE_SPSV_ALG_DEFAULT, spsvDescrU ) );
     }
 
     void cudaForwardBackwardSpSM()
@@ -474,16 +447,14 @@ public:
         CHECK_CUDA( cudaMemset( d_x, 0, n * sizeof( double ) ) );
 
         // Forward substitution: L * y = b using cuSPARSE SpSM
-        CHECK_CUSPARSE( cusparseSpSM_solve(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matL, matB, matY,
-            CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrL ) );
+        CHECK_CUSPARSE( cusparseSpSM_solve( cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                            CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matL, matB, matY,
+                                            CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrL ) );
 
         // Backward substitution: U * x = y using cuSPARSE SpSM
-        CHECK_CUSPARSE( cusparseSpSM_solve(
-            cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matU, matY, matX,
-            CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrU ) );
+        CHECK_CUSPARSE( cusparseSpSM_solve( cusparse_handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                            CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matU, matY, matX,
+                                            CUDA_R_64F, CUSPARSE_SPSM_ALG_DEFAULT, spsmDescrU ) );
     }
 
     double benchmarkForwardBackward( int num_iterations = 1000 )
@@ -503,8 +474,7 @@ public:
         CHECK_CUDA( cudaDeviceSynchronize() );
         auto end = std::chrono::high_resolution_clock::now();
 
-        auto duration =
-            std::chrono::duration_cast<std::chrono::microseconds>( end - start );
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>( end - start );
         double avg_time_ms = duration.count() / ( 1000.0 * num_iterations );
 
         // Copy result back from GPU
@@ -530,8 +500,7 @@ public:
         CHECK_CUDA( cudaDeviceSynchronize() );
         auto end = std::chrono::high_resolution_clock::now();
 
-        auto duration =
-            std::chrono::duration_cast<std::chrono::microseconds>( end - start );
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>( end - start );
         double avg_time_ms = duration.count() / ( 1000.0 * num_iterations );
 
         // Copy result back from GPU
@@ -616,10 +585,8 @@ public:
         double gflops = ( flops / 1e9 ) / ( gpu_time_ms / 1000.0 );
 
         std::cout << std::fixed << std::setprecision( 6 );
-        std::cout << "cuSPARSE " << method << " time: " << gpu_time_ms << " ms"
-                  << std::endl;
-        std::cout << "Performance: " << std::setprecision( 3 ) << gflops
-                  << " GFLOP/s" << std::endl;
+        std::cout << "cuSPARSE " << method << " time: " << gpu_time_ms << " ms" << std::endl;
+        std::cout << "Performance: " << std::setprecision( 3 ) << gflops << " GFLOP/s" << std::endl;
         std::cout << "Relative L2 error vs CPU reference: " << std::scientific
                   << std::setprecision( 2 ) << error << std::endl;
         std::cout << "Implementation: cuSPARSE " << method;
@@ -632,8 +599,7 @@ public:
             std::cout << " (Sparse matrix-dense matrix multiply)";
         }
         std::cout << std::endl;
-        std::cout << "L matrix nnz: " << h_L.NNZ()
-                  << ", U matrix nnz: " << h_U.NNZ() << std::endl;
+        std::cout << "L matrix nnz: " << h_L.NNZ() << ", U matrix nnz: " << h_U.NNZ() << std::endl;
     }
 
     void printResultsSpSM( double gpu_time_ms )
@@ -647,15 +613,13 @@ public:
 
         std::cout << std::fixed << std::setprecision( 6 );
         std::cout << "cuSPARSE SpSM time: " << gpu_time_ms << " ms" << std::endl;
-        std::cout << "Performance: " << std::setprecision( 3 ) << gflops
-                  << " GFLOP/s" << std::endl;
+        std::cout << "Performance: " << std::setprecision( 3 ) << gflops << " GFLOP/s" << std::endl;
         std::cout << "Relative L2 error vs CPU reference: " << std::scientific
                   << std::setprecision( 2 ) << error << std::endl;
         std::cout << "Implementation: cuSPARSE SpSM (Sparse matrix-dense "
                      "matrix multiply)"
                   << std::endl;
-        std::cout << "L matrix nnz: " << h_L.NNZ()
-                  << ", U matrix nnz: " << h_U.NNZ() << std::endl;
+        std::cout << "L matrix nnz: " << h_L.NNZ() << ", U matrix nnz: " << h_U.NNZ() << std::endl;
     }
 };
 
@@ -679,23 +643,18 @@ void printDeviceInfo()
 int main( int argc, char** argv )
 {
     // Parse command line arguments with cxxopts
-    cxxopts::Options options(
-        "cuSPARSE SpSV vs SpSM Performance Test",
-        "Benchmark cuSPARSE SpSV and SpSM performance for triangular solve" );
+    cxxopts::Options options( "cuSPARSE SpSV vs SpSM Performance Test",
+                              "Benchmark cuSPARSE SpSV and SpSM performance for triangular solve" );
 
     options.add_options()( "n,size", "Matrix size (ignored if file is provided)",
                            cxxopts::value<int>()->default_value( "10000" ) )(
         "s,sparsity", "Matrix sparsity for generated matrices (0.0-1.0)",
         cxxopts::value<double>()->default_value( "0.05" ) )(
-        "l,lfile", "L matrix Market file path (optional)",
-        cxxopts::value<std::string>()->default_value( "" ) )(
-        "u,ufile", "U matrix Market file path (optional)",
-        cxxopts::value<std::string>()->default_value( "" ) )(
-        "i,iterations", "Number of benchmark iterations",
-        cxxopts::value<int>()->default_value( "1000" ) )(
+        "l,lfile", "L matrix Market file path (optional)", cxxopts::value<std::string>()->default_value( "" ) )(
+        "u,ufile", "U matrix Market file path (optional)", cxxopts::value<std::string>()->default_value( "" ) )(
+        "i,iterations", "Number of benchmark iterations", cxxopts::value<int>()->default_value( "1000" ) )(
         "m,method", "Benchmark method: spsv, spsm, or both",
-        cxxopts::value<std::string>()->default_value( "both" ) )(
-        "h,help", "Show help message" );
+        cxxopts::value<std::string>()->default_value( "both" ) )( "h,help", "Show help message" );
 
     auto result = options.parse( argc, argv );
 
@@ -758,13 +717,11 @@ int main( int argc, char** argv )
     else
     {
         std::cout << "Matrix size: " << matrix_size << "x" << matrix_size << std::endl;
-        std::cout << "Target sparsity: " << std::fixed << std::setprecision( 4 )
-                  << sparsity << std::endl;
+        std::cout << "Target sparsity: " << std::fixed << std::setprecision( 4 ) << sparsity << std::endl;
     }
 
     std::cout << "Benchmark iterations: " << num_iterations << std::endl;
-    std::cout << "=========================================" << std::endl
-              << std::endl;
+    std::cout << "=========================================" << std::endl << std::endl;
 
     try
     {
@@ -805,8 +762,7 @@ int main( int argc, char** argv )
             }
             else
             {
-                std::cout << "SpSM is " << ( 1.0 / speedup )
-                          << "x faster than SpSV" << std::endl;
+                std::cout << "SpSM is " << ( 1.0 / speedup ) << "x faster than SpSV" << std::endl;
             }
             std::cout << "SpSV/SpSM time ratio: " << speedup << std::endl;
         }

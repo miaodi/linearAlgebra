@@ -10,7 +10,10 @@ namespace
 {
 
 template <typename COLTYPE>
-__global__ void make_zero_based_offsets_kernel( COLTYPE rows, const ExpandedIndex* row_ptr, ExpandedIndex base, ExpandedIndex* zero_based_offsets )
+__global__ void make_zero_based_offsets_kernel( COLTYPE rows,
+                                                const ExpandedIndex* row_ptr,
+                                                ExpandedIndex base,
+                                                ExpandedIndex* zero_based_offsets )
 {
     COLTYPE idx = static_cast<COLTYPE>( blockIdx.x * blockDim.x + threadIdx.x );
     if ( idx > rows )
@@ -51,16 +54,17 @@ bool SpGEMMSortExpandedProductsByColumn( const SpGEMMSymbolicResult<ROWTYPE, COL
         return false;
     }
 
-    const AsyncDeviceAllocator pool{stream};
+    const AsyncDeviceAllocator pool{ stream };
     const ExpandedIndex* segment_offsets = symbolic.expanded_row_ptr.data();
-    AsyncDeviceArray<ExpandedIndex> zero_based_offsets(pool);
+    AsyncDeviceArray<ExpandedIndex> zero_based_offsets( pool );
     if ( symbolic.base != 0 )
     {
         zero_based_offsets.resize( static_cast<size_t>( symbolic.n_rows + 1 ) );
         constexpr int threads = 256;
         const int blocks = ( static_cast<int>( symbolic.n_rows + 1 ) + threads - 1 ) / threads;
         make_zero_based_offsets_kernel<COLTYPE><<<blocks, threads, 0, stream>>>(
-            symbolic.n_rows, symbolic.expanded_row_ptr.data(), static_cast<ExpandedIndex>( symbolic.base ), zero_based_offsets.data() );
+            symbolic.n_rows, symbolic.expanded_row_ptr.data(),
+            static_cast<ExpandedIndex>( symbolic.base ), zero_based_offsets.data() );
         checkCudaError( cudaGetLastError(), "launch SpGEMM segment-offset normalization kernel" );
         segment_offsets = zero_based_offsets.data();
     }
@@ -85,17 +89,15 @@ bool SpGEMMSortExpandedProductsByColumn( const SpGEMMSymbolicResult<ROWTYPE, COL
     void* temp_storage = nullptr;
     size_t temp_storage_bytes = 0;
     checkCudaError( cub::DeviceSegmentedRadixSort::SortPairs(
-                        temp_storage, temp_storage_bytes, d_keys, d_vals,
-                        static_cast<std::int64_t>( total_items ),
+                        temp_storage, temp_storage_bytes, d_keys, d_vals, static_cast<std::int64_t>( total_items ),
                         static_cast<std::int64_t>( symbolic.n_rows ), segment_offsets,
                         segment_offsets + 1, 0, end_bit, stream ),
                     "query SpGEMM segmented sort temporary storage" );
 
-    AsyncDeviceArray<std::uint8_t> temp(pool);
+    AsyncDeviceArray<std::uint8_t> temp( pool );
     temp.resize( temp_storage_bytes );
     checkCudaError( cub::DeviceSegmentedRadixSort::SortPairs(
-                        temp.data(), temp_storage_bytes, d_keys, d_vals,
-                        static_cast<std::int64_t>( total_items ),
+                        temp.data(), temp_storage_bytes, d_keys, d_vals, static_cast<std::int64_t>( total_items ),
                         static_cast<std::int64_t>( symbolic.n_rows ), segment_offsets,
                         segment_offsets + 1, 0, end_bit, stream ),
                     "run SpGEMM segmented sort" );

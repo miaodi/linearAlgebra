@@ -12,8 +12,8 @@ namespace matrix_utils::sparse_cuda
 namespace
 {
 using ilu_detail::kThreadsPerBlock;
-using ilu_detail::kWarpsPerBlock;
 using ilu_detail::kWarpSize;
+using ilu_detail::kWarpsPerBlock;
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 __global__ void ilu_level_factor_workqueue_kernel( COLTYPE level_rows,
@@ -42,13 +42,12 @@ __global__ void ilu_level_factor_workqueue_kernel( COLTYPE level_rows,
         }
 
         const COLTYPE i = level_rows_perm[level_row] - base;
-        ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE>(
-            i, lu_ai, lu_aj, lu_diag, base, lu_av, status, lane );
+        ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE>( i, lu_ai, lu_aj, lu_diag,
+                                                                        base, lu_av, status, lane );
     }
 }
 
-inline cudaError_t compute_persistent_block_limit( const int blocks_per_sm,
-                                                   int* block_limit )
+inline cudaError_t compute_persistent_block_limit( const int blocks_per_sm, int* block_limit )
 {
     if ( block_limit == nullptr || blocks_per_sm <= 0 )
     {
@@ -76,11 +75,11 @@ inline cudaError_t compute_persistent_block_limit( const int blocks_per_sm,
     return cudaSuccess;
 }
 
-inline int select_workqueue_blocks( const long long level_rows,
-                                    const int block_limit )
+inline int select_workqueue_blocks( const long long level_rows, const int block_limit )
 {
     const long long static_blocks = ( level_rows + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
-    const long long selected_blocks = std::max<long long>( 1, std::min<long long>( static_blocks, block_limit ) );
+    const long long selected_blocks =
+        std::max<long long>( 1, std::min<long long>( static_blocks, block_limit ) );
     return static_cast<int>( std::min<long long>( selected_blocks, std::numeric_limits<int>::max() ) );
 }
 } // namespace
@@ -149,11 +148,12 @@ cudaError_t ILUBaseNumericFactorizationWorkQueueAsync( COLTYPE n,
             return status;
         }
 
-        const int blocks = select_workqueue_blocks( static_cast<long long>( level_rows ), persistent_block_limit );
+        const int blocks =
+            select_workqueue_blocks( static_cast<long long>( level_rows ), persistent_block_limit );
 
         ilu_level_factor_workqueue_kernel<<<blocks, kThreadsPerBlock, 0, stream>>>(
-            level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag,
-            base, d_lu_av, d_status, d_level_row_counter );
+            level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av,
+            d_status, d_level_row_counter );
         status = ilu_detail::CudaLaunchStatus();
         if ( status != cudaSuccess )
         {
@@ -198,22 +198,21 @@ template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<int, int, double>
                                                                                   int,
                                                                                   cudaStream_t );
 
-template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<std::int64_t, int, double>(
-    int,
-    const std::int64_t*,
-    const int*,
-    const double*,
-    const std::int64_t*,
-    const int*,
-    const std::int64_t*,
-    const int*,
-    const int*,
-    int,
-    int,
-    double*,
-    int*,
-    int*,
-    int,
-    cudaStream_t );
+template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<std::int64_t, int, double>( int,
+                                                                                           const std::int64_t*,
+                                                                                           const int*,
+                                                                                           const double*,
+                                                                                           const std::int64_t*,
+                                                                                           const int*,
+                                                                                           const std::int64_t*,
+                                                                                           const int*,
+                                                                                           const int*,
+                                                                                           int,
+                                                                                           int,
+                                                                                           double*,
+                                                                                           int*,
+                                                                                           int*,
+                                                                                           int,
+                                                                                           cudaStream_t );
 
 } // namespace matrix_utils::sparse_cuda

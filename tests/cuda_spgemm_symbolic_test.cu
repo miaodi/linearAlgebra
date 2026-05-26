@@ -222,8 +222,8 @@ TEST( CudaSpGEMMSymbolic, PreservesOneBasedRowPointersAndPermutationIds )
     d_B_row_ptr.copyFromHost( B_row_ptr.data(), B_row_ptr.size() );
 
     SpGEMMSymbolicResult<int, int> symbolic;
-    ASSERT_TRUE( ( SpGEMMSymbolicAnalyzeCSR<int, int>(
-        2, 3, d_A_row_ptr.data(), d_A_col_ind.data(), 3, d_B_row_ptr.data(), 1, symbolic ) ) );
+    ASSERT_TRUE( ( SpGEMMSymbolicAnalyzeCSR<int, int>( 2, 3, d_A_row_ptr.data(), d_A_col_ind.data(),
+                                                       3, d_B_row_ptr.data(), 1, symbolic ) ) );
 
     EXPECT_EQ( symbolic.total_expanded_nnz, 3 );
 

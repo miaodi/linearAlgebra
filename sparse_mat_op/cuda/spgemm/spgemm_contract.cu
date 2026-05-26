@@ -120,9 +120,9 @@ bool SpGEMMContractSortedProducts( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>&
     {
         return false;
     }
-    const AsyncDeviceAllocator pool{stream};
-    AsyncDeviceArray<std::uint64_t> packed_keys(pool);
-    AsyncDeviceArray<ExpandedIndex> unique_count(pool);
+    const AsyncDeviceAllocator pool{ stream };
+    AsyncDeviceArray<std::uint64_t> packed_keys( pool );
+    AsyncDeviceArray<ExpandedIndex> unique_count( pool );
     packed_keys.resize( static_cast<size_t>( total_items ) );
     reduced.row_col_keys.resize( static_cast<size_t>( total_items ) );
     reduced.values.resize( static_cast<size_t>( total_items ) );
@@ -143,7 +143,7 @@ bool SpGEMMContractSortedProducts( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>&
                         ::cuda::std::plus<VALTYPE>(), static_cast<int>( total_items ), stream ),
                     "query SpGEMM reduce-by-key temporary storage" );
 
-    AsyncDeviceArray<std::uint8_t> reduce_storage(pool);
+    AsyncDeviceArray<std::uint8_t> reduce_storage( pool );
     reduce_storage.resize( temp_storage_bytes );
     checkCudaError( cub::DeviceReduce::ReduceByKey( reduce_storage.data(), temp_storage_bytes,
                                                     packed_keys.data(), reduced.row_col_keys.data(),
@@ -214,17 +214,17 @@ bool SpGEMMConstructCSR( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>& symbolic,
                     "copy SpGEMM constructed values" );
 
     constexpr int threads = 256;
-    const AsyncDeviceAllocator pool{stream};
+    const AsyncDeviceAllocator pool{ stream };
     const int unique_blocks = static_cast<int>( ( nnz + threads - 1 ) / threads );
-    AsyncDeviceArray<COLTYPE> unique_row_ind(pool);
+    AsyncDeviceArray<COLTYPE> unique_row_ind( pool );
     unique_row_ind.resize( static_cast<size_t>( nnz ) );
     unpack_unique_keys_kernel<ROWTYPE, COLTYPE><<<unique_blocks, threads, 0, stream>>>(
         nnz, reduced.row_col_keys.data(), unique_row_ind.data(), output.aj.data() );
     checkCudaError( cudaGetLastError(), "launch SpGEMM construct key-unpack kernel" );
 
-    AsyncDeviceArray<COLTYPE> row_run_rows(pool);
-    AsyncDeviceArray<ROWTYPE> row_run_counts(pool);
-    AsyncDeviceArray<COLTYPE> row_run_count(pool);
+    AsyncDeviceArray<COLTYPE> row_run_rows( pool );
+    AsyncDeviceArray<ROWTYPE> row_run_counts( pool );
+    AsyncDeviceArray<COLTYPE> row_run_count( pool );
     row_run_rows.resize( static_cast<size_t>( nnz ) );
     row_run_counts.resize( static_cast<size_t>( nnz ) );
     row_run_count.resize( 1 );
@@ -236,7 +236,7 @@ bool SpGEMMConstructCSR( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>& symbolic,
                         row_run_counts.data(), row_run_count.data(), static_cast<int>( nnz ), stream ),
                     "query SpGEMM construct row RLE storage" );
 
-    AsyncDeviceArray<std::uint8_t> rle_storage(pool);
+    AsyncDeviceArray<std::uint8_t> rle_storage( pool );
     rle_storage.resize( rle_temp_bytes );
     checkCudaError( cub::DeviceRunLengthEncode::Encode(
                         rle_storage.data(), rle_temp_bytes, unique_row_ind.data(), row_run_rows.data(),
@@ -249,7 +249,7 @@ bool SpGEMMConstructCSR( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>& symbolic,
                     "copy SpGEMM construct row-run count" );
     checkCudaError( cudaStreamSynchronize( stream ), "synchronize SpGEMM construct row-run count" );
 
-    AsyncDeviceArray<ROWTYPE> row_counts(pool);
+    AsyncDeviceArray<ROWTYPE> row_counts( pool );
     row_counts.resize( static_cast<size_t>( symbolic.n_rows + 1 ) );
     checkCudaError( cudaMemsetAsync( row_counts.data(), 0,
                                      static_cast<size_t>( symbolic.n_rows + 1 ) * sizeof( ROWTYPE ), stream ),
@@ -268,7 +268,7 @@ bool SpGEMMConstructCSR( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>& symbolic,
                                         static_cast<int>( symbolic.n_rows + 1 ), stream ),
         "query SpGEMM construct row scan storage" );
 
-    AsyncDeviceArray<std::uint8_t> scan_storage(pool);
+    AsyncDeviceArray<std::uint8_t> scan_storage( pool );
     scan_storage.resize( scan_temp_bytes );
     checkCudaError(
         cub::DeviceScan::ExclusiveScan( scan_storage.data(), scan_temp_bytes, row_counts.data(),
@@ -391,7 +391,8 @@ bool SpGEMMContractSortedProducts( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>&
         thrust::fill( policy, ai_begin, ai_begin + rows + 1, symbolic.base );
         output.aj.resize( 0 );
         output_values.resize( 0 );
-        checkCudaError( cudaStreamSynchronize( stream ), "synchronize empty SpGEMM segmented contract" );
+        checkCudaError( cudaStreamSynchronize( stream ),
+                        "synchronize empty SpGEMM segmented contract" );
         return true;
     }
     if ( sorted.col_ind.data() == nullptr || sorted.values.data() == nullptr )
@@ -400,8 +401,8 @@ bool SpGEMMContractSortedProducts( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>&
     }
 
     // Pass 1: count unique columns per row.
-    const AsyncDeviceAllocator pool{stream};
-    AsyncDeviceArray<ROWTYPE> unique_counts(pool);
+    const AsyncDeviceAllocator pool{ stream };
+    AsyncDeviceArray<ROWTYPE> unique_counts( pool );
     unique_counts.resize( static_cast<size_t>( rows + 1 ) );
     {
         constexpr int threads = 256;
@@ -416,23 +417,21 @@ bool SpGEMMContractSortedProducts( const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>&
     {
         void* temp_storage = nullptr;
         size_t temp_storage_bytes = 0;
-        cub::DeviceScan::ExclusiveScan(
-            temp_storage, temp_storage_bytes, unique_counts.data(), output.ai.data(),
-            ::cuda::std::plus<ROWTYPE>(), symbolic.base,
-            static_cast<int>( rows + 1 ), stream );
+        cub::DeviceScan::ExclusiveScan( temp_storage, temp_storage_bytes, unique_counts.data(),
+                                        output.ai.data(), ::cuda::std::plus<ROWTYPE>(),
+                                        symbolic.base, static_cast<int>( rows + 1 ), stream );
 
-        AsyncDeviceArray<std::uint8_t> scan_storage(pool);
+        AsyncDeviceArray<std::uint8_t> scan_storage( pool );
         scan_storage.resize( temp_storage_bytes );
-        cub::DeviceScan::ExclusiveScan(
-            scan_storage.data(), temp_storage_bytes, unique_counts.data(), output.ai.data(),
-            ::cuda::std::plus<ROWTYPE>(), symbolic.base,
-            static_cast<int>( rows + 1 ), stream );
+        cub::DeviceScan::ExclusiveScan( scan_storage.data(), temp_storage_bytes, unique_counts.data(),
+                                        output.ai.data(), ::cuda::std::plus<ROWTYPE>(),
+                                        symbolic.base, static_cast<int>( rows + 1 ), stream );
     }
 
     // Read total output nnz from the last element of output.ai.
     ROWTYPE output_end = symbolic.base;
-    checkCudaError( cudaMemcpyAsync( &output_end, output.ai.data() + rows,
-                                     sizeof( ROWTYPE ), cudaMemcpyDeviceToHost, stream ),
+    checkCudaError( cudaMemcpyAsync( &output_end, output.ai.data() + rows, sizeof( ROWTYPE ),
+                                     cudaMemcpyDeviceToHost, stream ),
                     "copy SpGEMM segmented output nnz" );
     checkCudaError( cudaStreamSynchronize( stream ), "synchronize SpGEMM segmented output nnz" );
     const ROWTYPE output_nnz = output_end - symbolic.base;

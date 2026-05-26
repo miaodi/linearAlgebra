@@ -409,15 +409,12 @@ int main( int argc, char** argv )
         DeviceArray<int> d_row_ptr;
         DeviceArray<int> d_col_ind;
         DeviceArray<double> d_values;
-        runStep(
-            "copyFromHost(AI)",
-            [&] { d_row_ptr.copyFromHost( matrix.AI(), static_cast<size_t>( rows + 1 ) ); } );
-        runStep(
-            "copyFromHost(AJ)",
-            [&] { d_col_ind.copyFromHost( matrix.AJ(), static_cast<size_t>( nnz ) ); } );
-        runStep(
-            "copyFromHost(AV)",
-            [&] { d_values.copyFromHost( matrix.AV(), static_cast<size_t>( nnz ) ); } );
+        runStep( "copyFromHost(AI)",
+                 [&] { d_row_ptr.copyFromHost( matrix.AI(), static_cast<size_t>( rows + 1 ) ); } );
+        runStep( "copyFromHost(AJ)",
+                 [&] { d_col_ind.copyFromHost( matrix.AJ(), static_cast<size_t>( nnz ) ); } );
+        runStep( "copyFromHost(AV)",
+                 [&] { d_values.copyFromHost( matrix.AV(), static_cast<size_t>( nnz ) ); } );
 
         // Warm up: flush lazy CUDA context/driver initialization and JIT overhead
         // so timed phases measure only kernel work.
@@ -429,17 +426,17 @@ int main( int argc, char** argv )
         }
 
         matrix_utils::sparse_cuda::SpGEMMSymbolicResult<int, int> symbolic;
-        double symbolic_ms = timeMs(
-            "SpGEMMSymbolicAnalyzeCSR",
-            [&]
-            {
-                if ( !matrix_utils::sparse_cuda::SpGEMMSymbolicAnalyzeCSR<int, int>(
-                         rows, matrix.cols, d_row_ptr.data(), d_col_ind.data(), rows, d_row_ptr.data(),
-                         int{0}, symbolic ) )
-                {
-                    throw std::runtime_error( "SpGEMMSymbolicAnalyzeCSR failed." );
-                }
-            } );
+        double symbolic_ms =
+            timeMs( "SpGEMMSymbolicAnalyzeCSR",
+                    [&]
+                    {
+                        if ( !matrix_utils::sparse_cuda::SpGEMMSymbolicAnalyzeCSR<int, int>(
+                                 rows, matrix.cols, d_row_ptr.data(), d_col_ind.data(), rows,
+                                 d_row_ptr.data(), int{ 0 }, symbolic ) )
+                        {
+                            throw std::runtime_error( "SpGEMMSymbolicAnalyzeCSR failed." );
+                        }
+                    } );
         symbolic.n_cols = rows; // A*A: output columns = rows
 
         matrix_utils::sparse_cuda::SpGEMMExpandedProducts<int, double> expanded;
@@ -449,7 +446,7 @@ int main( int argc, char** argv )
             {
                 if ( !matrix_utils::sparse_cuda::SpGEMMExpandCSR<int, int, double>(
                          rows, matrix.cols, d_row_ptr.data(), d_col_ind.data(), d_values.data(), rows,
-                         d_row_ptr.data(), d_col_ind.data(), d_values.data(), int{0}, symbolic, expanded ) )
+                         d_row_ptr.data(), d_col_ind.data(), d_values.data(), int{ 0 }, symbolic, expanded ) )
                 {
                     throw std::runtime_error( "SpGEMMExpandCSR failed." );
                 }
@@ -473,16 +470,16 @@ int main( int argc, char** argv )
 
         matrix_utils::sparse_cuda::DeviceCSRMatrix<int, int> contracted;
         DeviceArray<double> contracted_values;
-        double contraction_ms = timeMs(
-            "SpGEMMContractSortedProducts",
-            [&]
-            {
-                if ( !matrix_utils::sparse_cuda::SpGEMMContractSortedProducts<int, int, double>(
-                         symbolic, sorted, contracted, contracted_values ) )
-                {
-                    throw std::runtime_error( "SpGEMMContractSortedProducts failed." );
-                }
-            } );
+        double contraction_ms =
+            timeMs( "SpGEMMContractSortedProducts",
+                    [&]
+                    {
+                        if ( !matrix_utils::sparse_cuda::SpGEMMContractSortedProducts<int, int, double>(
+                                 symbolic, sorted, contracted, contracted_values ) )
+                        {
+                            throw std::runtime_error( "SpGEMMContractSortedProducts failed." );
+                        }
+                    } );
 
         std::vector<int> contracted_row_ptr( static_cast<size_t>( rows + 1 ) );
         contracted.ai.copyToHost( contracted_row_ptr.data() );
@@ -517,12 +514,12 @@ int main( int argc, char** argv )
         bool cusparse_ok = false;
         try
         {
-            cusparse_ms = timeMs(
-                "cuSPARSE SpGEMM A*A",
-                [&]
-                {
-                    runCuSparseSpGEMMAA( rows, nnz, d_row_ptr.data(), d_col_ind.data(), d_values.data(), cusparse_product );
-                } );
+            cusparse_ms = timeMs( "cuSPARSE SpGEMM A*A",
+                                  [&]
+                                  {
+                                      runCuSparseSpGEMMAA( rows, nnz, d_row_ptr.data(), d_col_ind.data(),
+                                                           d_values.data(), cusparse_product );
+                                  } );
             cusparse_ok = true;
         }
         catch ( const std::exception& err )

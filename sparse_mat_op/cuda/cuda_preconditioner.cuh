@@ -24,7 +24,7 @@ public:
      * @param d_input Input vector x (device memory)
      * @param d_output Output vector y = M^{-1} * x (device memory)
      */
-    virtual void operator()(const DeviceVectorView& d_input, DeviceVectorView& d_output) = 0;
+    virtual void operator()( const DeviceVectorView& d_input, DeviceVectorView& d_output ) = 0;
 
     /**
      * @brief Check if preconditioner is properly initialized
@@ -45,7 +45,7 @@ public:
     NoPreconditioner() = default;
     ~NoPreconditioner() override = default;
 
-    void operator()(const DeviceVectorView& d_input, DeviceVectorView& d_output) override;
+    void operator()( const DeviceVectorView& d_input, DeviceVectorView& d_output ) override;
 
     bool isSetup() const override { return true; }
 };
@@ -68,7 +68,7 @@ public:
      * @param n Vector size
      * @param h_diag Diagonal values (size n, host data)
      */
-    void setup(size_t n, const double* h_diag);
+    void setup( size_t n, const double* h_diag );
 
     /**
      * @brief Setup Jacobi preconditioner by extracting diagonal from CSR matrix
@@ -78,9 +78,9 @@ public:
      * @param h_ja Column indices (host data)
      * @param h_va Values (host data)
      */
-    void setupFromMatrix(size_t n, const int* h_ia, const int* h_ja, const double* h_va);
+    void setupFromMatrix( size_t n, const int* h_ia, const int* h_ja, const double* h_va );
 
-    void operator()(const DeviceVectorView& d_input, DeviceVectorView& d_output) override;
+    void operator()( const DeviceVectorView& d_input, DeviceVectorView& d_output ) override;
 
     bool isSetup() const override { return _is_setup; }
 
@@ -118,11 +118,11 @@ protected:
 
     bool _is_setup;
 
-    explicit CuSparseILUPrecBase(cusparseHandle_t handle);
+    explicit CuSparseILUPrecBase( cusparseHandle_t handle );
     ~CuSparseILUPrecBase() override;
 
 public:
-    void operator()(const DeviceVectorView& d_input, DeviceVectorView& d_output) override;
+    void operator()( const DeviceVectorView& d_input, DeviceVectorView& d_output ) override;
 
     bool isSetup() const override { return _is_setup; }
 };
@@ -137,7 +137,7 @@ public:
 class CuSparseILUPrec : public CuSparseILUPrecBase
 {
 public:
-    explicit CuSparseILUPrec(cusparseHandle_t handle);
+    explicit CuSparseILUPrec( cusparseHandle_t handle );
     ~CuSparseILUPrec() override;
 
     /**
@@ -151,8 +151,13 @@ public:
      * @param h_ja_U Column indices for U factor (host data)
      * @param h_va_U Values for U factor (host data)
      */
-    void setup(size_t n, const int* h_ia_L, const int* h_ja_L, const double* h_va_L,
-               const int* h_ia_U, const int* h_ja_U, const double* h_va_U);
+    void setup( size_t n,
+                const int* h_ia_L,
+                const int* h_ja_L,
+                const double* h_va_L,
+                const int* h_ia_U,
+                const int* h_ja_U,
+                const double* h_va_U );
 
 private:
     // Device memory arrays for L and U factors
@@ -186,7 +191,7 @@ private:
 class CuSparseILU0Prec : public CuSparseILUPrecBase
 {
 public:
-    explicit CuSparseILU0Prec(cusparseHandle_t handle);
+    explicit CuSparseILU0Prec( cusparseHandle_t handle );
     ~CuSparseILU0Prec() override;
 
     /**
@@ -197,7 +202,7 @@ public:
      * @param h_ja Column indices for matrix (host data)
      * @param h_va Values for matrix (host data)
      */
-    void setup(size_t n, const int* h_ia, const int* h_ja, const double* h_va);
+    void setup( size_t n, const int* h_ia, const int* h_ja, const double* h_va );
 
     /**
      * @brief Setup ILU0 preconditioner using matrix already on device
@@ -209,7 +214,7 @@ public:
      * @param d_va Values for matrix (device data)
      * @param index_base Index base (0 or 1)
      */
-    void setupFromDevice(size_t n, size_t nnz, const int* d_ia, const int* d_ja, const double* d_va, int index_base);
+    void setupFromDevice( size_t n, size_t nnz, const int* d_ia, const int* d_ja, const double* d_va, int index_base );
 
 private:
     // Device memory for ILU0 factorization (stored in-place)
@@ -229,9 +234,8 @@ private:
     DeviceArray<char> _d_buffer_U;
 
     void cleanup();
-    void performFactorization(size_t n, size_t nnz, int index_base, int* d_ia, int* d_ja, double* d_va);
-    void setupSpSVDescriptors(size_t n, size_t nnz, int index_base, const int* d_ia,
-                              const int* d_ja, const double* d_va);
+    void performFactorization( size_t n, size_t nnz, int index_base, int* d_ia, int* d_ja, double* d_va );
+    void setupSpSVDescriptors( size_t n, size_t nnz, int index_base, const int* d_ia, const int* d_ja, const double* d_va );
 };
 
 } // namespace matrix_utils::sparse_cuda

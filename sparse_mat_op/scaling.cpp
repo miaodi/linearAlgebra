@@ -6,20 +6,20 @@
 namespace matrix_utils
 {
 template <typename COLTYPE, typename VALTYPE>
-void ScaleVec(const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads)
+void ScaleVec( const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads )
 {
-    #pragma omp parallel for num_threads(nthreads) schedule(static)
-    for (COLTYPE i = 0; i < size; ++i)
+#pragma omp parallel for num_threads( nthreads ) schedule( static )
+    for ( COLTYPE i = 0; i < size; ++i )
     {
         x[i] *= s[i];
     }
 }
 
 template <typename COLTYPE, typename VALTYPE>
-void InvScaleVec(const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads)
+void InvScaleVec( const COLTYPE size, VALTYPE* x, VALTYPE const* s, int nthreads )
 {
-    #pragma omp parallel for num_threads(nthreads) schedule(static)
-    for (COLTYPE i = 0; i < size; ++i)
+#pragma omp parallel for num_threads( nthreads ) schedule( static )
+    for ( COLTYPE i = 0; i < size; ++i )
     {
         x[i] /= s[i];
     }
@@ -33,30 +33,35 @@ enum class ScalingType
 };
 
 template <ScalingType ST, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-static void ScalingMatInternal(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj,
-                               VALTYPE* av, VALTYPE const* dr, VALTYPE const* dc, int nthreads)
+static void ScalingMatInternal( const COLTYPE rows,
+                                ROWTYPE const* ai,
+                                COLTYPE const* aj,
+                                VALTYPE* av,
+                                VALTYPE const* dr,
+                                VALTYPE const* dc,
+                                int nthreads )
 {
     const auto base = ai[0];
 
-    if constexpr (ST == ScalingType::ColOnly)
+    if constexpr ( ST == ScalingType::ColOnly )
     {
-        #pragma omp parallel for num_threads(nthreads) schedule(static)
-        for (COLTYPE i = 0; i < rows; ++i)
+#pragma omp parallel for num_threads( nthreads ) schedule( static )
+        for ( COLTYPE i = 0; i < rows; ++i )
         {
-            for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; ++j)
+            for ( ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; ++j )
             {
                 const COLTYPE col = aj[j] - base;
                 av[j] *= dc[col];
             }
         }
     }
-    else if constexpr (ST == ScalingType::RowOnly)
+    else if constexpr ( ST == ScalingType::RowOnly )
     {
-        #pragma omp parallel for num_threads(nthreads) schedule(static)
-        for (COLTYPE i = 0; i < rows; ++i)
+#pragma omp parallel for num_threads( nthreads ) schedule( static )
+        for ( COLTYPE i = 0; i < rows; ++i )
         {
             const VALTYPE row_scale = dr[i];
-            for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; ++j)
+            for ( ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; ++j )
             {
                 av[j] *= row_scale;
             }
@@ -64,11 +69,11 @@ static void ScalingMatInternal(const COLTYPE rows, ROWTYPE const* ai, COLTYPE co
     }
     else // ST == ScalingType::Both
     {
-        #pragma omp parallel for num_threads(nthreads) schedule(static)
-        for (COLTYPE i = 0; i < rows; ++i)
+#pragma omp parallel for num_threads( nthreads ) schedule( static )
+        for ( COLTYPE i = 0; i < rows; ++i )
         {
             const VALTYPE row_scale = dr[i];
-            for (ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; ++j)
+            for ( ROWTYPE j = ai[i] - base; j < ai[i + 1] - base; ++j )
             {
                 const COLTYPE col = aj[j] - base;
                 av[j] *= row_scale * dc[col];
@@ -78,46 +83,43 @@ static void ScalingMatInternal(const COLTYPE rows, ROWTYPE const* ai, COLTYPE co
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool ScaleMat(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE* av,
-              VALTYPE const* dr, VALTYPE const* dc, int nthreads)
+bool ScaleMat( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE* av, VALTYPE const* dr, VALTYPE const* dc, int nthreads )
 {
     // Error: both are nullptr
-    if (dr == nullptr && dc == nullptr)
+    if ( dr == nullptr && dc == nullptr )
     {
         return false;
     }
 
     // Determine scaling type at runtime and dispatch to appropriate template
-    if (dr == nullptr)
+    if ( dr == nullptr )
     {
-        ScalingMatInternal<ScalingType::ColOnly>(rows, ai, aj, av, dr, dc, nthreads);
+        ScalingMatInternal<ScalingType::ColOnly>( rows, ai, aj, av, dr, dc, nthreads );
     }
-    else if (dc == nullptr)
+    else if ( dc == nullptr )
     {
-        ScalingMatInternal<ScalingType::RowOnly>(rows, ai, aj, av, dr, dc, nthreads);
+        ScalingMatInternal<ScalingType::RowOnly>( rows, ai, aj, av, dr, dc, nthreads );
     }
     else
     {
-        ScalingMatInternal<ScalingType::Both>(rows, ai, aj, av, dr, dc, nthreads);
+        ScalingMatInternal<ScalingType::Both>( rows, ai, aj, av, dr, dc, nthreads );
     }
 
     return true;
 }
 
 // Explicit template instantiations for common types
-template void ScaleVec<int, double>(const int, double*, double const*, int);
-template void ScaleVec<int, float>(const int, float*, float const*, int);
-template void ScaleVec<size_t, double>(const size_t, double*, double const*, int);
-template void ScaleVec<size_t, float>(const size_t, float*, float const*, int);
+template void ScaleVec<int, double>( const int, double*, double const*, int );
+template void ScaleVec<int, float>( const int, float*, float const*, int );
+template void ScaleVec<size_t, double>( const size_t, double*, double const*, int );
+template void ScaleVec<size_t, float>( const size_t, float*, float const*, int );
 
-template void InvScaleVec<int, double>(const int, double*, double const*, int);
-template void InvScaleVec<int, float>(const int, float*, float const*, int);
-template void InvScaleVec<size_t, double>(const size_t, double*, double const*, int);
-template void InvScaleVec<size_t, float>(const size_t, float*, float const*, int);
+template void InvScaleVec<int, double>( const int, double*, double const*, int );
+template void InvScaleVec<int, float>( const int, float*, float const*, int );
+template void InvScaleVec<size_t, double>( const size_t, double*, double const*, int );
+template void InvScaleVec<size_t, float>( const size_t, float*, float const*, int );
 
-template bool ScaleMat<int, int, double>(const int, int const*, int const*, double*,
-                                         double const*, double const*, int);
-template bool ScaleMat<int, int, float>(const int, int const*, int const*, float*,
-                                        float const*, float const*, int);
+template bool ScaleMat<int, int, double>( const int, int const*, int const*, double*, double const*, double const*, int );
+template bool ScaleMat<int, int, float>( const int, int const*, int const*, float*, float const*, float const*, int );
 
 } // namespace matrix_utils

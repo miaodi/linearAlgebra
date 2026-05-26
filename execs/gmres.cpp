@@ -26,14 +26,10 @@ public:
     ILUPrec( const COLTYPE size, const CSRMatrixType& ilu )
         : _size( size ), _ilu( ilu ), tmp( size )
     {
-        matrix_utils::SplitLDU( _size, _ilu.AI()[0], _ilu.AI(), _ilu.AJ(),
-                                _ilu.AV(), L, D, U );
+        matrix_utils::SplitLDU( _size, _ilu.AI()[0], _ilu.AI(), _ilu.AJ(), _ilu.AV(), L, D, U );
     }
 
-    COLTYPE size() const
-    {
-        return _size;
-    }
+    COLTYPE size() const { return _size; }
 
     bool operator()( VALTYPE const* const b, VALTYPE* const x ) const
     {
@@ -57,14 +53,12 @@ int main( int argc, char** argv )
 {
     cxxopts::Options options( "Iterative Solver Example",
                               "Example of using iterative solvers with a CSR matrix" );
-    options.add_options()( "f,filename", "Matrix Market file to read",
-                           cxxopts::value<std::string>()->default_value(
-                               "../tests/data/ex5.mtx" ) )(
-        "s,solver", "Solver type: gmres or bicgstab",
-        cxxopts::value<std::string>()->default_value( "gmres" ) )(
+    options.add_options()(
+        "f,filename", "Matrix Market file to read",
+        cxxopts::value<std::string>()->default_value( "../tests/data/ex5.mtx" ) )(
+        "s,solver", "Solver type: gmres or bicgstab", cxxopts::value<std::string>()->default_value( "gmres" ) )(
         "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )(
-        "F,factorization", "ILU variant: iluk or ilut",
-        cxxopts::value<std::string>()->default_value( "iluk" ) )(
+        "F,factorization", "ILU variant: iluk or ilut", cxxopts::value<std::string>()->default_value( "iluk" ) )(
         "d,droptol", "ILUT drop tolerance", cxxopts::value<double>()->default_value( "1e-3" ) )(
         "p,precond",
         "Preconditioner type: none (no preconditioning), left (M^-1 A x = M^-1 "
@@ -72,13 +66,10 @@ int main( int argc, char** argv )
         cxxopts::value<std::string>()->default_value( "none" ) )(
         "r,restart", "GMRES restart parameter (ignored for BiCGSTAB)",
         cxxopts::value<int>()->default_value( "20" ) )(
-        "m,maxiter", "Maximum number of iterations",
-        cxxopts::value<int>()->default_value( "10" ) )(
-    "t,reltol", "Relative tolerance for convergence",
-    cxxopts::value<double>()->default_value( "1e-10" ) )(
-    "n,nthreads", "Number of threads for OpenMP parallelization (1=serial)",
-    cxxopts::value<int>()->default_value( "1" ) )( "h,help",
-                                  "Print usage" );
+        "m,maxiter", "Maximum number of iterations", cxxopts::value<int>()->default_value( "10" ) )(
+        "t,reltol", "Relative tolerance for convergence", cxxopts::value<double>()->default_value( "1e-10" ) )(
+        "n,nthreads", "Number of threads for OpenMP parallelization (1=serial)",
+        cxxopts::value<int>()->default_value( "1" ) )( "h,help", "Print usage" );
     auto result = options.parse( argc, argv );
     if ( result.count( "help" ) )
     {
@@ -98,8 +89,8 @@ int main( int argc, char** argv )
 
     // Parse solver type
     std::string solver_lower = solver_type_str;
-    std::transform( solver_lower.begin(), solver_lower.end(),
-                    solver_lower.begin(), []( unsigned char c ) { return std::tolower( c ); } );
+    std::transform( solver_lower.begin(), solver_lower.end(), solver_lower.begin(),
+                    []( unsigned char c ) { return std::tolower( c ); } );
     enum class SolverType
     {
         GMRES,
@@ -166,8 +157,7 @@ int main( int argc, char** argv )
     // Validate restart parameter for GMRES
     if ( solver_type == SolverType::GMRES && restart <= 0 )
     {
-        std::cerr << "Invalid restart parameter: " << restart
-                  << ". Must be a positive integer." << std::endl;
+        std::cerr << "Invalid restart parameter: " << restart << ". Must be a positive integer." << std::endl;
         return -1;
     }
 
@@ -217,8 +207,7 @@ int main( int argc, char** argv )
         success = ilu( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(), level, ilu_matrix );
         auto t2 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed = t2 - t1;
-        std::cout << "Symbolic ILU factorization time: " << elapsed.count() << " s"
-                  << std::endl;
+        std::cout << "Symbolic ILU factorization time: " << elapsed.count() << " s" << std::endl;
         if ( !success )
         {
             std::cout << "Symbolic ILU factorization failed." << std::endl;
@@ -236,21 +225,18 @@ int main( int argc, char** argv )
     if ( factorization == Factorization::ILUK )
     {
         std::cout << "Using ILULevelNumeric." << std::endl;
-        success = matrix_utils::ILULevelNumeric( csr_matrix.rows, csr_matrix.AI(),
-                                                 csr_matrix.AJ(), csr_matrix.AV(),
-                                                 level, ilu_matrix );
+        success = matrix_utils::ILULevelNumeric( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
+                                                 csr_matrix.AV(), level, ilu_matrix );
     }
     else
     {
         std::cout << "Using ILUTNumeric with droptol = " << droptol << std::endl;
-        success = matrix_utils::ILUTNumeric( csr_matrix.rows, csr_matrix.AI(),
-                                             csr_matrix.AJ(), csr_matrix.AV(),
-                                             droptol, ilu_matrix );
+        success = matrix_utils::ILUTNumeric( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
+                                             csr_matrix.AV(), droptol, ilu_matrix );
     }
     auto t4 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed_numeric = t4 - t3;
-    std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count()
-              << " s" << std::endl;
+    std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count() << " s" << std::endl;
     if ( !success )
     {
         std::cout << "Numeric ILU factorization failed." << std::endl;
@@ -259,7 +245,8 @@ int main( int argc, char** argv )
     std::cout << "ILU factorization done. nnz: " << ilu_matrix.NNZ() << std::endl;
     if ( factorization == Factorization::ILUT )
     {
-        std::cout << "  Fill ratio: " << static_cast<double>( ilu_matrix.NNZ() ) / csr_matrix.NNZ() << std::endl;
+        std::cout << "  Fill ratio: " << static_cast<double>( ilu_matrix.NNZ() ) / csr_matrix.NNZ()
+                  << std::endl;
     }
     // std::ofstream out1( "ilu_csr.svg" );
     // matrix_utils::writeSVG( ilu_matrix.rows, ilu_matrix.cols, ilu_matrix.AI(),
@@ -298,9 +285,9 @@ int main( int argc, char** argv )
     // }
 
     std::cout << "Generated b and x vectors" << std::endl;
-    
+
     iterative_solver::State state;
-    
+
     if ( solver_type == SolverType::GMRES )
     {
         std::cout << "Running GMRES..." << std::endl;
@@ -365,12 +352,11 @@ int main( int argc, char** argv )
     double relative_residual_norm = ( b_norm > 0.0 ) ? residual_norm / b_norm : residual_norm;
 
     std::cout << "Final residual norms:" << std::endl;
-    std::cout << "  Absolute L2 norm: " << std::scientific
-              << std::setprecision( 6 ) << residual_norm << std::endl;
-    std::cout << "  Relative L2 norm: " << std::scientific
-              << std::setprecision( 6 ) << relative_residual_norm << std::endl;
-    std::cout << "  RHS L2 norm:      " << std::scientific
-              << std::setprecision( 6 ) << b_norm << std::endl;
+    std::cout << "  Absolute L2 norm: " << std::scientific << std::setprecision( 6 )
+              << residual_norm << std::endl;
+    std::cout << "  Relative L2 norm: " << std::scientific << std::setprecision( 6 )
+              << relative_residual_norm << std::endl;
+    std::cout << "  RHS L2 norm:      " << std::scientific << std::setprecision( 6 ) << b_norm << std::endl;
 
     return ( state == iterative_solver::State::CONVERGED ) ? 0 : -1;
 }

@@ -81,10 +81,6 @@ BENCHMARK( BM_InclusiveScan )
     ->Args( { 10'000'000, 0 } )
     ->Args( { 10'000'000, 1 } );
 
-BENCHMARK( BM_ParallelPrefixSumInplace )
-    ->Arg( 1'000 )
-    ->Arg( 100'000 )
-    ->Arg( 1'000'000 )
-    ->Arg( 10'000'000 );
+BENCHMARK( BM_ParallelPrefixSumInplace )->Arg( 1'000 )->Arg( 100'000 )->Arg( 1'000'000 )->Arg( 10'000'000 );
 
 BENCHMARK_MAIN();

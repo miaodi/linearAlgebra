@@ -12,13 +12,13 @@ struct ILUMLevel
     using COLTYPE = typename CSRMatrixType::COLTYPE;
     using VALTYPE = typename CSRMatrixType::VALTYPE;
 
-    ILUMLevel() : _nthreads(1), _tau(0.0) {}
-    explicit ILUMLevel(int nthreads, VALTYPE tau = 0.0) : _nthreads(nthreads), _tau(tau) {}
+    ILUMLevel() : _nthreads( 1 ), _tau( 0.0 ) {}
+    explicit ILUMLevel( int nthreads, VALTYPE tau = 0.0 ) : _nthreads( nthreads ), _tau( tau ) {}
 
-    void operator()(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av);
-    
-    void setNumThreads(int nthreads) { _nthreads = nthreads; }
-    void setDropTolerance(VALTYPE tau) { _tau = tau; }
+    void operator()( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av );
+
+    void setNumThreads( int nthreads ) { _nthreads = nthreads; }
+    void setDropTolerance( VALTYPE tau ) { _tau = tau; }
 
     matrix_utils::CSRStructVec<ROWTYPE, COLTYPE> _APlusAT;
     CSRMatrixType _PAPT;
@@ -34,7 +34,7 @@ struct ILUMLevel
     COLTYPE _split_row; // always zero-based
 
 private:
-    void reordering(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av);
+    void reordering( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av );
     void split();
     void computeEDinv();
     void computeSchurComplement();

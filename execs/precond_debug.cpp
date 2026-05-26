@@ -16,8 +16,8 @@ static bool compare_csr_pattern( const CSR& a, const CSR& b )
 {
     if ( a.rows != b.rows || a.cols != b.cols )
     {
-        std::cerr << "Dimension mismatch: (" << a.rows << "x" << a.cols << ") vs ("
-                  << b.rows << "x" << b.cols << ")\n";
+        std::cerr << "Dimension mismatch: (" << a.rows << "x" << a.cols << ") vs (" << b.rows << "x"
+                  << b.cols << ")\n";
         return false;
     }
     const auto a_base = a.AI()[0];
@@ -38,8 +38,7 @@ static bool compare_csr_pattern( const CSR& a, const CSR& b )
     {
         if ( a.AI()[i] != b.AI()[i] )
         {
-            std::cerr << "AI mismatch at row " << i << ": " << a.AI()[i] << " vs "
-                      << b.AI()[i] << "\n";
+            std::cerr << "AI mismatch at row " << i << ": " << a.AI()[i] << " vs " << b.AI()[i] << "\n";
             return false;
         }
     }
@@ -47,8 +46,7 @@ static bool compare_csr_pattern( const CSR& a, const CSR& b )
     {
         if ( a.AJ()[i] != b.AJ()[i] )
         {
-            std::cerr << "AJ mismatch at idx " << i << ": " << a.AJ()[i] << " vs "
-                      << b.AJ()[i] << "\n";
+            std::cerr << "AJ mismatch at idx " << i << ": " << a.AJ()[i] << " vs " << b.AJ()[i] << "\n";
             return false;
         }
     }
@@ -89,17 +87,16 @@ static bool has_duplicate_row_indices( const CSR& m )
 
 int main( int argc, char** argv )
 {
-    cxxopts::Options options( "precond_debug",
-                              "Compare ILU(k) L patterns between serial and parallel symbolic factorization" );
+    cxxopts::Options options(
+        "precond_debug",
+        "Compare ILU(k) L patterns between serial and parallel symbolic factorization" );
     options.add_options()(
-        "f,file", "Matrix Market file",
-        cxxopts::value<std::string>()->default_value( "../tests/data/nos5.mtx" ) )(
+        "f,file", "Matrix Market file", cxxopts::value<std::string>()->default_value( "../tests/data/nos5.mtx" ) )(
         "l,level", "ILU level", cxxopts::value<int>()->default_value( "0" ) )(
         "t,threads", "OpenMP threads for parallel L",
         cxxopts::value<int>()->default_value( std::to_string( omp_get_max_threads() ) ) )(
         "o,out-prefix", "SVG output prefix",
-        cxxopts::value<std::string>()->default_value( "ilu_l" ) )(
-        "h,help", "Print help" );
+        cxxopts::value<std::string>()->default_value( "ilu_l" ) )( "h,help", "Print help" );
 
     auto result = options.parse( argc, argv );
     if ( result.count( "help" ) )
@@ -141,8 +138,7 @@ int main( int argc, char** argv )
         std::fill( ilu_serial->AV(), ilu_serial->AV() + ilu_serial->NNZ(), 1.0 );
 
     auto ilu_parallel = std::make_unique<CSR>();
-    matrix_utils::ILULevelSymbolicParallel<CSR, enums::matrix_utils::LU, true>
-        ilu_parallel_symbolic( threads );
+    matrix_utils::ILULevelSymbolicParallel<CSR, enums::matrix_utils::LU, true> ilu_parallel_symbolic( threads );
     if ( !ilu_parallel_symbolic( A.rows, A.AI(), A.AJ(), level, *ilu_parallel ) )
     {
         std::cerr << "ILULevelSymbolicParallel failed\n";
@@ -161,8 +157,7 @@ int main( int argc, char** argv )
         std::cerr << "Cannot write: " << serial_svg << "\n";
         return 1;
     }
-    matrix_utils::writeSVG( ilu_serial->rows, ilu_serial->cols, ilu_serial->AI(),
-                            ilu_serial->AJ(), serial_out );
+    matrix_utils::writeSVG( ilu_serial->rows, ilu_serial->cols, ilu_serial->AI(), ilu_serial->AJ(), serial_out );
 
     std::ofstream parallel_out( parallel_svg );
     if ( !parallel_out.good() )
@@ -171,8 +166,7 @@ int main( int argc, char** argv )
         return 1;
     }
     matrix_utils::writeSVG( ilu_parallel->rows, ilu_parallel->cols, ilu_parallel->AI(),
-                            ilu_parallel->AJ(),
-                            parallel_out );
+                            ilu_parallel->AJ(), parallel_out );
 
     std::cout << "Wrote SVGs: " << serial_svg << ", " << parallel_svg << "\n";
     std::cout << "ILU serial nnz: " << ilu_serial->NNZ() << "\n";

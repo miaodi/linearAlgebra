@@ -85,20 +85,13 @@ struct LevelScheduleTriangularSubstitution
         : _nthreads{ num_threads }
     {
         if ( _nthreads < 1 )
-            throw std::runtime_error("Number of threads must be at least 1.");
+            throw std::runtime_error( "Number of threads must be at least 1." );
     }
 
-    void analysis( const COLTYPE size,
-                   ROWTYPE const* ai,
-                   COLTYPE const* aj,
-                   VALTYPE const* av,
-                   VALTYPE const* diag = nullptr );
+    void analysis( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av, VALTYPE const* diag = nullptr );
 
     void operator()( VALTYPE const* const b, VALTYPE* const x ) const;
-    void set_num_threads( const int num_threads )
-    {
-        _nthreads = num_threads;
-    }
+    void set_num_threads( const int num_threads ) { _nthreads = num_threads; }
 
     int _nthreads;
     std::vector<COLTYPE> _iperm;
@@ -116,22 +109,17 @@ struct LevelScheduleTriangularSubstitution
 template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 struct P2PTriangularSubstitution
 {
-    P2PTriangularSubstitution( const int num_threads = omp_get_max_threads(),
-                               const COLTYPE task_maximum_size = 128 )
+    P2PTriangularSubstitution( const int num_threads = omp_get_max_threads(), const COLTYPE task_maximum_size = 128 )
         : _nthreads{ num_threads },
           _task_maximum_size{ task_maximum_size },
           _graphProjector{ num_threads },
           _transitiveReducer{ num_threads }
     {
         if ( _nthreads < 1 )
-            throw std::runtime_error("Number of threads must be at least 1.");
+            throw std::runtime_error( "Number of threads must be at least 1." );
     }
 
-    void analysis( const COLTYPE size,
-                   ROWTYPE const* ai,
-                   COLTYPE const* aj,
-                   VALTYPE const* av,
-                   VALTYPE const* diag = nullptr );
+    void analysis( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av, VALTYPE const* diag = nullptr );
 
     void operator()( VALTYPE const* const b, VALTYPE* const x ) const;
 
@@ -179,10 +167,10 @@ private:
     std::vector<std::vector<COLTYPE>> _threadTasks;
 
     // Cache-optimized matrix reordering for thread locality
-    std::vector<COLTYPE> _threadLocalizedRowPerm; // Row permutation: original_row -> new_row
+    std::vector<COLTYPE> _threadLocalizedRowPerm;    // Row permutation: original_row -> new_row
     std::vector<COLTYPE> _threadLocalizedRowInvPerm; // Inverse permutation: new_row -> original_row
     CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _reorderedMatrix; // Matrix reordered for thread locality
-    std::vector<VALTYPE> _reorderedDiag; // Diagonal values for reordered matrix
+    std::vector<VALTYPE> _reorderedDiag;                     // Diagonal values for reordered matrix
     mutable std::unique_ptr<std::atomic<bool>[]> _taskReady; // Task readiness flags
     mutable COLTYPE _taskReadyCapacity{ 0 };
 
@@ -206,33 +194,33 @@ struct JacobiTriangularSubstitution
     // Default SPMV type: ALBUSSPMV with SIMD kernel
     using SpmvType = ALBUSSPMV<ROWTYPE, COLTYPE, VALTYPE, RowDotKernel::Simd>;
 
-    JacobiTriangularSubstitution(const int num_threads = omp_get_num_threads(), const int max_iters = 100,
-                                 const VALTYPE tol = static_cast<VALTYPE>(1e-10))
-        : _nthreads{num_threads}, _max_iters{max_iters}, _tol{tol}
+    JacobiTriangularSubstitution( const int num_threads = omp_get_num_threads(),
+                                  const int max_iters = 100,
+                                  const VALTYPE tol = static_cast<VALTYPE>( 1e-10 ) )
+        : _nthreads{ num_threads }, _max_iters{ max_iters }, _tol{ tol }
     {
-        if (_nthreads < 1)
-            throw std::runtime_error("Number of threads must be at least 1.");
-        if (_max_iters < 1)
-            throw std::runtime_error("Max iterations must be at least 1.");
-        if (_tol < static_cast<VALTYPE>(0))
-            throw std::runtime_error("Tolerance must be non-negative.");
+        if ( _nthreads < 1 )
+            throw std::runtime_error( "Number of threads must be at least 1." );
+        if ( _max_iters < 1 )
+            throw std::runtime_error( "Max iterations must be at least 1." );
+        if ( _tol < static_cast<VALTYPE>( 0 ) )
+            throw std::runtime_error( "Tolerance must be non-negative." );
     }
 
-    void set_num_threads(const int num_threads) { _nthreads = num_threads; }
-    void set_max_iters(const int iters) { _max_iters = iters; }
-    void set_tol(const VALTYPE tol) { _tol = tol; }
+    void set_num_threads( const int num_threads ) { _nthreads = num_threads; }
+    void set_max_iters( const int iters ) { _max_iters = iters; }
+    void set_tol( const VALTYPE tol ) { _tol = tol; }
 
-    bool analysis(const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av,
-                  VALTYPE const* diag = nullptr);
+    bool analysis( const COLTYPE size, ROWTYPE const* ai, COLTYPE const* aj, VALTYPE const* av, VALTYPE const* diag = nullptr );
 
-    bool operator()(VALTYPE const* const b, VALTYPE* const x) const;
+    bool operator()( VALTYPE const* const b, VALTYPE* const x ) const;
 
 private:
     int _nthreads;
     int _max_iters;
     VALTYPE _tol;
 
-    VALTYPE const* _diag{nullptr};
+    VALTYPE const* _diag{ nullptr };
 
     mutable std::vector<VALTYPE> _dinv;
 
@@ -247,11 +235,7 @@ enum class FBSubstitutionType
     NoBarrierSuperNode
 };
 
-template <FBSubstitutionType FBST = FBSubstitutionType::Barrier,
-          TriangularMatrix TS = TriangularMatrix::L,
-          typename ROWTYPE = int,
-          typename COLTYPE = int,
-          typename VALTYPE = double>
+template <FBSubstitutionType FBST = FBSubstitutionType::Barrier, TriangularMatrix TS = TriangularMatrix::L, typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
 class OptimizedTriangularSolve
 {
 public:
@@ -259,7 +243,7 @@ public:
         : _nthreads{ num_threads }
     {
         if ( _nthreads < 1 )
-            throw std::runtime_error("Number of threads must be at least 1.");
+            throw std::runtime_error( "Number of threads must be at least 1." );
     }
 
     void analysis( const COLTYPE rows,
@@ -279,10 +263,7 @@ public:
 
     void build_task_graph();
 
-    int get_num_threads() const
-    {
-        return _nthreads;
-    }
+    int get_num_threads() const { return _nthreads; }
 
 protected:
     int _nthreads;
@@ -304,9 +285,9 @@ protected:
     CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskAdjGraph;    // children
     CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskInvAdjGraph; // parents
     CSRMatrixVec<ROWTYPE, COLTYPE, VALTYPE> _taskInvAdjGraph2; // parents after transisive edge removal
-    std::vector<COLTYPE> _threadTaskPrefix; // tasks on each thread
+    std::vector<COLTYPE> _threadTaskPrefix;                    // tasks on each thread
     std::vector<COLTYPE> _taskBoundaryPrefix; // num of rows in each task size task + 1
-    std::vector<ROWTYPE> _threadPrefixSum; //
+    std::vector<ROWTYPE> _threadPrefixSum;    //
     // std::vector<ROWTYPE> _threadPrefixSum2; //
     std::vector<COLTYPE> _reorderedRowIdToTaskId;
     std::vector<std::vector<COLTYPE>> _taskInvAdj; // thread local

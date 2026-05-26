@@ -86,8 +86,7 @@ ILUUpdateCache<ROWTYPE> BuildILUUpdateCache( const COLTYPE n,
                                              const COLTYPE base,
                                              const int threads )
 {
-    if ( n <= 0 || lu_ai == nullptr || lu_aj == nullptr || lu_diag == nullptr ||
-         threads <= 0 )
+    if ( n <= 0 || lu_ai == nullptr || lu_aj == nullptr || lu_diag == nullptr || threads <= 0 )
     {
         throw std::invalid_argument( "BuildILUUpdateCache received invalid input" );
     }
@@ -145,9 +144,8 @@ ILUUpdateCache<ROWTYPE> BuildILUUpdateCache( const COLTYPE n,
             const COLTYPE k = lu_aj[k_pos] - base;
             const ROWTYPE k_u_begin = ( lu_diag[k] - row_base ) + 1;
             const ROWTYPE k_u_end = lu_ai[k + 1] - row_base;
-            fill_update_intersections( row_end, k_pos, k_u_begin, k_u_end, lu_aj,
-                                       cache.update_jpos, cache.update_pos,
-                                       cache.update_ptr[static_cast<std::size_t>( k_pos )] );
+            fill_update_intersections( row_end, k_pos, k_u_begin, k_u_end, lu_aj, cache.update_jpos,
+                                       cache.update_pos, cache.update_ptr[static_cast<std::size_t>( k_pos )] );
         }
     }
 
@@ -157,10 +155,13 @@ ILUUpdateCache<ROWTYPE> BuildILUUpdateCache( const COLTYPE n,
     return cache;
 }
 
-template ILUUpdateCache<int> BuildILUUpdateCache<int, int>(
-    int, const int*, const int*, const int*, int, int );
+template ILUUpdateCache<int> BuildILUUpdateCache<int, int>( int, const int*, const int*, const int*, int, int );
 
-template ILUUpdateCache<std::int64_t> BuildILUUpdateCache<std::int64_t, int>(
-    int, const std::int64_t*, const int*, const std::int64_t*, int, int );
+template ILUUpdateCache<std::int64_t> BuildILUUpdateCache<std::int64_t, int>( int,
+                                                                              const std::int64_t*,
+                                                                              const int*,
+                                                                              const std::int64_t*,
+                                                                              int,
+                                                                              int );
 
 } // namespace matrix_utils::sparse_cuda

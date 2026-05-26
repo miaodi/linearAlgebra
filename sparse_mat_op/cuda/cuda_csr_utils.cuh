@@ -9,14 +9,14 @@ namespace matrix_utils::sparse_cuda
 /**
  * @brief Device CSR matrix structure using DeviceArray for automatic memory management
  */
- template <typename ROWTYPE, typename COLTYPE>
- struct DeviceCSRMatrix
- {
-     COLTYPE n_rows = 0;
-     ROWTYPE base = 0;
-     DeviceArray<ROWTYPE> ai; // row pointers (size n_rows + 1)
-     DeviceArray<COLTYPE> aj; // column indices (size nnz)
- };
+template <typename ROWTYPE, typename COLTYPE>
+struct DeviceCSRMatrix
+{
+    COLTYPE n_rows = 0;
+    ROWTYPE base = 0;
+    DeviceArray<ROWTYPE> ai; // row pointers (size n_rows + 1)
+    DeviceArray<COLTYPE> aj; // column indices (size nnz)
+};
 
 //==============================================================================
 // Public API declarations
@@ -27,7 +27,7 @@ namespace matrix_utils::sparse_cuda
 /// @param base Index base (0 or 1)
 /// @param out Output device CSR matrix (ai, aj filled on device via Thrust)
 template <typename ROWTYPE, typename COLTYPE>
-void CSRDiagDevice(COLTYPE n, ROWTYPE base, DeviceCSRMatrix<ROWTYPE, COLTYPE>& out);
+void CSRDiagDevice( COLTYPE n, ROWTYPE base, DeviceCSRMatrix<ROWTYPE, COLTYPE>& out );
 
 /// @brief Expand CSR row pointers into COO row indices on device.
 ///
@@ -39,11 +39,7 @@ void CSRDiagDevice(COLTYPE n, ROWTYPE base, DeviceCSRMatrix<ROWTYPE, COLTYPE>& o
 /// @param d_coo_rows Output COO row indices (device, size nnz)
 /// @param stream CUDA stream
 template <typename ROWTYPE, typename COLTYPE>
-void CSRPtrToCOORowDevice(
-    COLTYPE rows,
-    const ROWTYPE* d_ai,
-    COLTYPE* d_coo_rows,
-    cudaStream_t stream = nullptr);
+void CSRPtrToCOORowDevice( COLTYPE rows, const ROWTYPE* d_ai, COLTYPE* d_coo_rows, cudaStream_t stream = nullptr );
 
 /// @brief Find the position and value of the diagonal entry for each row of a device CSR matrix.
 /// @param rows Number of rows
@@ -54,14 +50,13 @@ void CSRPtrToCOORowDevice(
 /// @param d_diag_val Output: diagonal value for each row, or 0 if not found (device, size rows, may be nullptr)
 /// @param stream CUDA stream
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void CSRFindDiagonalDevice(
-    COLTYPE rows,
-    const ROWTYPE* d_ai,
-    const COLTYPE* d_aj,
-    const VALTYPE* d_av,
-    ROWTYPE* d_diag_pos,
-    VALTYPE* d_diag_val,
-    cudaStream_t stream = nullptr);
+void CSRFindDiagonalDevice( COLTYPE rows,
+                            const ROWTYPE* d_ai,
+                            const COLTYPE* d_aj,
+                            const VALTYPE* d_av,
+                            ROWTYPE* d_diag_pos,
+                            VALTYPE* d_diag_val,
+                            cudaStream_t stream = nullptr );
 
 /// @brief Compress a device CSR matrix using a keep/drop mask on every entry.
 ///
@@ -79,16 +74,15 @@ void CSRFindDiagonalDevice(
 /// @param stream CUDA stream
 /// @return Number of entries removed (nnz_before - nnz_after).
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename FLAGTYPE = int>
-ROWTYPE CSRSelectByMaskDevice(
-    COLTYPE rows,
-    const ROWTYPE* d_ai_in,
-    const COLTYPE* d_aj_in,
-    const VALTYPE* d_av_in,
-    const FLAGTYPE* d_keep_mask,
-    ROWTYPE* d_ai_out,
-    COLTYPE* d_aj_out,
-    VALTYPE* d_av_out,
-    cudaStream_t stream = nullptr);
+ROWTYPE CSRSelectByMaskDevice( COLTYPE rows,
+                               const ROWTYPE* d_ai_in,
+                               const COLTYPE* d_aj_in,
+                               const VALTYPE* d_av_in,
+                               const FLAGTYPE* d_keep_mask,
+                               ROWTYPE* d_ai_out,
+                               COLTYPE* d_aj_out,
+                               VALTYPE* d_av_out,
+                               cudaStream_t stream = nullptr );
 
 /// @brief Generate a keep/drop mask for CSR entries using diagonal scaled pruning.
 ///
@@ -103,37 +97,104 @@ ROWTYPE CSRSelectByMaskDevice(
 /// @param d_mask Output: keep mask (device, size nnz, 1=keep, 0=drop)
 /// @param stream CUDA stream
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename FLAGTYPE = int>
-void CSRGenDiagScaledPruneMask(
-    COLTYPE rows,
-    const ROWTYPE* d_ai,
-    const COLTYPE* d_aj,
-    const VALTYPE* d_av,
-    VALTYPE threshold,
-    FLAGTYPE* d_mask,
-    cudaStream_t stream = nullptr);
+void CSRGenDiagScaledPruneMask( COLTYPE rows,
+                                const ROWTYPE* d_ai,
+                                const COLTYPE* d_aj,
+                                const VALTYPE* d_av,
+                                VALTYPE threshold,
+                                FLAGTYPE* d_mask,
+                                cudaStream_t stream = nullptr );
 
 //==============================================================================
 // Explicit template instantiation declarations
 //==============================================================================
 
-extern template void CSRFindDiagonalDevice<int, int, float>(int, const int*, const int*, const float*, int*, float*, cudaStream_t);
-extern template void CSRFindDiagonalDevice<int, int, double>(int, const int*, const int*, const double*, int*, double*, cudaStream_t);
-extern template void CSRFindDiagonalDevice<std::int64_t, int, float>(int, const std::int64_t*, const int*, const float*, std::int64_t*, float*, cudaStream_t);
-extern template void CSRFindDiagonalDevice<std::int64_t, int, double>(int, const std::int64_t*, const int*, const double*, std::int64_t*, double*, cudaStream_t);
+extern template void CSRFindDiagonalDevice<int, int, float>( int, const int*, const int*, const float*, int*, float*, cudaStream_t );
+extern template void CSRFindDiagonalDevice<int, int, double>( int, const int*, const int*, const double*, int*, double*, cudaStream_t );
+extern template void CSRFindDiagonalDevice<std::int64_t, int, float>( int,
+                                                                      const std::int64_t*,
+                                                                      const int*,
+                                                                      const float*,
+                                                                      std::int64_t*,
+                                                                      float*,
+                                                                      cudaStream_t );
+extern template void CSRFindDiagonalDevice<std::int64_t, int, double>( int,
+                                                                       const std::int64_t*,
+                                                                       const int*,
+                                                                       const double*,
+                                                                       std::int64_t*,
+                                                                       double*,
+                                                                       cudaStream_t );
 
-extern template int CSRSelectByMaskDevice<int, int, float, int>(int, const int*, const int*, const float*, const int*, int*, int*, float*, cudaStream_t);
-extern template int CSRSelectByMaskDevice<int, int, double, int>(int, const int*, const int*, const double*, const int*, int*, int*, double*, cudaStream_t);
-extern template std::int64_t CSRSelectByMaskDevice<std::int64_t, int, float, int>(int, const std::int64_t*, const int*, const float*, const int*, std::int64_t*, int*, float*, cudaStream_t);
-extern template std::int64_t CSRSelectByMaskDevice<std::int64_t, int, double, int>(int, const std::int64_t*, const int*, const double*, const int*, std::int64_t*, int*, double*, cudaStream_t);
+extern template int CSRSelectByMaskDevice<int, int, float, int>( int,
+                                                                 const int*,
+                                                                 const int*,
+                                                                 const float*,
+                                                                 const int*,
+                                                                 int*,
+                                                                 int*,
+                                                                 float*,
+                                                                 cudaStream_t );
+extern template int CSRSelectByMaskDevice<int, int, double, int>( int,
+                                                                  const int*,
+                                                                  const int*,
+                                                                  const double*,
+                                                                  const int*,
+                                                                  int*,
+                                                                  int*,
+                                                                  double*,
+                                                                  cudaStream_t );
+extern template std::int64_t CSRSelectByMaskDevice<std::int64_t, int, float, int>( int,
+                                                                                   const std::int64_t*,
+                                                                                   const int*,
+                                                                                   const float*,
+                                                                                   const int*,
+                                                                                   std::int64_t*,
+                                                                                   int*,
+                                                                                   float*,
+                                                                                   cudaStream_t );
+extern template std::int64_t CSRSelectByMaskDevice<std::int64_t, int, double, int>( int,
+                                                                                    const std::int64_t*,
+                                                                                    const int*,
+                                                                                    const double*,
+                                                                                    const int*,
+                                                                                    std::int64_t*,
+                                                                                    int*,
+                                                                                    double*,
+                                                                                    cudaStream_t );
 
-extern template void CSRGenDiagScaledPruneMask<int, int, float, int>(int, const int*, const int*, const float*, float, int*, cudaStream_t);
-extern template void CSRGenDiagScaledPruneMask<int, int, double, int>(int, const int*, const int*, const double*, double, int*, cudaStream_t);
-extern template void CSRGenDiagScaledPruneMask<std::int64_t, int, float, int>(int, const std::int64_t*, const int*, const float*, float, int*, cudaStream_t);
-extern template void CSRGenDiagScaledPruneMask<std::int64_t, int, double, int>(int, const std::int64_t*, const int*, const double*, double, int*, cudaStream_t);
+extern template void CSRGenDiagScaledPruneMask<int, int, float, int>( int,
+                                                                      const int*,
+                                                                      const int*,
+                                                                      const float*,
+                                                                      float,
+                                                                      int*,
+                                                                      cudaStream_t );
+extern template void CSRGenDiagScaledPruneMask<int, int, double, int>( int,
+                                                                       const int*,
+                                                                       const int*,
+                                                                       const double*,
+                                                                       double,
+                                                                       int*,
+                                                                       cudaStream_t );
+extern template void CSRGenDiagScaledPruneMask<std::int64_t, int, float, int>( int,
+                                                                               const std::int64_t*,
+                                                                               const int*,
+                                                                               const float*,
+                                                                               float,
+                                                                               int*,
+                                                                               cudaStream_t );
+extern template void CSRGenDiagScaledPruneMask<std::int64_t, int, double, int>( int,
+                                                                                const std::int64_t*,
+                                                                                const int*,
+                                                                                const double*,
+                                                                                double,
+                                                                                int*,
+                                                                                cudaStream_t );
 
-extern template void CSRDiagDevice<int, int>(int, int, DeviceCSRMatrix<int, int>&);
-extern template void CSRDiagDevice<std::int64_t, int>(int, std::int64_t, DeviceCSRMatrix<std::int64_t, int>&);
-extern template void CSRPtrToCOORowDevice<int, int>(int, const int*, int*, cudaStream_t);
-extern template void CSRPtrToCOORowDevice<std::int64_t, int>(int, const std::int64_t*, int*, cudaStream_t);
+extern template void CSRDiagDevice<int, int>( int, int, DeviceCSRMatrix<int, int>& );
+extern template void CSRDiagDevice<std::int64_t, int>( int, std::int64_t, DeviceCSRMatrix<std::int64_t, int>& );
+extern template void CSRPtrToCOORowDevice<int, int>( int, const int*, int*, cudaStream_t );
+extern template void CSRPtrToCOORowDevice<std::int64_t, int>( int, const std::int64_t*, int*, cudaStream_t );
 
 } // namespace matrix_utils::sparse_cuda

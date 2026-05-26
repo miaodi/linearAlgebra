@@ -10,14 +10,14 @@ namespace matrix_utils
 
 template <ResizableCSR CSRMatrixType>
 void SpADD<CSRMatrixType>::analysis( const COLTYPE A_rows,
-                                      const COLTYPE A_cols,
-                                      const ROWTYPE* A_ai,
-                                      const COLTYPE* A_aj,
-                                      const COLTYPE B_rows,
-                                      const COLTYPE B_cols,
-                                      const ROWTYPE* B_ai,
-                                      const COLTYPE* B_aj,
-                                      CSRMatrixType& C )
+                                     const COLTYPE A_cols,
+                                     const ROWTYPE* A_ai,
+                                     const COLTYPE* A_aj,
+                                     const COLTYPE B_rows,
+                                     const COLTYPE B_cols,
+                                     const ROWTYPE* B_ai,
+                                     const COLTYPE* B_aj,
+                                     CSRMatrixType& C )
 {
     // Check dimensions
     if ( A_rows != B_rows || A_cols != B_cols )
@@ -48,7 +48,7 @@ void SpADD<CSRMatrixType>::analysis( const COLTYPE A_rows,
         for ( COLTYPE i = 0; i < A_rows; i++ )
         {
             ROWTYPE nnz_count = 0;
-            
+
             // Add columns from row i of A
             for ( ROWTYPE ja = A_ai[i] - A_base; ja < A_ai[i + 1] - A_base; ja++ )
             {
@@ -82,12 +82,12 @@ void SpADD<CSRMatrixType>::analysis( const COLTYPE A_rows,
     }
 
     // Convert counts to row pointers (prefix sum)
-    utils::ParallelPrefixSumInplace(_nthreads, C_ai, C_ai + A_rows + 1);
-    
+    utils::ParallelPrefixSumInplace( _nthreads, C_ai, C_ai + A_rows + 1 );
+
     // Allocate column indices
     const ROWTYPE C_nnz = C_ai[A_rows] - C_base;
     C.ResizeAJ( C_nnz );
-    
+
     COLTYPE* C_aj = C.AJ();
 
     // Build merged column structure
@@ -152,7 +152,7 @@ void SpADD<CSRMatrixType>::analysis( const COLTYPE A_rows,
         for ( COLTYPE i = 0; i < A_rows; i++ )
         {
             temp_cols.clear();
-            
+
             // Collect columns from A
             for ( ROWTYPE ja = A_ai[i] - A_base; ja < A_ai[i + 1] - A_base; ja++ )
             {
@@ -191,18 +191,18 @@ void SpADD<CSRMatrixType>::analysis( const COLTYPE A_rows,
 
 template <ResizableCSR CSRMatrixType>
 void SpADD<CSRMatrixType>::operator()( const COLTYPE A_rows,
-                                        const COLTYPE A_cols,
-                                        const ROWTYPE* A_ai,
-                                        const COLTYPE* A_aj,
-                                        const VALTYPE* A_av,
-                                        const VALTYPE alpha,
-                                        const COLTYPE B_rows,
-                                        const COLTYPE B_cols,
-                                        const ROWTYPE* B_ai,
-                                        const COLTYPE* B_aj,
-                                        const VALTYPE* B_av,
-                                        const VALTYPE beta,
-                                        CSRMatrixType& C )
+                                       const COLTYPE A_cols,
+                                       const ROWTYPE* A_ai,
+                                       const COLTYPE* A_aj,
+                                       const VALTYPE* A_av,
+                                       const VALTYPE alpha,
+                                       const COLTYPE B_rows,
+                                       const COLTYPE B_cols,
+                                       const ROWTYPE* B_ai,
+                                       const COLTYPE* B_aj,
+                                       const VALTYPE* B_av,
+                                       const VALTYPE beta,
+                                       CSRMatrixType& C )
 {
     // Check dimensions
     if ( A_rows != B_rows || A_cols != B_cols )
@@ -214,7 +214,7 @@ void SpADD<CSRMatrixType>::operator()( const COLTYPE A_rows,
     const ROWTYPE B_base = B_ai[0];
     const ROWTYPE C_base = C.AI()[0];
     const ROWTYPE C_nnz = C.AI()[C.rows] - C_base;
-    
+
     // Allocate values array
     C.ResizeAV( C_nnz );
 

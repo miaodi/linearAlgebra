@@ -1239,8 +1239,7 @@ bool ILULevelSymbolicParallel<CSRMatrixType, Triangular, keepdiag>::operator()( 
 #pragma omp for schedule( dynamic, chunk_size )
         for ( COLTYPE i = 0; i < size; i++ )
         {
-            const ROWTYPE row_size = BuildRow( i, ai, aj, lvl, base, visited_thread,
-                                               Q_thread, Q_next_thread );
+            const ROWTYPE row_size = BuildRow( i, ai, aj, lvl, base, visited_thread, Q_thread, Q_next_thread );
             l_ai[i + 1] = row_size;
         }
     }

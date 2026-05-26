@@ -4,11 +4,7 @@
 namespace reordering
 {
 template <typename ROWTYPE, typename COLTYPE>
-void MaximumMatching( const COLTYPE rows,
-                      ROWTYPE const* ai,
-                      COLTYPE const* aj,
-                      COLTYPE* matching_row,
-                      COLTYPE* matching_col )
+void MaximumMatching( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* matching_row, COLTYPE* matching_col )
 {
     const COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
     const ROWTYPE base = ai[0];
@@ -73,8 +69,7 @@ void MaximumMatching( const COLTYPE rows,
             {
                 matching_row[u] = u + base;
                 matching_col[u] = u + base;
-                std::cerr << "Warning: failed to find augmenting path for row "
-                          << u << std::endl;
+                std::cerr << "Warning: failed to find augmenting path for row " << u << std::endl;
             }
     }
 }
@@ -112,8 +107,7 @@ void HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::operator()( const COLTYPE n,
         {
             this->matching_row[i] = i + base;
             this->matching_col[i] = i + base;
-            std::cerr << "Warning: failed to find augmenting path for row " << i
-                      << std::endl;
+            std::cerr << "Warning: failed to find augmenting path for row " << i << std::endl;
         }
     }
 }
@@ -259,8 +253,7 @@ bool HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::match_row( const COLTYPE row
             for ( ROWTYPE i = ai[curS] - base; i < ai[curS + 1] - base; i++ )
             {
                 const COLTYPE curT = aj[i] - base;
-                const VALTYPE cost =
-                    av[i] - ( potential_col[curT] + potential_row[curS] );
+                const VALTYPE cost = av[i] - ( potential_col[curT] + potential_row[curS] );
                 if ( cost <= TOL_VAL )
                 {
                     // If cost is zero, consider this edge for the matching
@@ -302,8 +295,7 @@ bool HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::match_row( const COLTYPE row
             {
                 if ( parent[j] == INVALID )
                 {
-                    std::cerr << "Error: visiting a column with invalid parent!"
-                              << std::endl;
+                    std::cerr << "Error: visiting a column with invalid parent!" << std::endl;
                     return false;
                 }
                 T[j] = true;
@@ -325,8 +317,7 @@ bool HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::match_row( const COLTYPE row
     return false;
 }
 
-template void MaximumMatching<int, int>(
-    const int rows, int const* ai, int const* aj, int* matching_row, int* matching_col );
+template void MaximumMatching<int, int>( const int rows, int const* ai, int const* aj, int* matching_row, int* matching_col );
 
 template class HungarianAlgorithm<int, int, double>;
 

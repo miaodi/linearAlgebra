@@ -1,6 +1,7 @@
 #pragma once
 
-namespace matrix_utils {
+namespace matrix_utils
+{
 
 /**
  * These functions are for permuting a vector based on a permutation vector
@@ -19,8 +20,12 @@ namespace matrix_utils {
  *  v_perm = P * v
  */
 template <typename COLTYPE, typename VALTYPE>
-void permVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
-             COLTYPE const *const perm, VALTYPE *const v_perm, int nthreads = 1);
+void permVec( const COLTYPE rows,
+              const COLTYPE base,
+              VALTYPE const* const v,
+              COLTYPE const* const perm,
+              VALTYPE* const v_perm,
+              int nthreads = 1 );
 
 /** @brief Inverse permute a vector based on a permutation vector
  *  @param rows Number of rows in the vector
@@ -34,8 +39,12 @@ void permVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
  *  v_iperm = P^T * v
  */
 template <typename COLTYPE, typename VALTYPE>
-void invPermVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
-                COLTYPE const *const perm, VALTYPE *const v_iperm, int nthreads = 1);
+void invPermVec( const COLTYPE rows,
+                 const COLTYPE base,
+                 VALTYPE const* const v,
+                 COLTYPE const* const perm,
+                 VALTYPE* const v_iperm,
+                 int nthreads = 1 );
 
 /** @brief Inverse permutation of a permutation vector iperm = P^{-1} * perm
  *  @param rows Number of rows in the permutation vector
@@ -47,8 +56,7 @@ void invPermVec(const COLTYPE rows, const COLTYPE base, VALTYPE const *const v,
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
 template <typename COLTYPE>
-void invPerm(const COLTYPE rows, const COLTYPE base, COLTYPE const *const perm,
-             COLTYPE *const iperm, int nthreads = 1);
+void invPerm( const COLTYPE rows, const COLTYPE base, COLTYPE const* const perm, COLTYPE* const iperm, int nthreads = 1 );
 
 /** @brief Check if a given vector is a valid permutation
  *  @param rows Number of rows in the permutation vector
@@ -59,12 +67,10 @@ void invPerm(const COLTYPE rows, const COLTYPE base, COLTYPE const *const perm,
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
 template <typename COLTYPE>
-bool isPermutation(const COLTYPE rows, const COLTYPE base,
-                   COLTYPE const *const perm, int nthreads = 1);
+bool isPermutation( const COLTYPE rows, const COLTYPE base, COLTYPE const* const perm, int nthreads = 1 );
 
 template <typename COLTYPE>
-bool isPermutationSerial(const COLTYPE rows, const COLTYPE base,
-                         COLTYPE const *const perm);
+bool isPermutationSerial( const COLTYPE rows, const COLTYPE base, COLTYPE const* const perm );
 
 /** @brief Generate a random permutation
  *  @param rows Number of rows in the permutation vector
@@ -73,7 +79,7 @@ bool isPermutationSerial(const COLTYPE rows, const COLTYPE base,
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
 template <typename COLTYPE>
-void randPerm(const COLTYPE rows, const COLTYPE base, COLTYPE *const perm);
+void randPerm( const COLTYPE rows, const COLTYPE base, COLTYPE* const perm );
 
 /**
  *  ---------------------------------------------------------------
@@ -95,8 +101,7 @@ void randPerm(const COLTYPE rows, const COLTYPE base, COLTYPE *const perm);
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
 template <typename ROWTYPE, typename COLTYPE>
-void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
-                ROWTYPE *perm_ai, int nthreads = 1);
+void permRowPtr( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* perm, ROWTYPE* perm_ai, int nthreads = 1 );
 
 /** @brief Permute the matrix structure only: pA = P * A * Q^T (structure only)
  *  @param rows Number of rows in the matrix
@@ -112,10 +117,15 @@ void permRowPtr(const COLTYPE rows, ROWTYPE const *ai, COLTYPE const *perm,
  *  @tparam COLTYPE Type of the column indices (e.g., int, long)
  */
 template <typename ROWTYPE, typename COLTYPE>
-void permuteMat(const COLTYPE rows, const COLTYPE cols,
-                COLTYPE const *const permP, COLTYPE const *const ipermQ,
-                ROWTYPE const *const ai, COLTYPE const *const aj,
-                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, int nthreads = 1);
+void permuteMat( const COLTYPE rows,
+                 const COLTYPE cols,
+                 COLTYPE const* const permP,
+                 COLTYPE const* const ipermQ,
+                 ROWTYPE const* const ai,
+                 COLTYPE const* const aj,
+                 ROWTYPE* const perm_ai,
+                 COLTYPE* const perm_aj,
+                 int nthreads = 1 );
 
 /** @brief Permute the matrix with values: pA = P * A * Q^T (structure + values)
  *  @param rows Number of rows in the matrix
@@ -134,9 +144,16 @@ void permuteMat(const COLTYPE rows, const COLTYPE cols,
  *  @tparam VALTYPE Type of the matrix values (e.g., float, double)
  */
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-void permuteMat(const COLTYPE rows, const COLTYPE cols,
-                COLTYPE const *const permP, COLTYPE const *const ipermQ,
-                ROWTYPE const *const ai, COLTYPE const *const aj, VALTYPE const *const av,
-                ROWTYPE *const perm_ai, COLTYPE *const perm_aj, VALTYPE *const perm_av, int nthreads = 1);
+void permuteMat( const COLTYPE rows,
+                 const COLTYPE cols,
+                 COLTYPE const* const permP,
+                 COLTYPE const* const ipermQ,
+                 ROWTYPE const* const ai,
+                 COLTYPE const* const aj,
+                 VALTYPE const* const av,
+                 ROWTYPE* const perm_ai,
+                 COLTYPE* const perm_aj,
+                 VALTYPE* const perm_av,
+                 int nthreads = 1 );
 
 } // namespace matrix_utils

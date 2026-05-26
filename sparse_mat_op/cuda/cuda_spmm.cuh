@@ -37,11 +37,15 @@ enum class OuterProductBuildMethod
  * @note d_workload_prefix memory must be allocated/freed by the caller
  */
 template <typename ROWTYPE, typename COLTYPE>
-bool SpMMAnalyze(COLTYPE n_rows, const ROWTYPE* d_ai_A, const ROWTYPE* d_ai_B, ROWTYPE base,
-                 ROWTYPE* d_workload_prefix, ROWTYPE* required_array_size);
+bool SpMMAnalyze( COLTYPE n_rows,
+                  const ROWTYPE* d_ai_A,
+                  const ROWTYPE* d_ai_B,
+                  ROWTYPE base,
+                  ROWTYPE* d_workload_prefix,
+                  ROWTYPE* required_array_size );
 
 /**
- * @brief Step 2: Build packed COO sparsity pattern for C = A * B from outer products, 
+ * @brief Step 2: Build packed COO sparsity pattern for C = A * B from outer products,
  * where A is in CSC and B is in CSR and are both n x n
  *
  * This function forms outer products of A_{*i} (CSC column i) and B_{i*} (CSR row i),
@@ -63,9 +67,14 @@ bool SpMMAnalyze(COLTYPE n_rows, const ROWTYPE* d_ai_A, const ROWTYPE* d_ai_B, R
  * @return true if successful, false otherwise
  */
 template <typename ROWTYPE, typename COLTYPE>
-bool SpMMStruct(COLTYPE n, const ROWTYPE* d_ai_A, const COLTYPE* d_aj_A, const ROWTYPE* d_ai_B,
-                const COLTYPE* d_aj_B, ROWTYPE base, DeviceArray<uint64_t>& packed_coo,
-                OuterProductBuildMethod method = OuterProductBuildMethod::GlobalMemory);
+bool SpMMStruct( COLTYPE n,
+                 const ROWTYPE* d_ai_A,
+                 const COLTYPE* d_aj_A,
+                 const ROWTYPE* d_ai_B,
+                 const COLTYPE* d_aj_B,
+                 ROWTYPE base,
+                 DeviceArray<uint64_t>& packed_coo,
+                 OuterProductBuildMethod method = OuterProductBuildMethod::GlobalMemory );
 
 /**
  * @brief Convert packed COO format to CSR format
@@ -85,7 +94,10 @@ bool SpMMStruct(COLTYPE n, const ROWTYPE* d_ai_A, const COLTYPE* d_aj_A, const R
  * @return true if successful, false otherwise
  */
 template <typename ROWTYPE, typename COLTYPE>
-bool PackedCOOtoCSR(const uint64_t* d_keys, ROWTYPE unique_nnz, COLTYPE n_rows, ROWTYPE base,
-                    DeviceCSRMatrix<ROWTYPE, COLTYPE>& output);
+bool PackedCOOtoCSR( const uint64_t* d_keys,
+                     ROWTYPE unique_nnz,
+                     COLTYPE n_rows,
+                     ROWTYPE base,
+                     DeviceCSRMatrix<ROWTYPE, COLTYPE>& output );
 
 } // namespace matrix_utils::sparse_cuda

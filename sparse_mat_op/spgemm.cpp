@@ -10,14 +10,14 @@ namespace matrix_utils
 
 template <ResizableCSR CSRMatrixType>
 void SpGEMM<CSRMatrixType>::analysis( const COLTYPE A_rows,
-                                       const COLTYPE A_cols,
-                                       const ROWTYPE* A_ai,
-                                       const COLTYPE* A_aj,
-                                       const COLTYPE B_rows,
-                                       const COLTYPE B_cols,
-                                       const ROWTYPE* B_ai,
-                                       const COLTYPE* B_aj,
-                                       CSRMatrixType& C )
+                                      const COLTYPE A_cols,
+                                      const ROWTYPE* A_ai,
+                                      const COLTYPE* A_aj,
+                                      const COLTYPE B_rows,
+                                      const COLTYPE B_cols,
+                                      const ROWTYPE* B_ai,
+                                      const COLTYPE* B_aj,
+                                      CSRMatrixType& C )
 {
     // Check dimensions
     if ( A_cols != B_rows )
@@ -48,7 +48,7 @@ void SpGEMM<CSRMatrixType>::analysis( const COLTYPE A_rows,
         for ( COLTYPE i = 0; i < A_rows; i++ )
         {
             ROWTYPE nnz_count = 0;
-            
+
             // For each non-zero in row i of A
             for ( ROWTYPE ja = A_ai[i] - A_base; ja < A_ai[i + 1] - A_base; ja++ )
             {
@@ -90,16 +90,16 @@ void SpGEMM<CSRMatrixType>::analysis( const COLTYPE A_rows,
 
 template <ResizableCSR CSRMatrixType>
 void SpGEMM<CSRMatrixType>::operator()( const COLTYPE A_rows,
-                                         const COLTYPE A_cols,
-                                         const ROWTYPE* A_ai,
-                                         const COLTYPE* A_aj,
-                                         const VALTYPE* A_av,
-                                         const COLTYPE B_rows,
-                                         const COLTYPE B_cols,
-                                         const ROWTYPE* B_ai,
-                                         const COLTYPE* B_aj,
-                                         const VALTYPE* B_av,
-                                         CSRMatrixType& C )
+                                        const COLTYPE A_cols,
+                                        const ROWTYPE* A_ai,
+                                        const COLTYPE* A_aj,
+                                        const VALTYPE* A_av,
+                                        const COLTYPE B_rows,
+                                        const COLTYPE B_cols,
+                                        const ROWTYPE* B_ai,
+                                        const COLTYPE* B_aj,
+                                        const VALTYPE* B_av,
+                                        CSRMatrixType& C )
 {
     // Check dimensions
     if ( A_cols != B_rows )

@@ -7,77 +7,86 @@
 #include <type_traits>
 #include <variant>
 
-namespace reordering {
+namespace reordering
+{
 
-template <typename T> T Find(T *parents, const T x);
+template <typename T>
+T Find( T* parents, const T x );
 
-template <typename T> T UniteByRank(T *rank, T *parent, const T i, const T j);
+template <typename T>
+T UniteByRank( T* rank, T* parent, const T i, const T j );
 
 // Always use i as the root
-template <typename T> T Unite(T *parents, const T i, const T j);
+template <typename T>
+T Unite( T* parents, const T i, const T j );
 
-template <typename T, bool Rank> class UnionFind {
+template <typename T, bool Rank>
+class UnionFind
+{
 public:
-  UnionFind() = default;
-  UnionFind(T size);
+    UnionFind() = default;
+    UnionFind( T size );
 
-  T Find(const T x) { return reordering::Find(_parents.data(), x); }
+    T Find( const T x ) { return reordering::Find( _parents.data(), x ); }
 
-  T Unite(const T i, const T j) {
-    if constexpr (Rank) {
-      return reordering::UniteByRank(_ranks.data(), _parents.data(), i, j);
-    } else {
-      return reordering::Unite(_parents.data(), i, j);
+    T Unite( const T i, const T j )
+    {
+        if constexpr ( Rank )
+        {
+            return reordering::UniteByRank( _ranks.data(), _parents.data(), i, j );
+        }
+        else
+        {
+            return reordering::Unite( _parents.data(), i, j );
+        }
     }
-  }
 
-  void reset(const T size);
+    void reset( const T size );
 
 private:
-  std::vector<T> _parents;
+    std::vector<T> _parents;
 
-  std::conditional_t<Rank, std::vector<T>, std::monostate> _ranks;
+    std::conditional_t<Rank, std::vector<T>, std::monostate> _ranks;
 };
 
 // NOTE: no matter the base of ai, the output parents vector is always 0
 // based
 
 template <typename ROWTYPE, typename COLTYPE>
-void UnionFindRank(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents);
+void UnionFindRank( COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents );
 
 template <typename ROWTYPE, typename COLTYPE>
-void UnionFindRem(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents);
+void UnionFindRem( COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents );
 
 // Multi-core Spanning Forest Algorithms using the Disjoint-set Data Structure
 template <typename ROWTYPE, typename COLTYPE>
-void ParUnionFindRem(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents, int numthreads = 1);
+void ParUnionFindRem( COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* parents, int numthreads = 1 );
 
 // Wait-free parallel algorithms for the union-find problem
 // https://github.com/wjakob/dset
-class DisjointSets {
+class DisjointSets
+{
 public:
-  DisjointSets(uint32_t rows);
+    DisjointSets( uint32_t rows );
 
-  uint32_t find(uint32_t id) const;
+    uint32_t find( uint32_t id ) const;
 
-  bool same(uint32_t id1, uint32_t id2) const;
-  uint32_t unite(uint32_t id1, uint32_t id2);
+    bool same( uint32_t id1, uint32_t id2 ) const;
+    uint32_t unite( uint32_t id1, uint32_t id2 );
 
-  uint32_t size() const { return (uint32_t)mData.size(); }
+    uint32_t size() const { return (uint32_t)mData.size(); }
 
-  uint32_t rank(uint32_t id) const {
-    return ((uint32_t)(mData[id] >> 32)) & 0x7FFFFFFFu;
-  }
+    uint32_t rank( uint32_t id ) const { return ( (uint32_t)( mData[id] >> 32 ) ) & 0x7FFFFFFFu; }
 
-  template <typename ROWTYPE, typename COLTYPE>
-  void execute(COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj);
+    template <typename ROWTYPE, typename COLTYPE>
+    void execute( COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj );
 
-  uint32_t parent(uint32_t id) const { return (uint32_t)mData[id]; }
-  mutable std::vector<std::atomic<uint64_t>> mData;
+    uint32_t parent( uint32_t id ) const { return (uint32_t)mData[id]; }
+    mutable std::vector<std::atomic<uint64_t>> mData;
 };
 
 template <typename T>
-T CountComponents(T* parents, T size);
+T CountComponents( T* parents, T size );
 
 // Compute statistics about connected components in a union-find structure
 // Input:
@@ -90,7 +99,12 @@ T CountComponents(T* parents, T size);
 //   sortedComp: nodes sorted by component (grouped by root)
 //   compPrefSum: prefix sum of component sizes (compPrefSum[i+1] - compPrefSum[i] = size of component i)
 template <typename T>
-void ComponentsStat(const T* parents, T size, const T base, std::vector<T>& compRoots,
-                    std::vector<T>& sortedComp, std::vector<T>& compPrefSum, int numThreads = 1);
+void ComponentsStat( const T* parents,
+                     T size,
+                     const T base,
+                     std::vector<T>& compRoots,
+                     std::vector<T>& sortedComp,
+                     std::vector<T>& compPrefSum,
+                     int numThreads = 1 );
 
 } // namespace reordering

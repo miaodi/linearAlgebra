@@ -7,16 +7,17 @@
 /**
  * @file vec_ops.hpp
  * @brief Optimized vector operations with OpenMP parallelization and SIMD support
- * 
+ *
  * This file provides high-performance vector operations optimized for:
  * - Multi-core parallelization using OpenMP
  * - SIMD vectorization for efficient CPU utilization
  * - Static scheduling for balanced workload distribution
  * - Configurable thread count per operation
- * 
+ *
  * @note Requires compilation with OpenMP support (-fopenmp for GCC/Clang)
  */
-namespace vec_ops {
+namespace vec_ops
+{
 
 /**
  * @brief Copy vector from source to destination
@@ -29,20 +30,25 @@ namespace vec_ops {
  * @note Uses std::copy for compiler optimization opportunities
  */
 template <typename IDX, typename VAL>
-void copy_vec(const IDX size, VAL const *src, VAL *dst, int nthreads = 1) {
-    if (nthreads > 1) {
-#pragma omp parallel num_threads(nthreads)
+void copy_vec( const IDX size, VAL const* src, VAL* dst, int nthreads = 1 )
+{
+    if ( nthreads > 1 )
+    {
+#pragma omp parallel num_threads( nthreads )
         {
             const int tid = omp_get_thread_num();
-            const IDX chunk_size = (size + nthreads - 1) / nthreads;
+            const IDX chunk_size = ( size + nthreads - 1 ) / nthreads;
             const IDX start = tid * chunk_size;
-            const IDX end = std::min(start + chunk_size, size);
-            if (start < size) {
-                std::copy(src + start, src + end, dst + start);
+            const IDX end = std::min( start + chunk_size, size );
+            if ( start < size )
+            {
+                std::copy( src + start, src + end, dst + start );
             }
         }
-    } else {
-        std::copy(src, src + size, dst);
+    }
+    else
+    {
+        std::copy( src, src + size, dst );
     }
 }
 
@@ -57,14 +63,20 @@ void copy_vec(const IDX size, VAL const *src, VAL *dst, int nthreads = 1) {
  * @note Parallelized with OpenMP and SIMD instructions
  */
 template <typename IDX, typename VAL>
-void scale_vec(const IDX size, const VAL alpha, VAL *vec, int nthreads = 1) {
-    if (nthreads > 1) {
-#pragma omp parallel for simd schedule(static) num_threads(nthreads)
-        for (IDX i = 0; i < size; ++i) {
+void scale_vec( const IDX size, const VAL alpha, VAL* vec, int nthreads = 1 )
+{
+    if ( nthreads > 1 )
+    {
+#pragma omp parallel for simd schedule( static ) num_threads( nthreads )
+        for ( IDX i = 0; i < size; ++i )
+        {
             vec[i] *= alpha;
         }
-    } else {
-        for (IDX i = 0; i < size; ++i) {
+    }
+    else
+    {
+        for ( IDX i = 0; i < size; ++i )
+        {
             vec[i] *= alpha;
         }
     }
@@ -82,19 +94,25 @@ void scale_vec(const IDX size, const VAL alpha, VAL *vec, int nthreads = 1) {
  * @note Uses parallel reduction for thread-safe accumulation
  */
 template <typename IDX, typename VAL>
-VAL dot_product(const IDX size, const VAL *vec1, const VAL *vec2, int nthreads = 1) {
-  VAL result = static_cast<VAL>(0);
-  if (nthreads > 1) {
-#pragma omp parallel for simd reduction(+:result) schedule(static) num_threads(nthreads)
-      for (IDX i = 0; i < size; ++i) {
-        result += vec1[i] * vec2[i];
-      }
-  } else {
-      for (IDX i = 0; i < size; ++i) {
-        result += vec1[i] * vec2[i];
-      }
-  }
-  return result;
+VAL dot_product( const IDX size, const VAL* vec1, const VAL* vec2, int nthreads = 1 )
+{
+    VAL result = static_cast<VAL>( 0 );
+    if ( nthreads > 1 )
+    {
+#pragma omp parallel for simd reduction( + : result ) schedule( static ) num_threads( nthreads )
+        for ( IDX i = 0; i < size; ++i )
+        {
+            result += vec1[i] * vec2[i];
+        }
+    }
+    else
+    {
+        for ( IDX i = 0; i < size; ++i )
+        {
+            result += vec1[i] * vec2[i];
+        }
+    }
+    return result;
 }
 
 /**
@@ -108,8 +126,9 @@ VAL dot_product(const IDX size, const VAL *vec1, const VAL *vec2, int nthreads =
  * @note Implemented using dot_product for code reuse and optimization
  */
 template <typename IDX, typename VAL>
-VAL vec_l2_norm(const IDX size, const VAL *vec, int nthreads = 1) {
-  return std::sqrt(dot_product(size, vec, vec, nthreads));
+VAL vec_l2_norm( const IDX size, const VAL* vec, int nthreads = 1 )
+{
+    return std::sqrt( dot_product( size, vec, vec, nthreads ) );
 }
 
 /**
@@ -124,17 +143,23 @@ VAL vec_l2_norm(const IDX size, const VAL *vec, int nthreads = 1) {
  * @note Classic BLAS Level 1 operation, parallelized with OpenMP
  */
 template <typename IDX, typename VAL>
-void axpy(const IDX size, const VAL alpha, const VAL *x, VAL *y, int nthreads = 1) {
-  if (nthreads > 1) {
-#pragma omp parallel for simd schedule(static) num_threads(nthreads)
-      for (IDX i = 0; i < size; ++i) {
-        y[i] += alpha * x[i];
-      }
-  } else {
-      for (IDX i = 0; i < size; ++i) {
-        y[i] += alpha * x[i];
-      }
-  }
+void axpy( const IDX size, const VAL alpha, const VAL* x, VAL* y, int nthreads = 1 )
+{
+    if ( nthreads > 1 )
+    {
+#pragma omp parallel for simd schedule( static ) num_threads( nthreads )
+        for ( IDX i = 0; i < size; ++i )
+        {
+            y[i] += alpha * x[i];
+        }
+    }
+    else
+    {
+        for ( IDX i = 0; i < size; ++i )
+        {
+            y[i] += alpha * x[i];
+        }
+    }
 }
 
 /**
@@ -151,17 +176,23 @@ void axpy(const IDX size, const VAL alpha, const VAL *x, VAL *y, int nthreads = 
  * @note Linear combination of two vectors
  */
 template <typename IDX, typename VAL>
-void waxpby(const IDX size, const VAL alpha, const VAL *x, const VAL beta, const VAL *y, VAL *w, int nthreads = 1) {
-  if (nthreads > 1) {
-#pragma omp parallel for simd schedule(static) num_threads(nthreads)
-      for (IDX i = 0; i < size; ++i) {
-        w[i] = alpha * x[i] + beta * y[i];
-      }
-  } else {
-      for (IDX i = 0; i < size; ++i) {
-        w[i] = alpha * x[i] + beta * y[i];
-      }
-  }
+void waxpby( const IDX size, const VAL alpha, const VAL* x, const VAL beta, const VAL* y, VAL* w, int nthreads = 1 )
+{
+    if ( nthreads > 1 )
+    {
+#pragma omp parallel for simd schedule( static ) num_threads( nthreads )
+        for ( IDX i = 0; i < size; ++i )
+        {
+            w[i] = alpha * x[i] + beta * y[i];
+        }
+    }
+    else
+    {
+        for ( IDX i = 0; i < size; ++i )
+        {
+            w[i] = alpha * x[i] + beta * y[i];
+        }
+    }
 }
 
 /**
@@ -179,16 +210,22 @@ void waxpby(const IDX size, const VAL alpha, const VAL *x, const VAL beta, const
  * @note Compound operation used in iterative solvers like BiCGSTAB
  */
 template <typename IDX, typename VAL>
-void xpay_pbw(const IDX size, const VAL *x, const VAL alpha, const VAL *y, const VAL beta, const VAL *w, VAL *z, int nthreads = 1) {
-  if (nthreads > 1) {
-#pragma omp parallel for simd schedule(static) num_threads(nthreads)
-      for (IDX i = 0; i < size; ++i) {
-        z[i] = x[i] + alpha * (y[i] + beta * w[i]);
-      }
-  } else {
-      for (IDX i = 0; i < size; ++i) {
-        z[i] = x[i] + alpha * (y[i] + beta * w[i]);
-      }
-  }
+void xpay_pbw( const IDX size, const VAL* x, const VAL alpha, const VAL* y, const VAL beta, const VAL* w, VAL* z, int nthreads = 1 )
+{
+    if ( nthreads > 1 )
+    {
+#pragma omp parallel for simd schedule( static ) num_threads( nthreads )
+        for ( IDX i = 0; i < size; ++i )
+        {
+            z[i] = x[i] + alpha * ( y[i] + beta * w[i] );
+        }
+    }
+    else
+    {
+        for ( IDX i = 0; i < size; ++i )
+        {
+            z[i] = x[i] + alpha * ( y[i] + beta * w[i] );
+        }
+    }
 }
 } // namespace vec_ops

@@ -26,70 +26,71 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cstdint>
 #include <cstring>
 
-namespace utils {
-template <typename IDX = int> class BitVector {
+namespace utils
+{
+template <typename IDX = int>
+class BitVector
+{
 public:
-  using BitVectorType = int64_t;
-  static constexpr int BITS_PER_ELEMENT = sizeof(BitVectorType) * 8;
+    using BitVectorType = int64_t;
+    static constexpr int BITS_PER_ELEMENT = sizeof( BitVectorType ) * 8;
 
-  BitVector() = default;
-  BitVector(IDX n) {
-    n_ = (n + BITS_PER_ELEMENT - 1) / BITS_PER_ELEMENT;
-    bv_ = new BitVectorType[n_];
-    std::memset(bv_, 0, n_ * sizeof(BitVectorType));
-  }
-
-  ~BitVector() { delete[] bv_; }
-
-  // Prevent dangerous copies
-  BitVector(const BitVector&) = delete;
-  BitVector& operator=(const BitVector&) = delete;
-
-
-  void set(IDX i) { bv_[getIndexOf_(i)] |= getMaskOf_(i); }
-
-  bool get(IDX i) const { 
-    return bv_[getIndexOf_(i)] & getMaskOf_(i); 
-  }
-
-  bool testAndSet(IDX i) {
-    if (!get(i)) {
-      BitVectorType mask = getMaskOf_(i);
-      BitVectorType prev = __sync_fetch_and_or(bv_ + getIndexOf_(i), mask);
-      return !(prev & mask);
-    } else {
-      return false;
+    BitVector() = default;
+    BitVector( IDX n )
+    {
+        n_ = ( n + BITS_PER_ELEMENT - 1 ) / BITS_PER_ELEMENT;
+        bv_ = new BitVectorType[n_];
+        std::memset( bv_, 0, n_ * sizeof( BitVectorType ) );
     }
-  }
 
-  void atomicClear(IDX i) {
-    __sync_fetch_and_and(bv_ + getIndexOf_(i), ~getMaskOf_(i));
-  }
+    ~BitVector() { delete[] bv_; }
 
-  void clearAll() {
-    std::memset(bv_, 0, n_ * sizeof(BitVectorType));
-  }
+    // Prevent dangerous copies
+    BitVector( const BitVector& ) = delete;
+    BitVector& operator=( const BitVector& ) = delete;
 
-  void resize(IDX n) {
-    const IDX new_n = (n + BITS_PER_ELEMENT - 1) / BITS_PER_ELEMENT;
-    if (new_n > n_) {
-      if (bv_)
-        delete[] bv_;
-      n_ = new_n;
-      bv_ = new BitVectorType[n_];
-      std::memset(bv_, 0, n_ * sizeof(BitVectorType));
+    void set( IDX i ) { bv_[getIndexOf_( i )] |= getMaskOf_( i ); }
+
+    bool get( IDX i ) const { return bv_[getIndexOf_( i )] & getMaskOf_( i ); }
+
+    bool testAndSet( IDX i )
+    {
+        if ( !get( i ) )
+        {
+            BitVectorType mask = getMaskOf_( i );
+            BitVectorType prev = __sync_fetch_and_or( bv_ + getIndexOf_( i ), mask );
+            return !( prev & mask );
+        }
+        else
+        {
+            return false;
+        }
     }
-  }
+
+    void atomicClear( IDX i ) { __sync_fetch_and_and( bv_ + getIndexOf_( i ), ~getMaskOf_( i ) ); }
+
+    void clearAll() { std::memset( bv_, 0, n_ * sizeof( BitVectorType ) ); }
+
+    void resize( IDX n )
+    {
+        const IDX new_n = ( n + BITS_PER_ELEMENT - 1 ) / BITS_PER_ELEMENT;
+        if ( new_n > n_ )
+        {
+            if ( bv_ )
+                delete[] bv_;
+            n_ = new_n;
+            bv_ = new BitVectorType[n_];
+            std::memset( bv_, 0, n_ * sizeof( BitVectorType ) );
+        }
+    }
 
 private:
-  static IDX getIndexOf_(IDX i) { return i / BITS_PER_ELEMENT; }
-  static IDX getBitIndexOf_(IDX i) { return i % BITS_PER_ELEMENT; }
-  static BitVectorType getMaskOf_(IDX i) { 
-    return BitVectorType(1) << getBitIndexOf_(i); 
-  }
+    static IDX getIndexOf_( IDX i ) { return i / BITS_PER_ELEMENT; }
+    static IDX getBitIndexOf_( IDX i ) { return i % BITS_PER_ELEMENT; }
+    static BitVectorType getMaskOf_( IDX i ) { return BitVectorType( 1 ) << getBitIndexOf_( i ); }
 
-  BitVectorType* bv_{nullptr};
-  IDX n_{0};
+    BitVectorType* bv_{ nullptr };
+    IDX n_{ 0 };
 };
 
 } // namespace utils

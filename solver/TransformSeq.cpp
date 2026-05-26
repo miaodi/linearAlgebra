@@ -1,7 +1,8 @@
 #include "TransformSeq.hpp"
 #include "matrix_utils.hpp"
 
-namespace solver {
+namespace solver
+{
 
 // Use common matrix types from matrix_utils
 using matrix_utils::CSRMatrix;

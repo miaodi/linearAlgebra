@@ -76,6 +76,8 @@ interpreter selected by CMake.
 
 - Prefer small, focused C++ changes.
 - Preserve the existing C++20 style and CMake structure.
+- After generating or modifying C/C++ code, reformat the files changed with
+  `clang-format` using the repository `.clang-format`.
 - Be careful with sparse matrix indexing, base offsets, CSR invariants,
   row/column type aliases, and symmetry assumptions.
 - Verify algorithmic changes with existing tests when possible.

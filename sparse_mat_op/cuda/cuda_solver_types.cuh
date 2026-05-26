@@ -28,4 +28,3 @@ enum class State : int
 };
 
 } // namespace matrix_utils::sparse_cuda
-

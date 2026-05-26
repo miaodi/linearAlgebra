@@ -35,20 +35,16 @@ static CSRMatrix<int, int, double> loadMatrix( const std::string& path )
 
 int main( int argc, char** argv )
 {
-    cxxopts::Options options( "triangular_debug",
-                              "Debug triangular solves and level scheduling" );
-    options.add_options()( "f,file", "MatrixMarket file",
-                           cxxopts::value<std::string>()->default_value(
-                               "../tests/data/nos5.mtx" ) )(
-        "l,ilu-level", "ILU level (for building LDU)",
-        cxxopts::value<int>()->default_value( "0" ) )(
+    cxxopts::Options options( "triangular_debug", "Debug triangular solves and level scheduling" );
+    options.add_options()(
+        "f,file", "MatrixMarket file", cxxopts::value<std::string>()->default_value( "../tests/data/nos5.mtx" ) )(
+        "l,ilu-level", "ILU level (for building LDU)", cxxopts::value<int>()->default_value( "0" ) )(
         "u,upper", "Run upper triangular solve (default: lower)" )(
         "t,threads", "Number of OpenMP threads",
         cxxopts::value<int>()->default_value( std::to_string( omp_get_max_threads() ) ) )(
         "p,p2p", "Use P2PTriangularSubstitution (default)" )(
         "o,optimized", "Use OptimizedTriangularSolve instead of P2P" )(
-        "x,max-task-size", "P2P maximum works per task",
-        cxxopts::value<int>()->default_value( "128" ) )(
+        "x,max-task-size", "P2P maximum works per task", cxxopts::value<int>()->default_value( "128" ) )(
         "v,verify", "Compare against serial & BLAS" )( "h,help", "Print help" );
     auto result = options.parse( argc, argv );
     if ( result.count( "help" ) )
@@ -61,7 +57,7 @@ int main( int argc, char** argv )
     const std::string file = result["file"].as<std::string>();
     const int level = result["ilu-level"].as<int>();
     const bool runUpper = result.count( "upper" );
-    const bool useP2P = !result.count( "optimized" );  // P2P is default, unless -o is specified
+    const bool useP2P = !result.count( "optimized" ); // P2P is default, unless -o is specified
     const int maxTaskSize = result["max-task-size"].as<int>();
     const bool verify = result.count( "verify" );
 
@@ -92,7 +88,7 @@ int main( int argc, char** argv )
     {
         // Lower triangular solve (unit diagonal assumed)
         std::cout << "\n=== LOWER TRIANGULAR SOLVE ===\n";
-        
+
         if ( useP2P )
         {
             std::cout << "\n--- P2PTriangularSubstitution ---\n";
@@ -100,8 +96,7 @@ int main( int argc, char** argv )
                       << ", max " << maxTaskSize << " works per task\n";
             P2PTriangularSubstitution<TriangularMatrix::L, int, int, double> p2pSolve(
                 result["threads"].as<int>(), maxTaskSize );
-            p2pSolve.analysis( L.rows, L.AI(), L.AJ(), L.AV(),
-                              static_cast<const double*>( nullptr ) );
+            p2pSolve.analysis( L.rows, L.AI(), L.AJ(), L.AV(), static_cast<const double*>( nullptr ) );
             p2pSolve( b.data(), x_solver.data() );
         }
         else
@@ -109,21 +104,21 @@ int main( int argc, char** argv )
             std::cout << "\n--- OptimizedTriangularSolve (Level-Scheduled) ---\n";
             OptimizedTriangularSolve<FBSubstitutionType::NoBarrierSuperNode, TriangularMatrix::L, int, int, double> levelSolve(
                 result["threads"].as<int>() );
-            levelSolve.analysis( L.rows, L.Base(), L.AI(), L.AJ(), L.AV(),
-                                 static_cast<const double*>( nullptr ) );
+            levelSolve.analysis( L.rows, L.Base(), L.AI(), L.AJ(), L.AV(), static_cast<const double*>( nullptr ) );
             levelSolve( b.data(), x_solver.data() );
         }
 
         if ( verify )
         {
             std::cout << "\n--- Serial Reference ---\n";
-            TriangularSolve<TriangularMatrix::L>(
-                L.rows, L.AI(), L.AJ(), L.AV(),
-                static_cast<const double*>( nullptr ), b.data(), x_serial.data() );
-            
+            TriangularSolve<TriangularMatrix::L>( L.rows, L.AI(), L.AJ(), L.AV(),
+                                                  static_cast<const double*>( nullptr ), b.data(),
+                                                  x_serial.data() );
+
             // Compare solutions
             double maxdiff = 0;
-            for ( int i = 0; i < n; i++ ) {
+            for ( int i = 0; i < n; i++ )
+            {
                 maxdiff = std::max( maxdiff, std::abs( x_solver[i] - x_serial[i] ) );
             }
             std::cout << "\nVerification Results:\n";
@@ -134,7 +129,7 @@ int main( int argc, char** argv )
     {
         // Upper triangular solve with diagonal
         std::cout << "\n=== UPPER TRIANGULAR SOLVE ===\n";
-        
+
         if ( useP2P )
         {
             std::cout << "\n--- P2PTriangularSubstitution ---\n";
@@ -153,16 +148,17 @@ int main( int argc, char** argv )
             levelSolve.analysis( U.rows, U.Base(), U.AI(), U.AJ(), U.AV(), D.data() );
             levelSolve( b.data(), x_solver.data() );
         }
-        
+
         if ( verify )
         {
             std::cout << "\n--- Serial Reference ---\n";
-            TriangularSolve<TriangularMatrix::U>(
-                U.rows, U.AI(), U.AJ(), U.AV(), D.data(), b.data(), x_serial.data() );
-            
+            TriangularSolve<TriangularMatrix::U>( U.rows, U.AI(), U.AJ(), U.AV(), D.data(),
+                                                  b.data(), x_serial.data() );
+
             // Compare solutions
             double maxdiff = 0;
-            for ( int i = 0; i < n; i++ ) {
+            for ( int i = 0; i < n; i++ )
+            {
                 maxdiff = std::max( maxdiff, std::abs( x_solver[i] - x_serial[i] ) );
             }
             std::cout << "\nVerification Results:\n";

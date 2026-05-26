@@ -15,9 +15,9 @@ using CSRTYPE = matrix_utils::CSRMatrixVec<int32_t, int32_t, double>;
 struct BenchInputs
 {
     CSRTYPE A;
-    int32_t size{0};
-    int32_t base{0};
-    int32_t nnz{0};
+    int32_t size{ 0 };
+    int32_t base{ 0 };
+    int32_t nnz{ 0 };
     std::vector<int32_t> ai_serial;
     std::vector<int32_t> aj_serial;
 };
@@ -50,8 +50,7 @@ static void BM_APlusATSerial( benchmark::State& state, BenchInputs* bi )
     for ( auto _ : state )
     {
         matrix_utils::APlusATSerial<int32_t, int32_t, true>(
-            bi->size, bi->A.ai.data(), bi->A.aj.data(), bi->ai_serial.data(),
-            bi->aj_serial.data() );
+            bi->size, bi->A.ai.data(), bi->A.aj.data(), bi->ai_serial.data(), bi->aj_serial.data() );
         benchmark::DoNotOptimize( bi->ai_serial );
         benchmark::DoNotOptimize( bi->aj_serial );
     }
@@ -67,8 +66,7 @@ static void BM_APlusATStruct( benchmark::State& state, BenchInputs* bi )
 
     for ( auto _ : state )
     {
-        op( bi->size, bi->A.ai.data(), bi->A.aj.data(), ai_out.data(),
-            aj_out.data() );
+        op( bi->size, bi->A.ai.data(), bi->A.aj.data(), ai_out.data(), aj_out.data() );
         benchmark::DoNotOptimize( ai_out );
         benchmark::DoNotOptimize( aj_out );
     }
@@ -80,8 +78,8 @@ static void BM_APlusATPrefix( benchmark::State& state, BenchInputs* bi )
     std::vector<int32_t> ai_out( bi->size + 1 );
     for ( auto _ : state )
     {
-        matrix_utils::APlusATPrefix<int32_t, int32_t, true>(
-            bi->size, bi->A.ai.data(), bi->A.aj.data(), ai_out.data() );
+        matrix_utils::APlusATPrefix<int32_t, int32_t, true>( bi->size, bi->A.ai.data(),
+                                                             bi->A.aj.data(), ai_out.data() );
         benchmark::DoNotOptimize( ai_out );
     }
     state.SetItemsProcessed( int64_t( state.iterations() ) * bi->nnz );
@@ -100,16 +98,13 @@ static void BM_PrefixStruct( benchmark::State& state, BenchInputs* bi )
     state.SetItemsProcessed( int64_t( state.iterations() ) * bi->nnz );
 }
 
-static void BM_APlusATFill( benchmark::State& state,
-                            BenchInputs* bi,
-                            const std::vector<int32_t>& ai_prefix )
+static void BM_APlusATFill( benchmark::State& state, BenchInputs* bi, const std::vector<int32_t>& ai_prefix )
 {
     std::vector<int32_t> aj_out( std::max<int32_t>( 1, 2 * bi->nnz ) );
     for ( auto _ : state )
     {
         matrix_utils::APlusATFill<int32_t, int32_t, true>(
-            bi->size, bi->A.ai.data(), bi->A.aj.data(), ai_prefix.data(),
-            aj_out.data() );
+            bi->size, bi->A.ai.data(), bi->A.aj.data(), ai_prefix.data(), aj_out.data() );
         benchmark::DoNotOptimize( aj_out );
     }
     state.SetItemsProcessed( int64_t( state.iterations() ) * bi->nnz );
@@ -128,8 +123,7 @@ static void BM_FillAndCompact( benchmark::State& state,
 
     for ( auto _ : state )
     {
-        op->fillAndCompactOnly( bi->size, bi->A.ai.data(), bi->A.aj.data(),
-                                ai_out.data(), aj_out.data() );
+        op->fillAndCompactOnly( bi->size, bi->A.ai.data(), bi->A.aj.data(), ai_out.data(), aj_out.data() );
         benchmark::DoNotOptimize( ai_out );
         benchmark::DoNotOptimize( aj_out );
     }
@@ -140,8 +134,7 @@ int main( int argc, char** argv )
 {
     cxxopts::Options options( "sp_ops_bench", "Benchmark A+A^T implementations" );
     options.allow_unrecognised_options().add_options()(
-        "m,matrix", "Matrix Market file path",
-        cxxopts::value<std::string>()->default_value( "data/mcfe.mtx" ) )(
+        "m,matrix", "Matrix Market file path", cxxopts::value<std::string>()->default_value( "data/mcfe.mtx" ) )(
         "h,help", "Print usage" );
 
     auto result = options.parse( argc, argv );
@@ -152,15 +145,14 @@ int main( int argc, char** argv )
     }
 
     BenchInputs bi = loadMatrix( result["m"].as<std::string>() );
-    std::cout << "Matrix loaded: rows=" << bi.size << " nnz=" << bi.nnz
-              << " base=" << bi.base << std::endl;
+    std::cout << "Matrix loaded: rows=" << bi.size << " nnz=" << bi.nnz << " base=" << bi.base << std::endl;
 
     const int thread_cases[] = { 1, 2, 4, 8 };
 
     // Precompute prefix for fill benchmarks
     std::vector<int32_t> ai_prefix( bi.size + 1 );
-    matrix_utils::APlusATPrefix<int32_t, int32_t, true>( bi.size, bi.A.ai.data(),
-                                                         bi.A.aj.data(), ai_prefix.data() );
+    matrix_utils::APlusATPrefix<int32_t, int32_t, true>( bi.size, bi.A.ai.data(), bi.A.aj.data(),
+                                                         ai_prefix.data() );
 
     // Prepare struct with prefix pre-run
     matrix_utils::APlusATStruct<int32_t, int32_t, true> fill_struct( 1 );
@@ -170,7 +162,7 @@ int main( int argc, char** argv )
     benchmark::RegisterBenchmark( "APlusATSerial", BM_APlusATSerial, &bi );
     for ( int t : thread_cases )
     {
-        benchmark::RegisterBenchmark( ("APlusATStruct/threads_" + std::to_string( t )).c_str(),
+        benchmark::RegisterBenchmark( ( "APlusATStruct/threads_" + std::to_string( t ) ).c_str(),
                                       BM_APlusATStruct, &bi )
             ->Arg( t );
     }
@@ -179,7 +171,7 @@ int main( int argc, char** argv )
     benchmark::RegisterBenchmark( "APlusATPrefix", BM_APlusATPrefix, &bi );
     for ( int t : thread_cases )
     {
-        benchmark::RegisterBenchmark( ("PrefixStruct/threads_" + std::to_string( t )).c_str(),
+        benchmark::RegisterBenchmark( ( "PrefixStruct/threads_" + std::to_string( t ) ).c_str(),
                                       BM_PrefixStruct, &bi )
             ->Arg( t );
     }
@@ -188,7 +180,7 @@ int main( int argc, char** argv )
     benchmark::RegisterBenchmark( "APlusATFill", BM_APlusATFill, &bi, ai_prefix );
     for ( int t : thread_cases )
     {
-        benchmark::RegisterBenchmark( ("FillAndCompact/threads_" + std::to_string( t )).c_str(),
+        benchmark::RegisterBenchmark( ( "FillAndCompact/threads_" + std::to_string( t ) ).c_str(),
                                       BM_FillAndCompact, &bi, &fill_struct )
             ->Arg( t );
     }

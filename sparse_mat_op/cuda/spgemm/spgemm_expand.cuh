@@ -53,14 +53,14 @@ struct SpGEMMSymbolicResult
     // expanded_nnz sorted in the same order as row_perm.
     DeviceArray<ExpandedIndex> sorted_expanded_nnz;
 
-    COLTYPE classBegin(SpGEMMRowClass row_class) const
+    COLTYPE classBegin( SpGEMMRowClass row_class ) const
     {
-        return row_class_offsets[static_cast<int>(row_class)];
+        return row_class_offsets[static_cast<int>( row_class )];
     }
 
-    COLTYPE classEnd(SpGEMMRowClass row_class) const
+    COLTYPE classEnd( SpGEMMRowClass row_class ) const
     {
-        return row_class_offsets[static_cast<int>(row_class) + 1];
+        return row_class_offsets[static_cast<int>( row_class ) + 1];
     }
 };
 
@@ -79,49 +79,72 @@ struct SpGEMMExpandedProducts
  * ExpandedIndex (int64_t) internally, so products beyond INT_MAX are handled.
  */
 template <typename ROWTYPE, typename COLTYPE>
-bool SpGEMMSymbolicAnalyzeCSR(
-    COLTYPE A_rows,
-    COLTYPE A_cols,
-    const ROWTYPE* d_A_row_ptr,
-    const COLTYPE* d_A_col_ind,
-    COLTYPE B_rows,
-    const ROWTYPE* d_B_row_ptr,
-    ROWTYPE base,
-    SpGEMMSymbolicResult<ROWTYPE, COLTYPE>& result,
-    SpGEMMSymbolicOptions options = SpGEMMSymbolicOptions{},
-    cudaStream_t stream = nullptr);
+bool SpGEMMSymbolicAnalyzeCSR( COLTYPE A_rows,
+                               COLTYPE A_cols,
+                               const ROWTYPE* d_A_row_ptr,
+                               const COLTYPE* d_A_col_ind,
+                               COLTYPE B_rows,
+                               const ROWTYPE* d_B_row_ptr,
+                               ROWTYPE base,
+                               SpGEMMSymbolicResult<ROWTYPE, COLTYPE>& result,
+                               SpGEMMSymbolicOptions options = SpGEMMSymbolicOptions{},
+                               cudaStream_t stream = nullptr );
 
 /**
  * @brief Expand CSR SpGEMM products into row-wise temporary arrays.
  */
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool SpGEMMExpandCSR(
-    COLTYPE A_rows,
-    COLTYPE A_cols,
-    const ROWTYPE* d_A_row_ptr,
-    const COLTYPE* d_A_col_ind,
-    const VALTYPE* d_A_values,
-    COLTYPE B_rows,
-    const ROWTYPE* d_B_row_ptr,
-    const COLTYPE* d_B_col_ind,
-    const VALTYPE* d_B_values,
-    ROWTYPE base,
-    const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>& symbolic,
-    SpGEMMExpandedProducts<COLTYPE, VALTYPE>& expanded,
-    cudaStream_t stream = nullptr);
+bool SpGEMMExpandCSR( COLTYPE A_rows,
+                      COLTYPE A_cols,
+                      const ROWTYPE* d_A_row_ptr,
+                      const COLTYPE* d_A_col_ind,
+                      const VALTYPE* d_A_values,
+                      COLTYPE B_rows,
+                      const ROWTYPE* d_B_row_ptr,
+                      const COLTYPE* d_B_col_ind,
+                      const VALTYPE* d_B_values,
+                      ROWTYPE base,
+                      const SpGEMMSymbolicResult<ROWTYPE, COLTYPE>& symbolic,
+                      SpGEMMExpandedProducts<COLTYPE, VALTYPE>& expanded,
+                      cudaStream_t stream = nullptr );
 
-extern template bool SpGEMMSymbolicAnalyzeCSR<int, int>(
-    int, int, const int*, const int*, int, const int*, int,
-    SpGEMMSymbolicResult<int, int>&, SpGEMMSymbolicOptions, cudaStream_t);
+extern template bool SpGEMMSymbolicAnalyzeCSR<int, int>( int,
+                                                         int,
+                                                         const int*,
+                                                         const int*,
+                                                         int,
+                                                         const int*,
+                                                         int,
+                                                         SpGEMMSymbolicResult<int, int>&,
+                                                         SpGEMMSymbolicOptions,
+                                                         cudaStream_t );
 
-extern template bool SpGEMMExpandCSR<int, int, float>(
-    int, int, const int*, const int*, const float*,
-    int, const int*, const int*, const float*, int,
-    const SpGEMMSymbolicResult<int, int>&, SpGEMMExpandedProducts<int, float>&, cudaStream_t);
+extern template bool SpGEMMExpandCSR<int, int, float>( int,
+                                                       int,
+                                                       const int*,
+                                                       const int*,
+                                                       const float*,
+                                                       int,
+                                                       const int*,
+                                                       const int*,
+                                                       const float*,
+                                                       int,
+                                                       const SpGEMMSymbolicResult<int, int>&,
+                                                       SpGEMMExpandedProducts<int, float>&,
+                                                       cudaStream_t );
 
-extern template bool SpGEMMExpandCSR<int, int, double>(
-    int, int, const int*, const int*, const double*,
-    int, const int*, const int*, const double*, int,
-    const SpGEMMSymbolicResult<int, int>&, SpGEMMExpandedProducts<int, double>&, cudaStream_t);
+extern template bool SpGEMMExpandCSR<int, int, double>( int,
+                                                        int,
+                                                        const int*,
+                                                        const int*,
+                                                        const double*,
+                                                        int,
+                                                        const int*,
+                                                        const int*,
+                                                        const double*,
+                                                        int,
+                                                        const SpGEMMSymbolicResult<int, int>&,
+                                                        SpGEMMExpandedProducts<int, double>&,
+                                                        cudaStream_t );
 
 } // namespace matrix_utils::sparse_cuda

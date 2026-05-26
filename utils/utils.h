@@ -13,168 +13,190 @@
 #include <utility>
 #include <vector>
 
-namespace Eigen {
-template <typename T, typename ind> class Triplet;
+namespace Eigen
+{
+template <typename T, typename ind>
+class Triplet;
 }
-namespace utils {
-std::pair<int32_t, int32_t>
-ReadFromBinaryEigen(const std::string &filename,
-                    std::vector<Eigen::Triplet<double, int32_t>> &coo);
+namespace utils
+{
+std::pair<int32_t, int32_t> ReadFromBinaryEigen( const std::string& filename,
+                                                 std::vector<Eigen::Triplet<double, int32_t>>& coo );
 
 template <typename IVEC, typename VVEC, typename IB>
-auto ReadFromBinaryCOO(const std::string &filename, IVEC &rows, IVEC &cols,
-                       VVEC &vals, const IB base) {
-  using index_type = typename IVEC::value_type;
-  std::ifstream file(filename, std::ios::binary);
-  int64_t size;
-  index_type m = 0, n = 0;
-  std::tuple<int32_t, int32_t, double> tmp;
-  file.read(reinterpret_cast<char *>(&size), sizeof size);
-  rows.resize(size);
-  cols.resize(size);
-  vals.resize(size);
-  for (int64_t i = 0; i < size; i++) {
-    file.read(reinterpret_cast<char *>(&tmp), sizeof tmp);
-    rows[i] = std::get<0>(tmp);
-    cols[i] = std::get<1>(tmp);
-    vals[i] = std::get<2>(tmp);
-    m = std::max(m, rows[i]);
-    n = std::max(n, cols[i]);
-  }
-  return std::make_pair(m + (1 - base), n + (1 - base));
-}
-
-void ReadFromBinaryVec(const std::string &filename, std::vector<double> &vec);
-
-template <typename IVEC, typename VVEC, typename IB>
-auto ReadFromBinaryCSR(const std::string &filename, IVEC &ai, IVEC &aj,
-                       VVEC &av, const IB base) {
-  // using index_type = typename IVEC::value_type;
-
-  IVEC rows;
-  auto &cols = aj;
-  auto &vals = av;
-  auto res = ReadFromBinaryCOO(filename, rows, cols, vals, base);
-  ai = IVEC(res.first + 1, 0);
-
-  size_t nnz = cols.size();
-  std::vector<size_t> index(nnz);
-  for (size_t i = 0; i < index.size(); i++) {
-    index[i] = i;
-  }
-  std::sort(index.begin(), index.end(), [&rows, &cols](size_t a, size_t b) {
-    if (rows[a] == rows[b])
-      return cols[a] < cols[b];
-    return rows[a] < rows[b];
-  });
-  for (size_t i = 0; i != nnz; i++) {
-    size_t current = i;
-    while (i != index[current]) {
-      size_t next = index[current];
-      std::swap(rows[current], rows[next]);
-      std::swap(cols[current], cols[next]);
-      std::swap(vals[current], vals[next]);
-      index[current] = current;
-      current = next;
+auto ReadFromBinaryCOO( const std::string& filename, IVEC& rows, IVEC& cols, VVEC& vals, const IB base )
+{
+    using index_type = typename IVEC::value_type;
+    std::ifstream file( filename, std::ios::binary );
+    int64_t size;
+    index_type m = 0, n = 0;
+    std::tuple<int32_t, int32_t, double> tmp;
+    file.read( reinterpret_cast<char*>( &size ), sizeof size );
+    rows.resize( size );
+    cols.resize( size );
+    vals.resize( size );
+    for ( int64_t i = 0; i < size; i++ )
+    {
+        file.read( reinterpret_cast<char*>( &tmp ), sizeof tmp );
+        rows[i] = std::get<0>( tmp );
+        cols[i] = std::get<1>( tmp );
+        vals[i] = std::get<2>( tmp );
+        m = std::max( m, rows[i] );
+        n = std::max( n, cols[i] );
     }
-    index[current] = current;
-  }
-
-  for (size_t i = 0; i < nnz; i++) {
-    ai[rows[i] + (1 - base)]++;
-  }
-  ai[0] += base;
-  for (auto i = 0; i < res.first; i++) {
-    ai[i + 1] += ai[i];
-  }
-  return res;
+    return std::make_pair( m + ( 1 - base ), n + ( 1 - base ) );
 }
 
-void printProgress(double percentage);
+void ReadFromBinaryVec( const std::string& filename, std::vector<double>& vec );
+
+template <typename IVEC, typename VVEC, typename IB>
+auto ReadFromBinaryCSR( const std::string& filename, IVEC& ai, IVEC& aj, VVEC& av, const IB base )
+{
+    // using index_type = typename IVEC::value_type;
+
+    IVEC rows;
+    auto& cols = aj;
+    auto& vals = av;
+    auto res = ReadFromBinaryCOO( filename, rows, cols, vals, base );
+    ai = IVEC( res.first + 1, 0 );
+
+    size_t nnz = cols.size();
+    std::vector<size_t> index( nnz );
+    for ( size_t i = 0; i < index.size(); i++ )
+    {
+        index[i] = i;
+    }
+    std::sort( index.begin(), index.end(),
+               [&rows, &cols]( size_t a, size_t b )
+               {
+                   if ( rows[a] == rows[b] )
+                       return cols[a] < cols[b];
+                   return rows[a] < rows[b];
+               } );
+    for ( size_t i = 0; i != nnz; i++ )
+    {
+        size_t current = i;
+        while ( i != index[current] )
+        {
+            size_t next = index[current];
+            std::swap( rows[current], rows[next] );
+            std::swap( cols[current], cols[next] );
+            std::swap( vals[current], vals[next] );
+            index[current] = current;
+            current = next;
+        }
+        index[current] = current;
+    }
+
+    for ( size_t i = 0; i < nnz; i++ )
+    {
+        ai[rows[i] + ( 1 - base )]++;
+    }
+    ai[0] += base;
+    for ( auto i = 0; i < res.first; i++ )
+    {
+        ai[i + 1] += ai[i];
+    }
+    return res;
+}
+
+void printProgress( double percentage );
 
 template <typename COLTYPE>
-std::vector<COLTYPE> randomPermute(const COLTYPE n, const COLTYPE base = 0);
+std::vector<COLTYPE> randomPermute( const COLTYPE n, const COLTYPE base = 0 );
 
 template <typename COLTYPE>
-void inversePermute(std::vector<COLTYPE> &iperm,
-                    const std::vector<COLTYPE> &perm, const COLTYPE base = 0);
+void inversePermute( std::vector<COLTYPE>& iperm, const std::vector<COLTYPE>& perm, const COLTYPE base = 0 );
 
-template <typename T, typename C> class MaxHeap {
+template <typename T, typename C>
+class MaxHeap
+{
 public:
-  MaxHeap(C c) : _comp(c) {}
+    MaxHeap( C c ) : _comp( c ) {}
 
-  // return true if the Max Heap is empty, true otherwise.
-  bool empty() { return _heap.empty(); }
+    // return true if the Max Heap is empty, true otherwise.
+    bool empty() { return _heap.empty(); }
 
-  // used to insert an item in the priority queue.
-  void push(const T &obj) {
-    _heap.push_back(obj);
-    heapifyUp(_heap.size() - 1);
-  }
-
-  // deletes the highest priority item currently in the queue.
-  void pop() {
-    if (!empty()) {
-      std::swap(_heap[0], _heap[static_cast<int>(_heap.size()) - 1]);
-      _heap.pop_back();
-      if (!empty())
-        heapifyDown(0);
+    // used to insert an item in the priority queue.
+    void push( const T& obj )
+    {
+        _heap.push_back( obj );
+        heapifyUp( _heap.size() - 1 );
     }
-  }
 
-  int size() const { return static_cast<int>(_heap.size()); }
-
-  void clear() { _heap.clear(); }
-
-  // return the highest priority item currently in the queue.
-  T *top() {
-    if (!empty()) {
-      return &_heap[0];
+    // deletes the highest priority item currently in the queue.
+    void pop()
+    {
+        if ( !empty() )
+        {
+            std::swap( _heap[0], _heap[static_cast<int>( _heap.size() ) - 1] );
+            _heap.pop_back();
+            if ( !empty() )
+                heapifyDown( 0 );
+        }
     }
-    return nullptr;
-  }
 
-  std::vector<T> &getHeap() { return _heap; }
+    int size() const { return static_cast<int>( _heap.size() ); }
 
-  void setComp(C c) { _comp = c; }
+    void clear() { _heap.clear(); }
+
+    // return the highest priority item currently in the queue.
+    T* top()
+    {
+        if ( !empty() )
+        {
+            return &_heap[0];
+        }
+        return nullptr;
+    }
+
+    std::vector<T>& getHeap() { return _heap; }
+
+    void setComp( C c ) { _comp = c; }
 
 protected:
-  void heapifyUp(int idx) {
-    int parentIdx = parent(idx);
-    if (parentIdx < 0)
-      return;
-    if (_comp(_heap[parentIdx], _heap[idx])) {
-      std::swap(_heap[parentIdx], _heap[idx]);
-      heapifyUp(parentIdx);
-    }
-  }
-
-  void heapifyDown(int idx) {
-    int largeIdx = idx;
-    int leftChildIdx = leftChild(idx), rightChildIdx = rightChild(idx);
-    if (leftChildIdx < static_cast<int>(_heap.size())) {
-      if (_comp(_heap[largeIdx], _heap[leftChildIdx]))
-        largeIdx = leftChildIdx;
-    }
-    if (rightChildIdx < static_cast<int>(_heap.size())) {
-      if (_comp(_heap[largeIdx], _heap[rightChildIdx]))
-        largeIdx = rightChildIdx;
+    void heapifyUp( int idx )
+    {
+        int parentIdx = parent( idx );
+        if ( parentIdx < 0 )
+            return;
+        if ( _comp( _heap[parentIdx], _heap[idx] ) )
+        {
+            std::swap( _heap[parentIdx], _heap[idx] );
+            heapifyUp( parentIdx );
+        }
     }
 
-    if (largeIdx != idx) {
-      std::swap(_heap[largeIdx], _heap[idx]);
-      heapifyDown(largeIdx);
+    void heapifyDown( int idx )
+    {
+        int largeIdx = idx;
+        int leftChildIdx = leftChild( idx ), rightChildIdx = rightChild( idx );
+        if ( leftChildIdx < static_cast<int>( _heap.size() ) )
+        {
+            if ( _comp( _heap[largeIdx], _heap[leftChildIdx] ) )
+                largeIdx = leftChildIdx;
+        }
+        if ( rightChildIdx < static_cast<int>( _heap.size() ) )
+        {
+            if ( _comp( _heap[largeIdx], _heap[rightChildIdx] ) )
+                largeIdx = rightChildIdx;
+        }
+
+        if ( largeIdx != idx )
+        {
+            std::swap( _heap[largeIdx], _heap[idx] );
+            heapifyDown( largeIdx );
+        }
     }
-  }
 
-  int leftChild(int i) { return 2 * i + 1; }
+    int leftChild( int i ) { return 2 * i + 1; }
 
-  int rightChild(int i) { return 2 * i + 2; }
+    int rightChild( int i ) { return 2 * i + 2; }
 
-  int parent(int i) { return (i - 1) / 2; }
+    int parent( int i ) { return ( i - 1 ) / 2; }
 
-  std::vector<T> _heap;
-  C _comp;
+    std::vector<T> _heap;
+    C _comp;
 };
 
 /// @brief Compute parallel prefix sum (cumulative sum) with a specified base value
@@ -208,7 +230,7 @@ protected:
 /// @note Thread-safe and uses OpenMP for parallelization
 /// @note The base value at d_first[0] is preserved and used as the starting point
 template <class InputIt, class OutputIt>
-OutputIt ParallelPrefixSum(const int nthreads, InputIt first, InputIt last, OutputIt d_first);
+OutputIt ParallelPrefixSum( const int nthreads, InputIt first, InputIt last, OutputIt d_first );
 
 /// @brief In-place inclusive prefix sum (a[i] becomes sum_{k<=i} a[k])
 /// @tparam Iter Random access iterator or pointer
@@ -219,12 +241,11 @@ OutputIt ParallelPrefixSum(const int nthreads, InputIt first, InputIt last, Outp
 ///
 /// @note The operation is in-place; the original values are overwritten by the prefix sums.
 template <class Iter>
-Iter ParallelPrefixSumInplace(const int nthreads, Iter first, Iter last);
+Iter ParallelPrefixSumInplace( const int nthreads, Iter first, Iter last );
 
 #ifdef USE_BOOST_LIB
 template <typename COLTYPE>
-void printEliminationTree(const COLTYPE size, const COLTYPE base,
-                          COLTYPE *const parent, const std::string &filename);
+void printEliminationTree( const COLTYPE size, const COLTYPE base, COLTYPE* const parent, const std::string& filename );
 
 /// @brief Write adjacency graph to DOT format for GraphViz visualization (original version)
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
@@ -235,8 +256,11 @@ void printEliminationTree(const COLTYPE size, const COLTYPE base,
 /// @param filename Output DOT file path
 /// @param title Graph title for the DOT file (default: "Graph")
 template <typename ROWTYPE, typename COLTYPE>
-void writeAdjacencyGraphDOT(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, 
-                           const std::string& filename, const std::string& title = "Graph");
+void writeAdjacencyGraphDOT( const COLTYPE rows,
+                             ROWTYPE const* ai,
+                             COLTYPE const* aj,
+                             const std::string& filename,
+                             const std::string& title = "Graph" );
 
 /// @brief Write adjacency graph with node partitioning to DOT format for GraphViz visualization
 /// @tparam ROWTYPE Row pointer type (typically int or int64_t)
@@ -249,48 +273,54 @@ void writeAdjacencyGraphDOT(const COLTYPE rows, ROWTYPE const* ai, COLTYPE const
 /// @param filename Output DOT file path
 /// @param title Graph title for the DOT file (default: "Partitioned Graph")
 template <typename ROWTYPE, typename COLTYPE>
-void writeAdjacencyGraphDOT(const COLTYPE rows, 
-                           ROWTYPE const* ai, 
-                           COLTYPE const* aj,
-                           COLTYPE const* partition,
-                           COLTYPE num_partitions,
-                           const std::string& filename, 
-                           const std::string& title = "Partitioned Graph");
+void writeAdjacencyGraphDOT( const COLTYPE rows,
+                             ROWTYPE const* ai,
+                             COLTYPE const* aj,
+                             COLTYPE const* partition,
+                             COLTYPE num_partitions,
+                             const std::string& filename,
+                             const std::string& title = "Partitioned Graph" );
 #endif
 
 // TODO: remove
 template <typename T>
-class CacheFriendlyVectors : public std::vector<std::vector<T>> {
+class CacheFriendlyVectors : public std::vector<std::vector<T>>
+{
 public:
-  CacheFriendlyVectors(const size_t size) : std::vector<std::vector<T>>(size) {}
+    CacheFriendlyVectors( const size_t size ) : std::vector<std::vector<T>>( size ) {}
 
-  void push_back(const size_t to, const T &val) {
-    if ((*this)[to].capacity() == 0 && _availableInd < _at) {
-      std::swap((*this)[to], (*this)[_availableInd++]);
+    void push_back( const size_t to, const T& val )
+    {
+        if ( ( *this )[to].capacity() == 0 && _availableInd < _at )
+        {
+            std::swap( ( *this )[to], ( *this )[_availableInd++] );
+        }
+        ( *this )[to].push_back( val );
+        _modifiedInd = std::max( to, _modifiedInd );
     }
-    (*this)[to].push_back(val);
-    _modifiedInd = std::max(to, _modifiedInd);
-  }
 
-  void to_next() { (*this)[_at++].clear(); }
+    void to_next() { ( *this )[_at++].clear(); }
 
-  void clear() {
-    size_t r = 0;
-    for (size_t rr = _availableInd; rr <= _modifiedInd && r < rr; rr++) {
-      (*this)[rr].clear();
-      if ((*this)[rr].capacity()) {
-        std::swap((*this)[rr], (*this)[r++]);
-      }
+    void clear()
+    {
+        size_t r = 0;
+        for ( size_t rr = _availableInd; rr <= _modifiedInd && r < rr; rr++ )
+        {
+            ( *this )[rr].clear();
+            if ( ( *this )[rr].capacity() )
+            {
+                std::swap( ( *this )[rr], ( *this )[r++] );
+            }
+        }
+        _availableInd = 0;
+        _modifiedInd = 0;
+        _at = 0;
     }
-    _availableInd = 0;
-    _modifiedInd = 0;
-    _at = 0;
-  }
 
 protected:
-  size_t _availableInd{0};
-  size_t _modifiedInd{0};
-  size_t _at{0};
+    size_t _availableInd{ 0 };
+    size_t _modifiedInd{ 0 };
+    size_t _at{ 0 };
 };
 
 } // namespace utils

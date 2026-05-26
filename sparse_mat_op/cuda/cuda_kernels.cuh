@@ -7,10 +7,10 @@ namespace matrix_utils::sparse_cuda
 
 /**
  * @brief Element-wise multiplication: output[i] = a[i] * b[i]
- * 
+ *
  * This function launches a CUDA kernel to perform element-wise multiplication
  * of two vectors.
- * 
+ *
  * @tparam items_per_thread Number of elements each thread processes (default: 4)
  * @param d_a First device vector
  * @param d_b Second device vector
@@ -18,11 +18,10 @@ namespace matrix_utils::sparse_cuda
  * @param n Vector size
  */
 template <int items_per_thread = 4>
-void elementwiseMultiply(const double* d_a, const double* d_b,
-                         double* d_output, size_t n);
+void elementwiseMultiply( const double* d_a, const double* d_b, double* d_output, size_t n );
 
 template <typename T>
-void fillArray(T* d_data, size_t n, T value);
+void fillArray( T* d_data, size_t n, T value );
 
 // Additional CUDA kernels for iterative solvers can be added here
 

@@ -76,8 +76,7 @@ static __global__ void InitLUValuesKernel( COLTYPE n,
         return;
     }
 
-    InitializeLUValuesRow<ROWTYPE, COLTYPE, VALTYPE>(
-        row, lane, a_ai, a_aj, a_av, lu_ai, lu_aj, base, lu_av );
+    InitializeLUValuesRow<ROWTYPE, COLTYPE, VALTYPE>( row, lane, a_ai, a_aj, a_av, lu_ai, lu_aj, base, lu_av );
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
@@ -131,8 +130,8 @@ __device__ __forceinline__ void FactorLURowBinarySearch( const COLTYPE i,
     for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
     {
         const COLTYPE k = lu_aj[k_pos] - base;
-        const VALTYPE aik = NormalizeLowerEntry<ROWTYPE, COLTYPE, VALTYPE>(
-            k_pos, k, lu_diag, base, lu_av, status, lane );
+        const VALTYPE aik =
+            NormalizeLowerEntry<ROWTYPE, COLTYPE, VALTYPE>( k_pos, k, lu_diag, base, lu_av, status, lane );
         if ( aik == VALTYPE( 0 ) )
         {
             continue;
