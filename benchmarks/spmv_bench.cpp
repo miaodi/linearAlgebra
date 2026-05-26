@@ -12,6 +12,10 @@
 #include <string_view>
 #include <vector>
 
+#ifdef USE_MKL
+#include <mkl.h>
+#endif
+
 #ifdef USE_CUDA
 #include "cuda_spmv.cuh"
 #include <cuda_runtime.h>
@@ -190,6 +194,33 @@ auto CAMLBSimd = []( benchmark::State& state, const auto& mat, const int threads
     state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
                              int64_t( mat.NNZ() ) );
 };
+
+#ifdef USE_MKL
+template <typename VALTYPE>
+auto MKLSPMV_Bench = []( benchmark::State& state, const auto& mat, const int threads, const int it )
+{
+    std::vector<VALTYPE> x( mat.rows, 0.0 );
+    std::vector<VALTYPE> b( mat.rows, 1.0 );
+
+    mkl_set_num_threads_local( threads );
+
+    matrix_utils::SPMV<std::remove_cvref_t<decltype( mat )>, matrix_utils::MKLSPMV<MKL_INT, MKL_INT, VALTYPE>> spmv;
+    spmv.setMatrix( &mat );
+    spmv.preprocess();
+
+    for ( auto _ : state )
+    {
+        for ( int i = 0; i < it; i++ )
+        {
+            spmv( b.data(), x.data() );
+        }
+    }
+    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
+                             int64_t( mat.NNZ() ) );
+
+    mkl_set_num_threads_local( 0 );
+};
+#endif
 
 #ifdef USE_CUDA
 template <typename VALTYPE>
@@ -493,6 +524,10 @@ int main( int argc, char** argv )
     benchmark::RegisterBenchmark( "CAMLBSum_double", CAMLBSum<double>, mat_double, num_threads, iterations );
     benchmark::RegisterBenchmark( "CAMLBSimd_double", CAMLBSimd<double>, mat_double, num_threads, iterations );
 
+#ifdef USE_MKL
+    benchmark::RegisterBenchmark( "MKLSPMV_double", MKLSPMV_Bench<double>, mat_double, num_threads, iterations );
+#endif
+
 #ifdef USE_CUDA
     benchmark::RegisterBenchmark( "CuSparseSPMV_double", CuSparseSPMV_Bench<double>, mat_double,
                                   num_threads, iterations );
@@ -514,6 +549,10 @@ int main( int argc, char** argv )
     benchmark::RegisterBenchmark( "ALBUSSimd_float", ALBUSSimd<float>, mat_float, num_threads, iterations );
     benchmark::RegisterBenchmark( "CAMLBSum_float", CAMLBSum<float>, mat_float, num_threads, iterations );
     benchmark::RegisterBenchmark( "CAMLBSimd_float", CAMLBSimd<float>, mat_float, num_threads, iterations );
+
+#ifdef USE_MKL
+    benchmark::RegisterBenchmark( "MKLSPMV_float", MKLSPMV_Bench<float>, mat_float, num_threads, iterations );
+#endif
 
 #ifdef USE_CUDA
     benchmark::RegisterBenchmark( "CuSparseSPMV_float", CuSparseSPMV_Bench<float>, mat_float,

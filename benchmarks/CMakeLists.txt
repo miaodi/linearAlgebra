@@ -71,8 +71,8 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
        reordering
        graph
        utils
-      sparse_mat_op
-      OpenMP::OpenMP_CXX
+       sparse_mat_op
+       OpenMP::OpenMP_CXX
        cxxopts
     )
 
