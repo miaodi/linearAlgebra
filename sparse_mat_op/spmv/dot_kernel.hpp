@@ -82,17 +82,11 @@ inline VALTYPE DotRangeSIMD( const ROWTYPE start,
 
         if constexpr ( is_double && can_use_gather )
         {
+            const ROWTYPE row_nnz = end - start;
             const ROWTYPE simd_end = start + ( ( end - start ) & ( ~ROWTYPE( 3 ) ) );
-            // Use union to access SIMD register as array without explicit store
-            // vacc.vec for SIMD operations, vacc.arr for scalar extraction
-            union
-            {
-                __m256d vec;
-                double arr[4];
-            } vacc;
-            vacc.vec = _mm256_setzero_pd();
-            // #pragma unroll(32)
-            for ( ROWTYPE idx = start; idx < simd_end; idx += 4 )
+            ROWTYPE idx = start;
+
+            auto gather_fmadd = [&]( const ROWTYPE idx, __m256d acc ) -> __m256d
             {
                 __m128i j_idx = _mm_loadu_si128( reinterpret_cast<const __m128i*>( aj + idx ) );
                 if constexpr ( Base != 0 )
@@ -101,10 +95,35 @@ inline VALTYPE DotRangeSIMD( const ROWTYPE start,
                 }
                 __m256d vb = _mm256_i32gather_pd( b, j_idx, 8 );
                 __m256d va = _mm256_loadu_pd( av + idx );
-                vacc.vec = _mm256_fmadd_pd( va, vb, vacc.vec );
+                return _mm256_fmadd_pd( va, vb, acc );
+            };
+
+            __m256d vacc = _mm256_setzero_pd();
+            if ( row_nnz >= 16 )
+            {
+                const ROWTYPE unrolled_end = start + ( row_nnz & ( ~ROWTYPE( 15 ) ) );
+                __m256d vacc0 = _mm256_setzero_pd();
+                __m256d vacc1 = _mm256_setzero_pd();
+                __m256d vacc2 = _mm256_setzero_pd();
+                __m256d vacc3 = _mm256_setzero_pd();
+
+                for ( ; idx < unrolled_end; idx += 16 )
+                {
+                    vacc0 = gather_fmadd( idx, vacc0 );
+                    vacc1 = gather_fmadd( idx + 4, vacc1 );
+                    vacc2 = gather_fmadd( idx + 8, vacc2 );
+                    vacc3 = gather_fmadd( idx + 12, vacc3 );
+                }
+                vacc = _mm256_add_pd( _mm256_add_pd( vacc0, vacc1 ), _mm256_add_pd( vacc2, vacc3 ) );
             }
-            // Extract and sum 4 doubles directly from union
-            VALTYPE sum = vacc.arr[0] + vacc.arr[1] + vacc.arr[2] + vacc.arr[3];
+            for ( ; idx < simd_end; idx += 4 )
+            {
+                vacc = gather_fmadd( idx, vacc );
+            }
+
+            double lanes[4];
+            _mm256_storeu_pd( lanes, vacc );
+            VALTYPE sum = lanes[0] + lanes[1] + lanes[2] + lanes[3];
             if constexpr ( Base != 0 )
             {
                 for ( ROWTYPE idx = simd_end; idx < end; ++idx )
@@ -123,16 +142,11 @@ inline VALTYPE DotRangeSIMD( const ROWTYPE start,
         }
         else if constexpr ( is_float && can_use_gather )
         {
+            const ROWTYPE row_nnz = end - start;
             const ROWTYPE simd_end = start + ( ( end - start ) & ( ~ROWTYPE( 7 ) ) );
-            // Use union to access SIMD register as array without explicit store
-            // vacc.vec for SIMD operations, vacc.arr for scalar extraction
-            union
-            {
-                __m256 vec;
-                float arr[8];
-            } vacc;
-            vacc.vec = _mm256_setzero_ps();
-            for ( ROWTYPE idx = start; idx < simd_end; idx += 8 )
+            ROWTYPE idx = start;
+
+            auto gather_fmadd = [&]( const ROWTYPE idx, __m256 acc ) -> __m256
             {
                 __m256i j_idx = _mm256_loadu_si256( reinterpret_cast<const __m256i*>( aj + idx ) );
                 if constexpr ( Base != 0 )
@@ -141,11 +155,36 @@ inline VALTYPE DotRangeSIMD( const ROWTYPE start,
                 }
                 __m256 vb = _mm256_i32gather_ps( b, j_idx, 4 );
                 __m256 va = _mm256_loadu_ps( reinterpret_cast<const float*>( av + idx ) );
-                vacc.vec = _mm256_fmadd_ps( va, vb, vacc.vec );
+                return _mm256_fmadd_ps( va, vb, acc );
+            };
+
+            __m256 vacc = _mm256_setzero_ps();
+            if ( row_nnz >= 32 )
+            {
+                const ROWTYPE unrolled_end = start + ( row_nnz & ( ~ROWTYPE( 31 ) ) );
+                __m256 vacc0 = _mm256_setzero_ps();
+                __m256 vacc1 = _mm256_setzero_ps();
+                __m256 vacc2 = _mm256_setzero_ps();
+                __m256 vacc3 = _mm256_setzero_ps();
+
+                for ( ; idx < unrolled_end; idx += 32 )
+                {
+                    vacc0 = gather_fmadd( idx, vacc0 );
+                    vacc1 = gather_fmadd( idx + 8, vacc1 );
+                    vacc2 = gather_fmadd( idx + 16, vacc2 );
+                    vacc3 = gather_fmadd( idx + 24, vacc3 );
+                }
+                vacc = _mm256_add_ps( _mm256_add_ps( vacc0, vacc1 ), _mm256_add_ps( vacc2, vacc3 ) );
             }
-            // Extract and sum 8 floats directly from union
-            VALTYPE sum = static_cast<VALTYPE>( vacc.arr[0] + vacc.arr[1] + vacc.arr[2] + vacc.arr[3] +
-                                                vacc.arr[4] + vacc.arr[5] + vacc.arr[6] + vacc.arr[7] );
+            for ( ; idx < simd_end; idx += 8 )
+            {
+                vacc = gather_fmadd( idx, vacc );
+            }
+
+            float lanes[8];
+            _mm256_storeu_ps( lanes, vacc );
+            VALTYPE sum = static_cast<VALTYPE>( lanes[0] + lanes[1] + lanes[2] + lanes[3] +
+                                                lanes[4] + lanes[5] + lanes[6] + lanes[7] );
             if constexpr ( Base != 0 )
             {
                 for ( ROWTYPE idx = simd_end; idx < end; ++idx )

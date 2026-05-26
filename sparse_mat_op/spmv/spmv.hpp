@@ -226,9 +226,9 @@ private:
 ///            Parallel Computing, 2020
 ///
 /// @reference CAMLB mode:
-///            "CAMLB-SpMV: A Cache-Aware Memory Load Balance Strategy for SpMV on Many-Core
-///            Architectures" Xin He, Miao Wang, Haipeng Jia, Yunquan Zhang IEEE Transactions on
-///            Parallel and Distributed Systems (TPDS), 2019 DOI: 10.1109/TPDS.2018.2878777
+///            "CAMLB-SpMV: An Efficient Cache-Aware Memory Load-Balancing SpMV on CPU"
+///            Jihu Guo, Rui Xia, Jie Liu, Xiaoxiong Zhu, Xiang Zhang
+///            ICPP 2024, DOI: 10.1145/3673038.3673042
 ///
 /// @tparam ROWTYPE Integer type for row pointers (e.g., int, int64_t)
 /// @tparam COLTYPE Integer type for column indices (e.g., int, int64_t)
@@ -269,26 +269,28 @@ public:
             std::vector<std::size_t> workload_prefix( nnz + 1 );
 
             // Compute cache-line based workload costs
-            // Parameters: cache line = 64 bytes, L1 cache = 32KB -> 512 lines
+            // Parameters: cache line = 64 bytes, L1 cache = 32KB -> 512 lines.
+            // CAMLB sizes each thread's x-access sliding window as cache lines / threads.
             constexpr std::size_t cache_line_bytes = 64;
             constexpr std::size_t cache_lines = 512;
+            const std::size_t swindow_lines = cache_lines / static_cast<std::size_t>( _nthreads );
 
             compute_element_workload_prefix_hw<ROWTYPE, COLTYPE, VALTYPE>(
-                size, ai, aj, av, nullptr, nullptr, cache_line_bytes, cache_lines, workload_prefix.data() );
+                size, ai, aj, av, nullptr, nullptr, cache_line_bytes, swindow_lines, workload_prefix.data() );
 
             // Partition by workload cost instead of nnz
             const std::size_t total_work = workload_prefix[nnz];
+            const std::size_t work_per_thread = ( total_work + static_cast<std::size_t>( _nthreads ) - 1 ) /
+                                                static_cast<std::size_t>( _nthreads );
 
             // Find partition points based on workload (can be done in parallel)
 #pragma omp parallel for num_threads( _nthreads )
             for ( int i = 1; i <= _nthreads; i++ )
             {
-                // Compute target work for this partition boundary
-                // Use careful calculation to distribute work evenly, including remainder
-                const std::size_t target_work = ( static_cast<std::size_t>( i ) * total_work ) / _nthreads;
+                const std::size_t target_work = static_cast<std::size_t>( i ) * work_per_thread;
 
                 // Binary search to find element index with cumulative work >= target_work
-                auto it = std::lower_bound( workload_prefix.begin(), workload_prefix.end(), target_work );
+                auto it = std::lower_bound( workload_prefix.begin() + 1, workload_prefix.end(), target_work );
                 ROWTYPE elem_idx = static_cast<ROWTYPE>( std::distance( workload_prefix.begin(), it ) );
 
                 if ( elem_idx > nnz )
@@ -322,8 +324,7 @@ public:
 #pragma omp parallel for num_threads( _nthreads )
             for ( int i = 1; i <= _nthreads; i++ )
             {
-                // Use same even distribution formula as CAMLB: (i * total_work) / nthreads
-                // This naturally distributes remainder across threads, max difference = 1
+                // Distribute nonzeros evenly across threads, max difference = 1.
                 const ROWTYPE target_nnz = ( static_cast<ROWTYPE>( i ) * nnz ) / _nthreads;
                 _threadBlockSizePrefix[i] = target_nnz;
 

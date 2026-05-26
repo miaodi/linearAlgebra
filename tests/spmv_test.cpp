@@ -4,6 +4,7 @@
 #include "spmv.hpp"
 #include "utils.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -225,6 +226,40 @@ TEST_F( spmv_Test, CAMLB_spmv )
                                             << " with " << nthreads << " threads";
             }
         }
+    }
+}
+
+TEST( CAMLBWorkloadPrefix, MatchesPaperFigurePrefix )
+{
+    alignas( 64 ) std::array<int, 4> ai = { 0, 2, 4, 9 };
+    alignas( 64 ) std::array<int, 9> aj = { 0, 4, 5, 6, 1, 2, 7, 9, 0 };
+    alignas( 64 ) std::array<double, 9> av = {};
+    std::array<std::size_t, 10> prefix = {};
+
+    compute_element_workload_prefix_hw<int, int, double>( 3, ai.data(), aj.data(), av.data(),
+                                                          nullptr, nullptr, 16, 2, prefix.data() );
+
+    const std::array<std::size_t, 6> expected = { 0, 4, 6, 7, 8, 11 };
+    for ( std::size_t i = 0; i < expected.size(); ++i )
+    {
+        EXPECT_EQ( prefix[i], expected[i] ) << "paper Figure 6 workload prefix mismatch at " << i;
+    }
+}
+
+TEST( CAMLBWorkloadPrefix, UsesFifoSlidingWindow )
+{
+    alignas( 64 ) std::array<int, 2> ai = { 0, 5 };
+    alignas( 64 ) std::array<int, 5> aj = { 0, 2, 0, 4, 2 };
+    alignas( 64 ) std::array<double, 5> av = {};
+    std::array<std::size_t, 6> prefix = {};
+
+    compute_element_workload_prefix_hw<int, int, double>( 1, ai.data(), aj.data(), av.data(),
+                                                          nullptr, nullptr, 16, 2, prefix.data() );
+
+    const std::array<std::size_t, 6> expected = { 0, 4, 5, 6, 7, 10 };
+    for ( std::size_t i = 0; i < expected.size(); ++i )
+    {
+        EXPECT_EQ( prefix[i], expected[i] ) << "FIFO sliding-window mismatch at " << i;
     }
 }
 

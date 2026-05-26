@@ -2,21 +2,20 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <list>
-#include <unordered_map>
+#include <deque>
+#include <unordered_set>
 #include <vector>
 
 namespace matrix_utils
 {
 
 /// @brief Compute cache-aware workload model for SpMV (CAMLB-SpMV approach)
-/// @reference "CAMLB-SpMV: A Cache-Aware Memory Load Balance Strategy for SpMV on Many-Core Architectures"
-///            Xin He, Miao Wang, Haipeng Jia, Yunquan Zhang
-///            IEEE Transactions on Parallel and Distributed Systems (TPDS), 2019
-///            DOI: 10.1109/TPDS.2018.2878777
+/// @reference "CAMLB-SpMV: An Efficient Cache-Aware Memory Load-Balancing SpMV on CPU"
+///            Jihu Guo, Rui Xia, Jie Liu, Xiaoxiong Zhu, Xiang Zhang
+///            ICPP 2024, DOI: 10.1145/3673038.3673042
 /// @details Models memory access costs for y = A*x in CSR format by simulating:
 ///          - Streaming access for ai (row_ptr), aj (col_ind), ax (values), y (output)
-///          - LRU cache simulation for x (input vector) with limited capacity
+///          - FIFO sliding-window cache-line history for x (input vector)
 /// @tparam ROWTYPE Integer type for row pointers (e.g., int, int64_t)
 /// @tparam COLTYPE Integer type for column indices (e.g., int, int64_t)
 /// @tparam VALTYPE Value type for matrix elements and vectors (e.g., double, float)
@@ -27,7 +26,7 @@ namespace matrix_utils
 /// @param xvec Input vector x - OPTIONAL (nullptr = assume base address 0 for estimation)
 /// @param yvec Output vector y - OPTIONAL (nullptr = assume base address 0 for estimation)
 /// @param cache_line_bytes Size of cache line in bytes (typically 64)
-/// @param swindow_lines LRU cache capacity for x-vector in cache lines (e.g., L1 size / cache_line_bytes)
+/// @param swindow_lines FIFO sliding-window capacity for x-vector cache lines
 /// @param prefix Output: prefix sum of cache line loads per element (size nnz+1)
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void compute_element_workload_prefix_hw( COLTYPE nrows,
@@ -72,57 +71,44 @@ void compute_element_workload_prefix_hw( COLTYPE nrows,
     bool have_ai = false, have_aj = false, have_ax = false, have_y = false;
     std::size_t last_ai = 0, last_aj = 0, last_ax = 0, last_y = 0;
 
-    // LRU cache simulation for x-vector (random access pattern)
-    std::list<std::size_t> lru;
-    std::unordered_map<std::size_t, typename std::list<std::size_t>::iterator> lru_map;
+    // FIFO sliding window for x-vector cache-line accesses, matching CAMLB Algorithm 2.
+    std::deque<std::size_t> swindow;
+    std::unordered_set<std::size_t> swindow_set;
     if ( swindow_lines > 0 )
     {
-        lru_map.reserve( swindow_lines * 2 );
+        swindow_set.reserve( swindow_lines * 2 );
     }
 
-    // LRU touch function: returns true if cache hit, false if cache miss
-    auto lru_touch_x = [&]( std::size_t line_id ) -> bool
+    // Returns true for a recorded cache-line hit. Hits do not refresh FIFO order.
+    auto swindow_touch_x = [&]( std::size_t line_id ) -> bool
     {
-        auto it = lru_map.find( line_id );
-        if ( it != lru_map.end() )
+        if ( swindow_set.find( line_id ) != swindow_set.end() )
         {
-            // Cache hit: move to front (most recently used)
-            lru.splice( lru.begin(), lru, it->second );
-            it->second = lru.begin();
             return true;
         }
 
-        // Cache miss: add to front
-        lru.push_front( line_id );
-        lru_map[line_id] = lru.begin();
-
-        // Evict least recently used if capacity exceeded
-        if ( swindow_lines > 0 && lru.size() > swindow_lines )
+        if ( swindow_lines == 0 )
         {
-            auto last = std::prev( lru.end() );
-            lru_map.erase( *last );
-            lru.pop_back();
+            return false;
         }
+
+        if ( swindow.size() == swindow_lines )
+        {
+            swindow_set.erase( swindow.front() );
+            swindow.pop_front();
+        }
+        swindow.push_back( line_id );
+        swindow_set.insert( line_id );
         return false;
     };
 
-    std::size_t k = 0; // Current element index in flattened arrays
+    std::size_t cache_lines = 0;
 
     // Process each row
     for ( COLTYPE r = 0; r < nrows; ++r )
     {
         const ROWTYPE start = row_ptr[r] - base;
         const ROWTYPE end = row_ptr[r + 1] - base;
-
-        if ( start >= end )
-        {
-            continue; // Skip empty rows
-        }
-
-        // ===================================================================
-        // Compute row header cost (ai + y) - assigned to first element of row
-        // ===================================================================
-        std::size_t header_cost = 0;
 
         // Cost for accessing row_ptr[r] and row_ptr[r+1]
         {
@@ -135,7 +121,7 @@ void compute_element_workload_prefix_hw( COLTYPE nrows,
             // Check if row_ptr[r] is on a new cache line
             if ( !have_ai || line_r != last_ai )
             {
-                ++header_cost;
+                ++cache_lines;
                 last_ai = line_r;
                 have_ai = true;
             }
@@ -143,38 +129,21 @@ void compute_element_workload_prefix_hw( COLTYPE nrows,
             // Check if row_ptr[r+1] is on a new cache line
             if ( line_r1 != last_ai )
             {
-                ++header_cost;
+                ++cache_lines;
                 last_ai = line_r1;
             }
         }
 
-        // Cost for accessing y[r] (output vector)
-        // Always compute cost even if yvec is nullptr (assume address 0)
+        if ( start >= end )
         {
-            const std::uintptr_t addr_y = base_y + static_cast<std::uintptr_t>( r ) * val_bytes;
-            const std::size_t line_y = line_id_of( addr_y );
-
-            if ( !have_y || line_y != last_y )
-            {
-                ++header_cost;
-                last_y = line_y;
-                have_y = true;
-            }
+            continue; // Empty-row Ap cost is carried into the next nonzero workload entry.
         }
 
         // ===================================================================
         // Process elements in this row
         // ===================================================================
-        for ( ROWTYPE p = start; p < end; ++p, ++k )
+        for ( ROWTYPE p = start; p < end; ++p )
         {
-            std::size_t cost = 0;
-
-            // First element of row inherits row header cost
-            if ( p == start )
-            {
-                cost += header_cost;
-            }
-
             // Cost for accessing col_ind[p]
             {
                 const std::uintptr_t addr_aj = base_aj + static_cast<std::uintptr_t>( p ) * col_bytes;
@@ -182,7 +151,7 @@ void compute_element_workload_prefix_hw( COLTYPE nrows,
 
                 if ( !have_aj || line_aj != last_aj )
                 {
-                    ++cost;
+                    ++cache_lines;
                     last_aj = line_aj;
                     have_aj = true;
                 }
@@ -196,13 +165,13 @@ void compute_element_workload_prefix_hw( COLTYPE nrows,
 
                 if ( !have_ax || line_ax != last_ax )
                 {
-                    ++cost;
+                    ++cache_lines;
                     last_ax = line_ax;
                     have_ax = true;
                 }
             }
 
-            // Cost for accessing x[col_ind[p]] (input vector) - LRU simulation
+            // Cost for accessing x[col_ind[p]] (input vector) - FIFO sliding window
             // Always compute cost even if xvec is nullptr (assume address 0)
             {
                 const COLTYPE col = col_ind[p]; // Column index (may be 0-based or 1-based)
@@ -211,15 +180,29 @@ void compute_element_workload_prefix_hw( COLTYPE nrows,
                 const std::uintptr_t addr_x = base_x + static_cast<std::uintptr_t>( col_offset ) * val_bytes;
                 const std::size_t line_x = line_id_of( addr_x );
 
-                const bool hit = lru_touch_x( line_x );
+                const bool hit = swindow_touch_x( line_x );
                 if ( !hit )
                 {
-                    ++cost; // Cache miss
+                    ++cache_lines;
                 }
             }
 
-            // Update prefix sum with accumulated cost
-            prefix[k + 1] = prefix[k] + cost;
+            // Cost for writing y[r], charged when the last nonzero of the row is processed.
+            if ( p + 1 == end )
+            {
+                const std::uintptr_t addr_y = base_y + static_cast<std::uintptr_t>( r ) * val_bytes;
+                const std::size_t line_y = line_id_of( addr_y );
+
+                if ( !have_y || line_y != last_y )
+                {
+                    ++cache_lines;
+                    last_y = line_y;
+                    have_y = true;
+                }
+            }
+
+            // workload[j + 1] records the cumulative cache-line load through nonzero j.
+            prefix[static_cast<std::size_t>( p ) + 1] = cache_lines;
         }
     }
 }
