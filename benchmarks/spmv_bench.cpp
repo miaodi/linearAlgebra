@@ -10,6 +10,7 @@
 #include <numeric>
 #include <omp.h>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifdef USE_MKL
@@ -23,6 +24,33 @@
 
 using CSRTYPE_DOUBLE = typename matrix_utils::CSRMatrixVec<int, int, double>;
 using CSRTYPE_FLOAT = typename matrix_utils::CSRMatrixVec<int, int, float>;
+
+template <typename CSRMatrixType>
+int64_t csrSpmvBytesPerIteration( const CSRMatrixType& mat )
+{
+    using ROWTYPE = typename CSRMatrixType::ROWTYPE;
+    using COLTYPE = typename CSRMatrixType::COLTYPE;
+    using VALTYPE = typename CSRMatrixType::VALTYPE;
+
+    const int64_t rows = int64_t( mat.rows );
+    const int64_t nnz = int64_t( mat.NNZ() );
+    return nnz * ( sizeof( VALTYPE ) + sizeof( COLTYPE ) + sizeof( VALTYPE ) ) +
+           ( rows + 1 ) * sizeof( ROWTYPE ) + rows * sizeof( VALTYPE );
+}
+
+template <typename CSRMatrixType>
+void setSpmvBytesProcessed( benchmark::State& state, const CSRMatrixType& mat, const int it )
+{
+    state.SetBytesProcessed( int64_t( state.iterations() ) * int64_t( it ) *
+                             csrSpmvBytesPerIteration( mat ) );
+}
+
+template <typename Fn, typename... Args>
+void registerSpmvBenchmark( const char* name, Fn&& fn, Args&&... args )
+{
+    benchmark::RegisterBenchmark( name, std::forward<Fn>( fn ), std::forward<Args>( args )... )
+        ->UseRealTime();
+}
 
 template <typename VALTYPE>
 auto Serial = []( benchmark::State& state, const auto& mat, const int threads, const int it )
@@ -40,8 +68,7 @@ auto Serial = []( benchmark::State& state, const auto& mat, const int threads, c
             spmv( b.data(), x.data() );
         }
     }
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 };
 
 template <typename VALTYPE>
@@ -61,8 +88,7 @@ auto Parallel = []( benchmark::State& state, const auto& mat, const int threads,
             spmv( b.data(), x.data() );
         }
     }
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 };
 
 template <typename VALTYPE>
@@ -82,8 +108,7 @@ auto RowBalanced = []( benchmark::State& state, const auto& mat, const int threa
             spmv( b.data(), x.data() );
         }
     }
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 };
 
 template <typename VALTYPE>
@@ -103,8 +128,7 @@ auto RowBalancedSimd = []( benchmark::State& state, const auto& mat, const int t
             spmv( b.data(), x.data() );
         }
     }
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 };
 
 template <typename VALTYPE>
@@ -124,8 +148,7 @@ auto ALBUSSum = []( benchmark::State& state, const auto& mat, const int threads,
             spmv( b.data(), x.data() );
         }
     }
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 };
 
 template <typename VALTYPE>
@@ -145,8 +168,7 @@ auto ALBUSSimd = []( benchmark::State& state, const auto& mat, const int threads
             spmv( b.data(), x.data() );
         }
     }
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 };
 
 template <typename VALTYPE>
@@ -168,8 +190,7 @@ auto CAMLBSum = []( benchmark::State& state, const auto& mat, const int threads,
             spmv( b.data(), x.data() );
         }
     }
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 };
 
 template <typename VALTYPE>
@@ -191,8 +212,7 @@ auto CAMLBSimd = []( benchmark::State& state, const auto& mat, const int threads
             spmv( b.data(), x.data() );
         }
     }
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 };
 
 #ifdef USE_MKL
@@ -215,8 +235,7 @@ auto MKLSPMV_Bench = []( benchmark::State& state, const auto& mat, const int thr
             spmv( b.data(), x.data() );
         }
     }
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 
     mkl_set_num_threads_local( 0 );
 };
@@ -269,8 +288,7 @@ auto CuSparseSPMV_Bench = []( benchmark::State& state, const auto& mat, const in
         cudaDeviceSynchronize();
     }
 
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 
     // Cleanup
     cusparseDestroy( handle );
@@ -328,8 +346,7 @@ auto CSRScalarSPMV_Bench = []( benchmark::State& state, const auto& mat, const i
         cudaDeviceSynchronize();
     }
 
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 
     // Cleanup
     cudaFree( d_x );
@@ -386,8 +403,7 @@ auto CSRVectorSPMV_Bench = []( benchmark::State& state, const auto& mat, const i
         cudaDeviceSynchronize();
     }
 
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 
     // Cleanup
     cudaFree( d_x );
@@ -444,8 +460,7 @@ auto CSRMergeSPMV_Bench = []( benchmark::State& state, const auto& mat, const in
         cudaDeviceSynchronize();
     }
 
-    state.SetBytesProcessed( 2 * sizeof( VALTYPE ) * int64_t( state.iterations() ) * int64_t( it ) *
-                             int64_t( mat.NNZ() ) );
+    setSpmvBytesProcessed( state, mat, it );
 
     // Cleanup
     cudaFree( d_x );
@@ -514,55 +529,55 @@ int main( int argc, char** argv )
     std::cout << "  Iterations: " << iterations << "\n";
 
     // Double precision benchmarks
-    benchmark::RegisterBenchmark( "Serial_double", Serial<double>, mat_double, num_threads, iterations );
-    benchmark::RegisterBenchmark( "Parallel_double", Parallel<double>, mat_double, num_threads, iterations );
-    benchmark::RegisterBenchmark( "RowBalanced_double", RowBalanced<double>, mat_double, num_threads, iterations );
-    benchmark::RegisterBenchmark( "RowBalancedSimd_double", RowBalancedSimd<double>, mat_double,
-                                  num_threads, iterations );
-    benchmark::RegisterBenchmark( "ALBUSSum_double", ALBUSSum<double>, mat_double, num_threads, iterations );
-    benchmark::RegisterBenchmark( "ALBUSSimd_double", ALBUSSimd<double>, mat_double, num_threads, iterations );
-    benchmark::RegisterBenchmark( "CAMLBSum_double", CAMLBSum<double>, mat_double, num_threads, iterations );
-    benchmark::RegisterBenchmark( "CAMLBSimd_double", CAMLBSimd<double>, mat_double, num_threads, iterations );
+    registerSpmvBenchmark( "Serial_double", Serial<double>, mat_double, num_threads, iterations );
+    registerSpmvBenchmark( "Parallel_double", Parallel<double>, mat_double, num_threads, iterations );
+    registerSpmvBenchmark( "RowBalanced_double", RowBalanced<double>, mat_double, num_threads, iterations );
+    registerSpmvBenchmark( "RowBalancedSimd_double", RowBalancedSimd<double>, mat_double,
+                           num_threads, iterations );
+    registerSpmvBenchmark( "ALBUSSum_double", ALBUSSum<double>, mat_double, num_threads, iterations );
+    registerSpmvBenchmark( "ALBUSSimd_double", ALBUSSimd<double>, mat_double, num_threads, iterations );
+    registerSpmvBenchmark( "CAMLBSum_double", CAMLBSum<double>, mat_double, num_threads, iterations );
+    registerSpmvBenchmark( "CAMLBSimd_double", CAMLBSimd<double>, mat_double, num_threads, iterations );
 
 #ifdef USE_MKL
-    benchmark::RegisterBenchmark( "MKLSPMV_double", MKLSPMV_Bench<double>, mat_double, num_threads, iterations );
+    registerSpmvBenchmark( "MKLSPMV_double", MKLSPMV_Bench<double>, mat_double, num_threads, iterations );
 #endif
 
 #ifdef USE_CUDA
-    benchmark::RegisterBenchmark( "CuSparseSPMV_double", CuSparseSPMV_Bench<double>, mat_double,
-                                  num_threads, iterations );
-    benchmark::RegisterBenchmark( "CSRScalarSPMV_double", CSRScalarSPMV_Bench<double>, mat_double,
-                                  num_threads, iterations );
-    benchmark::RegisterBenchmark( "CSRVectorSPMV_double", CSRVectorSPMV_Bench<double>, mat_double,
-                                  num_threads, iterations );
-    benchmark::RegisterBenchmark( "CSRMergeSPMV_double", CSRMergeSPMV_Bench<double>, mat_double,
-                                  num_threads, iterations );
+    registerSpmvBenchmark( "CuSparseSPMV_double", CuSparseSPMV_Bench<double>, mat_double,
+                           num_threads, iterations );
+    registerSpmvBenchmark( "CSRScalarSPMV_double", CSRScalarSPMV_Bench<double>, mat_double,
+                           num_threads, iterations );
+    registerSpmvBenchmark( "CSRVectorSPMV_double", CSRVectorSPMV_Bench<double>, mat_double,
+                           num_threads, iterations );
+    registerSpmvBenchmark( "CSRMergeSPMV_double", CSRMergeSPMV_Bench<double>, mat_double,
+                           num_threads, iterations );
 #endif
 
     // Float precision benchmarks
-    benchmark::RegisterBenchmark( "Serial_float", Serial<float>, mat_float, num_threads, iterations );
-    benchmark::RegisterBenchmark( "Parallel_float", Parallel<float>, mat_float, num_threads, iterations );
-    benchmark::RegisterBenchmark( "RowBalanced_float", RowBalanced<float>, mat_float, num_threads, iterations );
-    benchmark::RegisterBenchmark( "RowBalancedSimd_float", RowBalancedSimd<float>, mat_float,
-                                  num_threads, iterations );
-    benchmark::RegisterBenchmark( "ALBUSSum_float", ALBUSSum<float>, mat_float, num_threads, iterations );
-    benchmark::RegisterBenchmark( "ALBUSSimd_float", ALBUSSimd<float>, mat_float, num_threads, iterations );
-    benchmark::RegisterBenchmark( "CAMLBSum_float", CAMLBSum<float>, mat_float, num_threads, iterations );
-    benchmark::RegisterBenchmark( "CAMLBSimd_float", CAMLBSimd<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "Serial_float", Serial<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "Parallel_float", Parallel<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "RowBalanced_float", RowBalanced<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "RowBalancedSimd_float", RowBalancedSimd<float>, mat_float,
+                           num_threads, iterations );
+    registerSpmvBenchmark( "ALBUSSum_float", ALBUSSum<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "ALBUSSimd_float", ALBUSSimd<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "CAMLBSum_float", CAMLBSum<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "CAMLBSimd_float", CAMLBSimd<float>, mat_float, num_threads, iterations );
 
 #ifdef USE_MKL
-    benchmark::RegisterBenchmark( "MKLSPMV_float", MKLSPMV_Bench<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "MKLSPMV_float", MKLSPMV_Bench<float>, mat_float, num_threads, iterations );
 #endif
 
 #ifdef USE_CUDA
-    benchmark::RegisterBenchmark( "CuSparseSPMV_float", CuSparseSPMV_Bench<float>, mat_float,
-                                  num_threads, iterations );
-    benchmark::RegisterBenchmark( "CSRScalarSPMV_float", CSRScalarSPMV_Bench<float>, mat_float,
-                                  num_threads, iterations );
-    benchmark::RegisterBenchmark( "CSRVectorSPMV_float", CSRVectorSPMV_Bench<float>, mat_float,
-                                  num_threads, iterations );
-    benchmark::RegisterBenchmark( "CSRMergeSPMV_float", CSRMergeSPMV_Bench<float>, mat_float,
-                                  num_threads, iterations );
+    registerSpmvBenchmark( "CuSparseSPMV_float", CuSparseSPMV_Bench<float>, mat_float,
+                           num_threads, iterations );
+    registerSpmvBenchmark( "CSRScalarSPMV_float", CSRScalarSPMV_Bench<float>, mat_float,
+                           num_threads, iterations );
+    registerSpmvBenchmark( "CSRVectorSPMV_float", CSRVectorSPMV_Bench<float>, mat_float,
+                           num_threads, iterations );
+    registerSpmvBenchmark( "CSRMergeSPMV_float", CSRMergeSPMV_Bench<float>, mat_float,
+                           num_threads, iterations );
 #endif
 
     benchmark::Initialize( &argc, argv );
