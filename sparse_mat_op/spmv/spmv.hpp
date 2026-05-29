@@ -5,7 +5,9 @@
 #include "spmv_load.hpp"
 #include <concepts>
 #include <cstring>
+#if defined( __x86_64__ ) || defined( __i386__ ) || defined( _M_X64 ) || defined( _M_IX86 )
 #include <immintrin.h>
+#endif
 #include <omp.h>
 #include "dot_kernel.hpp"
 #include "mkl_spmv.hpp"
@@ -459,28 +461,39 @@ private:
 
         COLTYPE idx = std::numeric_limits<COLTYPE>::max();
 #pragma unroll( 32 )
-        for ( int tid = 0; tid < _nthreads; tid++ )
+        for ( int tid = 0; tid < _nthreads - 1; tid++ )
         {
-            if ( _threadStartRow[tid] != idx )
-            {
-                idx = _threadStartRow[tid];
-                x[idx] = apply_beta<Mode>( _threadBoundaryValue[2 * tid], beta, x[idx] );
-            }
-            else
-            {
-                x[idx] += _threadBoundaryValue[2 * tid];
-            }
-            if ( tid == _nthreads - 1 )
-                break;
-            if ( _threadStartRow[tid + 1] != idx )
-            {
-                idx = _threadStartRow[tid + 1];
-                x[idx] = apply_beta<Mode>( _threadBoundaryValue[2 * tid + 1], beta, x[idx] );
-            }
-            else
-            {
-                x[idx] += _threadBoundaryValue[2 * tid + 1];
-            }
+            accumulateBoundary<Mode>( _threadStartRow[tid], _threadBoundaryValue[2 * tid], size, idx, x, beta );
+            accumulateBoundary<Mode>( _threadStartRow[tid + 1], _threadBoundaryValue[2 * tid + 1],
+                                      size, idx, x, beta );
+        }
+
+        const int lastTid = _nthreads - 1;
+        accumulateBoundary<Mode>( _threadStartRow[lastTid], _threadBoundaryValue[2 * lastTid], size,
+                                  idx, x, beta );
+    }
+
+    template <BetaMode Mode>
+    static inline void accumulateBoundary( const COLTYPE row,
+                                           const VALTYPE ax,
+                                           const COLTYPE size,
+                                           COLTYPE& idx,
+                                           VALTYPE* __restrict const x,
+                                           const VALTYPE beta )
+    {
+        if ( row >= size )
+        {
+            return;
+        }
+
+        if ( row != idx )
+        {
+            idx = row;
+            x[idx] = apply_beta<Mode>( ax, beta, x[idx] );
+        }
+        else
+        {
+            x[idx] += ax;
         }
     }
 

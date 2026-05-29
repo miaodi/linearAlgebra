@@ -4,7 +4,6 @@
 #include "permutation.hpp"
 #include <cxxopts.hpp>
 #include <fstream>
-#include <mkl.h>
 #include <string>
 #include <vector>
 

@@ -6,12 +6,12 @@
 #include "spmv.hpp"
 #include "triangle_solve.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cctype>
 #include <cxxopts.hpp>
 #include <fstream>
 #include <iomanip>
-#include <mkl.h>
 #include <random>
 #include <string>
 #include <vector>

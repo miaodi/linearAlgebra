@@ -4,13 +4,16 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
-#include <limits>
+#if defined( __x86_64__ ) || defined( __i386__ ) || defined( _M_X64 ) || defined( _M_IX86 )
+#include <immintrin.h>
+#else
+#include <thread>
+#endif
 #include <omp.h>
 #include <iostream>
 #include <vector>
 #include <set>
 #include <iterator>
-#include <immintrin.h>
 #include <numeric>
 #include <stdexcept>
 #include "matrix_utils.hpp"
@@ -18,6 +21,18 @@
 namespace graph
 {
 using enums::matrix_utils::TriangularMatrix;
+
+namespace
+{
+void SpinPause()
+{
+#if defined( __x86_64__ ) || defined( __i386__ ) || defined( _M_X64 ) || defined( _M_IX86 )
+    _mm_pause();
+#else
+    std::this_thread::yield();
+#endif
+}
+} // namespace
 
 template <typename ROWTYPE, typename COLTYPE>
 bool IsDAG( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj )
@@ -224,7 +239,7 @@ void TransitiveReduction<ROWTYPE, COLTYPE>::operator()( const COLTYPE rows,
 
                 while ( neighbor > node_j && !ready_flags[neighbor].load( std::memory_order_acquire ) )
                 {
-                    _mm_pause();
+                    SpinPause();
                 }
 
                 const auto& reachable_from_neighbor = _reachable[neighbor];

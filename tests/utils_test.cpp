@@ -12,7 +12,7 @@ TEST( Utils, knuth_s )
     std::uniform_int_distribution<std::mt19937::result_type> dist1( 0, 100000000 ); // distribution in range [1, 100000000]
     size_t size = dist1( rng );
     size_t lower_bound = dist1( rng );
-    size_t upper_bound = std::max( size + lower_bound, dist1( rng ) );
+    size_t upper_bound = std::max( size + lower_bound, static_cast<size_t>( dist1( rng ) ) );
 
     std::vector<int> randVec( size, 0 );
 

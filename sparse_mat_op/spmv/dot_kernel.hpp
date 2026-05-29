@@ -1,6 +1,9 @@
 #pragma once
 
+#if defined( __x86_64__ ) || defined( __i386__ ) || defined( _M_X64 ) || defined( _M_IX86 )
+#define MATRIX_UTILS_X86_INTRINSICS_AVAILABLE 1
 #include <immintrin.h>
+#endif
 #include <type_traits>
 
 namespace matrix_utils
@@ -68,14 +71,14 @@ inline VALTYPE DotRangeSIMD( const ROWTYPE start,
                              VALTYPE const* __restrict av,
                              VALTYPE const* __restrict b )
 {
-#if defined( AVX2_SUPPORTED ) || defined( __AVX2__ )
+#if defined( MATRIX_UTILS_X86_INTRINSICS_AVAILABLE ) && ( defined( AVX2_SUPPORTED ) || defined( __AVX2__ ) )
     constexpr bool is_double = std::is_same_v<VALTYPE, double>;
     constexpr bool is_float = std::is_same_v<VALTYPE, float>;
 #endif
 
     if constexpr ( Kernel == RowDotKernel::Simd )
     {
-#if defined( AVX2_SUPPORTED ) || defined( __AVX2__ )
+#if defined( MATRIX_UTILS_X86_INTRINSICS_AVAILABLE ) && ( defined( AVX2_SUPPORTED ) || defined( __AVX2__ ) )
         // AVX2 gather instructions require 32-bit indices
         // Fall back to scalar if COLTYPE is not 32-bit (e.g., int64_t)
         constexpr bool can_use_gather = ( sizeof( COLTYPE ) == sizeof( int32_t ) );

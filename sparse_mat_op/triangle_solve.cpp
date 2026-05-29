@@ -10,6 +10,9 @@
 #include <numeric>
 #include <algorithm>
 #include <cassert>
+#if defined( __x86_64__ ) || defined( __i386__ ) || defined( _M_X64 ) || defined( _M_IX86 )
+#include <immintrin.h>
+#endif
 #include <omp.h>
 #include <tuple>
 #include <type_traits>
@@ -21,6 +24,18 @@
 
 namespace matrix_utils
 {
+namespace
+{
+void SpinPause()
+{
+#if defined( __x86_64__ ) || defined( __i386__ ) || defined( _M_X64 ) || defined( _M_IX86 )
+    _mm_pause();
+#else
+    std::this_thread::yield();
+#endif
+}
+} // namespace
+
 /// @brief Combined triangular solve function using TriangularMatrix enum with standard CSR format
 template <TriangularMatrix TM, typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void TriangularSolve( const COLTYPE size,
@@ -428,7 +443,7 @@ void P2PTriangularSubstitution<TM, ROWTYPE, COLTYPE, VALTYPE>::operator()( VALTY
                 while ( !_taskReady[static_cast<std::size_t>( dep_task )].load( std::memory_order_acquire ) )
                 {
                     // std::this_thread::yield();
-                    _mm_pause();
+                    SpinPause();
                 }
             }
 
@@ -1500,7 +1515,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::NoBarrierOp(
                     {
                         // std::cout << "tid: " << tid << "yield\n";
                         // std::this_thread::yield();
-                        _mm_pause();
+                        SpinPause();
                     }
                     val += _reorderedMat.av[j] * x[j_idx];
                 }
@@ -1528,7 +1543,7 @@ void OptimizedTriangularSolve<FBST, TS, ROWTYPE, COLTYPE, VALTYPE>::NoBarrierSup
                 while ( !_bv.get( j_idx ) )
                 {
                     // std::this_thread::yield();
-                    _mm_pause();
+                    SpinPause();
                     // std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
             }
