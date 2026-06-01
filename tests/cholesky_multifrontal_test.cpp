@@ -407,10 +407,10 @@ TEST( MultifrontalCholeskySuperNodal, AcceptsExplicitBeginPointersBaseOne )
 TEST( MultifrontalCholesky, MatchesEigenSimplicialLLTOnCMakeSpdMatrices )
 {
     const std::vector<std::string> spd_matrices = {
-        "bcsstk17.mtx",
-        "s3rmt3m3.mtx",
-        "ex5.mtx",
-        "nos5.mtx",
+        "spd/bcsstk17.mtx",
+        "spd/s3rmt3m3.mtx",
+        "spd/ex5.mtx",
+        "spd/nos5.mtx",
     };
 
     for ( const auto& matrix_file : spd_matrices )

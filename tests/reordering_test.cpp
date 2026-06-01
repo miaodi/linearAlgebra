@@ -96,7 +96,7 @@ TEST( MinDegreeNode, tie_breaking )
 }
 
 // TEST(global_min_degree, parallel_vs_serial) {
-//   std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
+//   std::vector<std::string> files{"data/spd/ex5.mtx", "data/other/rdist1.mtx"};
 //   for (const auto &fn : files) {
 //     std::ifstream f(fn);
 //     f.clear();
@@ -127,7 +127,7 @@ TEST( MinDegreeNode, tie_breaking )
 // }
 
 // TEST(global_min_degree, base0_vs_base1) {
-//   std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
+//   std::vector<std::string> files{"data/spd/ex5.mtx", "data/other/rdist1.mtx"};
 //   for (const auto &fn : files) {
 //     std::ifstream f(fn);
 //     f.clear();
@@ -155,7 +155,7 @@ TEST( MinDegreeNode, tie_breaking )
 // }
 
 // TEST(component_min_degree, compare_with_sliding_window_size_10) {
-//   std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
+//   std::vector<std::string> files{"data/spd/ex5.mtx", "data/other/rdist1.mtx"};
 //   for (const auto &fn : files) {
 //     std::ifstream f(fn);
 //     f.clear();
@@ -189,7 +189,7 @@ TEST( MinDegreeNode, tie_breaking )
 // }
 
 // TEST(reordering, pseudoDiameter) {
-//   std::vector<std::string> files{"data/ex5.mtx", "data/rdist1.mtx"};
+//   std::vector<std::string> files{"data/spd/ex5.mtx", "data/other/rdist1.mtx"};
 //   std::vector<MKL_INT> degrees;
 //   for (const auto &fn : files) {
 //     std::ifstream f(fn);
@@ -462,7 +462,7 @@ TEST( UnionFind, rem_vs_parrank )
 
 // TEST(Reordering, SerialCM) {
 //   omp_set_num_threads(3);
-//   std::vector<std::string> files{"data/ex5.mtx", "data/s3rmt3m3.mtx"};
+//   std::vector<std::string> files{"data/spd/ex5.mtx", "data/spd/s3rmt3m3.mtx"};
 //   std::ofstream myfile;
 //   for (const auto &fn : files) {
 //     std::ifstream f(fn);

@@ -82,10 +82,10 @@ TEST_P( CudaSpMM, SpMMStruct_AA )
 
 INSTANTIATE_TEST_SUITE_P( MatrixSet,
                           CudaSpMM,
-                          ::testing::Values( "data/ex5.mtx",
-                                             "data/nos5.mtx",
-                                             "data/ex27.mtx",
-                                             "data/rdist1.mtx",
-                                             "data/s3rmt3m3.mtx",
-                                             "data/bcsstk17.mtx",
-                                             "data/jgl009.mtx" ) );
+                          ::testing::Values( "data/spd/ex5.mtx",
+                                             "data/spd/nos5.mtx",
+                                             "data/unsymm_with_diag/ex27.mtx",
+                                             "data/other/rdist1.mtx",
+                                             "data/spd/s3rmt3m3.mtx",
+                                             "data/spd/bcsstk17.mtx",
+                                             "data/other/jgl009.mtx" ) );

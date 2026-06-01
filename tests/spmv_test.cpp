@@ -27,7 +27,7 @@ protected:
         std::vector<double> csr_vals;
 
         std::ifstream f;
-        f.open( "data/ex5.mtx" ); // https://sparse.tamu.edu/FIDAP/ex5
+        f.open( "data/spd/ex5.mtx" ); // https://sparse.tamu.edu/FIDAP/ex5
         matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
         f.close();
         _mats.emplace_back();
@@ -36,7 +36,7 @@ protected:
         _mats.back().aj = std::move( csr_cols );
         _mats.back().av = std::move( csr_vals );
 
-        f.open( "data/nos5.mtx" );
+        f.open( "data/spd/nos5.mtx" );
         matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
         f.close();
         _mats.emplace_back();
@@ -45,7 +45,7 @@ protected:
         _mats.back().aj = std::move( csr_cols );
         _mats.back().av = std::move( csr_vals );
 
-        f.open( "data/s3rmt3m3.mtx" );
+        f.open( "data/spd/s3rmt3m3.mtx" );
         matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
         f.close();
         _mats.emplace_back();
@@ -54,7 +54,7 @@ protected:
         _mats.back().aj = std::move( csr_cols );
         _mats.back().av = std::move( csr_vals );
 
-        f.open( "data/rdist1.mtx" );
+        f.open( "data/other/rdist1.mtx" );
         matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
         f.close();
         _mats.emplace_back();

@@ -48,7 +48,7 @@ TEST( CudaILUBase, MatchesCPULevel0Ex5 )
     std::vector<int> csr_cols;
     std::vector<double> csr_vals;
 
-    std::ifstream f = open_test_matrix( "ex5.mtx" );
+    std::ifstream f = open_test_matrix( "spd/ex5.mtx" );
     ASSERT_TRUE( f.is_open() );
     matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
 

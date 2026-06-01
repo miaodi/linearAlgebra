@@ -35,7 +35,7 @@ protected:
         std::vector<double> csr_vals;
 
         std::ifstream f;
-        f.open( "data/nos5.mtx" );
+        f.open( "data/spd/nos5.mtx" );
         matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
         f.close();
         _mats.push_back( { mkl_wrapper::mkl_sparse_mat( csr_rows.size() - 1, csr_rows.size() - 1,
@@ -45,7 +45,7 @@ protected:
         csr_rows.clear();
         csr_cols.clear();
         csr_vals.clear();
-        f.open( "data/bcsstk17.mtx" );
+        f.open( "data/spd/bcsstk17.mtx" );
         matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
         f.close();
         _mats.push_back( { mkl_wrapper::mkl_sparse_mat( csr_rows.size() - 1, csr_rows.size() - 1,
@@ -55,7 +55,7 @@ protected:
         csr_rows.clear();
         csr_cols.clear();
         csr_vals.clear();
-        f.open( "data/ex27.mtx" );
+        f.open( "data/unsymm_with_diag/ex27.mtx" );
         matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
         f.close();
         _mats.push_back( { mkl_wrapper::mkl_sparse_mat( csr_rows.size() - 1, csr_rows.size() - 1,

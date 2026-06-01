@@ -445,7 +445,7 @@ TEST( CudaCSRUtils, DiagonalScaledPruneRealMatrixS3rmt3m3 )
     std::vector<int> ai_orig, aj_orig;
     std::vector<double> av_orig;
 
-    std::ifstream f( "data/s3rmt3m3.mtx" );
+    std::ifstream f( "data/spd/s3rmt3m3.mtx" );
     ASSERT_TRUE( f.is_open() ) << "Could not open s3rmt3m3.mtx";
     matrix_utils::CSRMatrixVec<int, int, double> mm;
     matrix_utils::readMatrixMarket( f, mm );
@@ -560,7 +560,7 @@ TEST( CudaCSRUtils, CSRFindDiagonalRealMatrixS3rmt3m3 )
     std::vector<int> ai_host, aj_host;
     std::vector<double> av_host;
 
-    std::ifstream f( "data/s3rmt3m3.mtx" );
+    std::ifstream f( "data/spd/s3rmt3m3.mtx" );
     ASSERT_TRUE( f.is_open() ) << "Could not open s3rmt3m3.mtx";
     matrix_utils::CSRMatrixVec<int, int, double> mm;
     matrix_utils::readMatrixMarket( f, mm );
@@ -756,8 +756,8 @@ TEST( CudaCSRUtils, CSRToTileCOOBase1 )
 
 TEST( CudaCSRUtils, CSRToTileCOORoundTripFromMatrixMarket )
 {
-    std::ifstream f( "data/ex27.mtx" );
-    ASSERT_TRUE( f.is_open() ) << "Failed to open data/ex27.mtx";
+    std::ifstream f( "data/unsymm_with_diag/ex27.mtx" );
+    ASSERT_TRUE( f.is_open() ) << "Failed to open data/unsymm_with_diag/ex27.mtx";
 
     using HostCSR = matrix_utils::CSRMatrixVec<int, int, double>;
     HostCSR original;

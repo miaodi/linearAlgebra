@@ -18,7 +18,7 @@ TEST( Solve, pardiso_vs_cudss )
 {
     omp_set_num_threads( 3 );
     const double tol = 1e-10;
-    std::vector<std::string> files{ "data/ex5.mtx" };
+    std::vector<std::string> files{ "data/spd/ex5.mtx" };
     std::ofstream myfile;
     for ( const auto& fn : files )
     {

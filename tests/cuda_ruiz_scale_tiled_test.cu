@@ -23,7 +23,7 @@ std::string get_matrix_path()
     {
         return std::string( env_path );
     }
-    return "data/ex27.mtx";
+    return "data/unsymm_with_diag/ex27.mtx";
 }
 
 } // namespace

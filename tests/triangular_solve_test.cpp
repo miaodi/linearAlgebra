@@ -52,10 +52,10 @@ protected:
         std::vector<double> csr_vals;
 
         const std::vector<std::string> matrix_files = {
-            "data/ex5.mtx", // https://sparse.tamu.edu/FIDAP/ex5
-            // "data/nos5.mtx",
-            // "data/s3rmt3m3.mtx",
-            // "data/bcsstk17.mtx"
+            "data/spd/ex5.mtx", // https://sparse.tamu.edu/FIDAP/ex5
+            // "data/spd/nos5.mtx",
+            // "data/spd/s3rmt3m3.mtx",
+            // "data/spd/bcsstk17.mtx"
         };
 
         auto load_matrix = [&]( const std::string& path )

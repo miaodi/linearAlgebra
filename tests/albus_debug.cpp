@@ -14,7 +14,7 @@ int main()
     std::vector<double> csr_vals;
 
     std::ifstream f;
-    f.open( "data/ex5.mtx" );
+    f.open( "data/spd/ex5.mtx" );
     matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
     f.close();
 

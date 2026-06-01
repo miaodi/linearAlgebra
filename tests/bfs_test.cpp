@@ -101,7 +101,7 @@ TEST( bfs, parallel )
 
 TEST( bfs, serial_vs_parallel )
 {
-    const std::vector<std::string> files{ "data/ex5.mtx", "data/rdist1.mtx" };
+    const std::vector<std::string> files{ "data/spd/ex5.mtx", "data/other/rdist1.mtx" };
 
     for ( const auto& fn : files )
     {

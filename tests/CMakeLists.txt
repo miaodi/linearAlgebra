@@ -80,47 +80,58 @@ foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
    add_test(NAME ${ONE_TEST_EXEC} COMMAND ${TARGET_NAME})
 endforeach()
 
-# configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/ex5.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ex5.mtx COPYONLY)
-# configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/rdist1.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/rdist1.mtx COPYONLY)
+set(TEST_DATA_DIR ${CMAKE_CURRENT_BINARY_DIR}/data)
+set(SPD_DATA_DIR ${TEST_DATA_DIR}/spd)
+set(UNSYMM_WITH_DIAG_DATA_DIR ${TEST_DATA_DIR}/unsymm_with_diag)
+set(OTHER_DATA_DIR ${TEST_DATA_DIR}/other)
 
-# file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/data)
-# file(GLOB MATRIX_FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/*.mtx)
-# foreach(MATRIX_FILE ${MATRIX_FILES})
-#    get_filename_component(FILENAME ${MATRIX_FILE} NAME)
-#    file(CREATE_LINK ${MATRIX_FILE} ${CMAKE_CURRENT_BINARY_DIR}/data/${FILENAME} SYMBOLIC)
-# endforeach()
+# Local synthetic unsymmetric matrices with every diagonal entry explicitly present:
+# local_4x4_unsymm_full_diag: 4 x 4, 9 nnz.
+# local_7x7_unsymm_full_diag: 7 x 7, 18 nnz.
+# local_12x12_unsymm_full_diag: 12 x 12, 36 nnz.
+file(MAKE_DIRECTORY ${UNSYMM_WITH_DIAG_DATA_DIR})
+file(GLOB UNSYMM_WITH_DIAG_LOCAL_MATRICES
+   ${CMAKE_CURRENT_SOURCE_DIR}/data/unsymm_with_diag/*.mtx)
+foreach(MATRIX_FILE ${UNSYMM_WITH_DIAG_LOCAL_MATRICES})
+   get_filename_component(FILENAME ${MATRIX_FILE} NAME)
+   configure_file(${MATRIX_FILE} ${UNSYMM_WITH_DIAG_DATA_DIR}/${FILENAME} COPYONLY)
+endforeach()
 
-# https://sparse.tamu.edu/HB/bcsstk17
-# 10974
-# spd
-download_sparse_matrix("bcsstk17" ${CMAKE_CURRENT_BINARY_DIR}/data)
+# Unsymmetric SuiteSparse matrices with every diagonal entry explicitly present.
+# HB/pores_1: 30 x 30, 180 nnz.
+download_sparse_matrix("HB/pores_1" ${UNSYMM_WITH_DIAG_DATA_DIR})
 
-# https://sparse.tamu.edu/Cylshell/s3rmt3m3
-# 5357
-# spd
-download_sparse_matrix("s3rmt3m3" ${CMAKE_CURRENT_BINARY_DIR}/data)
+# Bai/olm100: 100 x 100, 396 nnz.
+download_sparse_matrix("Bai/olm100" ${UNSYMM_WITH_DIAG_DATA_DIR})
 
-# https://sparse.tamu.edu/FIDAP/ex5
-# 27
-# spd
-download_sparse_matrix("ex5" ${CMAKE_CURRENT_BINARY_DIR}/data)
+# Bai/lop163: 163 x 163, 935 nnz.
+download_sparse_matrix("Bai/lop163" ${UNSYMM_WITH_DIAG_DATA_DIR})
 
-# https://sparse.tamu.edu/HB/jgl009
-# 9
-# not spd
-download_sparse_matrix("jgl009" ${CMAKE_CURRENT_BINARY_DIR}/data)
+# HB/pores_3: 532 x 532, 3,474 nnz.
+download_sparse_matrix("HB/pores_3" ${UNSYMM_WITH_DIAG_DATA_DIR})
 
-# https://sparse.tamu.edu/Zitney/rdist1
-# 4134
-# not spd
-download_sparse_matrix("rdist1" ${CMAKE_CURRENT_BINARY_DIR}/data)
+# HB/pores_2: 1,224 x 1,224, 9,613 nnz.
+download_sparse_matrix("HB/pores_2" ${UNSYMM_WITH_DIAG_DATA_DIR})
 
-# https://sparse.tamu.edu/HB/nos5
-# 468
-# spd
-download_sparse_matrix("nos5" ${CMAKE_CURRENT_BINARY_DIR}/data)
+# FIDAP/ex27: 974 x 974, 40,782 nnz.
+download_sparse_matrix("FIDAP/ex27" ${UNSYMM_WITH_DIAG_DATA_DIR})
 
-# https://sparse.tamu.edu/FIDAP/ex27
-# 974
-# not spd
-download_sparse_matrix("ex27" ${CMAKE_CURRENT_BINARY_DIR}/data)
+# SPD SuiteSparse matrices.
+# HB/bcsstk17: 10,974 x 10,974, 428,650 nnz.
+download_sparse_matrix("bcsstk17" ${SPD_DATA_DIR})
+
+# Cylshell/s3rmt3m3: 5,357 x 5,357, 217,681 nnz.
+download_sparse_matrix("s3rmt3m3" ${SPD_DATA_DIR})
+
+# FIDAP/ex5: 27 x 27, 279 nnz.
+download_sparse_matrix("ex5" ${SPD_DATA_DIR})
+
+# HB/nos5: 468 x 468, 5,172 nnz.
+download_sparse_matrix("nos5" ${SPD_DATA_DIR})
+
+# Other non-SPD SuiteSparse matrices.
+# HB/jgl009: 9 x 9, 50 nnz.
+download_sparse_matrix("jgl009" ${OTHER_DATA_DIR})
+
+# Zitney/rdist1: 4,134 x 4,134, 94,408 nnz.
+download_sparse_matrix("rdist1" ${OTHER_DATA_DIR})

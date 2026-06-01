@@ -41,7 +41,7 @@ protected:
         ajB.reset( new MKL_INT[6]{ 0, 0, 1, 0, 1, 2 } );
         avB.reset( new double[6]{ 1, 2, 4, 3, 5, 6 } );
 
-        std::ifstream f( "data/ex5.mtx" ); // https://sparse.tamu.edu/FIDAP/ex5
+        std::ifstream f( "data/spd/ex5.mtx" ); // https://sparse.tamu.edu/FIDAP/ex5
         matrix_utils::readMatrixMarket( f, csr_rows, csr_cols, csr_vals );
     }
 

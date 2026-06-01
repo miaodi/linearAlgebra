@@ -650,10 +650,10 @@ TEST_F( SymmetricOpsTest, LargerMatrix_FromFile )
     std::vector<int32_t> ai, aj;
     std::vector<double> av;
 
-    std::ifstream f( "data/ex5.mtx" );
+    std::ifstream f( "data/spd/ex5.mtx" );
     if ( !f.good() )
     {
-        GTEST_SKIP() << "Test matrix data/ex5.mtx not found";
+        GTEST_SKIP() << "Test matrix data/spd/ex5.mtx not found";
     }
 
     matrix_utils::readMatrixMarket( f, ai, aj, av );
@@ -1208,8 +1208,8 @@ TEST_F( PartitionTest, PartitionCSRMxN_EmptyBlocks )
 TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
 {
     // Test with real matrices from tests/data
-    std::vector<std::string> test_matrices = { "data/ex5.mtx", "data/bcsstk17.mtx",
-                                               "data/s3rmt3m3.mtx" };
+    std::vector<std::string> test_matrices = { "data/spd/ex5.mtx", "data/spd/bcsstk17.mtx",
+                                               "data/spd/s3rmt3m3.mtx" };
 
     for ( const auto& matrix_file : test_matrices )
     {
@@ -1409,8 +1409,8 @@ TEST_F( PartitionTest, PartitionCSR2x2_RealMatrices )
 
 TEST_F( PartitionTest, PartitionCSRMxN_RealMatrices )
 {
-    std::vector<std::string> test_matrices = { "data/ex5.mtx", "data/bcsstk17.mtx",
-                                               "data/s3rmt3m3.mtx" };
+    std::vector<std::string> test_matrices = { "data/spd/ex5.mtx", "data/spd/bcsstk17.mtx",
+                                               "data/spd/s3rmt3m3.mtx" };
     constexpr int max_grids = 5;
 
     for ( const auto& matrix_file : test_matrices )
