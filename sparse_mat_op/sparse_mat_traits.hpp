@@ -79,6 +79,14 @@ concept ResizableCSR = CSR<T> && requires( T obj ) {
     { obj.ResizeAV( std::declval<std::size_t>() ) } -> std::same_as<typename T::VALTYPE*>;
 };
 
+template <typename T>
+concept AppendableCSR = ResizableCSR<T> && requires( T obj, typename T::COLTYPE col, std::size_t size ) {
+    obj.aj.push_back( col );
+    obj.aj.clear();
+    { obj.aj.size() } -> std::convertible_to<std::size_t>;
+    obj.av.resize( size );
+};
+
 // Swappable resizable CSR matrix concept
 template <typename T>
 concept SwappableResizableCSR = ResizableCSR<T> && csr_owns_data<T> && csr_swappable<T>;
