@@ -70,8 +70,9 @@ private:
     /// pointers are not updated here.
     void appendUpperRowPattern( COLTYPE row, ROWTYPE const* ai, COLTYPE const* aj, CSRMatrixType& lu );
 
-    void extendUpperReachabilityColumn( COLTYPE col );
-    void rebuildUpperEdag( const CSRMatrixType& lu );
+    void extendUpperEdagColumn( COLTYPE col );
+    bool upperEdagReaches( COLTYPE source, COLTYPE target );
+    void packUpperEdag();
 
     bool validGraph( const GraphType& graph ) const;
     void reduceEdagRow( GraphType& edag,
@@ -93,7 +94,7 @@ private:
     std::vector<COLTYPE> _unionVisited;
     std::vector<COLTYPE> _stack;
     std::vector<ROWTYPE> _uCursor;
-    std::vector<std::vector<COLTYPE>> _uReachRows;
+    std::vector<std::vector<COLTYPE>> _uEdagRows;
     std::vector<std::vector<COLTYPE>> _uColumnRows;
     COLTYPE _reachEpoch{};
     COLTYPE _reduceEpoch{};

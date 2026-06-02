@@ -36,10 +36,10 @@ bool SymbolicLUEdags<CSRMatrixType>::apply( const COLTYPE nnodes, ROWTYPE const*
         appendUpperRowPattern( row, ai, aj, lu );
         const std::size_t upper_end = lu.aj.size();
         lu.AI()[row + 1] = static_cast<ROWTYPE>( upper_end ) + _base;
-        extendUpperReachabilityColumn( row );
+        extendUpperEdagColumn( row );
     }
 
-    rebuildUpperEdag( lu );
+    packUpperEdag();
     lu.av.resize( lu.aj.size() );
     return true;
 }
@@ -68,7 +68,7 @@ bool SymbolicLUEdags<CSRMatrixType>::initialize( const COLTYPE nnodes, ROWTYPE c
     _reduceVisited.assign( static_cast<std::size_t>( nnodes ), COLTYPE{} );
     _unionVisited.assign( static_cast<std::size_t>( nnodes ), COLTYPE{} );
     _uCursor.assign( static_cast<std::size_t>( nnodes ), _base );
-    _uReachRows.assign( static_cast<std::size_t>( nnodes ), {} );
+    _uEdagRows.assign( static_cast<std::size_t>( nnodes ), {} );
     _uColumnRows.assign( static_cast<std::size_t>( nnodes ), {} );
     _reachEpoch = COLTYPE{};
     _reduceEpoch = COLTYPE{};
@@ -110,7 +110,7 @@ void SymbolicLUEdags<CSRMatrixType>::appendLowerRowPattern( const COLTYPE row,
     assert( ai != nullptr && aj != nullptr );
     assert( _diag.size() == static_cast<std::size_t>( _nnodes ) );
     assert( _reachVisited.size() == static_cast<std::size_t>( _nnodes ) );
-    assert( _uReachRows.size() == static_cast<std::size_t>( _nnodes ) );
+    assert( _uEdagRows.size() == static_cast<std::size_t>( _nnodes ) );
     assert( lu.rows == _nnodes && lu.cols == _nnodes );
 
     _stack.clear();
@@ -139,7 +139,7 @@ void SymbolicLUEdags<CSRMatrixType>::appendLowerRowPattern( const COLTYPE row,
         const COLTYPE node = _stack.back();
         _stack.pop_back();
 
-        for ( const COLTYPE next : _uReachRows[node] )
+        for ( const COLTYPE next : _uEdagRows[node] )
         {
             if ( next < row )
             {
@@ -163,72 +163,88 @@ void SymbolicLUEdags<CSRMatrixType>::reduceLowerEdagRow( const COLTYPE row,
 }
 
 template <matrix_utils::AppendableCSR CSRMatrixType>
-void SymbolicLUEdags<CSRMatrixType>::extendUpperReachabilityColumn( const COLTYPE col )
+void SymbolicLUEdags<CSRMatrixType>::extendUpperEdagColumn( const COLTYPE col )
 {
     assert( col >= 0 && col < _nnodes );
-    assert( _uReachRows.size() == static_cast<std::size_t>( _nnodes ) );
     assert( _uColumnRows.size() == static_cast<std::size_t>( _nnodes ) );
+    assert( _uEdagRows.size() == static_cast<std::size_t>( _nnodes ) );
 
-    for ( const COLTYPE row : _uColumnRows[col] )
+    const auto& sources = _uColumnRows[col];
+    for ( auto source_it = sources.rbegin(); source_it != sources.rend(); ++source_it )
     {
-        assert( row >= 0 && row < col );
-        _uReachRows[row].push_back( col );
+        const COLTYPE source = *source_it;
+        assert( source >= 0 && source < col );
+
+        if ( !upperEdagReaches( source, col ) )
+        {
+            _uEdagRows[source].push_back( col );
+        }
     }
 }
 
 template <matrix_utils::AppendableCSR CSRMatrixType>
-void SymbolicLUEdags<CSRMatrixType>::rebuildUpperEdag( const CSRMatrixType& lu )
+bool SymbolicLUEdags<CSRMatrixType>::upperEdagReaches( const COLTYPE source, const COLTYPE target )
 {
-    assert( lu.rows == _nnodes && lu.cols == _nnodes );
-    assert( lu.AI() != nullptr );
+    assert( source >= 0 && source < target && target < _nnodes );
+    assert( _reduceVisited.size() == static_cast<std::size_t>( _nnodes ) );
+    assert( _uEdagRows.size() == static_cast<std::size_t>( _nnodes ) );
 
-    std::vector<std::vector<COLTYPE>> rows( static_cast<std::size_t>( _nnodes ) );
-    for ( COLTYPE offset = 0; offset < _nnodes; ++offset )
+    const COLTYPE label = nextEpoch( _reduceVisited, _reduceEpoch );
+    _stack.clear();
+
+    auto pushIfNew = [&]( const COLTYPE node ) -> bool
     {
-        const COLTYPE row = _nnodes - 1 - offset;
-        const COLTYPE label = nextEpoch( _reduceVisited, _reduceEpoch );
-
-        auto markReachable = [&]( const COLTYPE source )
+        if ( node == target )
         {
-            _reduceVisited[source] = label;
-            _stack.clear();
-            _stack.push_back( source );
+            return true;
+        }
 
-            while ( !_stack.empty() )
-            {
-                const COLTYPE node = _stack.back();
-                _stack.pop_back();
-
-                for ( const COLTYPE next_label : rows[node] )
-                {
-                    const COLTYPE next = next_label - _base;
-                    if ( _reduceVisited[next] != label )
-                    {
-                        _reduceVisited[next] = label;
-                        _stack.push_back( next );
-                    }
-                }
-            }
-        };
-
-        for ( ROWTYPE p = lu.AI()[row] - _base; p < lu.AI()[row + 1] - _base; ++p )
+        if ( node < target && _reduceVisited[node] != label )
         {
-            const COLTYPE candidate = lu.aj[p] - _base;
-            if ( candidate <= row || _reduceVisited[candidate] == label )
-            {
-                continue;
-            }
+            _reduceVisited[node] = label;
+            _stack.push_back( node );
+        }
+        return false;
+    };
 
-            rows[row].push_back( candidate + _base );
-            markReachable( candidate );
+    for ( const COLTYPE next : _uEdagRows[source] )
+    {
+        if ( pushIfNew( next ) )
+        {
+            return true;
         }
     }
+
+    while ( !_stack.empty() )
+    {
+        const COLTYPE node = _stack.back();
+        _stack.pop_back();
+
+        for ( const COLTYPE next : _uEdagRows[node] )
+        {
+            if ( pushIfNew( next ) )
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+template <matrix_utils::AppendableCSR CSRMatrixType>
+void SymbolicLUEdags<CSRMatrixType>::packUpperEdag()
+{
+    assert( _uEdagRows.size() == static_cast<std::size_t>( _nnodes ) );
 
     _uEdag.ai.assign( static_cast<std::size_t>( _nnodes ) + 1, _base );
     _uEdag.aj.clear();
     for ( COLTYPE row = 0; row < _nnodes; ++row )
     {
-        _uEdag.aj.insert( _uEdag.aj.end(), rows[row].begin(), rows[row].end() );
+        for ( const COLTYPE next : _uEdagRows[row] )
+        {
+            _uEdag.aj.push_back( next + _base );
+        }
         _uEdag.ai[row + 1] = static_cast<ROWTYPE>( _uEdag.aj.size() ) + _base;
     }
 }

@@ -94,13 +94,42 @@ CholeskyCSRMatrixType computeCholeskyPattern( const CholeskyCSRMatrixType& matri
     parent.resize( matrix.rows );
     graph::eliminationTree( matrix.rows, matrix.AI(), matrix.AJ(), parent.data(), ancestor.data() );
 
-    CholeskyCSRMatrixType skeleton;
-    factorization::SkeletonGraph<CholeskyCSRMatrixType> skeleton_builder( 1 );
-    skeleton_builder.apply( matrix.rows, matrix.AI(), matrix.AJ(), parent.data(), skeleton );
-
     CholeskyCSRMatrixType L;
-    factorization::SymbolicCholesky<CholeskyCSRMatrixType> symbolic( 1 );
-    symbolic.apply( matrix.rows, matrix.AI(), matrix.AJ(), parent.data(), skeleton.AI(), skeleton.AJ(), L );
+    L.rows = matrix.rows;
+    L.cols = matrix.cols;
+    L.ResizeAI( static_cast<std::size_t>( matrix.rows ) + 1 );
+    L.AI()[0] = matrix.Base();
+
+    const int base = matrix.Base();
+    std::vector<int> mark( matrix.rows, -1 );
+    std::vector<int> aj;
+    for ( int row = 0; row < matrix.rows; ++row )
+    {
+        const auto row_begin = aj.size();
+        for ( int p = matrix.AI()[row] - base; p < matrix.AI()[row + 1] - base; ++p )
+        {
+            int node = matrix.AJ()[p] - base;
+            if ( node >= row )
+            {
+                break;
+            }
+
+            while ( node < row && mark[node] != row )
+            {
+                mark[node] = row;
+                aj.push_back( node + base );
+                node = parent[node] - base;
+            }
+        }
+        std::sort( aj.begin() + static_cast<std::ptrdiff_t>( row_begin ), aj.end() );
+        aj.push_back( row + base );
+        L.AI()[row + 1] = static_cast<int>( aj.size() ) + base;
+    }
+
+    L.ResizeAJ( aj.size() );
+    L.ResizeAV( aj.size() );
+    std::copy( aj.begin(), aj.end(), L.AJ() );
+    std::fill( L.AV(), L.AV() + L.NNZ(), 1.0 );
     return L;
 }
 
@@ -227,7 +256,8 @@ TEST( SymbolicLUEdags, ApplyBuildsCombinedPatternThroughPublicApi )
 
 TEST( SymbolicLUEdags, SpdMatricesMatchCholeskyPatternAndEtree )
 {
-    const std::vector<std::string> spd_matrices = { "spd/ex5.mtx" };
+    const std::vector<std::string> spd_matrices = { "spd/ex5.mtx", "spd/nos5.mtx",
+                                                    "spd/s3rmt3m3.mtx", "spd/bcsstk17.mtx" };
 
     for ( const auto& matrix_file : spd_matrices )
     {
