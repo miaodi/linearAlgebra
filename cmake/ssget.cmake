@@ -34,6 +34,8 @@ function(download_sparse_matrix matrix_name output_dir)
             RESULT_VARIABLE _result
             OUTPUT_VARIABLE _output
             ERROR_VARIABLE _error
+            ECHO_OUTPUT_VARIABLE
+            ECHO_ERROR_VARIABLE
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         )
         if(NOT _result EQUAL 0)

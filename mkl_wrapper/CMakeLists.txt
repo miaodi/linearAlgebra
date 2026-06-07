@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5...3.20)
+cmake_minimum_required(VERSION 3.18...3.20)
 project(mkl_wrapper CXX)
 
 set(MKL_WRAPPER_SRC mkl_sparse_mat.cpp mkl_solver.cpp mkl_eigen.cpp mumps_solver.cpp arpack_wrapper.cpp incomplete_cholesky.cpp incomplete_lu.cpp amgcl_precond.cpp)

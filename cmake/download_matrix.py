@@ -1,7 +1,13 @@
 import sys
 import os
 import shutil
+import tarfile
 import tempfile
+import time
+
+
+DOWNLOAD_CHUNK_SIZE = 128 * 1024
+DOWNLOAD_SLEEP_SECONDS = 0.01
 
 
 def matrix_filename(matrix_name):
@@ -27,6 +33,55 @@ def find_matrix_file(path):
             return candidate
 
     return None
+
+
+def safe_extract(archive, output_dir):
+    output_dir = os.path.abspath(output_dir)
+    for member in archive.getmembers():
+        target = os.path.abspath(os.path.join(output_dir, member.name))
+        if not target.startswith(output_dir + os.sep) and target != output_dir:
+            raise RuntimeError(f"Archive member escapes output directory: {member.name}")
+
+    archive.extractall(output_dir)
+
+
+def format_rate(bytes_downloaded, elapsed_seconds):
+    if elapsed_seconds <= 0:
+        return "unknown speed"
+
+    mib_per_second = bytes_downloaded / (1024 * 1024) / elapsed_seconds
+    return f"{mib_per_second:.2f} MiB/s"
+
+
+def download_matrix_market_archive(matrix, outdir):
+    import requests
+
+    local_archive = os.path.join(outdir, f"{matrix.name}.tar.gz")
+    bytes_downloaded = 0
+    start = time.monotonic()
+
+    response = requests.get(matrix.url("MM"), stream=True)
+    response.raise_for_status()
+
+    with open(local_archive, "wb") as fout:
+        for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+            if not chunk:
+                continue
+
+            fout.write(chunk)
+            bytes_downloaded += len(chunk)
+            time.sleep(DOWNLOAD_SLEEP_SECONDS)
+
+    elapsed = time.monotonic() - start
+    print(
+        f"Downloaded {bytes_downloaded / (1024 * 1024):.2f} MiB in "
+        f"{elapsed:.2f}s ({format_rate(bytes_downloaded, elapsed)})"
+    )
+
+    with tarfile.open(local_archive, "r:gz") as archive:
+        safe_extract(archive, outdir)
+
+    return outdir
 
 if len(sys.argv) != 3:
     print("Usage: download_matrix.py <matrix_name> <output_dir>")
@@ -56,7 +111,7 @@ if not matches:
     sys.exit(1)
 
 with tempfile.TemporaryDirectory(prefix="ssget-", dir=outdir) as tmpdir:
-    path, _ = matches[0].download(destpath=tmpdir, extract=True)
+    path = download_matrix_market_archive(matches[0], tmpdir)
     matrix_path = find_matrix_file(path)
     if matrix_path is None:
         print(f"No Matrix Market coordinate file found for {matrix_name}", file=sys.stderr)

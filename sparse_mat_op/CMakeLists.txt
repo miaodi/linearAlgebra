@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5...3.20)
+cmake_minimum_required(VERSION 3.18...3.20)
 project(sparse_mat_op CXX)
 
 set(SPARSE_MAT_OP_SRC matrix_utils.cpp triangle_solve.cpp precond.cpp permutation.cpp io.cpp sp_ops.cpp spgemm.cpp spadd.cpp ilum.cpp ruiz_scale.cpp scaling.cpp)

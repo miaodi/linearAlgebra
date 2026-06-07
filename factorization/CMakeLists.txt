@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5...3.20)
+cmake_minimum_required(VERSION 3.18...3.20)
 project(factorization CXX)
 
 set(SRC cholesky_symbolic.cpp cholesky_multifrontal.cpp lu_symbolic.cpp)

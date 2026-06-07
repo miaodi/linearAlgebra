@@ -36,7 +36,7 @@ optionally for GPU sparse operations and experiments.
 
 ## Build And Test
 
-The project uses CMake.
+The project uses CMake 3.18 or newer.
 
 The common local build directory is `release/`.
 

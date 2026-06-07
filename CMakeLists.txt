@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5...3.20)
+cmake_minimum_required(VERSION 3.18...3.20)
 
 # Set compilers before project() to ensure proper detection
 # Note: These can be overridden via environment variables (CC, CXX) or cmake -D flags

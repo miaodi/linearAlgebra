@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5...3.20)
+cmake_minimum_required(VERSION 3.18...3.20)
 project(data)
 
 include(${CMAKE_SOURCE_DIR}/cmake/ssget.cmake)

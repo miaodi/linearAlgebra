@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5...3.20)
+cmake_minimum_required(VERSION 3.18...3.20)
 project(sparse_mat_op_cuda CUDA CXX)
 
 find_package(BLAS REQUIRED)

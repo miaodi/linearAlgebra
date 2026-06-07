@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5...3.20)
+cmake_minimum_required(VERSION 3.18...3.20)
 project(scratch_test CXX)
 
 add_executable(ilu_factorization_levels ilu_factorization_levels.cpp)

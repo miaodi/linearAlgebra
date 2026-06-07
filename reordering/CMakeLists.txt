@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5...3.20)
+cmake_minimum_required(VERSION 3.18...3.20)
 project(reordering CXX)
 
 set(REORDERING_SRC BFS.cpp Reordering.cpp UnionFind.cpp MinimumDegree.cpp quotient_graph.cpp UnsymmReordering.cpp)
