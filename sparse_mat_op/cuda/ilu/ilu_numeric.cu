@@ -13,7 +13,7 @@ using ilu_detail::kThreadsPerBlock;
 using ilu_detail::kWarpSize;
 using ilu_detail::kWarpsPerBlock;
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup>
 __global__ void ilu_level_factor_kernel( COLTYPE level_rows,
                                          const COLTYPE* level_rows_perm,
                                          const ROWTYPE* lu_ai,
@@ -32,10 +32,33 @@ __global__ void ilu_level_factor_kernel( COLTYPE level_rows,
     }
 
     const COLTYPE i = level_rows_perm[level_row] - base;
-    ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE>( i, lu_ai, lu_aj, lu_diag, base,
-                                                                    lu_av, status, lane );
+    if constexpr ( Lookup == ilu_detail::RowIndexLookup::Shared )
+    {
+        extern __shared__ unsigned char shared_storage[];
+        COLTYPE* shared_row_cols = reinterpret_cast<COLTYPE*>( shared_storage ) +
+                                   warp_in_block * ilu_detail::kSharedRowColumnsPerWarp;
+
+        const ROWTYPE row_len = ( lu_ai[i + 1] - base ) - ( lu_ai[i] - base );
+        if ( row_len <= static_cast<ROWTYPE>( ilu_detail::kSharedRowColumnsPerWarp ) )
+        {
+            ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Shared>(
+                i, lu_ai, lu_aj, lu_diag, base, lu_av, status, lane, shared_row_cols );
+        }
+        else
+        {
+            ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>(
+                i, lu_ai, lu_aj, lu_diag, base, lu_av, status, lane );
+        }
+    }
+    else
+    {
+        ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>(
+            i, lu_ai, lu_aj, lu_diag, base, lu_av, status, lane );
+    }
 }
 
+#if 0
+// Disabled while focusing on the base global/shared binary-search numeric path.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 __global__ void ilu_level_factor_cached_kernel( COLTYPE level_rows,
                                                 const COLTYPE* level_rows_perm,
@@ -79,48 +102,35 @@ __global__ void ilu_level_factor_cached_kernel( COLTYPE level_rows,
         }
     }
 }
-
-inline bool cuda_ok( cudaError_t status )
-{
-    return status == cudaSuccess;
-}
-
-inline cudaError_t allocate_status( int** d_status, cudaStream_t stream, bool* async_allocated )
-{
-#if defined( CUDART_VERSION ) && CUDART_VERSION >= 11020
-    cudaError_t status = cudaMallocAsync( reinterpret_cast<void**>( d_status ), sizeof( int ), stream );
-    if ( status == cudaSuccess )
-    {
-        *async_allocated = true;
-        return cudaSuccess;
-    }
-    if ( status != cudaErrorNotSupported )
-    {
-        return status;
-    }
-    cudaGetLastError();
 #endif
-    *async_allocated = false;
-    return cudaMalloc( reinterpret_cast<void**>( d_status ), sizeof( int ) );
-}
 
-inline cudaError_t free_status( int* d_status, cudaStream_t stream, bool async_allocated )
-{
-#if defined( CUDART_VERSION ) && CUDART_VERSION >= 11020
-    if ( async_allocated )
-    {
-        return cudaFreeAsync( d_status, stream );
-    }
-#endif
-    return cudaFree( d_status );
-}
 } // namespace
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t ILUEmbedAValuesToLUAsync( COLTYPE n,
+                                      const ROWTYPE* d_a_ai,
+                                      const COLTYPE* d_a_aj,
+                                      const VALTYPE* d_a_av,
+                                      const ROWTYPE* d_lu_ai,
+                                      const COLTYPE* d_lu_aj,
+                                      COLTYPE base,
+                                      VALTYPE* d_lu_av,
+                                      cudaStream_t stream )
+{
+    if ( n <= 0 || d_a_ai == nullptr || d_a_aj == nullptr || d_a_av == nullptr ||
+         d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_av == nullptr )
+    {
+        return cudaErrorInvalidValue;
+    }
+
+    const int init_blocks = ( n + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
+    ilu_detail::InitLUValuesKernel<<<init_blocks, kThreadsPerBlock, 0, stream>>>(
+        n, d_a_ai, d_a_aj, d_a_av, d_lu_ai, d_lu_aj, base, d_lu_av );
+    return ilu_detail::CudaLaunchStatus();
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
-                                              const ROWTYPE* d_a_ai,
-                                              const COLTYPE* d_a_aj,
-                                              const VALTYPE* d_a_av,
                                               const ROWTYPE* d_lu_ai,
                                               const COLTYPE* d_lu_aj,
                                               const ROWTYPE* d_lu_diag,
@@ -130,25 +140,16 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
                                               COLTYPE base,
                                               VALTYPE* d_lu_av,
                                               int* d_status,
+                                              ILUNumericRowLookup row_lookup,
                                               cudaStream_t stream )
 {
-    if ( n <= 0 || levels < 0 || d_a_ai == nullptr || d_a_aj == nullptr || d_a_av == nullptr ||
-         d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr || d_level_perm == nullptr ||
-         h_level_prefix == nullptr || d_lu_av == nullptr || d_status == nullptr )
+    if ( n <= 0 || levels < 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr ||
+         d_level_perm == nullptr || h_level_prefix == nullptr || d_lu_av == nullptr || d_status == nullptr )
     {
         return cudaErrorInvalidValue;
     }
 
     cudaError_t status = cudaMemsetAsync( d_status, 0, sizeof( int ), stream );
-    if ( status != cudaSuccess )
-    {
-        return status;
-    }
-
-    const int init_blocks = ( n + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
-    ilu_detail::InitLUValuesKernel<<<init_blocks, kThreadsPerBlock, 0, stream>>>(
-        n, d_a_ai, d_a_aj, d_a_av, d_lu_ai, d_lu_aj, base, d_lu_av );
-    status = ilu_detail::CudaLaunchStatus();
     if ( status != cudaSuccess )
     {
         return status;
@@ -165,8 +166,24 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
         }
 
         const int blocks = ( level_rows + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
-        ilu_level_factor_kernel<<<blocks, kThreadsPerBlock, 0, stream>>>(
-            level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av, d_status );
+        switch ( row_lookup )
+        {
+        case ILUNumericRowLookup::Global:
+            ilu_level_factor_kernel<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>
+                <<<blocks, kThreadsPerBlock, 0, stream>>>( level_rows, d_level_perm + level_begin, d_lu_ai,
+                                                           d_lu_aj, d_lu_diag, base, d_lu_av, d_status );
+            break;
+        case ILUNumericRowLookup::Shared:
+        {
+            const auto shared_bytes = ilu_detail::SharedRowIndexCacheBytes<COLTYPE>();
+            ilu_level_factor_kernel<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Shared>
+                <<<blocks, kThreadsPerBlock, shared_bytes, stream>>>(
+                    level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av, d_status );
+            break;
+        }
+        default:
+            return cudaErrorInvalidValue;
+        }
         status = ilu_detail::CudaLaunchStatus();
         if ( status != cudaSuccess )
         {
@@ -177,11 +194,10 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
     return cudaSuccess;
 }
 
+#if 0
+// Disabled while focusing on the base global/shared binary-search numeric path.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
-                                                    const ROWTYPE* d_a_ai,
-                                                    const COLTYPE* d_a_aj,
-                                                    const VALTYPE* d_a_av,
                                                     const ROWTYPE* d_lu_ai,
                                                     const COLTYPE* d_lu_aj,
                                                     const ROWTYPE* d_lu_diag,
@@ -196,24 +212,14 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
                                                     int* d_status,
                                                     cudaStream_t stream )
 {
-    if ( n <= 0 || levels < 0 || d_a_ai == nullptr || d_a_aj == nullptr || d_a_av == nullptr ||
-         d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr || d_update_ptr == nullptr ||
-         d_update_jpos == nullptr || d_update_pos == nullptr || d_level_perm == nullptr ||
-         h_level_prefix == nullptr || d_lu_av == nullptr || d_status == nullptr )
+    if ( n <= 0 || levels < 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr ||
+         d_update_ptr == nullptr || d_update_jpos == nullptr || d_update_pos == nullptr ||
+         d_level_perm == nullptr || h_level_prefix == nullptr || d_lu_av == nullptr || d_status == nullptr )
     {
         return cudaErrorInvalidValue;
     }
 
     cudaError_t status = cudaMemsetAsync( d_status, 0, sizeof( int ), stream );
-    if ( status != cudaSuccess )
-    {
-        return status;
-    }
-
-    const int init_blocks = ( n + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
-    ilu_detail::InitLUValuesKernel<<<init_blocks, kThreadsPerBlock, 0, stream>>>(
-        n, d_a_ai, d_a_aj, d_a_av, d_lu_ai, d_lu_aj, base, d_lu_av );
-    status = ilu_detail::CudaLaunchStatus();
     if ( status != cudaSuccess )
     {
         return status;
@@ -242,62 +248,39 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
 
     return cudaSuccess;
 }
+#endif
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool ILUBaseNumericFactorization( COLTYPE n,
-                                  const ROWTYPE* d_a_ai,
-                                  const COLTYPE* d_a_aj,
-                                  const VALTYPE* d_a_av,
-                                  const ROWTYPE* d_lu_ai,
-                                  const COLTYPE* d_lu_aj,
-                                  const ROWTYPE* d_lu_diag,
-                                  const COLTYPE* d_level_perm,
-                                  const COLTYPE* h_level_prefix,
-                                  COLTYPE levels,
-                                  COLTYPE base,
-                                  VALTYPE* d_lu_av,
-                                  cudaStream_t stream )
-{
-    int* d_status = nullptr;
-    bool async_allocated = false;
-    if ( !cuda_ok( allocate_status( &d_status, stream, &async_allocated ) ) )
-    {
-        return false;
-    }
+template cudaError_t ILUEmbedAValuesToLUAsync<int, int, float>( int,
+                                                                const int*,
+                                                                const int*,
+                                                                const float*,
+                                                                const int*,
+                                                                const int*,
+                                                                int,
+                                                                float*,
+                                                                cudaStream_t );
 
-    const cudaError_t enqueue_status = ILUBaseNumericFactorizationAsync(
-        n, d_a_ai, d_a_aj, d_a_av, d_lu_ai, d_lu_aj, d_lu_diag, d_level_perm, h_level_prefix,
-        levels, base, d_lu_av, d_status, stream );
-    if ( enqueue_status != cudaSuccess )
-    {
-        free_status( d_status, stream, async_allocated );
-        if ( async_allocated )
-        {
-            cudaStreamSynchronize( stream );
-        }
-        return false;
-    }
+template cudaError_t ILUEmbedAValuesToLUAsync<int, int, double>( int,
+                                                                 const int*,
+                                                                 const int*,
+                                                                 const double*,
+                                                                 const int*,
+                                                                 const int*,
+                                                                 int,
+                                                                 double*,
+                                                                 cudaStream_t );
 
-    int h_status = 0;
-    const bool copied_status =
-        cuda_ok( cudaMemcpyAsync( &h_status, d_status, sizeof( int ), cudaMemcpyDeviceToHost, stream ) );
-    const bool synced = copied_status && cuda_ok( cudaStreamSynchronize( stream ) );
-    free_status( d_status, stream, async_allocated );
-    if ( async_allocated )
-    {
-        cudaStreamSynchronize( stream );
-    }
-    if ( !synced )
-    {
-        return false;
-    }
-    return h_status == 0;
-}
+template cudaError_t ILUEmbedAValuesToLUAsync<std::int64_t, int, double>( int,
+                                                                          const std::int64_t*,
+                                                                          const int*,
+                                                                          const double*,
+                                                                          const std::int64_t*,
+                                                                          const int*,
+                                                                          int,
+                                                                          double*,
+                                                                          cudaStream_t );
 
 template cudaError_t ILUBaseNumericFactorizationAsync<int, int, float>( int,
-                                                                        const int*,
-                                                                        const int*,
-                                                                        const float*,
                                                                         const int*,
                                                                         const int*,
                                                                         const int*,
@@ -307,12 +290,10 @@ template cudaError_t ILUBaseNumericFactorizationAsync<int, int, float>( int,
                                                                         int,
                                                                         float*,
                                                                         int*,
+                                                                        ILUNumericRowLookup,
                                                                         cudaStream_t );
 
 template cudaError_t ILUBaseNumericFactorizationAsync<int, int, double>( int,
-                                                                         const int*,
-                                                                         const int*,
-                                                                         const double*,
                                                                          const int*,
                                                                          const int*,
                                                                          const int*,
@@ -322,12 +303,10 @@ template cudaError_t ILUBaseNumericFactorizationAsync<int, int, double>( int,
                                                                          int,
                                                                          double*,
                                                                          int*,
+                                                                         ILUNumericRowLookup,
                                                                          cudaStream_t );
 
 template cudaError_t ILUBaseNumericFactorizationAsync<std::int64_t, int, double>( int,
-                                                                                  const std::int64_t*,
-                                                                                  const int*,
-                                                                                  const double*,
                                                                                   const std::int64_t*,
                                                                                   const int*,
                                                                                   const std::int64_t*,
@@ -337,12 +316,12 @@ template cudaError_t ILUBaseNumericFactorizationAsync<std::int64_t, int, double>
                                                                                   int,
                                                                                   double*,
                                                                                   int*,
+                                                                                  ILUNumericRowLookup,
                                                                                   cudaStream_t );
 
+#if 0
+// Disabled while focusing on the base global/shared binary-search numeric path.
 template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, float>( int,
-                                                                              const int*,
-                                                                              const int*,
-                                                                              const float*,
                                                                               const int*,
                                                                               const int*,
                                                                               const int*,
@@ -360,9 +339,6 @@ template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, float>( in
 template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, double>( int,
                                                                                const int*,
                                                                                const int*,
-                                                                               const double*,
-                                                                               const int*,
-                                                                               const int*,
                                                                                const int*,
                                                                                const int*,
                                                                                const int*,
@@ -378,9 +354,6 @@ template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, double>( i
 template cudaError_t ILUBaseNumericFactorizationCachedAsync<std::int64_t, int, double>( int,
                                                                                         const std::int64_t*,
                                                                                         const int*,
-                                                                                        const double*,
-                                                                                        const std::int64_t*,
-                                                                                        const int*,
                                                                                         const std::int64_t*,
                                                                                         const std::int64_t*,
                                                                                         const std::int64_t*,
@@ -392,47 +365,6 @@ template cudaError_t ILUBaseNumericFactorizationCachedAsync<std::int64_t, int, d
                                                                                         double*,
                                                                                         int*,
                                                                                         cudaStream_t );
-
-template bool ILUBaseNumericFactorization<int, int, float>( int,
-                                                            const int*,
-                                                            const int*,
-                                                            const float*,
-                                                            const int*,
-                                                            const int*,
-                                                            const int*,
-                                                            const int*,
-                                                            const int*,
-                                                            int,
-                                                            int,
-                                                            float*,
-                                                            cudaStream_t );
-
-template bool ILUBaseNumericFactorization<int, int, double>( int,
-                                                             const int*,
-                                                             const int*,
-                                                             const double*,
-                                                             const int*,
-                                                             const int*,
-                                                             const int*,
-                                                             const int*,
-                                                             const int*,
-                                                             int,
-                                                             int,
-                                                             double*,
-                                                             cudaStream_t );
-
-template bool ILUBaseNumericFactorization<std::int64_t, int, double>( int,
-                                                                      const std::int64_t*,
-                                                                      const int*,
-                                                                      const double*,
-                                                                      const std::int64_t*,
-                                                                      const int*,
-                                                                      const std::int64_t*,
-                                                                      const int*,
-                                                                      const int*,
-                                                                      int,
-                                                                      int,
-                                                                      double*,
-                                                                      cudaStream_t );
+#endif
 
 } // namespace matrix_utils::sparse_cuda

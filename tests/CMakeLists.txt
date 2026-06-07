@@ -21,9 +21,14 @@ set(EXCLUDED_TESTS
    # "cuda_csr_utils_test.cu"
 )
 
+set(DISABLED_ILU_TESTS
+   "cuda_ilu_symbolic_test.cpp"
+)
+list(APPEND EXCLUDED_TESTS ${DISABLED_ILU_TESTS})
+
 # Conditionally exclude CUDA tests if CUDA is not enabled
 if(NOT USE_CUDA)
-   list(APPEND EXCLUDED_TESTS "cuda_ilu_symbolic_test.cpp" "cuda_ilu_base_test.cpp" "cuda_csr_utils_test.cu")
+   list(APPEND EXCLUDED_TESTS "cuda_csr_utils_test.cu")
 endif()
 
 set(MKL_REQUIRED_TESTS

@@ -6,12 +6,18 @@
 namespace matrix_utils::sparse_cuda
 {
 
+enum class ILUNumericRowLookup
+{
+    Global,
+    Shared
+};
+
 /**
- * @brief Base CUDA numerical ILU factorization over a precomputed LU pattern.
+ * @brief Embed A values into a precomputed LU sparsity pattern.
  *
- * The host traverses topological levels. For each level, one warp is assigned
- * to each row. Within a row, the warp processes lower entries sequentially and
- * updates row values in parallel.
+ * For every entry in the LU pattern, this copies the matching A value when the
+ * entry exists in A and writes zero for fill-ins. A and LU column indices must
+ * be sorted within each row because the device kernel uses binary search.
  *
  * @param n Matrix order.
  * @param d_a_ai Input A row pointers on device.
@@ -19,25 +25,35 @@ namespace matrix_utils::sparse_cuda
  * @param d_a_av Input A values on device.
  * @param d_lu_ai Symbolic LU row pointers on device.
  * @param d_lu_aj Symbolic LU column indices on device.
- * @param d_lu_diag Diagonal positions in LU, with the same base as d_lu_ai.
- * @param d_level_perm Topological row ordering on device.
- * @param h_level_prefix Topological level boundaries on host.
- * @param levels Number of topological levels.
  * @param base CSR base, usually 0.
  * @param d_lu_av Output LU values on device, size d_lu_ai[n] - base.
- * @param d_status Device status flag, set to 0 before factorization and to 1
- *                 if a zero pivot is found. The caller owns this storage and
- *                 must keep it valid until the stream reaches this work.
  * @param stream CUDA stream.
- * @return cudaSuccess if work was enqueued successfully. This does not imply
- *         the factorization has completed successfully; after successful stream
- *         completion, inspect d_status to detect numerical failure.
+ */
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t ILUEmbedAValuesToLUAsync( COLTYPE n,
+                                      const ROWTYPE* d_a_ai,
+                                      const COLTYPE* d_a_aj,
+                                      const VALTYPE* d_a_av,
+                                      const ROWTYPE* d_lu_ai,
+                                      const COLTYPE* d_lu_aj,
+                                      COLTYPE base,
+                                      VALTYPE* d_lu_av,
+                                      cudaStream_t stream = nullptr );
+
+/**
+ * @brief Base CUDA numerical ILU factorization with explicit row lookup mode.
+ *
+ * The host traverses topological levels. For each level, one warp is assigned
+ * to each row. Within a row, the warp processes lower entries sequentially and
+ * updates row values in parallel. The caller must initialize d_lu_av first,
+ * usually with ILUEmbedAValuesToLUAsync.
+ *
+ * Global uses only global-memory binary search. Shared caches row indices in
+ * shared memory when the row fits the internal per-warp capacity and falls back
+ * to global-memory binary search for longer rows.
  */
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
-                                              const ROWTYPE* d_a_ai,
-                                              const COLTYPE* d_a_aj,
-                                              const VALTYPE* d_a_av,
                                               const ROWTYPE* d_lu_ai,
                                               const COLTYPE* d_lu_aj,
                                               const ROWTYPE* d_lu_diag,
@@ -47,8 +63,11 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
                                               COLTYPE base,
                                               VALTYPE* d_lu_av,
                                               int* d_status,
+                                              ILUNumericRowLookup row_lookup,
                                               cudaStream_t stream = nullptr );
 
+#if 0
+// Disabled while focusing on the base global/shared binary-search numeric path.
 /**
  * @brief CUDA numerical ILU factorization using a precomputed update cache.
  *
@@ -57,15 +76,15 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
  * compact list of source U positions and destination row-i positions that
  * survive the ILU sparsity pattern.
  *
+ * The caller must initialize d_lu_av first, usually with
+ * ILUEmbedAValuesToLUAsync.
+ *
  * @param d_update_ptr Device update offsets, size d_lu_ai[n] - base + 1.
  * @param d_update_jpos Device source LU value positions for U(k,j).
  * @param d_update_pos Device destination LU value positions for row i.
  */
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
-                                                    const ROWTYPE* d_a_ai,
-                                                    const COLTYPE* d_a_aj,
-                                                    const VALTYPE* d_a_av,
                                                     const ROWTYPE* d_lu_ai,
                                                     const COLTYPE* d_lu_aj,
                                                     const ROWTYPE* d_lu_diag,
@@ -79,34 +98,39 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
                                                     VALTYPE* d_lu_av,
                                                     int* d_status,
                                                     cudaStream_t stream = nullptr );
+#endif
 
-/**
- * @brief Blocking convenience wrapper for ILUBaseNumericFactorizationAsync.
- *
- * This function synchronizes the supplied stream before returning so it can
- * report zero-pivot status as a host bool.
- *
- * @return true on success, false if launch/copy fails or a zero pivot is found.
- */
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool ILUBaseNumericFactorization( COLTYPE n,
-                                  const ROWTYPE* d_a_ai,
-                                  const COLTYPE* d_a_aj,
-                                  const VALTYPE* d_a_av,
-                                  const ROWTYPE* d_lu_ai,
-                                  const COLTYPE* d_lu_aj,
-                                  const ROWTYPE* d_lu_diag,
-                                  const COLTYPE* d_level_perm,
-                                  const COLTYPE* h_level_prefix,
-                                  COLTYPE levels,
-                                  COLTYPE base,
-                                  VALTYPE* d_lu_av,
-                                  cudaStream_t stream = nullptr );
+extern template cudaError_t ILUEmbedAValuesToLUAsync<int, int, float>( int,
+                                                                       const int*,
+                                                                       const int*,
+                                                                       const float*,
+                                                                       const int*,
+                                                                       const int*,
+                                                                       int,
+                                                                       float*,
+                                                                       cudaStream_t );
+
+extern template cudaError_t ILUEmbedAValuesToLUAsync<int, int, double>( int,
+                                                                        const int*,
+                                                                        const int*,
+                                                                        const double*,
+                                                                        const int*,
+                                                                        const int*,
+                                                                        int,
+                                                                        double*,
+                                                                        cudaStream_t );
+
+extern template cudaError_t ILUEmbedAValuesToLUAsync<std::int64_t, int, double>( int,
+                                                                                 const std::int64_t*,
+                                                                                 const int*,
+                                                                                 const double*,
+                                                                                 const std::int64_t*,
+                                                                                 const int*,
+                                                                                 int,
+                                                                                 double*,
+                                                                                 cudaStream_t );
 
 extern template cudaError_t ILUBaseNumericFactorizationAsync<int, int, float>( int,
-                                                                               const int*,
-                                                                               const int*,
-                                                                               const float*,
                                                                                const int*,
                                                                                const int*,
                                                                                const int*,
@@ -116,12 +140,10 @@ extern template cudaError_t ILUBaseNumericFactorizationAsync<int, int, float>( i
                                                                                int,
                                                                                float*,
                                                                                int*,
+                                                                               ILUNumericRowLookup,
                                                                                cudaStream_t );
 
 extern template cudaError_t ILUBaseNumericFactorizationAsync<int, int, double>( int,
-                                                                                const int*,
-                                                                                const int*,
-                                                                                const double*,
                                                                                 const int*,
                                                                                 const int*,
                                                                                 const int*,
@@ -131,12 +153,10 @@ extern template cudaError_t ILUBaseNumericFactorizationAsync<int, int, double>( 
                                                                                 int,
                                                                                 double*,
                                                                                 int*,
+                                                                                ILUNumericRowLookup,
                                                                                 cudaStream_t );
 
 extern template cudaError_t ILUBaseNumericFactorizationAsync<std::int64_t, int, double>( int,
-                                                                                         const std::int64_t*,
-                                                                                         const int*,
-                                                                                         const double*,
                                                                                          const std::int64_t*,
                                                                                          const int*,
                                                                                          const std::int64_t*,
@@ -146,12 +166,12 @@ extern template cudaError_t ILUBaseNumericFactorizationAsync<std::int64_t, int, 
                                                                                          int,
                                                                                          double*,
                                                                                          int*,
+                                                                                         ILUNumericRowLookup,
                                                                                          cudaStream_t );
 
+#if 0
+// Disabled while focusing on the base global/shared binary-search numeric path.
 extern template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, float>( int,
-                                                                                     const int*,
-                                                                                     const int*,
-                                                                                     const float*,
                                                                                      const int*,
                                                                                      const int*,
                                                                                      const int*,
@@ -167,9 +187,6 @@ extern template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, flo
                                                                                      cudaStream_t );
 
 extern template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, double>( int,
-                                                                                      const int*,
-                                                                                      const int*,
-                                                                                      const double*,
                                                                                       const int*,
                                                                                       const int*,
                                                                                       const int*,
@@ -188,9 +205,6 @@ extern template cudaError_t ILUBaseNumericFactorizationCachedAsync<std::int64_t,
     int,
     const std::int64_t*,
     const int*,
-    const double*,
-    const std::int64_t*,
-    const int*,
     const std::int64_t*,
     const std::int64_t*,
     const std::int64_t*,
@@ -202,47 +216,6 @@ extern template cudaError_t ILUBaseNumericFactorizationCachedAsync<std::int64_t,
     double*,
     int*,
     cudaStream_t );
-
-extern template bool ILUBaseNumericFactorization<int, int, float>( int,
-                                                                   const int*,
-                                                                   const int*,
-                                                                   const float*,
-                                                                   const int*,
-                                                                   const int*,
-                                                                   const int*,
-                                                                   const int*,
-                                                                   const int*,
-                                                                   int,
-                                                                   int,
-                                                                   float*,
-                                                                   cudaStream_t );
-
-extern template bool ILUBaseNumericFactorization<int, int, double>( int,
-                                                                    const int*,
-                                                                    const int*,
-                                                                    const double*,
-                                                                    const int*,
-                                                                    const int*,
-                                                                    const int*,
-                                                                    const int*,
-                                                                    const int*,
-                                                                    int,
-                                                                    int,
-                                                                    double*,
-                                                                    cudaStream_t );
-
-extern template bool ILUBaseNumericFactorization<std::int64_t, int, double>( int,
-                                                                             const std::int64_t*,
-                                                                             const int*,
-                                                                             const double*,
-                                                                             const std::int64_t*,
-                                                                             const int*,
-                                                                             const std::int64_t*,
-                                                                             const int*,
-                                                                             const int*,
-                                                                             int,
-                                                                             int,
-                                                                             double*,
-                                                                             cudaStream_t );
+#endif
 
 } // namespace matrix_utils::sparse_cuda

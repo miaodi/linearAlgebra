@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <limits>
 
+#if 0
+// Disabled while focusing on the base global/shared binary-search numeric path.
 namespace matrix_utils::sparse_cuda
 {
 namespace
@@ -26,7 +28,11 @@ __global__ void ilu_level_factor_workqueue_kernel( COLTYPE level_rows,
                                                    int* status,
                                                    COLTYPE* level_row_counter )
 {
+    const int warp_in_block = threadIdx.x / kWarpSize;
     const int lane = threadIdx.x & ( kWarpSize - 1 );
+    extern __shared__ unsigned char shared_storage[];
+    COLTYPE* shared_row_cols = reinterpret_cast<COLTYPE*>( shared_storage ) +
+                               warp_in_block * ilu_detail::kSharedRowColumnsPerWarp;
 
     while ( true )
     {
@@ -42,8 +48,17 @@ __global__ void ilu_level_factor_workqueue_kernel( COLTYPE level_rows,
         }
 
         const COLTYPE i = level_rows_perm[level_row] - base;
-        ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE>( i, lu_ai, lu_aj, lu_diag,
-                                                                        base, lu_av, status, lane );
+        const ROWTYPE row_len = ( lu_ai[i + 1] - base ) - ( lu_ai[i] - base );
+        if ( row_len <= static_cast<ROWTYPE>( ilu_detail::kSharedRowColumnsPerWarp ) )
+        {
+            ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Shared>(
+                i, lu_ai, lu_aj, lu_diag, base, lu_av, status, lane, shared_row_cols );
+        }
+        else
+        {
+            ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>(
+                i, lu_ai, lu_aj, lu_diag, base, lu_av, status, lane );
+        }
     }
 }
 
@@ -86,9 +101,6 @@ inline int select_workqueue_blocks( const long long level_rows, const int block_
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 cudaError_t ILUBaseNumericFactorizationWorkQueueAsync( COLTYPE n,
-                                                       const ROWTYPE* d_a_ai,
-                                                       const COLTYPE* d_a_aj,
-                                                       const VALTYPE* d_a_av,
                                                        const ROWTYPE* d_lu_ai,
                                                        const COLTYPE* d_lu_aj,
                                                        const ROWTYPE* d_lu_diag,
@@ -102,8 +114,7 @@ cudaError_t ILUBaseNumericFactorizationWorkQueueAsync( COLTYPE n,
                                                        int blocks_per_sm,
                                                        cudaStream_t stream )
 {
-    if ( n <= 0 || levels < 0 || d_a_ai == nullptr || d_a_aj == nullptr || d_a_av == nullptr ||
-         d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr ||
+    if ( n <= 0 || levels < 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr ||
          d_level_perm == nullptr || h_level_prefix == nullptr || d_lu_av == nullptr ||
          d_status == nullptr || d_level_row_counter == nullptr || blocks_per_sm <= 0 )
     {
@@ -111,15 +122,6 @@ cudaError_t ILUBaseNumericFactorizationWorkQueueAsync( COLTYPE n,
     }
 
     cudaError_t status = cudaMemsetAsync( d_status, 0, sizeof( int ), stream );
-    if ( status != cudaSuccess )
-    {
-        return status;
-    }
-
-    const int init_blocks = ( n + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
-    ilu_detail::InitLUValuesKernel<<<init_blocks, kThreadsPerBlock, 0, stream>>>(
-        n, d_a_ai, d_a_aj, d_a_av, d_lu_ai, d_lu_aj, base, d_lu_av );
-    status = ilu_detail::CudaLaunchStatus();
     if ( status != cudaSuccess )
     {
         return status;
@@ -151,7 +153,8 @@ cudaError_t ILUBaseNumericFactorizationWorkQueueAsync( COLTYPE n,
         const int blocks =
             select_workqueue_blocks( static_cast<long long>( level_rows ), persistent_block_limit );
 
-        ilu_level_factor_workqueue_kernel<<<blocks, kThreadsPerBlock, 0, stream>>>(
+        const auto shared_bytes = ilu_detail::SharedRowIndexCacheBytes<COLTYPE>();
+        ilu_level_factor_workqueue_kernel<<<blocks, kThreadsPerBlock, shared_bytes, stream>>>(
             level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av,
             d_status, d_level_row_counter );
         status = ilu_detail::CudaLaunchStatus();
@@ -165,9 +168,6 @@ cudaError_t ILUBaseNumericFactorizationWorkQueueAsync( COLTYPE n,
 }
 
 template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<int, int, float>( int,
-                                                                                 const int*,
-                                                                                 const int*,
-                                                                                 const float*,
                                                                                  const int*,
                                                                                  const int*,
                                                                                  const int*,
@@ -184,9 +184,6 @@ template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<int, int, float>(
 template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<int, int, double>( int,
                                                                                   const int*,
                                                                                   const int*,
-                                                                                  const double*,
-                                                                                  const int*,
-                                                                                  const int*,
                                                                                   const int*,
                                                                                   const int*,
                                                                                   const int*,
@@ -201,9 +198,6 @@ template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<int, int, double>
 template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<std::int64_t, int, double>( int,
                                                                                            const std::int64_t*,
                                                                                            const int*,
-                                                                                           const double*,
-                                                                                           const std::int64_t*,
-                                                                                           const int*,
                                                                                            const std::int64_t*,
                                                                                            const int*,
                                                                                            const int*,
@@ -216,3 +210,4 @@ template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<std::int64_t, int
                                                                                            cudaStream_t );
 
 } // namespace matrix_utils::sparse_cuda
+#endif

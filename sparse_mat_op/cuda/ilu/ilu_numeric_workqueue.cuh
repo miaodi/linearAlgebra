@@ -6,14 +6,18 @@
 namespace matrix_utils::sparse_cuda
 {
 
+#if 0
+// Disabled while focusing on the base global/shared binary-search numeric path.
 /**
  * @brief Experimental no-cache CUDA ILU numeric factorization with a per-level work queue.
  *
  * The host still walks topological levels, preserving the exact dependency
  * boundary used by ILUBaseNumericFactorizationAsync. Inside each level,
  * resident warps dynamically pull rows from d_level_row_counter instead of
- * using a static row-to-warp assignment. The row update itself still uses the
- * original global-memory binary search path; no update cache is required.
+ * using a static row-to-warp assignment. Row updates use shared-memory row-index
+ * lookup for short rows and global-memory binary search for longer rows; no
+ * update cache is required. The caller must initialize d_lu_av first, usually
+ * with ILUEmbedAValuesToLUAsync.
  *
  * @param d_level_row_counter Device scalar used as the current level's row counter.
  *                            The caller owns this storage and must keep it valid
@@ -22,9 +26,6 @@ namespace matrix_utils::sparse_cuda
  */
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 cudaError_t ILUBaseNumericFactorizationWorkQueueAsync( COLTYPE n,
-                                                       const ROWTYPE* d_a_ai,
-                                                       const COLTYPE* d_a_aj,
-                                                       const VALTYPE* d_a_av,
                                                        const ROWTYPE* d_lu_ai,
                                                        const COLTYPE* d_lu_aj,
                                                        const ROWTYPE* d_lu_diag,
@@ -41,9 +42,6 @@ cudaError_t ILUBaseNumericFactorizationWorkQueueAsync( COLTYPE n,
 extern template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<int, int, float>( int,
                                                                                         const int*,
                                                                                         const int*,
-                                                                                        const float*,
-                                                                                        const int*,
-                                                                                        const int*,
                                                                                         const int*,
                                                                                         const int*,
                                                                                         const int*,
@@ -56,9 +54,6 @@ extern template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<int, int, 
                                                                                         cudaStream_t );
 
 extern template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<int, int, double>( int,
-                                                                                         const int*,
-                                                                                         const int*,
-                                                                                         const double*,
                                                                                          const int*,
                                                                                          const int*,
                                                                                          const int*,
@@ -76,9 +71,6 @@ extern template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<std::int64
     int,
     const std::int64_t*,
     const int*,
-    const double*,
-    const std::int64_t*,
-    const int*,
     const std::int64_t*,
     const int*,
     const int*,
@@ -89,5 +81,6 @@ extern template cudaError_t ILUBaseNumericFactorizationWorkQueueAsync<std::int64
     int*,
     int,
     cudaStream_t );
+#endif
 
 } // namespace matrix_utils::sparse_cuda
