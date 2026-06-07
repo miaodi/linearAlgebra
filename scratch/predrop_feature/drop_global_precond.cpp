@@ -493,8 +493,7 @@ iterative_solver::State solveWithPreconditioner( const Options& opts,
 
         std::cout << "Numeric ILU factorization..." << std::endl;
         auto t3 = std::chrono::high_resolution_clock::now();
-        success = matrix_utils::ILULevelNumeric( pruned.rows, pruned.AI(), pruned.AJ(), pruned.AV(),
-                                                 opts.level, ilu_matrix );
+        success = matrix_utils::ILUNumeric( pruned.rows, pruned.AI(), pruned.AJ(), pruned.AV(), ilu_matrix );
         auto t4 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed_numeric = t4 - t3;
         std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count() << " s" << std::endl;

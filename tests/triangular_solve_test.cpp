@@ -85,7 +85,7 @@ protected:
             matrix_utils::ILULevelSymbolic<decltype( ilu_matrix )> ilu_sym;
             if ( !ilu_sym( mat.rows, mat.AI(), mat.AJ(), _ilu_level, ilu_matrix ) )
                 continue;
-            if ( !matrix_utils::ILULevelNumeric( mat.rows, mat.AI(), mat.AJ(), mat.AV(), _ilu_level, ilu_matrix ) )
+            if ( !matrix_utils::ILUNumeric( mat.rows, mat.AI(), mat.AJ(), mat.AV(), ilu_matrix ) )
                 continue;
             matrix_utils::SplitLDU( ilu_matrix.rows, ilu_matrix.Base(), ilu_matrix.AI(),
                                     ilu_matrix.AJ(), ilu_matrix.AV(), _Ls[i], _Ds[i], _Us[i] );

@@ -224,9 +224,9 @@ int main( int argc, char** argv )
     auto t3 = std::chrono::high_resolution_clock::now();
     if ( factorization == Factorization::ILUK )
     {
-        std::cout << "Using ILULevelNumeric." << std::endl;
-        success = matrix_utils::ILULevelNumeric( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
-                                                 csr_matrix.AV(), level, ilu_matrix );
+        std::cout << "Using ILUNumeric." << std::endl;
+        success = matrix_utils::ILUNumeric( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
+                                            csr_matrix.AV(), ilu_matrix );
     }
     else
     {

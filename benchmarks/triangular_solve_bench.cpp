@@ -10,7 +10,7 @@
 #include "io.hpp"
 #include "matrix_utils.hpp"
 #include "triangle_solve.hpp"
-#include "precond.hpp" // for ILULevelSymbolic / ILULevelNumeric
+#include "precond.hpp" // for ILULevelSymbolic / ILUNumeric
 #include "utils.h"
 #include <benchmark/benchmark.h>
 #include <omp.h>
@@ -66,8 +66,8 @@ BenchmarkData& getData()
             bool ok_sym = sym( data.n, data.ai.data(), data.aj.data(), k, ilu_mat );
             bool ok_num = false;
             if ( ok_sym )
-                ok_num = matrix_utils::ILULevelNumeric( data.n, data.ai.data(), data.aj.data(),
-                                                        data.av.data(), k, ilu_mat );
+                ok_num = matrix_utils::ILUNumeric( data.n, data.ai.data(), data.aj.data(),
+                                                   data.av.data(), ilu_mat );
             if ( ok_sym && ok_num )
             {
                 matrix_utils::SplitLDU( ilu_mat.rows, ilu_mat.Base(), ilu_mat.AI(), ilu_mat.AJ(),

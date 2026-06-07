@@ -2,7 +2,7 @@
 #include "graph_algs.hpp"
 #include "io.hpp"
 #include "matrix_utils.hpp"
-#include "precond.hpp" // for ILULevelSymbolic / ILULevelNumeric / SplitLDU
+#include "precond.hpp" // for ILULevelSymbolic / ILUNumeric / SplitLDU
 #include "utils.h"
 #include <cxxopts.hpp>
 #include <fstream>
@@ -100,7 +100,7 @@ int main( int argc, char** argv )
         return 1;
     }
 
-    if ( !matrix_utils::ILULevelNumeric( A.rows, A.AI(), A.AJ(), A.AV(), level, ilu ) )
+    if ( !matrix_utils::ILUNumeric( A.rows, A.AI(), A.AJ(), A.AV(), ilu ) )
     {
         std::cerr << "Error: ILU numeric factorization failed" << std::endl;
         return 1;

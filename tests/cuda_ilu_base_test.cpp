@@ -14,8 +14,8 @@
 #include <vector>
 
 using matrix_utils::CSRMatrix;
-using matrix_utils::ILULevelNumeric;
 using matrix_utils::ILULevelSymbolicParallel;
+using matrix_utils::ILUNumeric;
 using matrix_utils::TriangularMatrix;
 using matrix_utils::sparse_cuda::ILUBaseNumericFactorizationAsync;
 
@@ -66,7 +66,7 @@ TEST( CudaILUBase, MatchesCPULevel0Ex5 )
     ILULevelSymbolicParallel<CSRMatrix<int, int, double>, enums::matrix_utils::LU, true> symbolic( 1 );
     CSRMatrix<int, int, double> lu_cpu;
     ASSERT_TRUE( symbolic( n, csr_rows.data(), csr_cols.data(), 0, lu_cpu ) );
-    ASSERT_TRUE( ILULevelNumeric( n, csr_rows.data(), csr_cols.data(), csr_vals.data(), 0, lu_cpu ) );
+    ASSERT_TRUE( ILUNumeric( n, csr_rows.data(), csr_cols.data(), csr_vals.data(), lu_cpu ) );
 
     std::vector<int> level_perm( n );
     std::vector<int> level_prefix( n + 1 );

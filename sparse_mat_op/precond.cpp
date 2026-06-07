@@ -1749,12 +1749,11 @@ struct ILURowEliminator
 };
 
 template <ResizableDiagonal CSRMatrixType>
-bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
-                      typename CSRMatrixType::ROWTYPE const* ai,
-                      typename CSRMatrixType::COLTYPE const* aj,
-                      typename CSRMatrixType::VALTYPE const* av,
-                      const int lvl,
-                      CSRMatrixType& ilu )
+bool ILUNumeric( const typename CSRMatrixType::COLTYPE size,
+                 typename CSRMatrixType::ROWTYPE const* ai,
+                 typename CSRMatrixType::COLTYPE const* aj,
+                 typename CSRMatrixType::VALTYPE const* av,
+                 CSRMatrixType& ilu )
 {
     const auto base = ai[0];
     auto const* ilu_ai = ilu.AI();
@@ -2310,12 +2309,11 @@ template class ILULevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double
 template class ILULevelSymbolicParallelV2<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::L, false>;
 template class ILULevelSymbolicParallelV2<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::L, true>;
 template class ILULevelSymbolicParallelV2<matrix_utils::CSRMatrix<int, int, double>, enums::matrix_utils::LU, true>;
-template bool ILULevelNumeric<matrix_utils::CSRMatrix<int, int, double>>( const int size,
-                                                                          int const* ai,
-                                                                          int const* aj,
-                                                                          double const* av,
-                                                                          const int lvl,
-                                                                          matrix_utils::CSRMatrix<int, int, double>& ilu );
+template bool ILUNumeric<matrix_utils::CSRMatrix<int, int, double>>( const int size,
+                                                                     int const* ai,
+                                                                     int const* aj,
+                                                                     double const* av,
+                                                                     matrix_utils::CSRMatrix<int, int, double>& ilu );
 template bool ILUTNumeric<matrix_utils::CSRMatrix<int, int, double>>( const int size,
                                                                       int const* ai,
                                                                       int const* aj,

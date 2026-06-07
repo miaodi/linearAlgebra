@@ -166,8 +166,8 @@ std::unique_ptr<Preconditioner> setupPreconditioner( PreconditionerImpl precond_
             // Numeric ILU factorization
             std::cout << "Numeric ILU factorization..." << std::endl;
             auto t3 = std::chrono::high_resolution_clock::now();
-            success = matrix_utils::ILULevelNumeric( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
-                                                     csr_matrix.AV(), level, ilu_matrix );
+            success = matrix_utils::ILUNumeric( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
+                                                csr_matrix.AV(), ilu_matrix );
             auto t4 = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> elapsed_numeric = t4 - t3;
             std::cout << "Numeric ILU factorization time: " << elapsed_numeric.count() << " s" << std::endl;

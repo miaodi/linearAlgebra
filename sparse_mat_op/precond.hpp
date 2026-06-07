@@ -331,12 +331,11 @@ private:
 };
 
 template <ResizableDiagonal CSRMatrixType>
-bool ILULevelNumeric( const typename CSRMatrixType::COLTYPE size,
-                      typename CSRMatrixType::ROWTYPE const* ai,
-                      typename CSRMatrixType::COLTYPE const* aj,
-                      typename CSRMatrixType::VALTYPE const* av,
-                      const int lvl,
-                      CSRMatrixType& ilu );
+bool ILUNumeric( const typename CSRMatrixType::COLTYPE size,
+                 typename CSRMatrixType::ROWTYPE const* ai,
+                 typename CSRMatrixType::COLTYPE const* aj,
+                 typename CSRMatrixType::VALTYPE const* av,
+                 CSRMatrixType& ilu );
 
 template <ResizableDiagonal CSRMatrixType>
 bool ILUTNumeric( const typename CSRMatrixType::COLTYPE size,

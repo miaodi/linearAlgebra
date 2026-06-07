@@ -1,6 +1,6 @@
 #include "io.hpp"
 #include "matrix_utils.hpp"
-#include "precond.hpp" // for ILULevelSymbolic / ILULevelNumeric / SplitLDU
+#include "precond.hpp" // for ILULevelSymbolic / ILUNumeric / SplitLDU
 #include "triangle_solve.hpp"
 #include "utils.h"
 #include <cxxopts.hpp>
@@ -71,7 +71,7 @@ int main( int argc, char** argv )
         std::cerr << "Symbolic ILU failed\n";
         return 1;
     }
-    if ( !ILULevelNumeric( A.rows, A.AI(), A.AJ(), A.AV(), level, ilu ) )
+    if ( !ILUNumeric( A.rows, A.AI(), A.AJ(), A.AV(), ilu ) )
     {
         std::cerr << "Numeric ILU failed\n";
         return 1;

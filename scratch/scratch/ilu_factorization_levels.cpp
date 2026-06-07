@@ -320,15 +320,15 @@ int main( int argc, char** argv )
               << ", max level width=" << max_level_width << '\n';
 
     // const auto numeric_start = std::chrono::steady_clock::now();
-    // if ( !matrix_utils::ILULevelNumeric( matrix.rows, matrix.AI(), matrix.AJ(), matrix.AV(), level, lu ) )
+    // if ( !matrix_utils::ILUNumeric( matrix.rows, matrix.AI(), matrix.AJ(), matrix.AV(), lu ) )
     // {
-    //     std::cerr << "ILULevelNumeric failed\n";
+    //     std::cerr << "ILUNumeric failed\n";
     //     return 1;
     // }
     // const auto numeric_end = std::chrono::steady_clock::now();
     // const std::chrono::duration<double, std::milli> numeric_ms = numeric_end - numeric_start;
     // std::cout << "ILU(" << level << ") numeric factorization complete\n";
-    // std::cout << "ILULevelNumeric time: " << numeric_ms.count() << " ms\n";
+    // std::cout << "ILUNumeric time: " << numeric_ms.count() << " ms\n";
 
     // std::cout << "ILU factorization level analysis complete\n";
     return 0;
