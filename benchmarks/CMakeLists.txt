@@ -93,6 +93,9 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
          sparse_mat_op_cuda
          CUDA::cudart
       )
+      if(ENABLE_CUDA_PROFILER_RANGE)
+         target_compile_definitions(${TARGET_NAME} PRIVATE LINEAR_ALGEBRA_ENABLE_CUDA_PROFILER_RANGE=1)
+      endif()
    endif()
    target_enable_simd(${TARGET_NAME})
 endforeach()

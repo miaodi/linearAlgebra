@@ -65,6 +65,7 @@ option(USE_CUDA "Use cuda" OFF)
 option(USE_CUDSS "Use cudss library for direct solver. Note that USE_CUDA must be ON" OFF)
 
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(ENABLE_CUDA_PROFILER_RANGE "Enable cudaProfilerStart/Stop scopes in CUDA benchmarks" OFF)
 option(ENABLE_TESTS "Enable building tests and downloading test data" ON)
 option(ENABLE_DATA_DOWNLOADS "Download SuiteSparse matrices into the build tree" ON)
 option(BUILD_DATA "Build data subdirectory" OFF)

@@ -7,6 +7,9 @@
 
 #include <benchmark/benchmark.h>
 #include <cusparse.h>
+#if defined( LINEAR_ALGEBRA_ENABLE_CUDA_PROFILER_RANGE )
+#include <cuda_profiler_api.h>
+#endif
 #include <cuda_runtime.h>
 #include <cxxopts.hpp>
 
@@ -40,6 +43,24 @@ void checkCusparse( const cusparseStatus_t status, const char* message )
     {
         throw std::runtime_error( std::string( message ) + ": " + cusparseGetErrorString( status ) );
     }
+}
+
+void startCudaProfilerRange( const char* message )
+{
+#if defined( LINEAR_ALGEBRA_ENABLE_CUDA_PROFILER_RANGE )
+    checkCuda( cudaProfilerStart(), message );
+#else
+    (void)message;
+#endif
+}
+
+void stopCudaProfilerRange( const char* message )
+{
+#if defined( LINEAR_ALGEBRA_ENABLE_CUDA_PROFILER_RANGE )
+    checkCuda( cudaProfilerStop(), message );
+#else
+    (void)message;
+#endif
 }
 
 struct CusparseMatDescrGuard
@@ -338,6 +359,7 @@ void BM_OurILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data, const 
     {
         state.PauseTiming();
         data.resetOurValues();
+        startCudaProfilerRange( "start CUDA profiler for our ILU0 numeric factorization" );
         state.ResumeTiming();
 
         checkCuda( cuda_utils::ILUBaseNumericFactorizationAsync<int, int, double>(
@@ -347,6 +369,9 @@ void BM_OurILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data, const 
                    "run our ILU0 numeric factorization" );
         checkCuda( cudaStreamSynchronize( data.stream ),
                    "sync after our ILU0 numeric factorization" );
+        state.PauseTiming();
+        stopCudaProfilerRange( "stop CUDA profiler after our ILU0 numeric factorization" );
+        state.ResumeTiming();
     }
     setCounters( state, data );
 }
@@ -357,6 +382,7 @@ void BM_CuSparseILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data )
     {
         state.PauseTiming();
         data.resetCusparseValues();
+        startCudaProfilerRange( "start CUDA profiler for cuSPARSE ILU0 numeric factorization" );
         state.ResumeTiming();
 
 #pragma GCC diagnostic push
@@ -370,6 +396,9 @@ void BM_CuSparseILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data )
 #pragma GCC diagnostic pop
         checkCuda( cudaStreamSynchronize( data.stream ),
                    "sync after cuSPARSE ILU0 numeric factorization" );
+        state.PauseTiming();
+        stopCudaProfilerRange( "stop CUDA profiler after cuSPARSE ILU0 numeric factorization" );
+        state.ResumeTiming();
     }
     setCounters( state, data );
 }

@@ -10,7 +10,7 @@ namespace matrix_utils::sparse_cuda::ilu_detail
 inline constexpr int kWarpSize = 32;
 inline constexpr int kWarpsPerBlock = 4;
 inline constexpr int kThreadsPerBlock = kWarpSize * kWarpsPerBlock;
-inline constexpr int kSharedRowColumnsPerWarp = 1024;
+inline constexpr int kSharedRowColumnsPerWarp = 256;
 
 enum class RowIndexLookup
 {
@@ -131,6 +131,11 @@ __device__ __forceinline__ void FactorLURowBinarySearch( const COLTYPE i,
     const ROWTYPE row_end = lu_ai[i + 1] - base;
     const ROWTYPE lower_end = lu_diag[i] - base;
     const ROWTYPE row_len = row_end - row_begin;
+
+    if ( row_begin == lower_end )
+    {
+        return;
+    }
 
     if constexpr ( Lookup == RowIndexLookup::Shared )
     {
