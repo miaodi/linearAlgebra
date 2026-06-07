@@ -18,9 +18,6 @@ set(CUDA_SOURCES
     cuda_kernels.cu
     cuda_ilu_symbolic.cu
     cuda_ilu_symbolic_persistent.cu
-    ilu/ilu_numeric.cu
-    ilu/ilu_numeric_workqueue.cu
-    ilu/ilu_update_cache.cpp
     spgemm/spgemm_expand.cu
     spgemm/spgemm_sort.cu
     spgemm/spgemm_contract.cu
@@ -32,6 +29,7 @@ set(CUDA_SOURCES
 )
 
 add_library(${PROJECT_NAME} STATIC ${CUDA_SOURCES})
+add_subdirectory(ilu)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     CCCL_IGNORE_DEPRECATED_STREAM_REF_HEADER
