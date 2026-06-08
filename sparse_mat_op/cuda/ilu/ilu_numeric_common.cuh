@@ -11,6 +11,7 @@ inline constexpr int kWarpSize = 32;
 inline constexpr int kWarpsPerBlock = 4;
 inline constexpr int kThreadsPerBlock = kWarpSize * kWarpsPerBlock;
 inline constexpr int kSharedRowColumnsPerWarp = 256;
+inline constexpr int kMergeReferenceColumnsPerWarp = kWarpSize;
 
 enum class RowIndexLookup
 {
@@ -18,10 +19,37 @@ enum class RowIndexLookup
     Shared
 };
 
+enum class RowUpdateStrategy
+{
+    BinarySearch,
+    Merge
+};
+
 template <typename COLTYPE>
 inline constexpr std::size_t SharedRowIndexCacheBytes()
 {
     return static_cast<std::size_t>( kWarpsPerBlock ) * kSharedRowColumnsPerWarp * sizeof( COLTYPE );
+}
+
+template <typename COLTYPE>
+inline constexpr std::size_t SharedMergeReferenceCacheBytes()
+{
+    return static_cast<std::size_t>( kWarpsPerBlock ) * kMergeReferenceColumnsPerWarp * sizeof( COLTYPE );
+}
+
+template <typename COLTYPE>
+inline constexpr std::size_t SharedFactorRowBytes( const RowIndexLookup lookup, const RowUpdateStrategy update )
+{
+    std::size_t bytes = 0;
+    if ( lookup == RowIndexLookup::Shared && update == RowUpdateStrategy::BinarySearch )
+    {
+        bytes += SharedRowIndexCacheBytes<COLTYPE>();
+    }
+    if ( update == RowUpdateStrategy::Merge )
+    {
+        bytes += SharedMergeReferenceCacheBytes<COLTYPE>();
+    }
+    return bytes;
 }
 
 template <typename ROWTYPE, typename COLTYPE>
@@ -179,6 +207,84 @@ __device__ __forceinline__ void FactorLURowBinarySearch( const COLTYPE i,
             {
                 lu_av[pos_i] -= aik * lu_av[j_pos];
             }
+        }
+    }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, RowIndexLookup Lookup = RowIndexLookup::Global>
+__device__ __forceinline__ void FactorLURowMerge( const COLTYPE i,
+                                                  const ROWTYPE* lu_ai,
+                                                  const COLTYPE* lu_aj,
+                                                  const ROWTYPE* lu_diag,
+                                                  const COLTYPE base,
+                                                  VALTYPE* lu_av,
+                                                  int* status,
+                                                  const int lane,
+                                                  COLTYPE* shared_ref_cols )
+{
+    const ROWTYPE row_begin = lu_ai[i] - base;
+    const ROWTYPE row_end = lu_ai[i + 1] - base;
+    const ROWTYPE lower_end = lu_diag[i] - base;
+
+    if ( row_begin == lower_end )
+    {
+        return;
+    }
+
+    // Walk the strictly lower part of the current i row. For each reference row,
+    // intersect the sorted current-row suffix with U(k, :) using warp-sized tiles.
+    for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
+    {
+        const COLTYPE k = lu_aj[k_pos] - base;
+        const VALTYPE aik =
+            NormalizeLowerEntry<ROWTYPE, COLTYPE, VALTYPE>( k_pos, k, lu_diag, base, lu_av, status, lane );
+        if ( aik == VALTYPE( 0 ) )
+        {
+            continue;
+        }
+
+        ROWTYPE curr_head = k_pos + 1;
+        ROWTYPE ref_head = ( lu_diag[k] - base ) + 1;
+        const ROWTYPE ref_end = lu_ai[k + 1] - base;
+
+        while ( curr_head < row_end && ref_head < ref_end )
+        {
+            const ROWTYPE curr_tile_end = ( curr_head + kWarpSize < row_end ) ? curr_head + kWarpSize : row_end;
+            const ROWTYPE ref_tile_end = ( ref_head + kWarpSize < ref_end ) ? ref_head + kWarpSize : ref_end;
+            const int ref_count = static_cast<int>( ref_tile_end - ref_head );
+
+            const ROWTYPE ref_pos = ref_head + lane;
+            if ( ref_pos < ref_tile_end )
+            {
+                shared_ref_cols[lane] = lu_aj[ref_pos] - base;
+            }
+            __syncwarp();
+
+            const ROWTYPE curr_pos = curr_head + lane;
+            if ( curr_pos < curr_tile_end )
+            {
+                const COLTYPE curr_col = lu_aj[curr_pos] - base;
+                for ( int ref_lane = 0; ref_lane < ref_count; ++ref_lane )
+                {
+                    if ( curr_col == shared_ref_cols[ref_lane] )
+                    {
+                        lu_av[curr_pos] -= aik * lu_av[ref_head + ref_lane];
+                        break;
+                    }
+                }
+            }
+
+            const COLTYPE curr_last_col = lu_aj[curr_tile_end - 1] - base;
+            const COLTYPE ref_last_col = lu_aj[ref_tile_end - 1] - base;
+            if ( curr_last_col <= ref_last_col )
+            {
+                curr_head += kWarpSize;
+            }
+            if ( ref_last_col <= curr_last_col )
+            {
+                ref_head += kWarpSize;
+            }
+            __syncwarp();
         }
     }
 }

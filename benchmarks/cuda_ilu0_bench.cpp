@@ -295,36 +295,29 @@ struct ILU0BenchmarkData
 
     void warmUpAndValidate()
     {
-        resetOurValues();
-        checkCuda( cuda_utils::ILUBaseNumericFactorizationAsync<int, int, double>(
-                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), d_level_perm.data(),
-                       level_prefix.data(), levels, base, d_our_lu_av.data(), d_status.data(),
-                       cuda_utils::ILUNumericRowLookup::Shared, stream ),
-                   "warm up shared ILU0 factorization" );
-        int host_status = 1;
-        checkCuda( cudaMemcpyAsync( &host_status, d_status.data(), sizeof( int ), cudaMemcpyDeviceToHost, stream ),
-                   "copy shared ILU0 status" );
-        checkCuda( cudaStreamSynchronize( stream ), "sync after shared ILU0 warmup" );
-        if ( host_status != 0 )
+        for ( const auto row_lookup :
+              { cuda_utils::ILUNumericRowLookup::Global, cuda_utils::ILUNumericRowLookup::Shared } )
         {
-            throw std::runtime_error(
-                "shared ILU0 factorization found a zero pivot during warmup" );
-        }
-
-        resetOurValues();
-        checkCuda( cuda_utils::ILUBaseNumericFactorizationAsync<int, int, double>(
-                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), d_level_perm.data(),
-                       level_prefix.data(), levels, base, d_our_lu_av.data(), d_status.data(),
-                       cuda_utils::ILUNumericRowLookup::Global, stream ),
-                   "warm up global ILU0 factorization" );
-        host_status = 1;
-        checkCuda( cudaMemcpyAsync( &host_status, d_status.data(), sizeof( int ), cudaMemcpyDeviceToHost, stream ),
-                   "copy global ILU0 status" );
-        checkCuda( cudaStreamSynchronize( stream ), "sync after global ILU0 warmup" );
-        if ( host_status != 0 )
-        {
-            throw std::runtime_error(
-                "global ILU0 factorization found a zero pivot during warmup" );
+            for ( const auto row_update : { cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
+                                            cuda_utils::ILUNumericRowUpdateStrategy::Merge } )
+            {
+                resetOurValues();
+                checkCuda( cuda_utils::ILUBaseNumericFactorizationAsync<int, int, double>(
+                               n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(),
+                               d_level_perm.data(), level_prefix.data(), levels, base,
+                               d_our_lu_av.data(), d_status.data(), row_lookup, row_update, stream ),
+                           "warm up our ILU0 factorization" );
+                int host_status = 1;
+                checkCuda( cudaMemcpyAsync( &host_status, d_status.data(), sizeof( int ),
+                                            cudaMemcpyDeviceToHost, stream ),
+                           "copy our ILU0 status" );
+                checkCuda( cudaStreamSynchronize( stream ), "sync after our ILU0 warmup" );
+                if ( host_status != 0 )
+                {
+                    throw std::runtime_error(
+                        "our ILU0 factorization found a zero pivot during warmup" );
+                }
+            }
         }
 
         resetCusparseValues();
@@ -353,7 +346,10 @@ void setCounters( benchmark::State& state, const ILU0BenchmarkData& data )
     state.SetItemsProcessed( state.iterations() * static_cast<int64_t>( data.nnz_lu ) );
 }
 
-void BM_OurILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data, const cuda_utils::ILUNumericRowLookup row_lookup )
+void BM_OurILU0Numeric( benchmark::State& state,
+                        ILU0BenchmarkData& data,
+                        const cuda_utils::ILUNumericRowLookup row_lookup,
+                        const cuda_utils::ILUNumericRowUpdateStrategy row_update )
 {
     for ( auto _ : state )
     {
@@ -365,7 +361,7 @@ void BM_OurILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data, const 
         checkCuda( cuda_utils::ILUBaseNumericFactorizationAsync<int, int, double>(
                        data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
                        data.d_level_perm.data(), data.level_prefix.data(), data.levels, data.base,
-                       data.d_our_lu_av.data(), data.d_status.data(), row_lookup, data.stream ),
+                       data.d_our_lu_av.data(), data.d_status.data(), row_lookup, row_update, data.stream ),
                    "run our ILU0 numeric factorization" );
         checkCuda( cudaStreamSynchronize( data.stream ),
                    "sync after our ILU0 numeric factorization" );
@@ -455,13 +451,39 @@ int main( int argc, char** argv )
 
         auto data = std::make_shared<ILU0BenchmarkData>( matrix_file, symbolic_threads );
         benchmark::RegisterBenchmark(
-            "ILU0Numeric/ours_global", [data]( benchmark::State& state )
-            { BM_OurILU0Numeric( state, *data, cuda_utils::ILUNumericRowLookup::Global ); } )
+            "ILU0Numeric/ours_binary_global",
+            [data]( benchmark::State& state )
+            {
+                BM_OurILU0Numeric( state, *data, cuda_utils::ILUNumericRowLookup::Global,
+                                   cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch );
+            } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
         benchmark::RegisterBenchmark(
-            "ILU0Numeric/ours_shared", [data]( benchmark::State& state )
-            { BM_OurILU0Numeric( state, *data, cuda_utils::ILUNumericRowLookup::Shared ); } )
+            "ILU0Numeric/ours_binary_shared",
+            [data]( benchmark::State& state )
+            {
+                BM_OurILU0Numeric( state, *data, cuda_utils::ILUNumericRowLookup::Shared,
+                                   cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch );
+            } )
+            ->Unit( benchmark::kMillisecond )
+            ->UseRealTime();
+        benchmark::RegisterBenchmark( "ILU0Numeric/ours_merge_global",
+                                      [data]( benchmark::State& state )
+                                      {
+                                          BM_OurILU0Numeric(
+                                              state, *data, cuda_utils::ILUNumericRowLookup::Global,
+                                              cuda_utils::ILUNumericRowUpdateStrategy::Merge );
+                                      } )
+            ->Unit( benchmark::kMillisecond )
+            ->UseRealTime();
+        benchmark::RegisterBenchmark( "ILU0Numeric/ours_merge_shared",
+                                      [data]( benchmark::State& state )
+                                      {
+                                          BM_OurILU0Numeric(
+                                              state, *data, cuda_utils::ILUNumericRowLookup::Shared,
+                                              cuda_utils::ILUNumericRowUpdateStrategy::Merge );
+                                      } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/cuSPARSE", [data]( benchmark::State& state )

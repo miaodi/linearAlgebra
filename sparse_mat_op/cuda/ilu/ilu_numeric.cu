@@ -13,7 +13,7 @@ using ilu_detail::kThreadsPerBlock;
 using ilu_detail::kWarpSize;
 using ilu_detail::kWarpsPerBlock;
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup, ilu_detail::RowUpdateStrategy Update>
 __global__ void ilu_level_factor_kernel( COLTYPE level_rows,
                                          const COLTYPE* level_rows_perm,
                                          const ROWTYPE* lu_ai,
@@ -32,12 +32,35 @@ __global__ void ilu_level_factor_kernel( COLTYPE level_rows,
     }
 
     const COLTYPE i = level_rows_perm[level_row] - base;
-    if constexpr ( Lookup == ilu_detail::RowIndexLookup::Shared )
+
+    COLTYPE* shared_row_cols = nullptr;
+    COLTYPE* shared_ref_cols = nullptr;
+    if constexpr ( ( Lookup == ilu_detail::RowIndexLookup::Shared &&
+                     Update == ilu_detail::RowUpdateStrategy::BinarySearch ) ||
+                   Update == ilu_detail::RowUpdateStrategy::Merge )
     {
         extern __shared__ unsigned char shared_storage[];
-        COLTYPE* shared_row_cols = reinterpret_cast<COLTYPE*>( shared_storage ) +
-                                   warp_in_block * ilu_detail::kSharedRowColumnsPerWarp;
+        COLTYPE* shared_cols = reinterpret_cast<COLTYPE*>( shared_storage );
+        int shared_offset = 0;
+        if constexpr ( Lookup == ilu_detail::RowIndexLookup::Shared &&
+                       Update == ilu_detail::RowUpdateStrategy::BinarySearch )
+        {
+            shared_row_cols = shared_cols + shared_offset + warp_in_block * ilu_detail::kSharedRowColumnsPerWarp;
+            shared_offset += ilu_detail::kWarpsPerBlock * ilu_detail::kSharedRowColumnsPerWarp;
+        }
+        if constexpr ( Update == ilu_detail::RowUpdateStrategy::Merge )
+        {
+            shared_ref_cols = shared_cols + shared_offset + warp_in_block * ilu_detail::kMergeReferenceColumnsPerWarp;
+        }
+    }
 
+    if constexpr ( Update == ilu_detail::RowUpdateStrategy::Merge )
+    {
+        ilu_detail::FactorLURowMerge<ROWTYPE, COLTYPE, VALTYPE, Lookup>(
+            i, lu_ai, lu_aj, lu_diag, base, lu_av, status, lane, shared_ref_cols );
+    }
+    else if constexpr ( Lookup == ilu_detail::RowIndexLookup::Shared )
+    {
         const ROWTYPE row_len = ( lu_ai[i + 1] - base ) - ( lu_ai[i] - base );
         if ( row_len <= static_cast<ROWTYPE>( ilu_detail::kSharedRowColumnsPerWarp ) )
         {
@@ -55,6 +78,25 @@ __global__ void ilu_level_factor_kernel( COLTYPE level_rows,
         ilu_detail::FactorLURowBinarySearch<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>(
             i, lu_ai, lu_aj, lu_diag, base, lu_av, status, lane );
     }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup, ilu_detail::RowUpdateStrategy Update>
+cudaError_t launch_level_factor_kernel( const int blocks,
+                                        const COLTYPE level_rows,
+                                        const COLTYPE* level_rows_perm,
+                                        const ROWTYPE* lu_ai,
+                                        const COLTYPE* lu_aj,
+                                        const ROWTYPE* lu_diag,
+                                        const COLTYPE base,
+                                        VALTYPE* lu_av,
+                                        int* status,
+                                        cudaStream_t stream )
+{
+    const auto shared_bytes = ilu_detail::SharedFactorRowBytes<COLTYPE>( Lookup, Update );
+    ilu_level_factor_kernel<ROWTYPE, COLTYPE, VALTYPE, Lookup, Update>
+        <<<blocks, kThreadsPerBlock, shared_bytes, stream>>>( level_rows, level_rows_perm, lu_ai,
+                                                              lu_aj, lu_diag, base, lu_av, status );
+    return ilu_detail::CudaLaunchStatus();
 }
 
 #if 0
@@ -141,6 +183,7 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
                                               VALTYPE* d_lu_av,
                                               int* d_status,
                                               ILUNumericRowLookup row_lookup,
+                                              ILUNumericRowUpdateStrategy row_update,
                                               cudaStream_t stream )
 {
     if ( n <= 0 || levels < 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr ||
@@ -169,22 +212,46 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
         switch ( row_lookup )
         {
         case ILUNumericRowLookup::Global:
-            ilu_level_factor_kernel<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>
-                <<<blocks, kThreadsPerBlock, 0, stream>>>( level_rows, d_level_perm + level_begin, d_lu_ai,
-                                                           d_lu_aj, d_lu_diag, base, d_lu_av, d_status );
+            switch ( row_update )
+            {
+            case ILUNumericRowUpdateStrategy::BinarySearch:
+                status = launch_level_factor_kernel<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global,
+                                                    ilu_detail::RowUpdateStrategy::BinarySearch>(
+                    blocks, level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag,
+                    base, d_lu_av, d_status, stream );
+                break;
+            case ILUNumericRowUpdateStrategy::Merge:
+                status = launch_level_factor_kernel<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global,
+                                                    ilu_detail::RowUpdateStrategy::Merge>(
+                    blocks, level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag,
+                    base, d_lu_av, d_status, stream );
+                break;
+            default:
+                return cudaErrorInvalidValue;
+            }
             break;
         case ILUNumericRowLookup::Shared:
-        {
-            const auto shared_bytes = ilu_detail::SharedRowIndexCacheBytes<COLTYPE>();
-            ilu_level_factor_kernel<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Shared>
-                <<<blocks, kThreadsPerBlock, shared_bytes, stream>>>(
-                    level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av, d_status );
+            switch ( row_update )
+            {
+            case ILUNumericRowUpdateStrategy::BinarySearch:
+                status = launch_level_factor_kernel<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Shared,
+                                                    ilu_detail::RowUpdateStrategy::BinarySearch>(
+                    blocks, level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag,
+                    base, d_lu_av, d_status, stream );
+                break;
+            case ILUNumericRowUpdateStrategy::Merge:
+                status = launch_level_factor_kernel<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Shared,
+                                                    ilu_detail::RowUpdateStrategy::Merge>(
+                    blocks, level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag,
+                    base, d_lu_av, d_status, stream );
+                break;
+            default:
+                return cudaErrorInvalidValue;
+            }
             break;
-        }
         default:
             return cudaErrorInvalidValue;
         }
-        status = ilu_detail::CudaLaunchStatus();
         if ( status != cudaSuccess )
         {
             return status;
@@ -192,6 +259,25 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
     }
 
     return cudaSuccess;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
+                                              const ROWTYPE* d_lu_ai,
+                                              const COLTYPE* d_lu_aj,
+                                              const ROWTYPE* d_lu_diag,
+                                              const COLTYPE* d_level_perm,
+                                              const COLTYPE* h_level_prefix,
+                                              COLTYPE levels,
+                                              COLTYPE base,
+                                              VALTYPE* d_lu_av,
+                                              int* d_status,
+                                              ILUNumericRowLookup row_lookup,
+                                              cudaStream_t stream )
+{
+    return ILUBaseNumericFactorizationAsync<ROWTYPE, COLTYPE, VALTYPE>(
+        n, d_lu_ai, d_lu_aj, d_lu_diag, d_level_perm, h_level_prefix, levels, base, d_lu_av,
+        d_status, row_lookup, ILUNumericRowUpdateStrategy::BinarySearch, stream );
 }
 
 #if 0
@@ -279,6 +365,48 @@ template cudaError_t ILUEmbedAValuesToLUAsync<std::int64_t, int, double>( int,
                                                                           int,
                                                                           double*,
                                                                           cudaStream_t );
+
+template cudaError_t ILUBaseNumericFactorizationAsync<int, int, float>( int,
+                                                                        const int*,
+                                                                        const int*,
+                                                                        const int*,
+                                                                        const int*,
+                                                                        const int*,
+                                                                        int,
+                                                                        int,
+                                                                        float*,
+                                                                        int*,
+                                                                        ILUNumericRowLookup,
+                                                                        ILUNumericRowUpdateStrategy,
+                                                                        cudaStream_t );
+
+template cudaError_t ILUBaseNumericFactorizationAsync<int, int, double>( int,
+                                                                         const int*,
+                                                                         const int*,
+                                                                         const int*,
+                                                                         const int*,
+                                                                         const int*,
+                                                                         int,
+                                                                         int,
+                                                                         double*,
+                                                                         int*,
+                                                                         ILUNumericRowLookup,
+                                                                         ILUNumericRowUpdateStrategy,
+                                                                         cudaStream_t );
+
+template cudaError_t ILUBaseNumericFactorizationAsync<std::int64_t, int, double>( int,
+                                                                                  const std::int64_t*,
+                                                                                  const int*,
+                                                                                  const std::int64_t*,
+                                                                                  const int*,
+                                                                                  const int*,
+                                                                                  int,
+                                                                                  int,
+                                                                                  double*,
+                                                                                  int*,
+                                                                                  ILUNumericRowLookup,
+                                                                                  ILUNumericRowUpdateStrategy,
+                                                                                  cudaStream_t );
 
 template cudaError_t ILUBaseNumericFactorizationAsync<int, int, float>( int,
                                                                         const int*,

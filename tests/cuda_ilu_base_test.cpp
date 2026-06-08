@@ -20,6 +20,7 @@ using matrix_utils::TriangularMatrix;
 using matrix_utils::sparse_cuda::ILUBaseNumericFactorizationAsync;
 using matrix_utils::sparse_cuda::ILUEmbedAValuesToLUAsync;
 using matrix_utils::sparse_cuda::ILUNumericRowLookup;
+using matrix_utils::sparse_cuda::ILUNumericRowUpdateStrategy;
 
 namespace
 {
@@ -123,24 +124,30 @@ TEST( CudaILUBase, MatchesCPULevel0Ex5 )
 
     for ( const auto row_lookup : { ILUNumericRowLookup::Global, ILUNumericRowLookup::Shared } )
     {
-        ASSERT_CUDA_OK( cudaMemcpyAsync( d_lu_av, d_lu_initial, static_cast<size_t>( nnz_lu ) * sizeof( double ),
-                                         cudaMemcpyDeviceToDevice, stream ) );
-        ASSERT_CUDA_OK( ILUBaseNumericFactorizationAsync<int, int, double>(
-            n, d_lu_ai, d_lu_aj, d_lu_diag, d_level_perm, level_prefix.data(), levels, base,
-            d_lu_av, d_status, row_lookup, stream ) );
-
-        int h_status = 1;
-        ASSERT_CUDA_OK( cudaMemcpyAsync( &h_status, d_status, sizeof( int ), cudaMemcpyDeviceToHost, stream ) );
-        ASSERT_CUDA_OK( cudaStreamSynchronize( stream ) );
-        ASSERT_EQ( h_status, 0 );
-
-        std::vector<double> lu_gpu( static_cast<size_t>( nnz_lu ) );
-        ASSERT_CUDA_OK( cudaMemcpy( lu_gpu.data(), d_lu_av, static_cast<size_t>( nnz_lu ) * sizeof( double ),
-                                    cudaMemcpyDeviceToHost ) );
-
-        for ( int i = 0; i < nnz_lu; ++i )
+        for ( const auto row_update :
+              { ILUNumericRowUpdateStrategy::BinarySearch, ILUNumericRowUpdateStrategy::Merge } )
         {
-            EXPECT_NEAR( lu_gpu[i], lu_cpu.AV()[i], 1e-10 ) << "Mismatch at LU value " << i;
+            SCOPED_TRACE( "row_lookup=" + std::to_string( static_cast<int>( row_lookup ) ) +
+                          " row_update=" + std::to_string( static_cast<int>( row_update ) ) );
+            ASSERT_CUDA_OK( cudaMemcpyAsync( d_lu_av, d_lu_initial, static_cast<size_t>( nnz_lu ) * sizeof( double ),
+                                             cudaMemcpyDeviceToDevice, stream ) );
+            ASSERT_CUDA_OK( ILUBaseNumericFactorizationAsync<int, int, double>(
+                n, d_lu_ai, d_lu_aj, d_lu_diag, d_level_perm, level_prefix.data(), levels, base,
+                d_lu_av, d_status, row_lookup, row_update, stream ) );
+
+            int h_status = 1;
+            ASSERT_CUDA_OK( cudaMemcpyAsync( &h_status, d_status, sizeof( int ), cudaMemcpyDeviceToHost, stream ) );
+            ASSERT_CUDA_OK( cudaStreamSynchronize( stream ) );
+            ASSERT_EQ( h_status, 0 );
+
+            std::vector<double> lu_gpu( static_cast<size_t>( nnz_lu ) );
+            ASSERT_CUDA_OK( cudaMemcpy( lu_gpu.data(), d_lu_av, static_cast<size_t>( nnz_lu ) * sizeof( double ),
+                                        cudaMemcpyDeviceToHost ) );
+
+            for ( int i = 0; i < nnz_lu; ++i )
+            {
+                EXPECT_NEAR( lu_gpu[i], lu_cpu.AV()[i], 1e-10 ) << "Mismatch at LU value " << i;
+            }
         }
     }
 
