@@ -22,9 +22,11 @@ using matrix_utils::sparse_cuda::BuildILUUpdateCacheAsync;
 using matrix_utils::sparse_cuda::DeviceILUUpdateCache;
 using matrix_utils::sparse_cuda::ILUBaseNumericFactorizationAsync;
 using matrix_utils::sparse_cuda::ILUBaseNumericFactorizationCachedAsync;
+using matrix_utils::sparse_cuda::ILUBaseNumericFactorizationPersistentAsync;
 using matrix_utils::sparse_cuda::ILUEmbedAValuesToLUAsync;
 using matrix_utils::sparse_cuda::ILUNumericRowLookup;
 using matrix_utils::sparse_cuda::ILUNumericRowUpdateStrategy;
+using matrix_utils::sparse_cuda::ILUPersistentLaunchConfig;
 using matrix_utils::sparse_cuda::ILUUpdateCache;
 
 namespace
@@ -146,6 +148,8 @@ TEST( CudaILUBase, MatchesCPULevel0Ex5 )
     int* d_lu_diag = nullptr;
     int* d_level_perm = nullptr;
     int* d_status = nullptr;
+    int* d_next_row = nullptr;
+    int* d_row_done = nullptr;
     double* d_lu_initial = nullptr;
     double* d_lu_av = nullptr;
 
@@ -157,6 +161,8 @@ TEST( CudaILUBase, MatchesCPULevel0Ex5 )
     ASSERT_CUDA_OK( cudaMalloc( &d_lu_diag, static_cast<size_t>( n ) * sizeof( int ) ) );
     ASSERT_CUDA_OK( cudaMalloc( &d_level_perm, static_cast<size_t>( n ) * sizeof( int ) ) );
     ASSERT_CUDA_OK( cudaMalloc( &d_status, sizeof( int ) ) );
+    ASSERT_CUDA_OK( cudaMalloc( &d_next_row, sizeof( int ) ) );
+    ASSERT_CUDA_OK( cudaMalloc( &d_row_done, static_cast<size_t>( n ) * sizeof( int ) ) );
     ASSERT_CUDA_OK( cudaMalloc( &d_lu_initial, static_cast<size_t>( nnz_lu ) * sizeof( double ) ) );
     ASSERT_CUDA_OK( cudaMalloc( &d_lu_av, static_cast<size_t>( nnz_lu ) * sizeof( double ) ) );
 
@@ -251,6 +257,30 @@ TEST( CudaILUBase, MatchesCPULevel0Ex5 )
         EXPECT_NEAR( lu_cached_gpu[i], lu_cpu.AV()[i], 1e-10 ) << "Cached mismatch at LU value " << i;
     }
 
+    ASSERT_CUDA_OK( cudaMemcpyAsync( d_lu_av, d_lu_initial, static_cast<size_t>( nnz_lu ) * sizeof( double ),
+                                     cudaMemcpyDeviceToDevice, stream ) );
+    ILUPersistentLaunchConfig persistent_launch;
+    ASSERT_CUDA_OK( ILUBaseNumericFactorizationPersistentAsync<int, int, double>(
+        n, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av, d_status, d_next_row, d_row_done, stream, &persistent_launch ) );
+
+    h_status = 1;
+    ASSERT_CUDA_OK( cudaMemcpyAsync( &h_status, d_status, sizeof( int ), cudaMemcpyDeviceToHost, stream ) );
+    ASSERT_CUDA_OK( cudaStreamSynchronize( stream ) );
+    ASSERT_EQ( h_status, 0 );
+    EXPECT_GT( persistent_launch.block_size, 0 );
+    EXPECT_GT( persistent_launch.grid_blocks, 0 );
+    EXPECT_GT( persistent_launch.resident_warps, 0 );
+
+    std::vector<double> lu_persistent_gpu( static_cast<size_t>( nnz_lu ) );
+    ASSERT_CUDA_OK( cudaMemcpy( lu_persistent_gpu.data(), d_lu_av,
+                                static_cast<size_t>( nnz_lu ) * sizeof( double ), cudaMemcpyDeviceToHost ) );
+
+    for ( int i = 0; i < nnz_lu; ++i )
+    {
+        EXPECT_NEAR( lu_persistent_gpu[i], lu_cpu.AV()[i], 1e-10 )
+            << "Persistent mismatch at LU value " << i;
+    }
+
     ASSERT_CUDA_OK( cudaStreamDestroy( stream ) );
 
     cudaFree( d_a_ai );
@@ -261,6 +291,8 @@ TEST( CudaILUBase, MatchesCPULevel0Ex5 )
     cudaFree( d_lu_diag );
     cudaFree( d_level_perm );
     cudaFree( d_status );
+    cudaFree( d_next_row );
+    cudaFree( d_row_done );
     cudaFree( d_lu_initial );
     cudaFree( d_lu_av );
 }

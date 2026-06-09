@@ -139,11 +139,14 @@ struct ILU0BenchmarkData
     DeviceIntArray d_lu_diag;
     DeviceIntArray d_level_perm;
     DeviceIntArray d_status;
+    DeviceIntArray d_next_row;
+    DeviceIntArray d_row_done;
     DeviceDoubleArray d_lu_av_initial;
     DeviceDoubleArray d_our_lu_av;
     DeviceDoubleArray d_cusparse_lu_av;
     cuda_utils::DeviceArray<char> d_cusparse_buffer;
     cuda_utils::DeviceILUUpdateCache<int> update_cache;
+    cuda_utils::ILUPersistentLaunchConfig persistent_launch;
 
     ILU0BenchmarkData( const std::string& matrix_file, const int symbolic_threads )
     {
@@ -203,6 +206,8 @@ struct ILU0BenchmarkData
         d_lu_diag.copyFromHost( lu_pattern.Diagonal(), static_cast<std::size_t>( n ) );
         d_level_perm.copyFromHost( level_perm.data(), static_cast<std::size_t>( n ) );
         d_status.resize( 1 );
+        d_next_row.resize( 1 );
+        d_row_done.resize( static_cast<std::size_t>( n ) );
         d_lu_av_initial.resize( static_cast<std::size_t>( nnz_lu ) );
         d_our_lu_av.resize( static_cast<std::size_t>( nnz_lu ) );
         d_cusparse_lu_av.resize( static_cast<std::size_t>( nnz_lu ) );
@@ -225,7 +230,9 @@ struct ILU0BenchmarkData
         std::cout << "Loaded " << matrix_file << ": n=" << n << ", nnz(A)=" << nnz_a
                   << ", nnz(LU0 pattern)=" << nnz_lu << ", levels=" << levels
                   << ", strict lower nnz=" << update_cache.strict_lower_nnz
-                  << ", cached updates=" << update_cache.total_updates << std::endl;
+                  << ", cached updates=" << update_cache.total_updates
+                  << ", persistent block size=" << persistent_launch.block_size
+                  << ", persistent grid blocks=" << persistent_launch.grid_blocks << std::endl;
     }
 
     ~ILU0BenchmarkData()
@@ -328,6 +335,22 @@ struct ILU0BenchmarkData
         }
 
         resetOurValues();
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationPersistentAsync<int, int, double>(
+                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), base, d_our_lu_av.data(),
+                       d_status.data(), d_next_row.data(), d_row_done.data(), stream, &persistent_launch ),
+                   "warm up persistent ILU0 factorization" );
+        int persistent_host_status = 1;
+        checkCuda( cudaMemcpyAsync( &persistent_host_status, d_status.data(), sizeof( int ),
+                                    cudaMemcpyDeviceToHost, stream ),
+                   "copy persistent ILU0 status" );
+        checkCuda( cudaStreamSynchronize( stream ), "sync after persistent ILU0 warmup" );
+        if ( persistent_host_status != 0 )
+        {
+            throw std::runtime_error(
+                "persistent ILU0 factorization found a zero pivot during warmup" );
+        }
+
+        resetOurValues();
         checkCuda( cuda_utils::ILUBaseNumericFactorizationCachedAsync<int, int, double>(
                        n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(),
                        update_cache.lower_row_ptr.data(), update_cache.update_ptr.data(),
@@ -371,6 +394,9 @@ void setCounters( benchmark::State& state, const ILU0BenchmarkData& data )
     state.counters["strict_lower_nnz"] = static_cast<double>( data.update_cache.strict_lower_nnz );
     state.counters["cached_updates"] = static_cast<double>( data.update_cache.total_updates );
     state.counters["cache_MB"] = static_cast<double>( data.update_cache.bytes() ) / ( 1024.0 * 1024.0 );
+    state.counters["persistent_block_size"] = static_cast<double>( data.persistent_launch.block_size );
+    state.counters["persistent_grid_blocks"] = static_cast<double>( data.persistent_launch.grid_blocks );
+    state.counters["persistent_resident_warps"] = static_cast<double>( data.persistent_launch.resident_warps );
     state.SetItemsProcessed( state.iterations() * static_cast<int64_t>( data.nnz_lu ) );
 }
 
@@ -395,6 +421,29 @@ void BM_OurILU0Numeric( benchmark::State& state,
                    "sync after our ILU0 numeric factorization" );
         state.PauseTiming();
         stopCudaProfilerRange( "stop CUDA profiler after our ILU0 numeric factorization" );
+        state.ResumeTiming();
+    }
+    setCounters( state, data );
+}
+
+void BM_OurILU0NumericPersistent( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    for ( auto _ : state )
+    {
+        state.PauseTiming();
+        data.resetOurValues();
+        startCudaProfilerRange( "start CUDA profiler for persistent ILU0 numeric factorization" );
+        state.ResumeTiming();
+
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationPersistentAsync<int, int, double>(
+                       data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
+                       data.base, data.d_our_lu_av.data(), data.d_status.data(), data.d_next_row.data(),
+                       data.d_row_done.data(), data.stream, &data.persistent_launch ),
+                   "run persistent ILU0 numeric factorization" );
+        checkCuda( cudaStreamSynchronize( data.stream ),
+                   "sync after persistent ILU0 numeric factorization" );
+        state.PauseTiming();
+        stopCudaProfilerRange( "stop CUDA profiler after persistent ILU0 numeric factorization" );
         state.ResumeTiming();
     }
     setCounters( state, data );
@@ -541,6 +590,10 @@ int main( int argc, char** argv )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/ours_cached", [data]( benchmark::State& state )
                                       { BM_OurILU0NumericCached( state, *data ); } )
+            ->Unit( benchmark::kMillisecond )
+            ->UseRealTime();
+        benchmark::RegisterBenchmark( "ILU0Numeric/ours_persistent_spin", [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericPersistent( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/cuSPARSE", [data]( benchmark::State& state )
