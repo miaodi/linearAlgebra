@@ -91,13 +91,14 @@ Options parseOptions( const int argc, char** argv )
 {
     cxxopts::Options options(
         "mtx_to_binary",
-        "Convert a MatrixMarket text matrix to the project binary matrix format." );
+        "Convert a MatrixMarket text matrix to .bin binary or .mtx MatrixMarket output." );
     options.add_options()( "i,input", "Input MatrixMarket .mtx file", cxxopts::value<std::string>() )(
-        "o,output", "Output binary matrix file", cxxopts::value<std::string>() )(
-        "sparsity-png", "Write the output matrix sparsity pattern to a PNG file",
-        cxxopts::value<std::string>() )( "sparsity-resolution",
-                                         "Maximum sparsity PNG width/height in pixels",
-                                         cxxopts::value<int>()->default_value( "4096" ) )(
+        "o,output", "Output matrix file; .bin writes binary, .mtx writes MatrixMarket text",
+        cxxopts::value<std::string>() )( "sparsity-png",
+                                         "Write the output matrix sparsity pattern to a PNG file",
+                                         cxxopts::value<std::string>() )(
+        "sparsity-resolution", "Maximum sparsity PNG width/height in pixels",
+        cxxopts::value<int>()->default_value( "4096" ) )(
         "metis", "Apply METIS nested-dissection symmetric reordering before writing" )(
         "t,threads", "Threads used for permutation work", cxxopts::value<int>()->default_value( "1" ) )(
         "seed", "METIS random seed", cxxopts::value<int>()->default_value( "42" ) )(
@@ -172,7 +173,7 @@ int main( int argc, char** argv )
         }
 
         const auto write_start = std::chrono::steady_clock::now();
-        matrix_utils::writeMatrix( matrix, options.output, matrix_utils::MatrixDataType::Binary );
+        matrix_utils::writeMatrix( matrix, options.output );
         const auto write_end = std::chrono::steady_clock::now();
 
         const std::chrono::duration<double> read_time = read_end - read_start;
