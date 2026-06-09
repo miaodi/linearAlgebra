@@ -143,6 +143,7 @@ struct ILU0BenchmarkData
     DeviceIntArray d_row_done;
     DeviceDoubleArray d_lu_av_initial;
     DeviceDoubleArray d_our_lu_av;
+    DeviceDoubleArray d_diag_inv;
     DeviceDoubleArray d_cusparse_lu_av;
     cuda_utils::DeviceArray<char> d_cusparse_buffer;
     cuda_utils::DeviceILUUpdateCache<int> update_cache;
@@ -210,6 +211,7 @@ struct ILU0BenchmarkData
         d_row_done.resize( static_cast<std::size_t>( n ) );
         d_lu_av_initial.resize( static_cast<std::size_t>( nnz_lu ) );
         d_our_lu_av.resize( static_cast<std::size_t>( nnz_lu ) );
+        d_diag_inv.resize( static_cast<std::size_t>( n ) );
         d_cusparse_lu_av.resize( static_cast<std::size_t>( nnz_lu ) );
 
         checkCuda( cuda_utils::BuildILUUpdateCacheAsync<int, int>(
@@ -336,8 +338,9 @@ struct ILU0BenchmarkData
 
         resetOurValues();
         checkCuda( cuda_utils::ILUBaseNumericFactorizationPersistentAsync<int, int, double>(
-                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), base, d_our_lu_av.data(),
-                       d_status.data(), d_next_row.data(), d_row_done.data(), stream, &persistent_launch ),
+                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), base,
+                       d_our_lu_av.data(), d_diag_inv.data(), d_status.data(), d_next_row.data(),
+                       d_row_done.data(), stream, &persistent_launch ),
                    "warm up persistent ILU0 factorization" );
         int persistent_host_status = 1;
         checkCuda( cudaMemcpyAsync( &persistent_host_status, d_status.data(), sizeof( int ),
@@ -437,8 +440,8 @@ void BM_OurILU0NumericPersistent( benchmark::State& state, ILU0BenchmarkData& da
 
         checkCuda( cuda_utils::ILUBaseNumericFactorizationPersistentAsync<int, int, double>(
                        data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
-                       data.base, data.d_our_lu_av.data(), data.d_status.data(), data.d_next_row.data(),
-                       data.d_row_done.data(), data.stream, &data.persistent_launch ),
+                       data.base, data.d_our_lu_av.data(), data.d_diag_inv.data(), data.d_status.data(),
+                       data.d_next_row.data(), data.d_row_done.data(), data.stream, &data.persistent_launch ),
                    "run persistent ILU0 numeric factorization" );
         checkCuda( cudaStreamSynchronize( data.stream ),
                    "sync after persistent ILU0 numeric factorization" );

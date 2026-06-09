@@ -24,8 +24,9 @@ struct ILUPersistentLaunchConfig
  * independent block per row.
  *
  * The caller must initialize d_lu_av first, usually with ILUEmbedAValuesToLUAsync.
- * d_next_row is a device scalar and d_row_done has size n. Both are initialized
- * by this function on the supplied stream.
+ * d_diag_inv is caller-owned scratch storage of size n. d_next_row is a device
+ * scalar and d_row_done has size n. d_next_row and d_row_done are initialized by
+ * this function on the supplied stream.
  */
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 cudaError_t ILUBaseNumericFactorizationPersistentAsync( COLTYPE n,
@@ -34,6 +35,7 @@ cudaError_t ILUBaseNumericFactorizationPersistentAsync( COLTYPE n,
                                                         const ROWTYPE* d_lu_diag,
                                                         COLTYPE base,
                                                         VALTYPE* d_lu_av,
+                                                        VALTYPE* d_diag_inv,
                                                         int* d_status,
                                                         COLTYPE* d_next_row,
                                                         int* d_row_done,
@@ -45,6 +47,7 @@ extern template cudaError_t ILUBaseNumericFactorizationPersistentAsync<int, int,
                                                                                          const int*,
                                                                                          const int*,
                                                                                          int,
+                                                                                         float*,
                                                                                          float*,
                                                                                          int*,
                                                                                          int*,
@@ -58,6 +61,7 @@ extern template cudaError_t ILUBaseNumericFactorizationPersistentAsync<int, int,
                                                                                           const int*,
                                                                                           int,
                                                                                           double*,
+                                                                                          double*,
                                                                                           int*,
                                                                                           int*,
                                                                                           int*,
@@ -70,6 +74,7 @@ extern template cudaError_t ILUBaseNumericFactorizationPersistentAsync<std::int6
     const int*,
     const std::int64_t*,
     int,
+    double*,
     double*,
     int*,
     int*,

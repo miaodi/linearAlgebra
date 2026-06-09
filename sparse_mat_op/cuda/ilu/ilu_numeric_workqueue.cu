@@ -16,43 +16,78 @@ namespace
 using ilu_detail::kSharedRowColumnsPerWarp;
 using ilu_detail::kWarpSize;
 
-template <typename COLTYPE>
-__device__ __forceinline__ bool wait_for_row_done( const COLTYPE row, const int* row_done, int* status )
+__device__ __forceinline__ int load_status( const int* status )
 {
-    cuda::atomic_ref<int, cuda::thread_scope_device> ready( *const_cast<int*>( row_done + row ) );
-    int spins = 0;
-    while ( ready.load( cuda::memory_order_acquire ) == 0 )
+    cuda::atomic_ref<int, cuda::thread_scope_device> status_value( *const_cast<int*>( status ) );
+    return status_value.load( cuda::memory_order_relaxed );
+}
+
+template <typename COLTYPE>
+__device__ __forceinline__ bool wait_for_row_done( const COLTYPE row, const int* row_done, const int* status, const int lane )
+{
+    int success = 1;
+    if ( lane == 0 )
     {
-        if ( ( spins++ & 0xff ) == 0 && atomicAdd( status, 0 ) != 0 )
+        cuda::atomic_ref<int, cuda::thread_scope_device> ready( *const_cast<int*>( row_done + row ) );
+        int spins = 0;
+        while ( ready.load( cuda::memory_order_acquire ) == 0 )
         {
-            return false;
-        }
+            if ( ( spins++ & 0xff ) == 0 && load_status( status ) != 0 )
+            {
+                success = 0;
+                break;
+            }
 #if __CUDA_ARCH__ >= 700
-        __nanosleep( spins < 256 ? spins : 256 );
+            if ( spins > 64 )
+            {
+                __nanosleep( spins < 256 ? spins : 256 );
+            }
 #endif
+        }
     }
-    return atomicAdd( status, 0 ) == 0;
+    return __shfl_sync( 0xffffffffu, success, 0 ) != 0;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+__device__ __forceinline__ VALTYPE normalize_lower_entry_with_diag_inv( const ROWTYPE k_pos,
+                                                                        const COLTYPE k,
+                                                                        VALTYPE* lu_av,
+                                                                        const VALTYPE* diag_inv,
+                                                                        const int lane )
+{
+    VALTYPE aik = lu_av[k_pos];
+    if ( aik == VALTYPE( 0 ) )
+    {
+        return VALTYPE( 0 );
+    }
+
+    if ( lane == 0 )
+    {
+        aik *= diag_inv[k];
+        lu_av[k_pos] = aik;
+    }
+
+    return __shfl_sync( 0xffffffffu, aik, 0 );
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup>
-__device__ void factor_lu_row_binary_search_persistent( const COLTYPE i,
+__device__ void factor_lu_row_binary_search_persistent( const ROWTYPE row_begin,
+                                                        const ROWTYPE row_end,
+                                                        const ROWTYPE lower_end,
                                                         const ROWTYPE* lu_ai,
                                                         const COLTYPE* lu_aj,
                                                         const ROWTYPE* lu_diag,
                                                         const COLTYPE base,
                                                         VALTYPE* lu_av,
+                                                        const VALTYPE* diag_inv,
                                                         int* status,
                                                         const int* row_done,
                                                         const int lane,
                                                         COLTYPE* shared_row_cols = nullptr )
 {
-    const ROWTYPE row_begin = lu_ai[i] - base;
-    const ROWTYPE row_end = lu_ai[i + 1] - base;
-    const ROWTYPE lower_end = lu_diag[i] - base;
-    const ROWTYPE row_len = row_end - row_begin;
-
     if constexpr ( Lookup == ilu_detail::RowIndexLookup::Shared )
     {
+        const ROWTYPE row_len = row_end - row_begin;
         for ( ROWTYPE offset = lane; offset < row_len; offset += kWarpSize )
         {
             shared_row_cols[offset] = lu_aj[row_begin + offset] - base;
@@ -63,13 +98,13 @@ __device__ void factor_lu_row_binary_search_persistent( const COLTYPE i,
     for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
     {
         const COLTYPE k = lu_aj[k_pos] - base;
-        if ( !wait_for_row_done( k, row_done, status ) )
+        if ( !wait_for_row_done( k, row_done, status, lane ) )
         {
             return;
         }
 
-        const VALTYPE aik = ilu_detail::NormalizeLowerEntry<ROWTYPE, COLTYPE, VALTYPE>(
-            k_pos, k, lu_diag, base, lu_av, status, lane );
+        const VALTYPE aik = normalize_lower_entry_with_diag_inv<ROWTYPE, COLTYPE, VALTYPE>(
+            k_pos, k, lu_av, diag_inv, lane );
         if ( aik == VALTYPE( 0 ) )
         {
             continue;
@@ -105,6 +140,7 @@ __global__ void ilu_persistent_spin_kernel( COLTYPE n,
                                             const ROWTYPE* lu_diag,
                                             COLTYPE base,
                                             VALTYPE* lu_av,
+                                            VALTYPE* diag_inv,
                                             int* status,
                                             COLTYPE* next_row,
                                             int* row_done )
@@ -120,7 +156,7 @@ __global__ void ilu_persistent_spin_kernel( COLTYPE n,
         COLTYPE row = n;
         if ( lane == 0 )
         {
-            row = ( atomicAdd( status, 0 ) == 0 ) ? atomicAdd( next_row, COLTYPE( 1 ) ) : n;
+            row = ( load_status( status ) == 0 ) ? atomicAdd( next_row, COLTYPE( 1 ) ) : n;
         }
         row = __shfl_sync( 0xffffffffu, row, 0 );
         if ( row >= n )
@@ -128,25 +164,41 @@ __global__ void ilu_persistent_spin_kernel( COLTYPE n,
             return;
         }
 
-        const ROWTYPE row_len = ( lu_ai[row + 1] - base ) - ( lu_ai[row] - base );
-        if ( row_len <= static_cast<ROWTYPE>( kSharedRowColumnsPerWarp ) )
+        const ROWTYPE row_begin = lu_ai[row] - base;
+        const ROWTYPE row_end = lu_ai[row + 1] - base;
+        const ROWTYPE lower_end = lu_diag[row] - base;
+        const bool has_lower = row_begin < lower_end;
+        if ( has_lower && row_end - row_begin <= static_cast<ROWTYPE>( kSharedRowColumnsPerWarp ) )
         {
             factor_lu_row_binary_search_persistent<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Shared>(
-                row, lu_ai, lu_aj, lu_diag, base, lu_av, status, row_done, lane, shared_row_cols );
+                row_begin, row_end, lower_end, lu_ai, lu_aj, lu_diag, base, lu_av, diag_inv, status,
+                row_done, lane, shared_row_cols );
         }
-        else
+        else if ( has_lower )
         {
             factor_lu_row_binary_search_persistent<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>(
-                row, lu_ai, lu_aj, lu_diag, base, lu_av, status, row_done, lane );
+                row_begin, row_end, lower_end, lu_ai, lu_aj, lu_diag, base, lu_av, diag_inv, status,
+                row_done, lane );
         }
 
-        __syncwarp();
-        __threadfence();
-        __syncwarp();
-        if ( lane == 0 && atomicAdd( status, 0 ) == 0 )
+        if ( has_lower )
         {
-            cuda::atomic_ref<int, cuda::thread_scope_device> ready( row_done[row] );
-            ready.store( 1, cuda::memory_order_release );
+            __threadfence();
+            __syncwarp();
+        }
+        if ( lane == 0 && load_status( status ) == 0 )
+        {
+            const VALTYPE diagonal = lu_av[lower_end];
+            if ( diagonal == VALTYPE( 0 ) )
+            {
+                atomicCAS( status, 0, 1 );
+            }
+            else
+            {
+                diag_inv[row] = VALTYPE( 1 ) / diagonal;
+                cuda::atomic_ref<int, cuda::thread_scope_device> ready( row_done[row] );
+                ready.store( 1, cuda::memory_order_release );
+            }
         }
     }
 }
@@ -237,14 +289,15 @@ cudaError_t ILUBaseNumericFactorizationPersistentAsync( COLTYPE n,
                                                         const ROWTYPE* d_lu_diag,
                                                         COLTYPE base,
                                                         VALTYPE* d_lu_av,
+                                                        VALTYPE* d_diag_inv,
                                                         int* d_status,
                                                         COLTYPE* d_next_row,
                                                         int* d_row_done,
                                                         cudaStream_t stream,
                                                         ILUPersistentLaunchConfig* h_launch_config )
 {
-    if ( n <= 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr ||
-         d_lu_av == nullptr || d_status == nullptr || d_next_row == nullptr || d_row_done == nullptr )
+    if ( n <= 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr || d_lu_av == nullptr ||
+         d_diag_inv == nullptr || d_status == nullptr || d_next_row == nullptr || d_row_done == nullptr )
     {
         return cudaErrorInvalidValue;
     }
@@ -276,7 +329,7 @@ cudaError_t ILUBaseNumericFactorizationPersistentAsync( COLTYPE n,
     const std::size_t shared_bytes =
         static_cast<std::size_t>( warps_per_block ) * kSharedRowColumnsPerWarp * sizeof( COLTYPE );
     ilu_persistent_spin_kernel<<<config.grid_blocks, config.block_size, shared_bytes, stream>>>(
-        n, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av, d_status, d_next_row, d_row_done );
+        n, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av, d_diag_inv, d_status, d_next_row, d_row_done );
     status = ilu_detail::CudaLaunchStatus();
     if ( status != cudaSuccess )
     {
@@ -296,6 +349,7 @@ template cudaError_t ILUBaseNumericFactorizationPersistentAsync<int, int, float>
                                                                                   const int*,
                                                                                   int,
                                                                                   float*,
+                                                                                  float*,
                                                                                   int*,
                                                                                   int*,
                                                                                   int*,
@@ -307,6 +361,7 @@ template cudaError_t ILUBaseNumericFactorizationPersistentAsync<int, int, double
                                                                                    const int*,
                                                                                    const int*,
                                                                                    int,
+                                                                                   double*,
                                                                                    double*,
                                                                                    int*,
                                                                                    int*,
@@ -320,6 +375,7 @@ template cudaError_t ILUBaseNumericFactorizationPersistentAsync<std::int64_t, in
     const int*,
     const std::int64_t*,
     int,
+    double*,
     double*,
     int*,
     int*,
