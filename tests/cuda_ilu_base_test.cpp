@@ -23,6 +23,7 @@ using matrix_utils::sparse_cuda::DeviceILUUpdateCache;
 using matrix_utils::sparse_cuda::ILUBaseNumericFactorizationAsync;
 using matrix_utils::sparse_cuda::ILUBaseNumericFactorizationCachedAsync;
 using matrix_utils::sparse_cuda::ILUBaseNumericFactorizationPersistentAsync;
+using matrix_utils::sparse_cuda::ILUBaseNumericFactorizationPersistentCachedAsync;
 using matrix_utils::sparse_cuda::ILUEmbedAValuesToLUAsync;
 using matrix_utils::sparse_cuda::ILUNumericRowLookup;
 using matrix_utils::sparse_cuda::ILUNumericRowUpdateStrategy;
@@ -282,6 +283,32 @@ TEST( CudaILUBase, MatchesCPULevel0Ex5 )
     {
         EXPECT_NEAR( lu_persistent_gpu[i], lu_cpu.AV()[i], 1e-8 )
             << "Persistent mismatch at LU value " << i;
+    }
+
+    ASSERT_CUDA_OK( cudaMemcpyAsync( d_lu_av, d_lu_initial, static_cast<size_t>( nnz_lu ) * sizeof( double ),
+                                     cudaMemcpyDeviceToDevice, stream ) );
+    ILUPersistentLaunchConfig persistent_cached_launch;
+    ASSERT_CUDA_OK( ILUBaseNumericFactorizationPersistentCachedAsync<int, int, double>(
+        n, d_lu_ai, d_lu_aj, d_lu_diag, device_cache.lower_row_ptr.data(), device_cache.update_ptr.data(),
+        device_cache.update_jpos.data(), device_cache.update_pos.data(), base, d_lu_av, d_diag_inv,
+        d_status, d_next_row, d_row_done, stream, &persistent_cached_launch ) );
+
+    h_status = 1;
+    ASSERT_CUDA_OK( cudaMemcpyAsync( &h_status, d_status, sizeof( int ), cudaMemcpyDeviceToHost, stream ) );
+    ASSERT_CUDA_OK( cudaStreamSynchronize( stream ) );
+    ASSERT_EQ( h_status, 0 );
+    EXPECT_GT( persistent_cached_launch.block_size, 0 );
+    EXPECT_GT( persistent_cached_launch.grid_blocks, 0 );
+    EXPECT_GT( persistent_cached_launch.resident_warps, 0 );
+
+    std::vector<double> lu_persistent_cached_gpu( static_cast<size_t>( nnz_lu ) );
+    ASSERT_CUDA_OK( cudaMemcpy( lu_persistent_cached_gpu.data(), d_lu_av,
+                                static_cast<size_t>( nnz_lu ) * sizeof( double ), cudaMemcpyDeviceToHost ) );
+
+    for ( int i = 0; i < nnz_lu; ++i )
+    {
+        EXPECT_NEAR( lu_persistent_cached_gpu[i], lu_cpu.AV()[i], 1e-8 )
+            << "Persistent cached mismatch at LU value " << i;
     }
 
     ASSERT_CUDA_OK( cudaStreamDestroy( stream ) );

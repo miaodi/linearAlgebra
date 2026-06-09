@@ -29,6 +29,21 @@ using HostCSRMatrix = matrix_utils::CSRMatrixVec<int, int, double>;
 using DeviceDoubleArray = cuda_utils::DeviceArray<double>;
 using DeviceIntArray = cuda_utils::DeviceArray<int>;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+const char* cusparseSolvePolicyName( const cusparseSolvePolicy_t policy )
+{
+    switch ( policy )
+    {
+    case CUSPARSE_SOLVE_POLICY_NO_LEVEL:
+        return "no_level";
+    case CUSPARSE_SOLVE_POLICY_USE_LEVEL:
+        return "use_level";
+    }
+    return "unknown";
+}
+#pragma GCC diagnostic pop
+
 void checkCuda( const cudaError_t status, const char* message )
 {
     if ( status != cudaSuccess )
@@ -148,6 +163,7 @@ struct ILU0BenchmarkData
     cuda_utils::DeviceArray<char> d_cusparse_buffer;
     cuda_utils::DeviceILUUpdateCache<int> update_cache;
     cuda_utils::ILUPersistentLaunchConfig persistent_launch;
+    cuda_utils::ILUPersistentLaunchConfig persistent_cached_launch;
 
     ILU0BenchmarkData( const std::string& matrix_file, const int symbolic_threads )
     {
@@ -234,7 +250,10 @@ struct ILU0BenchmarkData
                   << ", strict lower nnz=" << update_cache.strict_lower_nnz
                   << ", cached updates=" << update_cache.total_updates
                   << ", persistent block size=" << persistent_launch.block_size
-                  << ", persistent grid blocks=" << persistent_launch.grid_blocks << std::endl;
+                  << ", persistent grid blocks=" << persistent_launch.grid_blocks
+                  << ", persistent cached block size=" << persistent_cached_launch.block_size
+                  << ", persistent cached grid blocks=" << persistent_cached_launch.grid_blocks
+                  << std::endl;
     }
 
     ~ILU0BenchmarkData()
@@ -371,17 +390,38 @@ struct ILU0BenchmarkData
                 "cached ILU0 factorization found a zero pivot during warmup" );
         }
 
-        resetCusparseValues();
+        resetOurValues();
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationPersistentCachedAsync<int, int, double>(
+                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(),
+                       update_cache.lower_row_ptr.data(), update_cache.update_ptr.data(),
+                       update_cache.update_jpos.data(), update_cache.update_pos.data(), base,
+                       d_our_lu_av.data(), d_diag_inv.data(), d_status.data(), d_next_row.data(),
+                       d_row_done.data(), stream, &persistent_cached_launch ),
+                   "warm up persistent cached ILU0 factorization" );
+        int persistent_cached_host_status = 1;
+        checkCuda( cudaMemcpyAsync( &persistent_cached_host_status, d_status.data(), sizeof( int ),
+                                    cudaMemcpyDeviceToHost, stream ),
+                   "copy persistent cached ILU0 status" );
+        checkCuda( cudaStreamSynchronize( stream ), "sync after persistent cached ILU0 warmup" );
+        if ( persistent_cached_host_status != 0 )
+        {
+            throw std::runtime_error(
+                "persistent cached ILU0 factorization found a zero pivot during warmup" );
+        }
+
+        for ( const auto policy : { CUSPARSE_SOLVE_POLICY_USE_LEVEL, CUSPARSE_SOLVE_POLICY_NO_LEVEL } )
+        {
+            resetCusparseValues();
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-        checkCusparse( cusparseDcsrilu02( cusparse_handle, n, nnz_lu, cusparse_descr.descr,
-                                          d_cusparse_lu_av.data(), d_lu_ai.data(), d_lu_aj.data(),
-                                          cusparse_info.info, CUSPARSE_SOLVE_POLICY_USE_LEVEL,
-                                          d_cusparse_buffer.data() ),
-                       "warm up cuSPARSE ILU0 factorization" );
+            checkCusparse( cusparseDcsrilu02( cusparse_handle, n, nnz_lu, cusparse_descr.descr,
+                                              d_cusparse_lu_av.data(), d_lu_ai.data(), d_lu_aj.data(),
+                                              cusparse_info.info, policy, d_cusparse_buffer.data() ),
+                           "warm up cuSPARSE ILU0 factorization" );
 #pragma GCC diagnostic pop
-        checkCuda( cudaStreamSynchronize( stream ), "sync after cuSPARSE ILU0 warmup" );
-        checkCusparseZeroPivot( "cuSPARSE ILU0 numerical zero" );
+            checkCuda( cudaStreamSynchronize( stream ), "sync after cuSPARSE ILU0 warmup" );
+            checkCusparseZeroPivot( "cuSPARSE ILU0 numerical zero" );
+        }
 
         resetOurValues();
         resetCusparseValues();
@@ -400,6 +440,12 @@ void setCounters( benchmark::State& state, const ILU0BenchmarkData& data )
     state.counters["persistent_block_size"] = static_cast<double>( data.persistent_launch.block_size );
     state.counters["persistent_grid_blocks"] = static_cast<double>( data.persistent_launch.grid_blocks );
     state.counters["persistent_resident_warps"] = static_cast<double>( data.persistent_launch.resident_warps );
+    state.counters["persistent_cached_block_size"] =
+        static_cast<double>( data.persistent_cached_launch.block_size );
+    state.counters["persistent_cached_grid_blocks"] =
+        static_cast<double>( data.persistent_cached_launch.grid_blocks );
+    state.counters["persistent_cached_resident_warps"] =
+        static_cast<double>( data.persistent_cached_launch.resident_warps );
     state.SetItemsProcessed( state.iterations() * static_cast<int64_t>( data.nnz_lu ) );
 }
 
@@ -477,7 +523,36 @@ void BM_OurILU0NumericCached( benchmark::State& state, ILU0BenchmarkData& data )
     setCounters( state, data );
 }
 
-void BM_CuSparseILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data )
+void BM_OurILU0NumericPersistentCached( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    for ( auto _ : state )
+    {
+        state.PauseTiming();
+        data.resetOurValues();
+        startCudaProfilerRange(
+            "start CUDA profiler for persistent cached ILU0 numeric factorization" );
+        state.ResumeTiming();
+
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationPersistentCachedAsync<int, int, double>(
+                       data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
+                       data.update_cache.lower_row_ptr.data(), data.update_cache.update_ptr.data(),
+                       data.update_cache.update_jpos.data(), data.update_cache.update_pos.data(),
+                       data.base, data.d_our_lu_av.data(), data.d_diag_inv.data(), data.d_status.data(),
+                       data.d_next_row.data(), data.d_row_done.data(), data.stream, &data.persistent_cached_launch ),
+                   "run persistent cached ILU0 numeric factorization" );
+        checkCuda( cudaStreamSynchronize( data.stream ),
+                   "sync after persistent cached ILU0 numeric factorization" );
+        state.PauseTiming();
+        stopCudaProfilerRange(
+            "stop CUDA profiler after persistent cached ILU0 numeric factorization" );
+        state.ResumeTiming();
+    }
+    setCounters( state, data );
+}
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void BM_CuSparseILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data, const cusparseSolvePolicy_t policy )
 {
     for ( auto _ : state )
     {
@@ -490,9 +565,8 @@ void BM_CuSparseILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data )
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         checkCusparse(
             cusparseDcsrilu02( data.cusparse_handle, data.n, data.nnz_lu, data.cusparse_descr.descr,
-                               data.d_cusparse_lu_av.data(), data.d_lu_ai.data(),
-                               data.d_lu_aj.data(), data.cusparse_info.info,
-                               CUSPARSE_SOLVE_POLICY_USE_LEVEL, data.d_cusparse_buffer.data() ),
+                               data.d_cusparse_lu_av.data(), data.d_lu_ai.data(), data.d_lu_aj.data(),
+                               data.cusparse_info.info, policy, data.d_cusparse_buffer.data() ),
             "run cuSPARSE ILU0 numeric factorization" );
 #pragma GCC diagnostic pop
         checkCuda( cudaStreamSynchronize( data.stream ),
@@ -502,7 +576,9 @@ void BM_CuSparseILU0Numeric( benchmark::State& state, ILU0BenchmarkData& data )
         state.ResumeTiming();
     }
     setCounters( state, data );
+    state.counters["cusparse_policy"] = policy == CUSPARSE_SOLVE_POLICY_USE_LEVEL ? 1.0 : 0.0;
 }
+#pragma GCC diagnostic pop
 
 void printUsage()
 {
@@ -599,10 +675,18 @@ int main( int argc, char** argv )
                                       { BM_OurILU0NumericPersistent( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
-        benchmark::RegisterBenchmark( "ILU0Numeric/cuSPARSE", [data]( benchmark::State& state )
-                                      { BM_CuSparseILU0Numeric( state, *data ); } )
+        benchmark::RegisterBenchmark( "ILU0Numeric/ours_persistent_cached", [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericPersistentCached( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
+        for ( const auto policy : { CUSPARSE_SOLVE_POLICY_USE_LEVEL, CUSPARSE_SOLVE_POLICY_NO_LEVEL } )
+        {
+            const std::string name = std::string( "ILU0Numeric/cuSPARSE_" ) + cusparseSolvePolicyName( policy );
+            benchmark::RegisterBenchmark( name.c_str(), [data, policy]( benchmark::State& state )
+                                          { BM_CuSparseILU0Numeric( state, *data, policy ); } )
+                ->Unit( benchmark::kMillisecond )
+                ->UseRealTime();
+        }
     }
     catch ( const std::exception& e )
     {

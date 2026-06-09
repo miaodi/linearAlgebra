@@ -5,7 +5,7 @@
 This note summarizes work after the committed checkpoint
 `e5e712f7458ced81c9b1075961f70ee5442eb86a`
 (`feat(cuda): add persistent ILU numeric path`) on the CUDA ILU(0) numeric
-factorization non-cached persistent spin path.
+factorization persistent spin paths.
 
 Baseline matrix: `/home/miaodi/repo/matrix_lib/RTP_metis.bin`.
 
@@ -22,14 +22,15 @@ Baseline matrix: `/home/miaodi/repo/matrix_lib/RTP_metis.bin`.
 
 Approximate benchmark means on RTP:
 
-| Stage | `ours_persistent_spin` | `ours_binary_shared` | `cuSPARSE` | Notes |
+| Stage | Result | `ours_binary_shared` | `cuSPARSE` | Notes |
 | --- | ---: | ---: | ---: | --- |
 | Original persistent path after `e5e712f` | 50.5 ms | 58.0 ms | -- | Acquire/release row-ready polling. |
 | Wait-path tuning | 45.9 ms | 58.0 ms | -- | Lower polling and status-check overhead. |
 | Diagonal inverse optimization | 34.6 ms | 58.0 ms | 21.8 ms | Dependents multiply by stored `diag_inv[k]`. |
+| Persistent cached path | 30.5 ms | 58.0 ms | 21.9 ms | Persistent scheduler plus lower-only update cache. |
 
-The current persistent path is faster than the non-persistent binary shared path
-on this matrix, but still trails cuSPARSE by about 12.8 ms.
+The current best persistent path is faster than the non-persistent binary shared
+path on this matrix, but still trails cuSPARSE by about 8.6 ms.
 
 ## Current Persistent Algorithm Overview
 
@@ -38,9 +39,11 @@ on this matrix, but still trails cuSPARSE by about 12.8 ms.
   `row_done[k]` is published.
 - Monotonic row assignment ensures lower-index dependencies are scheduled before
   dependent rows can wait on them.
-- The path remains non-cached: row updates use the existing binary-search row
-  lookup, with shared row-column staging for rows that fit the shared buffer and
-  global lookup otherwise.
+- The non-cached path uses binary-search row lookup, with shared row-column
+  staging for rows that fit the shared buffer and global lookup otherwise.
+- The cached persistent path uses the same persistent scheduler and diagonal
+  inverse publishing, but applies updates from the lower-only update cache
+  instead of performing per-update binary searches.
 - Each completed row checks the diagonal, stores `diag_inv[row] = 1 / U(row,row)`,
   then publishes `row_done[row]`.
 
@@ -63,6 +66,9 @@ Primary files:
 - The persistent API takes a caller-owned `d_diag_inv` scratch buffer of size
   `n` and reuses it during the numeric factorization.
 - Dependents multiply by `diag_inv[k]` instead of dividing by `U(k,k)`.
+- `ILUBaseNumericFactorizationPersistentCachedAsync` combines the persistent row
+  scheduler with `lower_row_ptr`, `update_ptr`, `update_jpos`, and `update_pos`
+  to remove numeric-phase binary searches.
 
 ## Rejected Experiments
 
@@ -83,19 +89,19 @@ Primary files:
 - Replacing division by multiplication with a stored reciprocal changes floating
   point roundoff slightly. The persistent test tolerance was relaxed from
   `1e-10` to `1e-8`.
-- Verification already run after the diagonal-inverse change:
+- Verification already run after the persistent cached change:
   - `ctest --test-dir release -R cuda_ilu_base_test --output-on-failure` passed.
   - `git diff --check` passed.
 
 ## Remaining Gap and Likely Next Steps
 
-The current RTP result is roughly `34.6 ms` versus cuSPARSE at roughly
-`21.8 ms`. Likely next steps are hypotheses until profiler data confirms them:
+The current RTP result is roughly `30.5 ms` versus cuSPARSE at roughly
+`21.9 ms`. Likely next steps are hypotheses until profiler data confirms them:
 
 - Profile the persistent kernel to separate dependency-wait time from row-update
   work.
 - Investigate scheduling or hybrid level/persistent schemes that reduce spin
   overhead without losing enough parallelism to regress.
-- Reduce binary-search lookup and global-memory traffic in the update path.
+- Reduce remaining global-memory traffic in the cached update path.
 - Revisit launch configuration only with profiler evidence; fixed block sizes
   were neutral and a hard resident-warp cap regressed.
