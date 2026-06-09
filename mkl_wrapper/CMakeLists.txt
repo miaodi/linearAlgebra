@@ -23,8 +23,7 @@ endif()
 
 if(USE_CUDA AND USE_CUDSS)
   set(MKL_WRAPPER_SRC ${MKL_WRAPPER_SRC} cudss_wrapper.cpp)
-  set_source_files_properties(cudss_wrapper.cpp PROPERTIES LANGUAGE CUDA)
-  set(DEPENDENCIES ${DEPENDENCIES} cudss)
+  set(DEPENDENCIES ${DEPENDENCIES} cudss CUDA::cudart)
 endif()
 
 add_library(${PROJECT_NAME} STATIC ${MKL_WRAPPER_SRC})

@@ -209,10 +209,11 @@ if(USE_BOOST_LIB)
 endif()
 
 if(USE_CUDA)
-  # Set CUDA compiler explicitly if not already set
-  if(NOT DEFINED CMAKE_CUDA_COMPILER)
-    set(CMAKE_CUDA_COMPILER "nvcc")
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR "${CMAKE_CUDA_ARCHITECTURES}" STREQUAL "")
+    set(CMAKE_CUDA_ARCHITECTURES "75-real;80-real;86-real;89-real;90-real" CACHE STRING
+        "CUDA architectures to build; use 90-real for H100 deployments that must avoid PTX JIT")
   endif()
+
   enable_language(CUDA)
   
   # Set CUDA standard to match C++ standard
@@ -223,22 +224,9 @@ if(USE_CUDA)
   # Find CUDA (handles both standard CUDA Toolkit and NVIDIA HPC SDK)
   find_package(CUDAHPC REQUIRED)
   
-  # Set CUDA architectures if not already set
-  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89")  # Turing and newer (cuCo requires sm_70+, but some features need sm_75+)
-  endif()
-  
-  # Set CUDA compiler flags for different build types
-  # Note: For multi-config generators, use CMAKE_CUDA_FLAGS_<CONFIG> instead
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G")  # Debug info for device code
-  elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -G")  # Enable device debug code.
   endif()
-  
-  # Add forward compatibility for older drivers
-  # This allows code compiled with newer CUDA toolkit to run on older drivers
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --forward-unknown-to-host-compiler")
   
   # Enable extended device lambdas (required by cuco)
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-extended-lambda")

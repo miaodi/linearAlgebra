@@ -125,6 +125,23 @@
                 "CMAKE_CXX_COMPILER": "g++",
                 "USE_CUDA": "ON"
             }
+        },
+        {
+            "name": "release-cuda-h100",
+            "displayName": "Release CUDA H100 (sm_90)",
+            "description": "H100 deployment build with native sm_90 cubins only to avoid PTX JIT on older drivers",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/release_h100",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "USE_CUDA": "ON",
+                "CMAKE_CUDA_ARCHITECTURES": "90-real",
+                "ENABLE_TESTS": "OFF",
+                "ENABLE_DATA_DOWNLOADS": "OFF",
+                "BUILD_BENCHMARKS": "OFF"
+            }
         }
     ],
     "buildPresets": [
@@ -165,6 +182,10 @@
         {
             "name": "release-cuda",
             "configurePreset": "release-cuda"
+        },
+        {
+            "name": "release-cuda-h100",
+            "configurePreset": "release-cuda-h100"
         }
     ]
 }

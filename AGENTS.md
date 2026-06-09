@@ -58,6 +58,17 @@ Run tests:
 ctest --test-dir release --output-on-failure
 ```
 
+H100 CUDA deployment build:
+
+```sh
+cmake --preset release-cuda-h100
+cmake --build --preset release-cuda-h100
+```
+
+The H100 preset uses `CMAKE_CUDA_ARCHITECTURES=90-real` to emit native
+`sm_90` cubins and avoid PTX JIT on clusters where the CUDA toolkit is newer
+than the installed driver.
+
 Useful CMake options:
 
 - `USE_MKL=ON` by default.

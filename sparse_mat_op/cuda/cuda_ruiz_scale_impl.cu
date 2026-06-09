@@ -669,8 +669,11 @@ bool RuizScaleCudaTileTemplate( DeviceTileCOOMatrix<ROWTYPE, COLTYPE, VALTYPE>& 
     const size_t shared_bytes = 2 * tile_size * sizeof( VALTYPE );
     const int sparse_block_size = 256;
 
+    int device = 0;
+    cuda_check( cudaGetDevice( &device ), "Failed to query current CUDA device" );
+
     int max_shared_per_block = 0;
-    cuda_check( cudaDeviceGetAttribute( &max_shared_per_block, cudaDevAttrMaxSharedMemoryPerBlock, 0 ),
+    cuda_check( cudaDeviceGetAttribute( &max_shared_per_block, cudaDevAttrMaxSharedMemoryPerBlock, device ),
                 "Failed to query max shared memory" );
     if ( shared_bytes > static_cast<size_t>( max_shared_per_block ) )
     {

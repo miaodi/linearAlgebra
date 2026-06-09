@@ -141,8 +141,11 @@ static void BM_RuizScaleCudaTiled( benchmark::State& state, const std::string& m
     const size_t tile_size = size_t{ 1 } << tile_k;
     const size_t shared_bytes = 2 * tile_size * sizeof( double );
 
+    int device = 0;
+    checkCudaError( cudaGetDevice( &device ), "query current CUDA device" );
+
     int max_shared_per_block = 0;
-    checkCudaError( cudaDeviceGetAttribute( &max_shared_per_block, cudaDevAttrMaxSharedMemoryPerBlock, 0 ),
+    checkCudaError( cudaDeviceGetAttribute( &max_shared_per_block, cudaDevAttrMaxSharedMemoryPerBlock, device ),
                     "query max shared memory per block" );
     if ( shared_bytes > static_cast<size_t>( max_shared_per_block ) )
     {

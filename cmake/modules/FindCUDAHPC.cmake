@@ -11,6 +11,9 @@
 #   CUDAHPC_FOUND - True if CUDA libraries are found
 #   CUDAHPC_IS_HPC_SDK - True if using NVIDIA HPC SDK
 
+set(CUDAHPC_FOUND FALSE)
+set(CUDAHPC_IS_HPC_SDK FALSE)
+
 # Function to create manual CUDA targets for HPC SDK
 function(create_hpc_cuda_targets)
     if(NOT DEFINED ENV{NVHPC_ROOT})
@@ -22,6 +25,11 @@ function(create_hpc_cuda_targets)
     # Set paths for HPC SDK
     set(NVHPC_CUDA_ROOT "$ENV{NVHPC_ROOT}/cuda")
     set(NVHPC_MATH_LIBS "$ENV{NVHPC_ROOT}/math_libs")
+
+    if(NOT EXISTS "${NVHPC_CUDA_ROOT}/include/cuda_runtime.h")
+        message(STATUS "NVHPC_ROOT is set, but CUDA headers were not found at ${NVHPC_CUDA_ROOT}")
+        return()
+    endif()
     
     # cusparse library
     find_library(CUSPARSE_LIBRARY cusparse
@@ -29,11 +37,13 @@ function(create_hpc_cuda_targets)
         NO_DEFAULT_PATH
     )
     if(CUSPARSE_LIBRARY)
-        add_library(CUDA::cusparse SHARED IMPORTED)
-        set_target_properties(CUDA::cusparse PROPERTIES
-            IMPORTED_LOCATION "${CUSPARSE_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${NVHPC_MATH_LIBS}/include;${NVHPC_CUDA_ROOT}/include"
-        )
+        if(NOT TARGET CUDA::cusparse)
+            add_library(CUDA::cusparse SHARED IMPORTED)
+            set_target_properties(CUDA::cusparse PROPERTIES
+                IMPORTED_LOCATION "${CUSPARSE_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${NVHPC_MATH_LIBS}/include;${NVHPC_CUDA_ROOT}/include"
+            )
+        endif()
         message(STATUS "Found cusparse: ${CUSPARSE_LIBRARY}")
     endif()
     
@@ -43,11 +53,13 @@ function(create_hpc_cuda_targets)
         NO_DEFAULT_PATH
     )
     if(CUBLAS_LIBRARY)
-        add_library(CUDA::cublas SHARED IMPORTED)
-        set_target_properties(CUDA::cublas PROPERTIES
-            IMPORTED_LOCATION "${CUBLAS_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${NVHPC_MATH_LIBS}/include;${NVHPC_CUDA_ROOT}/include"
-        )
+        if(NOT TARGET CUDA::cublas)
+            add_library(CUDA::cublas SHARED IMPORTED)
+            set_target_properties(CUDA::cublas PROPERTIES
+                IMPORTED_LOCATION "${CUBLAS_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${NVHPC_MATH_LIBS}/include;${NVHPC_CUDA_ROOT}/include"
+            )
+        endif()
         message(STATUS "Found cublas: ${CUBLAS_LIBRARY}")
     endif()
     
@@ -57,11 +69,13 @@ function(create_hpc_cuda_targets)
         NO_DEFAULT_PATH
     )
     if(CUDART_LIBRARY)
-        add_library(CUDA::cudart SHARED IMPORTED)
-        set_target_properties(CUDA::cudart PROPERTIES
-            IMPORTED_LOCATION "${CUDART_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${NVHPC_CUDA_ROOT}/include"
-        )
+        if(NOT TARGET CUDA::cudart)
+            add_library(CUDA::cudart SHARED IMPORTED)
+            set_target_properties(CUDA::cudart PROPERTIES
+                IMPORTED_LOCATION "${CUDART_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${NVHPC_CUDA_ROOT}/include"
+            )
+        endif()
         message(STATUS "Found cudart: ${CUDART_LIBRARY}")
     endif()
 
@@ -72,26 +86,15 @@ function(create_hpc_cuda_targets)
     endif()
 endfunction()
 
-# Main detection logic
-if(DEFINED ENV{NVHPC_ROOT})
-    # Try HPC SDK approach first
+# Main detection logic. Prefer CMake's CUDAToolkit package because, when the
+# CUDA language is enabled, it searches relative to the active CUDA compiler.
+find_package(CUDAToolkit QUIET)
+if(CUDAToolkit_FOUND)
+    set(CUDAHPC_FOUND TRUE)
+    set(CUDAHPC_IS_HPC_SDK FALSE)
+elseif(DEFINED ENV{NVHPC_ROOT})
+    # Fall back to manual HPC SDK targets only when CUDAToolkit was not found.
     create_hpc_cuda_targets()
-    
-    if(NOT CUDAHPC_FOUND)
-        message(STATUS "HPC SDK CUDA setup failed, falling back to standard CUDAToolkit")
-        find_package(CUDAToolkit)
-        if(CUDAToolkit_FOUND)
-            set(CUDAHPC_FOUND TRUE)
-            set(CUDAHPC_IS_HPC_SDK FALSE)
-        endif()
-    endif()
-else()
-    # Standard CUDA Toolkit installation
-    find_package(CUDAToolkit)
-    if(CUDAToolkit_FOUND)
-        set(CUDAHPC_FOUND TRUE)
-        set(CUDAHPC_IS_HPC_SDK FALSE)
-    endif()
 endif()
 
 # Report results
@@ -103,4 +106,9 @@ if(CUDAHPC_FOUND)
     endif()
 else()
     message(STATUS "CUDA support not found")
+    if(CUDAHPC_FIND_REQUIRED)
+        message(FATAL_ERROR
+            "CUDAHPC was required but CUDA Toolkit libraries were not found. "
+            "Set CUDAToolkit_ROOT or CMAKE_CUDA_COMPILER to the intended CUDA installation.")
+    endif()
 endif()
