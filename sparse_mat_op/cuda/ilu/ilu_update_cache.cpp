@@ -93,10 +93,33 @@ ILUUpdateCache<ROWTYPE> BuildILUUpdateCache( const COLTYPE n,
 
     const auto build_start = std::chrono::steady_clock::now();
     const ROWTYPE row_base = static_cast<ROWTYPE>( base );
-    const ROWTYPE nnz = lu_ai[n] - row_base;
 
     ILUUpdateCache<ROWTYPE> cache;
-    cache.update_ptr.assign( static_cast<std::size_t>( nnz ) + 1, ROWTYPE( 0 ) );
+    cache.lower_row_ptr.assign( static_cast<std::size_t>( n ) + 1, ROWTYPE( 0 ) );
+
+    std::int64_t strict_lower_nnz = 0;
+    for ( COLTYPE i = 0; i < n; ++i )
+    {
+        const ROWTYPE row_begin = lu_ai[i] - row_base;
+        const ROWTYPE lower_end = lu_diag[i] - row_base;
+        if ( lower_end < row_begin )
+        {
+            throw std::runtime_error( "ILU update cache received invalid diagonal position" );
+        }
+        if ( strict_lower_nnz > std::numeric_limits<ROWTYPE>::max() )
+        {
+            throw std::runtime_error( "ILU update cache lower entries exceed row index range" );
+        }
+        cache.lower_row_ptr[static_cast<std::size_t>( i )] = static_cast<ROWTYPE>( strict_lower_nnz );
+        strict_lower_nnz += lower_end - row_begin;
+    }
+    if ( strict_lower_nnz > std::numeric_limits<ROWTYPE>::max() )
+    {
+        throw std::runtime_error( "ILU update cache lower entries exceed row index range" );
+    }
+    cache.lower_row_ptr[static_cast<std::size_t>( n )] = static_cast<ROWTYPE>( strict_lower_nnz );
+    cache.strict_lower_nnz = static_cast<ROWTYPE>( strict_lower_nnz );
+    cache.update_ptr.assign( static_cast<std::size_t>( strict_lower_nnz ) + 1, ROWTYPE( 0 ) );
 
 #pragma omp parallel for schedule( dynamic ) num_threads( threads )
     for ( COLTYPE i = 0; i < n; ++i )
@@ -104,18 +127,20 @@ ILUUpdateCache<ROWTYPE> BuildILUUpdateCache( const COLTYPE n,
         const ROWTYPE row_begin = lu_ai[i] - row_base;
         const ROWTYPE row_end = lu_ai[i + 1] - row_base;
         const ROWTYPE lower_end = lu_diag[i] - row_base;
+        const ROWTYPE lower_begin = cache.lower_row_ptr[static_cast<std::size_t>( i )];
         for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
         {
             const COLTYPE k = lu_aj[k_pos] - base;
             const ROWTYPE k_u_begin = ( lu_diag[k] - row_base ) + 1;
             const ROWTYPE k_u_end = lu_ai[k + 1] - row_base;
-            cache.update_ptr[static_cast<std::size_t>( k_pos )] =
+            const ROWTYPE lower_id = lower_begin + ( k_pos - row_begin );
+            cache.update_ptr[static_cast<std::size_t>( lower_id )] =
                 count_update_intersections( row_end, k_pos, k_u_begin, k_u_end, lu_aj );
         }
     }
 
     std::int64_t total_updates = 0;
-    for ( ROWTYPE pos = 0; pos < nnz; ++pos )
+    for ( ROWTYPE pos = 0; pos < cache.strict_lower_nnz; ++pos )
     {
         const ROWTYPE count = cache.update_ptr[static_cast<std::size_t>( pos )];
         if ( total_updates > std::numeric_limits<ROWTYPE>::max() )
@@ -129,7 +154,8 @@ ILUUpdateCache<ROWTYPE> BuildILUUpdateCache( const COLTYPE n,
     {
         throw std::runtime_error( "ILU update cache exceeds row index range" );
     }
-    cache.update_ptr[static_cast<std::size_t>( nnz )] = static_cast<ROWTYPE>( total_updates );
+    cache.update_ptr[static_cast<std::size_t>( cache.strict_lower_nnz )] = static_cast<ROWTYPE>( total_updates );
+    cache.total_updates = static_cast<ROWTYPE>( total_updates );
     cache.update_jpos.resize( static_cast<std::size_t>( total_updates ) );
     cache.update_pos.resize( static_cast<std::size_t>( total_updates ) );
 
@@ -139,13 +165,16 @@ ILUUpdateCache<ROWTYPE> BuildILUUpdateCache( const COLTYPE n,
         const ROWTYPE row_begin = lu_ai[i] - row_base;
         const ROWTYPE row_end = lu_ai[i + 1] - row_base;
         const ROWTYPE lower_end = lu_diag[i] - row_base;
+        const ROWTYPE lower_begin = cache.lower_row_ptr[static_cast<std::size_t>( i )];
         for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
         {
             const COLTYPE k = lu_aj[k_pos] - base;
             const ROWTYPE k_u_begin = ( lu_diag[k] - row_base ) + 1;
             const ROWTYPE k_u_end = lu_ai[k + 1] - row_base;
+            const ROWTYPE lower_id = lower_begin + ( k_pos - row_begin );
             fill_update_intersections( row_end, k_pos, k_u_begin, k_u_end, lu_aj, cache.update_jpos,
-                                       cache.update_pos, cache.update_ptr[static_cast<std::size_t>( k_pos )] );
+                                       cache.update_pos,
+                                       cache.update_ptr[static_cast<std::size_t>( lower_id )] );
         }
     }
 

@@ -2,3 +2,4 @@
 
 #include "ilu/ilu_numeric.cuh"
 #include "ilu/ilu_numeric_workqueue.cuh"
+#include "ilu/ilu_update_cache.hpp"

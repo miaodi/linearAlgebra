@@ -99,14 +99,13 @@ cudaError_t launch_level_factor_kernel( const int blocks,
     return ilu_detail::CudaLaunchStatus();
 }
 
-#if 0
-// Disabled while focusing on the base global/shared binary-search numeric path.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 __global__ void ilu_level_factor_cached_kernel( COLTYPE level_rows,
                                                 const COLTYPE* level_rows_perm,
                                                 const ROWTYPE* lu_ai,
                                                 const COLTYPE* lu_aj,
                                                 const ROWTYPE* lu_diag,
+                                                const ROWTYPE* lower_row_ptr,
                                                 const ROWTYPE* update_ptr,
                                                 const ROWTYPE* update_jpos,
                                                 const ROWTYPE* update_pos,
@@ -125,6 +124,7 @@ __global__ void ilu_level_factor_cached_kernel( COLTYPE level_rows,
     const COLTYPE i = level_rows_perm[level_row] - base;
     const ROWTYPE row_begin = lu_ai[i] - base;
     const ROWTYPE lower_end = lu_diag[i] - base;
+    const ROWTYPE lower_begin = lower_row_ptr[i];
 
     for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
     {
@@ -136,15 +136,15 @@ __global__ void ilu_level_factor_cached_kernel( COLTYPE level_rows,
             continue;
         }
 
-        const ROWTYPE update_begin = update_ptr[k_pos];
-        const ROWTYPE update_end = update_ptr[k_pos + 1];
+        const ROWTYPE lower_id = lower_begin + ( k_pos - row_begin );
+        const ROWTYPE update_begin = update_ptr[lower_id];
+        const ROWTYPE update_end = update_ptr[lower_id + 1];
         for ( ROWTYPE update = update_begin + lane; update < update_end; update += kWarpSize )
         {
             lu_av[update_pos[update]] -= aik * lu_av[update_jpos[update]];
         }
     }
 }
-#endif
 
 } // namespace
 
@@ -280,13 +280,12 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
         d_status, row_lookup, ILUNumericRowUpdateStrategy::BinarySearch, stream );
 }
 
-#if 0
-// Disabled while focusing on the base global/shared binary-search numeric path.
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
                                                     const ROWTYPE* d_lu_ai,
                                                     const COLTYPE* d_lu_aj,
                                                     const ROWTYPE* d_lu_diag,
+                                                    const ROWTYPE* d_lower_row_ptr,
                                                     const ROWTYPE* d_update_ptr,
                                                     const ROWTYPE* d_update_jpos,
                                                     const ROWTYPE* d_update_pos,
@@ -299,8 +298,9 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
                                                     cudaStream_t stream )
 {
     if ( n <= 0 || levels < 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr ||
-         d_update_ptr == nullptr || d_update_jpos == nullptr || d_update_pos == nullptr ||
-         d_level_perm == nullptr || h_level_prefix == nullptr || d_lu_av == nullptr || d_status == nullptr )
+         d_lower_row_ptr == nullptr || d_update_ptr == nullptr || d_update_jpos == nullptr ||
+         d_update_pos == nullptr || d_level_perm == nullptr || h_level_prefix == nullptr ||
+         d_lu_av == nullptr || d_status == nullptr )
     {
         return cudaErrorInvalidValue;
     }
@@ -323,8 +323,8 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
 
         const int blocks = ( level_rows + kWarpsPerBlock - 1 ) / kWarpsPerBlock;
         ilu_level_factor_cached_kernel<<<blocks, kThreadsPerBlock, 0, stream>>>(
-            level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag, d_update_ptr,
-            d_update_jpos, d_update_pos, base, d_lu_av, d_status );
+            level_rows, d_level_perm + level_begin, d_lu_ai, d_lu_aj, d_lu_diag, d_lower_row_ptr,
+            d_update_ptr, d_update_jpos, d_update_pos, base, d_lu_av, d_status );
         status = ilu_detail::CudaLaunchStatus();
         if ( status != cudaSuccess )
         {
@@ -334,7 +334,6 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
 
     return cudaSuccess;
 }
-#endif
 
 template cudaError_t ILUEmbedAValuesToLUAsync<int, int, float>( int,
                                                                 const int*,
@@ -447,9 +446,8 @@ template cudaError_t ILUBaseNumericFactorizationAsync<std::int64_t, int, double>
                                                                                   ILUNumericRowLookup,
                                                                                   cudaStream_t );
 
-#if 0
-// Disabled while focusing on the base global/shared binary-search numeric path.
 template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, float>( int,
+                                                                              const int*,
                                                                               const int*,
                                                                               const int*,
                                                                               const int*,
@@ -473,6 +471,7 @@ template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, double>( i
                                                                                const int*,
                                                                                const int*,
                                                                                const int*,
+                                                                               const int*,
                                                                                int,
                                                                                int,
                                                                                double*,
@@ -486,6 +485,7 @@ template cudaError_t ILUBaseNumericFactorizationCachedAsync<std::int64_t, int, d
                                                                                         const std::int64_t*,
                                                                                         const std::int64_t*,
                                                                                         const std::int64_t*,
+                                                                                        const std::int64_t*,
                                                                                         const int*,
                                                                                         const int*,
                                                                                         int,
@@ -493,6 +493,5 @@ template cudaError_t ILUBaseNumericFactorizationCachedAsync<std::int64_t, int, d
                                                                                         double*,
                                                                                         int*,
                                                                                         cudaStream_t );
-#endif
 
 } // namespace matrix_utils::sparse_cuda

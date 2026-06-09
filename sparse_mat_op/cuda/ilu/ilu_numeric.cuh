@@ -89,20 +89,19 @@ cudaError_t ILUBaseNumericFactorizationAsync( COLTYPE n,
                                               ILUNumericRowLookup row_lookup,
                                               cudaStream_t stream = nullptr );
 
-#if 0
-// Disabled while focusing on the base global/shared binary-search numeric path.
 /**
  * @brief CUDA numerical ILU factorization using a precomputed update cache.
  *
  * The cache removes numeric-phase binary searches. For every lower entry
- * position k_pos in row i, update_ptr[k_pos]..update_ptr[k_pos + 1] stores the
+ * position k_pos in row i, lower_row_ptr[i] + (k_pos - row_begin) maps to the
  * compact list of source U positions and destination row-i positions that
  * survive the ILU sparsity pattern.
  *
  * The caller must initialize d_lu_av first, usually with
  * ILUEmbedAValuesToLUAsync.
  *
- * @param d_update_ptr Device update offsets, size d_lu_ai[n] - base + 1.
+ * @param d_lower_row_ptr Device strict-lower row offsets, size n + 1.
+ * @param d_update_ptr Device update offsets, size d_lower_row_ptr[n] + 1.
  * @param d_update_jpos Device source LU value positions for U(k,j).
  * @param d_update_pos Device destination LU value positions for row i.
  */
@@ -111,6 +110,7 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
                                                     const ROWTYPE* d_lu_ai,
                                                     const COLTYPE* d_lu_aj,
                                                     const ROWTYPE* d_lu_diag,
+                                                    const ROWTYPE* d_lower_row_ptr,
                                                     const ROWTYPE* d_update_ptr,
                                                     const ROWTYPE* d_update_jpos,
                                                     const ROWTYPE* d_update_pos,
@@ -121,7 +121,6 @@ cudaError_t ILUBaseNumericFactorizationCachedAsync( COLTYPE n,
                                                     VALTYPE* d_lu_av,
                                                     int* d_status,
                                                     cudaStream_t stream = nullptr );
-#endif
 
 extern template cudaError_t ILUEmbedAValuesToLUAsync<int, int, float>( int,
                                                                        const int*,
@@ -234,9 +233,8 @@ extern template cudaError_t ILUBaseNumericFactorizationAsync<std::int64_t, int, 
                                                                                          ILUNumericRowLookup,
                                                                                          cudaStream_t );
 
-#if 0
-// Disabled while focusing on the base global/shared binary-search numeric path.
 extern template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, float>( int,
+                                                                                     const int*,
                                                                                      const int*,
                                                                                      const int*,
                                                                                      const int*,
@@ -260,6 +258,7 @@ extern template cudaError_t ILUBaseNumericFactorizationCachedAsync<int, int, dou
                                                                                       const int*,
                                                                                       const int*,
                                                                                       const int*,
+                                                                                      const int*,
                                                                                       int,
                                                                                       int,
                                                                                       double*,
@@ -274,6 +273,7 @@ extern template cudaError_t ILUBaseNumericFactorizationCachedAsync<std::int64_t,
     const std::int64_t*,
     const std::int64_t*,
     const std::int64_t*,
+    const std::int64_t*,
     const int*,
     const int*,
     int,
@@ -281,6 +281,5 @@ extern template cudaError_t ILUBaseNumericFactorizationCachedAsync<std::int64_t,
     double*,
     int*,
     cudaStream_t );
-#endif
 
 } // namespace matrix_utils::sparse_cuda

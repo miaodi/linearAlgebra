@@ -143,6 +143,7 @@ struct ILU0BenchmarkData
     DeviceDoubleArray d_our_lu_av;
     DeviceDoubleArray d_cusparse_lu_av;
     cuda_utils::DeviceArray<char> d_cusparse_buffer;
+    cuda_utils::DeviceILUUpdateCache<int> update_cache;
 
     ILU0BenchmarkData( const std::string& matrix_file, const int symbolic_threads )
     {
@@ -206,6 +207,10 @@ struct ILU0BenchmarkData
         d_our_lu_av.resize( static_cast<std::size_t>( nnz_lu ) );
         d_cusparse_lu_av.resize( static_cast<std::size_t>( nnz_lu ) );
 
+        checkCuda( cuda_utils::BuildILUUpdateCacheAsync<int, int>(
+                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), base, update_cache, stream ),
+                   "build device ILU update cache" );
+
         checkCuda( cuda_utils::ILUEmbedAValuesToLUAsync<int, int, double>(
                        n, d_a_ai.data(), d_a_aj.data(), d_a_av.data(), d_lu_ai.data(),
                        d_lu_aj.data(), base, d_lu_av_initial.data(), stream ),
@@ -218,7 +223,9 @@ struct ILU0BenchmarkData
         warmUpAndValidate();
 
         std::cout << "Loaded " << matrix_file << ": n=" << n << ", nnz(A)=" << nnz_a
-                  << ", nnz(LU0 pattern)=" << nnz_lu << ", levels=" << levels << std::endl;
+                  << ", nnz(LU0 pattern)=" << nnz_lu << ", levels=" << levels
+                  << ", strict lower nnz=" << update_cache.strict_lower_nnz
+                  << ", cached updates=" << update_cache.total_updates << std::endl;
     }
 
     ~ILU0BenchmarkData()
@@ -320,6 +327,24 @@ struct ILU0BenchmarkData
             }
         }
 
+        resetOurValues();
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationCachedAsync<int, int, double>(
+                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(),
+                       update_cache.lower_row_ptr.data(), update_cache.update_ptr.data(),
+                       update_cache.update_jpos.data(), update_cache.update_pos.data(), d_level_perm.data(),
+                       level_prefix.data(), levels, base, d_our_lu_av.data(), d_status.data(), stream ),
+                   "warm up cached ILU0 factorization" );
+        int cached_host_status = 1;
+        checkCuda( cudaMemcpyAsync( &cached_host_status, d_status.data(), sizeof( int ),
+                                    cudaMemcpyDeviceToHost, stream ),
+                   "copy cached ILU0 status" );
+        checkCuda( cudaStreamSynchronize( stream ), "sync after cached ILU0 warmup" );
+        if ( cached_host_status != 0 )
+        {
+            throw std::runtime_error(
+                "cached ILU0 factorization found a zero pivot during warmup" );
+        }
+
         resetCusparseValues();
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -343,6 +368,9 @@ void setCounters( benchmark::State& state, const ILU0BenchmarkData& data )
     state.counters["nnz_A"] = static_cast<double>( data.nnz_a );
     state.counters["nnz_LU"] = static_cast<double>( data.nnz_lu );
     state.counters["levels"] = static_cast<double>( data.levels );
+    state.counters["strict_lower_nnz"] = static_cast<double>( data.update_cache.strict_lower_nnz );
+    state.counters["cached_updates"] = static_cast<double>( data.update_cache.total_updates );
+    state.counters["cache_MB"] = static_cast<double>( data.update_cache.bytes() ) / ( 1024.0 * 1024.0 );
     state.SetItemsProcessed( state.iterations() * static_cast<int64_t>( data.nnz_lu ) );
 }
 
@@ -367,6 +395,31 @@ void BM_OurILU0Numeric( benchmark::State& state,
                    "sync after our ILU0 numeric factorization" );
         state.PauseTiming();
         stopCudaProfilerRange( "stop CUDA profiler after our ILU0 numeric factorization" );
+        state.ResumeTiming();
+    }
+    setCounters( state, data );
+}
+
+void BM_OurILU0NumericCached( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    for ( auto _ : state )
+    {
+        state.PauseTiming();
+        data.resetOurValues();
+        startCudaProfilerRange( "start CUDA profiler for cached ILU0 numeric factorization" );
+        state.ResumeTiming();
+
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationCachedAsync<int, int, double>(
+                       data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
+                       data.update_cache.lower_row_ptr.data(), data.update_cache.update_ptr.data(),
+                       data.update_cache.update_jpos.data(), data.update_cache.update_pos.data(),
+                       data.d_level_perm.data(), data.level_prefix.data(), data.levels, data.base,
+                       data.d_our_lu_av.data(), data.d_status.data(), data.stream ),
+                   "run cached ILU0 numeric factorization" );
+        checkCuda( cudaStreamSynchronize( data.stream ),
+                   "sync after cached ILU0 numeric factorization" );
+        state.PauseTiming();
+        stopCudaProfilerRange( "stop CUDA profiler after cached ILU0 numeric factorization" );
         state.ResumeTiming();
     }
     setCounters( state, data );
@@ -484,6 +537,10 @@ int main( int argc, char** argv )
                                               state, *data, cuda_utils::ILUNumericRowLookup::Shared,
                                               cuda_utils::ILUNumericRowUpdateStrategy::Merge );
                                       } )
+            ->Unit( benchmark::kMillisecond )
+            ->UseRealTime();
+        benchmark::RegisterBenchmark( "ILU0Numeric/ours_cached", [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericCached( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/cuSPARSE", [data]( benchmark::State& state )
