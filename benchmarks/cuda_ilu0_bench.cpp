@@ -138,6 +138,7 @@ struct ILU0BenchmarkData
     int nnz_lu = 0;
     int base = 0;
     int levels = 0;
+    int cusparse_buffer_size = 0;
 
     std::vector<int> level_prefix;
 
@@ -162,6 +163,10 @@ struct ILU0BenchmarkData
     DeviceDoubleArray d_cusparse_lu_av;
     cuda_utils::DeviceArray<char> d_cusparse_buffer;
     cuda_utils::DeviceILUUpdateCache<int> update_cache;
+    cuda_utils::ILULevelCtaSchedule<int, int> level_cta_schedule;
+    cuda_utils::DeviceILULevelCtaSchedule<int, int> d_level_cta_schedule;
+    cuda_utils::ILULevelCtaScratch level_cta_scratch;
+    cuda_utils::ILULevelCtaLaunchConfig level_cta_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_cached_launch;
 
@@ -233,6 +238,11 @@ struct ILU0BenchmarkData
         checkCuda( cuda_utils::BuildILUUpdateCacheAsync<int, int>(
                        n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), base, update_cache, stream ),
                    "build device ILU update cache" );
+        level_cta_schedule = cuda_utils::BuildILULevelCtaSchedule<int, int>(
+            n, lu_pattern.AI(), lu_pattern.AJ(), lu_pattern.Diagonal(), level_perm.data(),
+            level_prefix.data(), levels, base );
+        checkCuda( cuda_utils::UploadILULevelCtaSchedule<int, int>( level_cta_schedule, d_level_cta_schedule ),
+                   "upload level CTA schedule" );
 
         checkCuda( cuda_utils::ILUEmbedAValuesToLUAsync<int, int, double>(
                        n, d_a_ai.data(), d_a_aj.data(), d_a_av.data(), d_lu_ai.data(),
@@ -249,6 +259,10 @@ struct ILU0BenchmarkData
                   << ", nnz(LU0 pattern)=" << nnz_lu << ", levels=" << levels
                   << ", strict lower nnz=" << update_cache.strict_lower_nnz
                   << ", cached updates=" << update_cache.total_updates
+                  << ", cache bytes=" << update_cache.bytes() << ", cuSPARSE buffer bytes=" << cusparse_buffer_size
+                  << ", level CTA dag edges=" << level_cta_schedule.cta_edge_count
+                  << ", level CTA grid blocks=" << level_cta_launch.total_blocks
+                  << ", level CTA hollow warps=" << level_cta_launch.hollow_warps
                   << ", persistent block size=" << persistent_launch.block_size
                   << ", persistent grid blocks=" << persistent_launch.grid_blocks
                   << ", persistent cached block size=" << persistent_cached_launch.block_size
@@ -299,6 +313,7 @@ struct ILU0BenchmarkData
                                                      d_lu_aj.data(), cusparse_info.info, &buffer_size ),
                        "query cuSPARSE csrilu02 buffer size" );
 #pragma GCC diagnostic pop
+        cusparse_buffer_size = buffer_size;
         d_cusparse_buffer.resize( static_cast<std::size_t>( std::max( buffer_size, 0 ) ) );
 
 #pragma GCC diagnostic push
@@ -353,6 +368,24 @@ struct ILU0BenchmarkData
                         "our ILU0 factorization found a zero pivot during warmup" );
                 }
             }
+        }
+
+        resetOurValues();
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationLevelCtaAsync<int, int, double>(
+                       d_level_cta_schedule, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), base,
+                       d_our_lu_av.data(), d_diag_inv.data(), d_status.data(),
+                       cuda_utils::ILUNumericRowLookup::Shared, cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
+                       level_cta_scratch, stream, &level_cta_launch ),
+                   "warm up level CTA ILU0 factorization" );
+        int level_cta_host_status = 1;
+        checkCuda( cudaMemcpyAsync( &level_cta_host_status, d_status.data(), sizeof( int ),
+                                    cudaMemcpyDeviceToHost, stream ),
+                   "copy level CTA ILU0 status" );
+        checkCuda( cudaStreamSynchronize( stream ), "sync after level CTA ILU0 warmup" );
+        if ( level_cta_host_status != 0 )
+        {
+            throw std::runtime_error(
+                "level CTA ILU0 factorization found a zero pivot during warmup" );
         }
 
         resetOurValues();
@@ -437,6 +470,17 @@ void setCounters( benchmark::State& state, const ILU0BenchmarkData& data )
     state.counters["strict_lower_nnz"] = static_cast<double>( data.update_cache.strict_lower_nnz );
     state.counters["cached_updates"] = static_cast<double>( data.update_cache.total_updates );
     state.counters["cache_MB"] = static_cast<double>( data.update_cache.bytes() ) / ( 1024.0 * 1024.0 );
+    state.counters["cusparse_buffer_MB"] =
+        static_cast<double>( data.cusparse_buffer_size ) / ( 1024.0 * 1024.0 );
+    state.counters["level_cta_block_size"] = static_cast<double>( data.level_cta_launch.block_size );
+    state.counters["level_cta_dag_edges"] = static_cast<double>( data.level_cta_schedule.cta_edge_count );
+    state.counters["level_cta_hollow_warps"] = static_cast<double>( data.level_cta_launch.hollow_warps );
+    state.counters["level_cta_schedule_MB"] =
+        static_cast<double>( data.d_level_cta_schedule.bytes() ) / ( 1024.0 * 1024.0 );
+    state.counters["level_cta_scratch_MB"] =
+        static_cast<double>( data.level_cta_scratch.bytes() ) / ( 1024.0 * 1024.0 );
+    state.counters["level_cta_total_blocks"] = static_cast<double>( data.level_cta_launch.total_blocks );
+    state.counters["level_cta_warps_per_block"] = static_cast<double>( data.level_cta_launch.warps_per_block );
     state.counters["persistent_block_size"] = static_cast<double>( data.persistent_launch.block_size );
     state.counters["persistent_grid_blocks"] = static_cast<double>( data.persistent_launch.grid_blocks );
     state.counters["persistent_resident_warps"] = static_cast<double>( data.persistent_launch.resident_warps );
@@ -518,6 +562,31 @@ void BM_OurILU0NumericCached( benchmark::State& state, ILU0BenchmarkData& data )
                    "sync after cached ILU0 numeric factorization" );
         state.PauseTiming();
         stopCudaProfilerRange( "stop CUDA profiler after cached ILU0 numeric factorization" );
+        state.ResumeTiming();
+    }
+    setCounters( state, data );
+}
+
+void BM_OurILU0NumericLevelCta( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    for ( auto _ : state )
+    {
+        state.PauseTiming();
+        data.resetOurValues();
+        startCudaProfilerRange( "start CUDA profiler for level CTA ILU0 numeric factorization" );
+        state.ResumeTiming();
+
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationLevelCtaAsync<int, int, double>(
+                       data.d_level_cta_schedule, data.d_lu_ai.data(), data.d_lu_aj.data(),
+                       data.d_lu_diag.data(), data.base, data.d_our_lu_av.data(), data.d_diag_inv.data(),
+                       data.d_status.data(), cuda_utils::ILUNumericRowLookup::Shared,
+                       cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
+                       data.level_cta_scratch, data.stream, &data.level_cta_launch ),
+                   "run level CTA ILU0 numeric factorization" );
+        checkCuda( cudaStreamSynchronize( data.stream ),
+                   "sync after level CTA ILU0 numeric factorization" );
+        state.PauseTiming();
+        stopCudaProfilerRange( "stop CUDA profiler after level CTA ILU0 numeric factorization" );
         state.ResumeTiming();
     }
     setCounters( state, data );
@@ -669,6 +738,10 @@ int main( int argc, char** argv )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/ours_cached", [data]( benchmark::State& state )
                                       { BM_OurILU0NumericCached( state, *data ); } )
+            ->Unit( benchmark::kMillisecond )
+            ->UseRealTime();
+        benchmark::RegisterBenchmark( "ILU0Numeric/ours_level_cta", [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericLevelCta( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/ours_persistent_spin", [data]( benchmark::State& state )
