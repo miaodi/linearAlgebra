@@ -154,6 +154,7 @@ struct ILU0BenchmarkData
     DeviceIntArray d_lu_aj;
     DeviceIntArray d_lu_diag;
     DeviceIntArray d_level_perm;
+    DeviceIntArray d_identity_perm;
     DeviceIntArray d_status;
     DeviceIntArray d_next_row;
     DeviceIntArray d_row_done;
@@ -163,13 +164,9 @@ struct ILU0BenchmarkData
     DeviceDoubleArray d_cusparse_lu_av;
     cuda_utils::DeviceArray<char> d_cusparse_buffer;
     cuda_utils::DeviceILUUpdateCache<int> update_cache;
-    cuda_utils::ILULevelCtaSchedule<int, int> level_cta_schedule;
-    cuda_utils::DeviceILULevelCtaSchedule<int, int> d_level_cta_schedule;
-    cuda_utils::ILULevelCtaSchedule<int, int> level_cta_identity_schedule;
-    cuda_utils::DeviceILULevelCtaSchedule<int, int> d_level_cta_identity_schedule;
-    cuda_utils::ILULevelCtaScratch level_cta_scratch;
-    cuda_utils::ILULevelCtaLaunchConfig level_cta_launch;
-    cuda_utils::ILULevelCtaLaunchConfig level_cta_identity_launch;
+    cuda_utils::ILUCtaGranularScratch cta_granular_scratch;
+    cuda_utils::ILUCtaGranularLaunchConfig cta_granular_launch;
+    cuda_utils::ILUCtaGranularLaunchConfig cta_granular_identity_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_perm_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_cached_launch;
@@ -222,7 +219,6 @@ struct ILU0BenchmarkData
         {
             identity_perm[static_cast<std::size_t>( row )] = row + base;
         }
-        const std::vector<int> identity_prefix = { base, n + base };
 
         checkCuda( cudaStreamCreate( &stream ), "create CUDA stream" );
         checkCusparse( cusparseCreate( &cusparse_handle ), "create cuSPARSE handle" );
@@ -238,6 +234,7 @@ struct ILU0BenchmarkData
         d_lu_aj.copyFromHost( lu_pattern.AJ(), static_cast<std::size_t>( nnz_lu ) );
         d_lu_diag.copyFromHost( lu_pattern.Diagonal(), static_cast<std::size_t>( n ) );
         d_level_perm.copyFromHost( level_perm.data(), static_cast<std::size_t>( n ) );
+        d_identity_perm.copyFromHost( identity_perm.data(), static_cast<std::size_t>( n ) );
         d_status.resize( 1 );
         d_next_row.resize( 1 );
         d_row_done.resize( static_cast<std::size_t>( n ) );
@@ -249,17 +246,6 @@ struct ILU0BenchmarkData
         checkCuda( cuda_utils::BuildILUUpdateCacheAsync<int, int>(
                        n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), base, update_cache, stream ),
                    "build device ILU update cache" );
-        level_cta_schedule = cuda_utils::BuildILULevelCtaSchedule<int, int>(
-            n, lu_pattern.AI(), lu_pattern.AJ(), lu_pattern.Diagonal(), level_perm.data(),
-            level_prefix.data(), levels, base );
-        checkCuda( cuda_utils::UploadILULevelCtaSchedule<int, int>( level_cta_schedule, d_level_cta_schedule ),
-                   "upload level CTA schedule" );
-        level_cta_identity_schedule = cuda_utils::BuildILULevelCtaSchedule<int, int>(
-            n, lu_pattern.AI(), lu_pattern.AJ(), lu_pattern.Diagonal(), identity_perm.data(),
-            identity_prefix.data(), 1, base );
-        checkCuda( cuda_utils::UploadILULevelCtaSchedule<int, int>( level_cta_identity_schedule,
-                                                                    d_level_cta_identity_schedule ),
-                   "upload identity level CTA schedule" );
 
         checkCuda( cuda_utils::ILUEmbedAValuesToLUAsync<int, int, double>(
                        n, d_a_ai.data(), d_a_aj.data(), d_a_av.data(), d_lu_ai.data(),
@@ -277,12 +263,10 @@ struct ILU0BenchmarkData
                   << ", strict lower nnz=" << update_cache.strict_lower_nnz
                   << ", cached updates=" << update_cache.total_updates
                   << ", cache bytes=" << update_cache.bytes() << ", cuSPARSE buffer bytes=" << cusparse_buffer_size
-                  << ", level CTA dag edges=" << level_cta_schedule.cta_edge_count
-                  << ", level CTA grid blocks=" << level_cta_launch.total_blocks
-                  << ", level CTA hollow warps=" << level_cta_launch.hollow_warps
-                  << ", identity level CTA dag edges=" << level_cta_identity_schedule.cta_edge_count
-                  << ", identity level CTA grid blocks=" << level_cta_identity_launch.total_blocks
-                  << ", identity level CTA hollow warps=" << level_cta_identity_launch.hollow_warps
+                  << ", CTA-granular grid blocks=" << cta_granular_launch.total_blocks
+                  << ", CTA-granular hollow warps=" << cta_granular_launch.hollow_warps
+                  << ", identity CTA-granular grid blocks=" << cta_granular_identity_launch.total_blocks
+                  << ", identity CTA-granular hollow warps=" << cta_granular_identity_launch.hollow_warps
                   << ", persistent block size=" << persistent_launch.block_size
                   << ", persistent grid blocks=" << persistent_launch.grid_blocks
                   << ", persistent perm block size=" << persistent_perm_launch.block_size
@@ -395,39 +379,40 @@ struct ILU0BenchmarkData
         }
 
         resetOurValues();
-        checkCuda( cuda_utils::ILUBaseNumericFactorizationLevelCtaAsync<int, int, double>(
-                       d_level_cta_schedule, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), base,
-                       d_our_lu_av.data(), d_diag_inv.data(), d_status.data(),
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularAsync<int, int, double>(
+                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), d_level_perm.data(),
+                       base, d_our_lu_av.data(), d_diag_inv.data(), d_status.data(),
                        cuda_utils::ILUNumericRowLookup::Shared, cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
-                       level_cta_scratch, stream, &level_cta_launch ),
-                   "warm up level CTA ILU0 factorization" );
-        int level_cta_host_status = 1;
-        checkCuda( cudaMemcpyAsync( &level_cta_host_status, d_status.data(), sizeof( int ),
+                       cta_granular_scratch, stream, &cta_granular_launch ),
+                   "warm up CTA-granular ILU0 factorization" );
+        int cta_granular_host_status = 1;
+        checkCuda( cudaMemcpyAsync( &cta_granular_host_status, d_status.data(), sizeof( int ),
                                     cudaMemcpyDeviceToHost, stream ),
-                   "copy level CTA ILU0 status" );
-        checkCuda( cudaStreamSynchronize( stream ), "sync after level CTA ILU0 warmup" );
-        if ( level_cta_host_status != 0 )
+                   "copy CTA-granular ILU0 status" );
+        checkCuda( cudaStreamSynchronize( stream ), "sync after CTA-granular ILU0 warmup" );
+        if ( cta_granular_host_status != 0 )
         {
             throw std::runtime_error(
-                "level CTA ILU0 factorization found a zero pivot during warmup" );
+                "CTA-granular ILU0 factorization found a zero pivot during warmup" );
         }
 
         resetOurValues();
-        checkCuda( cuda_utils::ILUBaseNumericFactorizationLevelCtaAsync<int, int, double>(
-                       d_level_cta_identity_schedule, d_lu_ai.data(), d_lu_aj.data(),
-                       d_lu_diag.data(), base, d_our_lu_av.data(), d_diag_inv.data(), d_status.data(),
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularAsync<int, int, double>(
+                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), d_identity_perm.data(),
+                       base, d_our_lu_av.data(), d_diag_inv.data(), d_status.data(),
                        cuda_utils::ILUNumericRowLookup::Shared, cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
-                       level_cta_scratch, stream, &level_cta_identity_launch ),
-                   "warm up identity level CTA ILU0 factorization" );
-        int identity_level_cta_host_status = 1;
-        checkCuda( cudaMemcpyAsync( &identity_level_cta_host_status, d_status.data(), sizeof( int ),
-                                    cudaMemcpyDeviceToHost, stream ),
-                   "copy identity level CTA ILU0 status" );
-        checkCuda( cudaStreamSynchronize( stream ), "sync after identity level CTA ILU0 warmup" );
-        if ( identity_level_cta_host_status != 0 )
+                       cta_granular_scratch, stream, &cta_granular_identity_launch ),
+                   "warm up identity CTA-granular ILU0 factorization" );
+        int cta_granular_identity_host_status = 1;
+        checkCuda( cudaMemcpyAsync( &cta_granular_identity_host_status, d_status.data(),
+                                    sizeof( int ), cudaMemcpyDeviceToHost, stream ),
+                   "copy identity CTA-granular ILU0 status" );
+        checkCuda( cudaStreamSynchronize( stream ),
+                   "sync after identity CTA-granular ILU0 warmup" );
+        if ( cta_granular_identity_host_status != 0 )
         {
             throw std::runtime_error(
-                "identity level CTA ILU0 factorization found a zero pivot during warmup" );
+                "identity CTA-granular ILU0 factorization found a zero pivot during warmup" );
         }
 
         resetOurValues();
@@ -542,9 +527,7 @@ struct ILU0BenchmarkData
 
 void setCounters( benchmark::State& state,
                   const ILU0BenchmarkData& data,
-                  const cuda_utils::ILULevelCtaSchedule<int, int>& level_cta_schedule,
-                  const cuda_utils::DeviceILULevelCtaSchedule<int, int>& d_level_cta_schedule,
-                  const cuda_utils::ILULevelCtaLaunchConfig& level_cta_launch )
+                  const cuda_utils::ILUCtaGranularLaunchConfig& cta_granular_launch )
 {
     state.counters["n"] = static_cast<double>( data.n );
     state.counters["nnz_A"] = static_cast<double>( data.nnz_a );
@@ -555,15 +538,12 @@ void setCounters( benchmark::State& state,
     state.counters["cache_MB"] = static_cast<double>( data.update_cache.bytes() ) / ( 1024.0 * 1024.0 );
     state.counters["cusparse_buffer_MB"] =
         static_cast<double>( data.cusparse_buffer_size ) / ( 1024.0 * 1024.0 );
-    state.counters["level_cta_block_size"] = static_cast<double>( level_cta_launch.block_size );
-    state.counters["level_cta_dag_edges"] = static_cast<double>( level_cta_schedule.cta_edge_count );
-    state.counters["level_cta_hollow_warps"] = static_cast<double>( level_cta_launch.hollow_warps );
-    state.counters["level_cta_schedule_MB"] =
-        static_cast<double>( d_level_cta_schedule.bytes() ) / ( 1024.0 * 1024.0 );
-    state.counters["level_cta_scratch_MB"] =
-        static_cast<double>( data.level_cta_scratch.bytes() ) / ( 1024.0 * 1024.0 );
-    state.counters["level_cta_total_blocks"] = static_cast<double>( level_cta_launch.total_blocks );
-    state.counters["level_cta_warps_per_block"] = static_cast<double>( level_cta_launch.warps_per_block );
+    state.counters["cta_granular_block_size"] = static_cast<double>( cta_granular_launch.block_size );
+    state.counters["cta_granular_hollow_warps"] = static_cast<double>( cta_granular_launch.hollow_warps );
+    state.counters["cta_granular_scratch_MB"] =
+        static_cast<double>( data.cta_granular_scratch.bytes() ) / ( 1024.0 * 1024.0 );
+    state.counters["cta_granular_total_blocks"] = static_cast<double>( cta_granular_launch.total_blocks );
+    state.counters["cta_granular_warps_per_block"] = static_cast<double>( cta_granular_launch.warps_per_block );
     state.counters["persistent_block_size"] = static_cast<double>( data.persistent_launch.block_size );
     state.counters["persistent_grid_blocks"] = static_cast<double>( data.persistent_launch.grid_blocks );
     state.counters["persistent_resident_warps"] = static_cast<double>( data.persistent_launch.resident_warps );
@@ -589,7 +569,7 @@ void setCounters( benchmark::State& state,
 
 void setCounters( benchmark::State& state, const ILU0BenchmarkData& data )
 {
-    setCounters( state, data, data.level_cta_schedule, data.d_level_cta_schedule, data.level_cta_launch );
+    setCounters( state, data, data.cta_granular_launch );
 }
 
 void BM_OurILU0Numeric( benchmark::State& state,
@@ -692,57 +672,56 @@ void BM_OurILU0NumericCached( benchmark::State& state, ILU0BenchmarkData& data )
     setCounters( state, data );
 }
 
-void BM_OurILU0NumericLevelCta( benchmark::State& state, ILU0BenchmarkData& data )
+void BM_OurILU0NumericCtaGranular( benchmark::State& state, ILU0BenchmarkData& data )
 {
     for ( auto _ : state )
     {
         state.PauseTiming();
         data.resetOurValues();
-        startCudaProfilerRange( "start CUDA profiler for level CTA ILU0 numeric factorization" );
+        startCudaProfilerRange( "start CUDA profiler for CTA-granular ILU0 numeric factorization" );
         state.ResumeTiming();
 
-        checkCuda( cuda_utils::ILUBaseNumericFactorizationLevelCtaAsync<int, int, double>(
-                       data.d_level_cta_schedule, data.d_lu_ai.data(), data.d_lu_aj.data(),
-                       data.d_lu_diag.data(), data.base, data.d_our_lu_av.data(), data.d_diag_inv.data(),
-                       data.d_status.data(), cuda_utils::ILUNumericRowLookup::Shared,
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularAsync<int, int, double>(
+                       data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
+                       data.d_level_perm.data(), data.base, data.d_our_lu_av.data(),
+                       data.d_diag_inv.data(), data.d_status.data(), cuda_utils::ILUNumericRowLookup::Shared,
                        cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
-                       data.level_cta_scratch, data.stream, &data.level_cta_launch ),
-                   "run level CTA ILU0 numeric factorization" );
+                       data.cta_granular_scratch, data.stream, &data.cta_granular_launch ),
+                   "run CTA-granular ILU0 numeric factorization" );
         checkCuda( cudaStreamSynchronize( data.stream ),
-                   "sync after level CTA ILU0 numeric factorization" );
+                   "sync after CTA-granular ILU0 numeric factorization" );
         state.PauseTiming();
-        stopCudaProfilerRange( "stop CUDA profiler after level CTA ILU0 numeric factorization" );
+        stopCudaProfilerRange( "stop CUDA profiler after CTA-granular ILU0 numeric factorization" );
         state.ResumeTiming();
     }
     setCounters( state, data );
 }
 
-void BM_OurILU0NumericLevelCtaIdentity( benchmark::State& state, ILU0BenchmarkData& data )
+void BM_OurILU0NumericCtaGranularIdentity( benchmark::State& state, ILU0BenchmarkData& data )
 {
     for ( auto _ : state )
     {
         state.PauseTiming();
         data.resetOurValues();
         startCudaProfilerRange(
-            "start CUDA profiler for identity level CTA ILU0 numeric factorization" );
+            "start CUDA profiler for identity CTA-granular ILU0 numeric factorization" );
         state.ResumeTiming();
 
-        checkCuda( cuda_utils::ILUBaseNumericFactorizationLevelCtaAsync<int, int, double>(
-                       data.d_level_cta_identity_schedule, data.d_lu_ai.data(), data.d_lu_aj.data(),
-                       data.d_lu_diag.data(), data.base, data.d_our_lu_av.data(), data.d_diag_inv.data(),
-                       data.d_status.data(), cuda_utils::ILUNumericRowLookup::Shared,
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularAsync<int, int, double>(
+                       data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
+                       data.d_identity_perm.data(), data.base, data.d_our_lu_av.data(),
+                       data.d_diag_inv.data(), data.d_status.data(), cuda_utils::ILUNumericRowLookup::Shared,
                        cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
-                       data.level_cta_scratch, data.stream, &data.level_cta_identity_launch ),
-                   "run identity level CTA ILU0 numeric factorization" );
+                       data.cta_granular_scratch, data.stream, &data.cta_granular_identity_launch ),
+                   "run identity CTA-granular ILU0 numeric factorization" );
         checkCuda( cudaStreamSynchronize( data.stream ),
-                   "sync after identity level CTA ILU0 numeric factorization" );
+                   "sync after identity CTA-granular ILU0 numeric factorization" );
         state.PauseTiming();
         stopCudaProfilerRange(
-            "stop CUDA profiler after identity level CTA ILU0 numeric factorization" );
+            "stop CUDA profiler after identity CTA-granular ILU0 numeric factorization" );
         state.ResumeTiming();
     }
-    setCounters( state, data, data.level_cta_identity_schedule, data.d_level_cta_identity_schedule,
-                 data.level_cta_identity_launch );
+    setCounters( state, data, data.cta_granular_identity_launch );
 }
 
 void BM_OurILU0NumericPersistentCached( benchmark::State& state, ILU0BenchmarkData& data )
@@ -921,12 +900,12 @@ int main( int argc, char** argv )
                                       { BM_OurILU0NumericCached( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
-        benchmark::RegisterBenchmark( "ILU0Numeric/level_cta", [data]( benchmark::State& state )
-                                      { BM_OurILU0NumericLevelCta( state, *data ); } )
+        benchmark::RegisterBenchmark( "ILU0Numeric/cta_granular", [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericCtaGranular( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
-        benchmark::RegisterBenchmark( "ILU0Numeric/level_cta_identity", [data]( benchmark::State& state )
-                                      { BM_OurILU0NumericLevelCtaIdentity( state, *data ); } )
+        benchmark::RegisterBenchmark( "ILU0Numeric/cta_granular_identity", [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericCtaGranularIdentity( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/persistent_spin", [data]( benchmark::State& state )

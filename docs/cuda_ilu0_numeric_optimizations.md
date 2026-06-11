@@ -51,7 +51,7 @@ small timing differences should be treated as noisy unless repeated.
 | Level scheduled numeric | `sparse_mat_op/cuda/ilu/ilu_numeric.cu` | One launch per topological level. |
 | Persistent spin | `sparse_mat_op/cuda/ilu/ilu_numeric_persistent.cu` | Resident warps claim rows from `next_row`. |
 | Persistent cached | `sparse_mat_op/cuda/ilu/ilu_numeric_persistent.cu` | Persistent row scheduler plus precomputed update cache. |
-| Level CTA | `sparse_mat_op/cuda/ilu/ilu_numeric_level_cta.cu` | Resident CTAs claim packed row bundles from `next_cta`. |
+| CTA-granular | `sparse_mat_op/cuda/ilu/ilu_numeric_cta_granular.cu` | One grid block per 8-row chunk of a row permutation, with row-done polling for dependencies. |
 | Shared helpers | `sparse_mat_op/cuda/ilu/ilu_numeric_common.cuh` | Shared row waiting, diagonal inverse, publish, and row update helpers. |
 
 The benchmark driver is `benchmarks/cuda_ilu0_bench.cpp`.
@@ -67,8 +67,8 @@ Approximate RTP timings observed during development:
 | Persistent wait-path tuning | ~45.9 ms | Reduced polling/status overhead and delayed sleep. |
 | Persistent with `diag_inv` | ~34.6 ms | Dependents multiply by published reciprocal diagonal. |
 | Persistent cached | ~30.5 ms | Persistent scheduler plus lower-only update cache. |
-| `level_cta` | ~24.5 ms | Topological `level_perm` order, 8 rows per CTA task. |
-| `level_cta_identity` | ~48.2 ms | Identity row order experiment, CTA chunks `[0..7]`, `[8..15]`, ... |
+| `cta_granular` | ~22.4 ms | Topological `level_perm` order, one grid block per 8-row CTA task. |
+| `cta_granular_identity` | ~44.3 ms | Identity row order experiment, CTA chunks `[0..7]`, `[8..15]`, ... |
 | `persistent_spin_perm` | ~18.5 ms | Persistent scheduler with topological `level_perm` row order. |
 | `persistent_cached_perm` | ~17.6 ms | Topological persistent scheduler plus lower-only update cache. |
 | cuSPARSE `csrilu02` | ~21.8 ms | Reference library implementation on the same matrix. |
@@ -78,7 +78,7 @@ The most important recent experiment compared these variants:
 ```sh
 release/benchmarks/cuda_ilu0_bench \
   -f ~/repo/matrix_lib/RTP_metis.bin \
-  --benchmark_filter='ILU0Numeric/(persistent_spin|persistent_spin_perm|persistent_cached|persistent_cached_perm|level_cta|level_cta_identity)' \
+  --benchmark_filter='ILU0Numeric/(persistent_spin|persistent_spin_perm|persistent_cached|persistent_cached_perm|cta_granular|cta_granular_identity)' \
   --benchmark_min_time=5s \
   --benchmark_counters_tabular=true
 ```
@@ -87,37 +87,40 @@ Observed result:
 
 | Benchmark | Time |
 | --- | ---: |
-| `ILU0Numeric/level_cta/real_time` | 24.5 ms |
-| `ILU0Numeric/level_cta_identity/real_time` | 48.2 ms |
+| `ILU0Numeric/cta_granular/real_time` | 22.4 ms |
+| `ILU0Numeric/cta_granular_identity/real_time` | 44.3 ms |
 | `ILU0Numeric/persistent_spin/real_time` | 34.7 ms |
 | `ILU0Numeric/persistent_spin_perm/real_time` | 18.5 ms |
 | `ILU0Numeric/persistent_cached/real_time` | 30.6 ms |
 | `ILU0Numeric/persistent_cached_perm/real_time` | 17.6 ms |
 
 This experiment shows that topological row ordering is a major part of the
-`level_cta` speedup. It also shows that the fine-grained persistent scheduler
+`cta_granular` speedup. It also shows that the fine-grained persistent scheduler
 benefits even more from using the same topological order.
 
 ## Optimization: Topological Row Order
 
-The level CTA schedule is built by `BuildILULevelCtaSchedule`. It packs rows in
-`level_perm` order, not raw row-id order:
+The CTA-granular path launches one grid block per 8-row chunk and maps each
+claimed row slot through the caller-provided row permutation:
 
 ```cpp
-const COLTYPE row = checkedZeroBasedIndex(level_perm[pos], base, n, "level row");
-schedule.cta_rows.push_back(row);
+const COLTYPE row_slot = atomicAdd(next_row, kCtaGranularWarpsPerBlock) + warp_in_block;
+const COLTYPE row = row_perm[row_slot] - base;
 ```
 
-The level CTA numeric kernel still uses row-level dependency waiting through
-`row_done`. The CTA predecessor/successor arrays are built and uploaded, but the
-current numeric kernel does not use them for runtime dependency scheduling.
+The CTA-granular numeric kernel still uses row-level dependency waiting through
+`row_done`. It no longer builds or uploads CTA predecessor/successor arrays; the
+only runtime scheduling state is the row permutation and a monotonic `next_row`
+counter. Each grid block atomically claims one 8-row chunk and then retires,
+matching cuSPARSE's large-grid shape more closely and avoiding the previous
+persistent CTA loop's repeated end-of-task block barrier.
 
 What matters today is the row issue order:
 
 | Schedule | Row order | Result on RTP |
 | --- | --- | ---: |
-| Topological level CTA | `level_perm[0..n)` | ~24.5 ms |
-| Identity level CTA | `0, 1, 2, ...` | ~48.2 ms |
+| Topological CTA-granular | `level_perm[0..n)` | ~22.4 ms |
+| Identity CTA-granular | `0, 1, 2, ...` | ~44.3 ms |
 
 The identity experiment creates CTA tasks like:
 
@@ -132,7 +135,7 @@ likely cause is much more speculative dependency spinning and CTA-level barrier
 drag when rows are issued before enough predecessors have completed.
 
 Takeaway: preserve topological or dependency-depth ordering when changing the
-level CTA path. Any new scheduler should measure how much time is spent waiting
+CTA-granular path. Any new scheduler should measure how much time is spent waiting
 on `row_done`.
 
 ## Optimization: Permuted Persistent Row Scheduling
@@ -167,7 +170,7 @@ Measured on RTP:
 
 This is currently the strongest evidence that row issue order dominates much of
 the dependency-wait cost. Both topological persistent paths are faster than the
-current level CTA path on RTP, despite doing one work-counter atomic per row.
+current CTA-granular path on RTP, despite doing one work-counter atomic per row.
 
 Correctness requirement:
 
@@ -224,7 +227,7 @@ row can be searched many times while processing its lower dependencies.
 Important constraint:
 
 - `kSharedRowColumnsPerWarp = 256`.
-- The persistent and level CTA paths use shared staging only when
+- The persistent and CTA-granular paths use shared staging only when
   `row_end - row_begin <= kSharedRowColumnsPerWarp`.
 - Larger rows fall back to global lookup to avoid overflowing the per-warp shared
   buffer.
@@ -264,13 +267,13 @@ lower_row_ptr, update_ptr, update_jpos, update_pos
 
 This reduced the RTP time from roughly `34.6 ms` to `30.5 ms`.
 
-## Optimization: Level CTA Granularity
+## Optimization: CTA Granularity
 
-The level CTA kernel assigns one CTA task to a block. Each task contains up to 8
-rows by default, one row per warp:
+The CTA-granular kernel launches one grid block for each CTA task. Each task
+contains up to 8 rows by default, one row per warp:
 
 ```text
-block claims CTA task -> warp 0 handles row slot 0, ..., warp 7 handles row slot 7
+block claims one CTA task -> warp 0 handles row slot 0, ..., warp 7 handles row slot 7
 ```
 
 Compared with persistent row scheduling:
@@ -278,11 +281,13 @@ Compared with persistent row scheduling:
 | Path | Work claim granularity | Global scheduling atomics |
 | --- | --- | --- |
 | Persistent spin | 1 row per warp claim | About one per row. |
-| Level CTA | Up to 8 rows per CTA claim | About one per 8 rows. |
+| CTA-granular | Up to 8 rows per CTA claim | About one per 8 rows. |
 
-This coarser granularity reduces scheduler atomic traffic, but the identity
-experiment shows it is not the main reason `level_cta` is fast. The topological
-`level_perm` ordering is essential on RTP.
+This coarser granularity reduces scheduler atomic traffic. Launching one block
+per CTA task also removes the previous persistent-loop `__syncthreads()` after
+each task; a focused NCU run on RTP reduced the barrier stall ratio from about
+`20.66` to about `0.38` per issued instruction. The identity experiment still
+shows that topological `level_perm` ordering is essential on RTP.
 
 ## Experiments To Avoid Repeating Blindly
 
@@ -293,7 +298,7 @@ experiment shows it is not the main reason `level_cta` is fast. The topological
 | Forced global lookup | ~53.0 ms | Rejected; shared row-column staging remains useful. |
 | Busy spin without `__nanosleep` | ~49.5 ms | Rejected; delayed sleep performed better. |
 | Forced 128/256 block size | Neutral | Not retained as a tuning knob. |
-| Identity level CTA order | ~48.2 ms | Rejected; topological ordering matters. |
+| Identity CTA-granular order | ~44.3 ms | Rejected; topological ordering matters. |
 
 ## Current Interpretation
 
@@ -305,7 +310,7 @@ The main lessons are:
 
 - Topological row order is a major performance feature, not just a correctness
   convenience.
-- Topological order helps both coarse level CTA scheduling and fine-grained
+- Topological order helps both coarse CTA-granular scheduling and fine-grained
   persistent row scheduling.
 - `diag_inv` is a major row-done path optimization.
 - Shared row-column staging helps binary search when the current row fits the
@@ -313,7 +318,7 @@ The main lessons are:
 - Coarser CTA scheduling reduces work-counter atomic traffic, but without
   topological ordering it can be slower than the finer persistent row scheduler.
 - With topological ordering, the fine-grained persistent scheduler can beat the
-  current level CTA path despite issuing one work-counter atomic per row.
+  current CTA-granular path despite issuing one work-counter atomic per row.
 - Combining topological persistent scheduling with the cached update path is the
   current fastest measured variant on RTP.
 - Future scheduling work should measure dependency spin time directly, not just
@@ -332,7 +337,7 @@ Run the focused topological-order experiment:
 ```sh
 release/benchmarks/cuda_ilu0_bench \
   -f ~/repo/matrix_lib/RTP_metis.bin \
-  --benchmark_filter='ILU0Numeric/(persistent_spin|persistent_spin_perm|persistent_cached|persistent_cached_perm|level_cta|level_cta_identity)' \
+  --benchmark_filter='ILU0Numeric/(persistent_spin|persistent_spin_perm|persistent_cached|persistent_cached_perm|cta_granular|cta_granular_identity)' \
   --benchmark_min_time=5s \
   --benchmark_counters_tabular=true
 ```
