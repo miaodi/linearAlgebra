@@ -29,6 +29,8 @@ optionally for GPU sparse operations and experiments.
   utilities, and other shared helpers.
 - `tests/`: GoogleTest-based unit tests.
 - `benchmarks/`: Google Benchmark performance tests.
+- `docs/`: durable development notes, optimization records, and experiment
+  summaries that should survive across sessions.
 - `execs/`: standalone experiments and debugging executables.
 - `scratch/`: temporary development experiments.
 - `cmake/`: CMake modules, dependency setup, data download helpers, and build
@@ -99,6 +101,9 @@ interpreter selected by CMake.
 - For CUDA code, consider memory coalescing, occupancy, synchronization,
   launch overhead, and host-device transfer costs.
 - For CMake changes, preserve optional dependency behavior.
+- For documentation in `docs/`, prefer durable engineering notes over temporary
+  logs. Include the target code paths, benchmark commands, matrix/data set,
+  measured results, and the interpretation or decision the result supports.
 - For Cholesky symbolic or multifrontal work, keep elimination-tree ordering,
   postorder mappings, frontal matrix assembly, and sparse index invariants
   explicit. Verify with the focused Cholesky tests when possible.

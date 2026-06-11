@@ -56,11 +56,12 @@ __device__ void factor_lu_row_cached_persistent( const ROWTYPE row_begin,
     }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
 __global__ void ilu_persistent_spin_kernel( COLTYPE n,
                                             const ROWTYPE* lu_ai,
                                             const COLTYPE* lu_aj,
                                             const ROWTYPE* lu_diag,
+                                            const COLTYPE* row_perm,
                                             COLTYPE base,
                                             VALTYPE* lu_av,
                                             VALTYPE* diag_inv,
@@ -76,15 +77,21 @@ __global__ void ilu_persistent_spin_kernel( COLTYPE n,
 
     while ( true )
     {
-        COLTYPE row = n;
+        COLTYPE row_slot = n;
         if ( lane == 0 )
         {
-            row = ( ilu_detail::LoadDeviceInt( status ) == 0 ) ? atomicAdd( next_row, COLTYPE( 1 ) ) : n;
+            row_slot = ( ilu_detail::LoadDeviceInt( status ) == 0 ) ? atomicAdd( next_row, COLTYPE( 1 ) ) : n;
         }
-        row = __shfl_sync( 0xffffffffu, row, 0 );
-        if ( row >= n )
+        row_slot = __shfl_sync( 0xffffffffu, row_slot, 0 );
+        if ( row_slot >= n )
         {
             return;
+        }
+
+        COLTYPE row = row_slot;
+        if constexpr ( UseRowPerm )
+        {
+            row = row_perm[row_slot] - base;
         }
 
         const ROWTYPE row_begin = lu_ai[row] - base;
@@ -114,7 +121,7 @@ __global__ void ilu_persistent_spin_kernel( COLTYPE n,
     }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
 __global__ void ilu_persistent_cached_kernel( COLTYPE n,
                                               const ROWTYPE* lu_ai,
                                               const COLTYPE* lu_aj,
@@ -123,6 +130,7 @@ __global__ void ilu_persistent_cached_kernel( COLTYPE n,
                                               const ROWTYPE* update_ptr,
                                               const ROWTYPE* update_jpos,
                                               const ROWTYPE* update_pos,
+                                              const COLTYPE* row_perm,
                                               COLTYPE base,
                                               VALTYPE* lu_av,
                                               VALTYPE* diag_inv,
@@ -134,15 +142,21 @@ __global__ void ilu_persistent_cached_kernel( COLTYPE n,
 
     while ( true )
     {
-        COLTYPE row = n;
+        COLTYPE row_slot = n;
         if ( lane == 0 )
         {
-            row = ( ilu_detail::LoadDeviceInt( status ) == 0 ) ? atomicAdd( next_row, COLTYPE( 1 ) ) : n;
+            row_slot = ( ilu_detail::LoadDeviceInt( status ) == 0 ) ? atomicAdd( next_row, COLTYPE( 1 ) ) : n;
         }
-        row = __shfl_sync( 0xffffffffu, row, 0 );
-        if ( row >= n )
+        row_slot = __shfl_sync( 0xffffffffu, row_slot, 0 );
+        if ( row_slot >= n )
         {
             return;
+        }
+
+        COLTYPE row = row_slot;
+        if constexpr ( UseRowPerm )
+        {
+            row = row_perm[row_slot] - base;
         }
 
         const ROWTYPE row_begin = lu_ai[row] - base;
@@ -160,7 +174,7 @@ __global__ void ilu_persistent_cached_kernel( COLTYPE n,
     }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
 cudaError_t select_persistent_launch_config( const COLTYPE n, ILUPersistentLaunchConfig* config )
 {
     if ( n <= 0 || config == nullptr )
@@ -199,7 +213,8 @@ cudaError_t select_persistent_launch_config( const COLTYPE n, ILUPersistentLaunc
             static_cast<std::size_t>( warps_per_block ) * kSharedRowColumnsPerWarp * sizeof( COLTYPE );
         int blocks_per_sm = 0;
         status = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-            &blocks_per_sm, ilu_persistent_spin_kernel<ROWTYPE, COLTYPE, VALTYPE>, block_size, shared_bytes );
+            &blocks_per_sm, ilu_persistent_spin_kernel<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>,
+            block_size, shared_bytes );
         if ( status != cudaSuccess )
         {
             return status;
@@ -238,7 +253,7 @@ cudaError_t select_persistent_launch_config( const COLTYPE n, ILUPersistentLaunc
     return cudaSuccess;
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
 cudaError_t select_persistent_cached_launch_config( const COLTYPE n, ILUPersistentLaunchConfig* config )
 {
     if ( n <= 0 || config == nullptr )
@@ -275,7 +290,7 @@ cudaError_t select_persistent_cached_launch_config( const COLTYPE n, ILUPersiste
         const int warps_per_block = block_size / kWarpSize;
         int blocks_per_sm = 0;
         status = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-            &blocks_per_sm, ilu_persistent_cached_kernel<ROWTYPE, COLTYPE, VALTYPE>, block_size, 0 );
+            &blocks_per_sm, ilu_persistent_cached_kernel<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>, block_size, 0 );
         if ( status != cudaSuccess )
         {
             return status;
@@ -313,30 +328,37 @@ cudaError_t select_persistent_cached_launch_config( const COLTYPE n, ILUPersiste
     config->resident_warps = config->grid_blocks * warps_per_block;
     return cudaSuccess;
 }
-} // namespace
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-cudaError_t ILUBaseNumericFactorizationPersistentAsync( COLTYPE n,
-                                                        const ROWTYPE* d_lu_ai,
-                                                        const COLTYPE* d_lu_aj,
-                                                        const ROWTYPE* d_lu_diag,
-                                                        COLTYPE base,
-                                                        VALTYPE* d_lu_av,
-                                                        VALTYPE* d_diag_inv,
-                                                        int* d_status,
-                                                        COLTYPE* d_next_row,
-                                                        int* d_row_done,
-                                                        cudaStream_t stream,
-                                                        ILUPersistentLaunchConfig* h_launch_config )
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
+cudaError_t launch_persistent_async( COLTYPE n,
+                                     const ROWTYPE* d_lu_ai,
+                                     const COLTYPE* d_lu_aj,
+                                     const ROWTYPE* d_lu_diag,
+                                     const COLTYPE* d_row_perm,
+                                     COLTYPE base,
+                                     VALTYPE* d_lu_av,
+                                     VALTYPE* d_diag_inv,
+                                     int* d_status,
+                                     COLTYPE* d_next_row,
+                                     int* d_row_done,
+                                     cudaStream_t stream,
+                                     ILUPersistentLaunchConfig* h_launch_config )
 {
     if ( n <= 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr || d_lu_av == nullptr ||
          d_diag_inv == nullptr || d_status == nullptr || d_next_row == nullptr || d_row_done == nullptr )
     {
         return cudaErrorInvalidValue;
     }
+    if constexpr ( UseRowPerm )
+    {
+        if ( d_row_perm == nullptr )
+        {
+            return cudaErrorInvalidValue;
+        }
+    }
 
     ILUPersistentLaunchConfig config;
-    cudaError_t status = select_persistent_launch_config<ROWTYPE, COLTYPE, VALTYPE>( n, &config );
+    cudaError_t status = select_persistent_launch_config<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>( n, &config );
     if ( status != cudaSuccess )
     {
         return status;
@@ -361,8 +383,10 @@ cudaError_t ILUBaseNumericFactorizationPersistentAsync( COLTYPE n,
     const int warps_per_block = config.block_size / kWarpSize;
     const std::size_t shared_bytes =
         static_cast<std::size_t>( warps_per_block ) * kSharedRowColumnsPerWarp * sizeof( COLTYPE );
-    ilu_persistent_spin_kernel<<<config.grid_blocks, config.block_size, shared_bytes, stream>>>(
-        n, d_lu_ai, d_lu_aj, d_lu_diag, base, d_lu_av, d_diag_inv, d_status, d_next_row, d_row_done );
+    ilu_persistent_spin_kernel<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>
+        <<<config.grid_blocks, config.block_size, shared_bytes, stream>>>(
+            n, d_lu_ai, d_lu_aj, d_lu_diag, d_row_perm, base, d_lu_av, d_diag_inv, d_status,
+            d_next_row, d_row_done );
     status = ilu_detail::CudaLaunchStatus();
     if ( status != cudaSuccess )
     {
@@ -376,23 +400,24 @@ cudaError_t ILUBaseNumericFactorizationPersistentAsync( COLTYPE n,
     return cudaSuccess;
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-cudaError_t ILUBaseNumericFactorizationPersistentCachedAsync( COLTYPE n,
-                                                              const ROWTYPE* d_lu_ai,
-                                                              const COLTYPE* d_lu_aj,
-                                                              const ROWTYPE* d_lu_diag,
-                                                              const ROWTYPE* d_lower_row_ptr,
-                                                              const ROWTYPE* d_update_ptr,
-                                                              const ROWTYPE* d_update_jpos,
-                                                              const ROWTYPE* d_update_pos,
-                                                              COLTYPE base,
-                                                              VALTYPE* d_lu_av,
-                                                              VALTYPE* d_diag_inv,
-                                                              int* d_status,
-                                                              COLTYPE* d_next_row,
-                                                              int* d_row_done,
-                                                              cudaStream_t stream,
-                                                              ILUPersistentLaunchConfig* h_launch_config )
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
+cudaError_t launch_persistent_cached_async( COLTYPE n,
+                                            const ROWTYPE* d_lu_ai,
+                                            const COLTYPE* d_lu_aj,
+                                            const ROWTYPE* d_lu_diag,
+                                            const ROWTYPE* d_lower_row_ptr,
+                                            const ROWTYPE* d_update_ptr,
+                                            const ROWTYPE* d_update_jpos,
+                                            const ROWTYPE* d_update_pos,
+                                            const COLTYPE* d_row_perm,
+                                            COLTYPE base,
+                                            VALTYPE* d_lu_av,
+                                            VALTYPE* d_diag_inv,
+                                            int* d_status,
+                                            COLTYPE* d_next_row,
+                                            int* d_row_done,
+                                            cudaStream_t stream,
+                                            ILUPersistentLaunchConfig* h_launch_config )
 {
     if ( n <= 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr ||
          d_lower_row_ptr == nullptr || d_update_ptr == nullptr || d_update_jpos == nullptr ||
@@ -401,9 +426,17 @@ cudaError_t ILUBaseNumericFactorizationPersistentCachedAsync( COLTYPE n,
     {
         return cudaErrorInvalidValue;
     }
+    if constexpr ( UseRowPerm )
+    {
+        if ( d_row_perm == nullptr )
+        {
+            return cudaErrorInvalidValue;
+        }
+    }
 
     ILUPersistentLaunchConfig config;
-    cudaError_t status = select_persistent_cached_launch_config<ROWTYPE, COLTYPE, VALTYPE>( n, &config );
+    cudaError_t status =
+        select_persistent_cached_launch_config<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>( n, &config );
     if ( status != cudaSuccess )
     {
         return status;
@@ -425,9 +458,10 @@ cudaError_t ILUBaseNumericFactorizationPersistentCachedAsync( COLTYPE n,
         return status;
     }
 
-    ilu_persistent_cached_kernel<<<config.grid_blocks, config.block_size, 0, stream>>>(
-        n, d_lu_ai, d_lu_aj, d_lu_diag, d_lower_row_ptr, d_update_ptr, d_update_jpos, d_update_pos,
-        base, d_lu_av, d_diag_inv, d_status, d_next_row, d_row_done );
+    ilu_persistent_cached_kernel<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>
+        <<<config.grid_blocks, config.block_size, 0, stream>>>(
+            n, d_lu_ai, d_lu_aj, d_lu_diag, d_lower_row_ptr, d_update_ptr, d_update_jpos,
+            d_update_pos, d_row_perm, base, d_lu_av, d_diag_inv, d_status, d_next_row, d_row_done );
     status = ilu_detail::CudaLaunchStatus();
     if ( status != cudaSuccess )
     {
@@ -439,6 +473,93 @@ cudaError_t ILUBaseNumericFactorizationPersistentCachedAsync( COLTYPE n,
         *h_launch_config = config;
     }
     return cudaSuccess;
+}
+} // namespace
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t ILUBaseNumericFactorizationPersistentAsync( COLTYPE n,
+                                                        const ROWTYPE* d_lu_ai,
+                                                        const COLTYPE* d_lu_aj,
+                                                        const ROWTYPE* d_lu_diag,
+                                                        COLTYPE base,
+                                                        VALTYPE* d_lu_av,
+                                                        VALTYPE* d_diag_inv,
+                                                        int* d_status,
+                                                        COLTYPE* d_next_row,
+                                                        int* d_row_done,
+                                                        cudaStream_t stream,
+                                                        ILUPersistentLaunchConfig* h_launch_config )
+{
+    return launch_persistent_async<ROWTYPE, COLTYPE, VALTYPE, false>(
+        n, d_lu_ai, d_lu_aj, d_lu_diag, nullptr, base, d_lu_av, d_diag_inv, d_status, d_next_row,
+        d_row_done, stream, h_launch_config );
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t ILUBaseNumericFactorizationPersistentPermAsync( COLTYPE n,
+                                                            const ROWTYPE* d_lu_ai,
+                                                            const COLTYPE* d_lu_aj,
+                                                            const ROWTYPE* d_lu_diag,
+                                                            const COLTYPE* d_row_perm,
+                                                            COLTYPE base,
+                                                            VALTYPE* d_lu_av,
+                                                            VALTYPE* d_diag_inv,
+                                                            int* d_status,
+                                                            COLTYPE* d_next_row,
+                                                            int* d_row_done,
+                                                            cudaStream_t stream,
+                                                            ILUPersistentLaunchConfig* h_launch_config )
+{
+    return launch_persistent_async<ROWTYPE, COLTYPE, VALTYPE, true>(
+        n, d_lu_ai, d_lu_aj, d_lu_diag, d_row_perm, base, d_lu_av, d_diag_inv, d_status, d_next_row,
+        d_row_done, stream, h_launch_config );
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t ILUBaseNumericFactorizationPersistentCachedAsync( COLTYPE n,
+                                                              const ROWTYPE* d_lu_ai,
+                                                              const COLTYPE* d_lu_aj,
+                                                              const ROWTYPE* d_lu_diag,
+                                                              const ROWTYPE* d_lower_row_ptr,
+                                                              const ROWTYPE* d_update_ptr,
+                                                              const ROWTYPE* d_update_jpos,
+                                                              const ROWTYPE* d_update_pos,
+                                                              COLTYPE base,
+                                                              VALTYPE* d_lu_av,
+                                                              VALTYPE* d_diag_inv,
+                                                              int* d_status,
+                                                              COLTYPE* d_next_row,
+                                                              int* d_row_done,
+                                                              cudaStream_t stream,
+                                                              ILUPersistentLaunchConfig* h_launch_config )
+{
+    return launch_persistent_cached_async<ROWTYPE, COLTYPE, VALTYPE, false>(
+        n, d_lu_ai, d_lu_aj, d_lu_diag, d_lower_row_ptr, d_update_ptr, d_update_jpos, d_update_pos,
+        nullptr, base, d_lu_av, d_diag_inv, d_status, d_next_row, d_row_done, stream, h_launch_config );
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t ILUBaseNumericFactorizationPersistentCachedPermAsync( COLTYPE n,
+                                                                  const ROWTYPE* d_lu_ai,
+                                                                  const COLTYPE* d_lu_aj,
+                                                                  const ROWTYPE* d_lu_diag,
+                                                                  const ROWTYPE* d_lower_row_ptr,
+                                                                  const ROWTYPE* d_update_ptr,
+                                                                  const ROWTYPE* d_update_jpos,
+                                                                  const ROWTYPE* d_update_pos,
+                                                                  const COLTYPE* d_row_perm,
+                                                                  COLTYPE base,
+                                                                  VALTYPE* d_lu_av,
+                                                                  VALTYPE* d_diag_inv,
+                                                                  int* d_status,
+                                                                  COLTYPE* d_next_row,
+                                                                  int* d_row_done,
+                                                                  cudaStream_t stream,
+                                                                  ILUPersistentLaunchConfig* h_launch_config )
+{
+    return launch_persistent_cached_async<ROWTYPE, COLTYPE, VALTYPE, true>(
+        n, d_lu_ai, d_lu_aj, d_lu_diag, d_lower_row_ptr, d_update_ptr, d_update_jpos, d_update_pos,
+        d_row_perm, base, d_lu_av, d_diag_inv, d_status, d_next_row, d_row_done, stream, h_launch_config );
 }
 
 template cudaError_t ILUBaseNumericFactorizationPersistentAsync<int, int, float>( int,
@@ -472,6 +593,49 @@ template cudaError_t ILUBaseNumericFactorizationPersistentAsync<std::int64_t, in
     const std::int64_t*,
     const int*,
     const std::int64_t*,
+    int,
+    double*,
+    double*,
+    int*,
+    int*,
+    int*,
+    cudaStream_t,
+    ILUPersistentLaunchConfig* );
+
+template cudaError_t ILUBaseNumericFactorizationPersistentPermAsync<int, int, float>( int,
+                                                                                      const int*,
+                                                                                      const int*,
+                                                                                      const int*,
+                                                                                      const int*,
+                                                                                      int,
+                                                                                      float*,
+                                                                                      float*,
+                                                                                      int*,
+                                                                                      int*,
+                                                                                      int*,
+                                                                                      cudaStream_t,
+                                                                                      ILUPersistentLaunchConfig* );
+
+template cudaError_t ILUBaseNumericFactorizationPersistentPermAsync<int, int, double>( int,
+                                                                                       const int*,
+                                                                                       const int*,
+                                                                                       const int*,
+                                                                                       const int*,
+                                                                                       int,
+                                                                                       double*,
+                                                                                       double*,
+                                                                                       int*,
+                                                                                       int*,
+                                                                                       int*,
+                                                                                       cudaStream_t,
+                                                                                       ILUPersistentLaunchConfig* );
+
+template cudaError_t ILUBaseNumericFactorizationPersistentPermAsync<std::int64_t, int, double>(
+    int,
+    const std::int64_t*,
+    const int*,
+    const std::int64_t*,
+    const int*,
     int,
     double*,
     double*,
@@ -524,6 +688,62 @@ template cudaError_t ILUBaseNumericFactorizationPersistentCachedAsync<std::int64
     const std::int64_t*,
     const std::int64_t*,
     const std::int64_t*,
+    int,
+    double*,
+    double*,
+    int*,
+    int*,
+    int*,
+    cudaStream_t,
+    ILUPersistentLaunchConfig* );
+
+template cudaError_t ILUBaseNumericFactorizationPersistentCachedPermAsync<int, int, float>( int,
+                                                                                            const int*,
+                                                                                            const int*,
+                                                                                            const int*,
+                                                                                            const int*,
+                                                                                            const int*,
+                                                                                            const int*,
+                                                                                            const int*,
+                                                                                            const int*,
+                                                                                            int,
+                                                                                            float*,
+                                                                                            float*,
+                                                                                            int*,
+                                                                                            int*,
+                                                                                            int*,
+                                                                                            cudaStream_t,
+                                                                                            ILUPersistentLaunchConfig* );
+
+template cudaError_t ILUBaseNumericFactorizationPersistentCachedPermAsync<int, int, double>(
+    int,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    int,
+    double*,
+    double*,
+    int*,
+    int*,
+    int*,
+    cudaStream_t,
+    ILUPersistentLaunchConfig* );
+
+template cudaError_t ILUBaseNumericFactorizationPersistentCachedPermAsync<std::int64_t, int, double>(
+    int,
+    const std::int64_t*,
+    const int*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const int*,
     int,
     double*,
     double*,

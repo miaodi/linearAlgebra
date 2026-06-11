@@ -1,5 +1,9 @@
 # CUDA ILU Persistent Optimization Notes
 
+This is an older persistent-path note. The current broader ILU0 numeric
+optimization record, including topological persistent and cached-permutation
+results, is `docs/cuda_ilu0_numeric_optimizations.md`.
+
 ## Context
 
 This note summarizes work after the committed checkpoint
@@ -22,7 +26,7 @@ Baseline matrix: `/home/miaodi/repo/matrix_lib/RTP_metis.bin`.
 
 Approximate benchmark means on RTP:
 
-| Stage | Result | `ours_binary_shared` | `cuSPARSE` | Notes |
+| Stage | Result | `binary_shared` | `cuSPARSE` | Notes |
 | --- | ---: | ---: | ---: | --- |
 | Original persistent path after `e5e712f` | 50.5 ms | 58.0 ms | -- | Acquire/release row-ready polling. |
 | Wait-path tuning | 45.9 ms | 58.0 ms | -- | Lower polling and status-check overhead. |
