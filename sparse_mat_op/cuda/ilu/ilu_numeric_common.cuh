@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cuda/atomic>
 #include <cuda_runtime.h>
 
 #include <cstddef>
@@ -23,6 +24,12 @@ enum class RowUpdateStrategy
 {
     BinarySearch,
     Merge
+};
+
+enum class RowWaitSleepPolicy
+{
+    Fixed64,
+    Adaptive
 };
 
 template <typename COLTYPE>
@@ -77,6 +84,165 @@ __device__ __forceinline__ ROWTYPE BinarySearchRow( const COLTYPE target,
         }
     }
     return ( left < local_end && cols[left] - base == target ) ? left + index_offset : ROWTYPE( -1 );
+}
+
+__device__ __forceinline__ int LoadDeviceInt( const int* value )
+{
+    cuda::atomic_ref<int, cuda::thread_scope_device> device_value( *const_cast<int*>( value ) );
+    return device_value.load( cuda::memory_order_relaxed );
+}
+
+template <typename COLTYPE, RowWaitSleepPolicy SleepPolicy = RowWaitSleepPolicy::Fixed64>
+__device__ __forceinline__ bool WaitForRowDone( const COLTYPE row, const int* row_done, const int* status, const int lane )
+{
+    int success = 1;
+    if ( lane == 0 )
+    {
+        cuda::atomic_ref<int, cuda::thread_scope_device> ready( *const_cast<int*>( row_done + row ) );
+        int spins = 0;
+        while ( ready.load( cuda::memory_order_acquire ) == 0 )
+        {
+            if ( ( spins++ & 0xff ) == 0 && LoadDeviceInt( status ) != 0 )
+            {
+                success = 0;
+                break;
+            }
+#if __CUDA_ARCH__ >= 700
+            if ( spins > 64 )
+            {
+                if constexpr ( SleepPolicy == RowWaitSleepPolicy::Adaptive )
+                {
+                    __nanosleep( spins < 256 ? spins : 256 );
+                }
+                else
+                {
+                    __nanosleep( 64 );
+                }
+            }
+#endif
+        }
+    }
+    return __shfl_sync( 0xffffffffu, success, 0 ) != 0;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+__device__ __forceinline__ VALTYPE NormalizeLowerEntryWithDiagInv( const ROWTYPE k_pos,
+                                                                   const COLTYPE k,
+                                                                   VALTYPE* lu_av,
+                                                                   const VALTYPE* diag_inv,
+                                                                   const int lane )
+{
+    VALTYPE aik = lu_av[k_pos];
+    if ( aik == VALTYPE( 0 ) )
+    {
+        return VALTYPE( 0 );
+    }
+
+    if ( lane == 0 )
+    {
+        aik *= diag_inv[k];
+        lu_av[k_pos] = aik;
+    }
+
+    return __shfl_sync( 0xffffffffu, aik, 0 );
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+__device__ __forceinline__ void PublishRowDone( const COLTYPE row,
+                                                const ROWTYPE diag_pos,
+                                                const bool needs_fence,
+                                                VALTYPE* lu_av,
+                                                VALTYPE* diag_inv,
+                                                int* status,
+                                                int* row_done,
+                                                const int lane )
+{
+    if ( needs_fence )
+    {
+        __threadfence();
+        __syncwarp();
+    }
+    if ( lane == 0 && LoadDeviceInt( status ) == 0 )
+    {
+        const VALTYPE diagonal = lu_av[diag_pos];
+        if ( diagonal == VALTYPE( 0 ) )
+        {
+            atomicCAS( status, 0, 1 );
+        }
+        else
+        {
+            diag_inv[row] = VALTYPE( 1 ) / diagonal;
+            cuda::atomic_ref<int, cuda::thread_scope_device> ready( row_done[row] );
+            ready.store( 1, cuda::memory_order_release );
+        }
+    }
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, RowIndexLookup Lookup, RowWaitSleepPolicy SleepPolicy = RowWaitSleepPolicy::Fixed64, bool SyncAfterWait = true>
+__device__ void FactorLURowBinarySearchWithRowDone( const ROWTYPE row_begin,
+                                                    const ROWTYPE row_end,
+                                                    const ROWTYPE lower_end,
+                                                    const ROWTYPE* lu_ai,
+                                                    const COLTYPE* lu_aj,
+                                                    const ROWTYPE* lu_diag,
+                                                    const COLTYPE base,
+                                                    VALTYPE* lu_av,
+                                                    const VALTYPE* diag_inv,
+                                                    const int* status,
+                                                    const int* row_done,
+                                                    const int lane,
+                                                    COLTYPE* shared_row_cols = nullptr )
+{
+    if constexpr ( Lookup == RowIndexLookup::Shared )
+    {
+        const ROWTYPE row_len = row_end - row_begin;
+        for ( ROWTYPE offset = lane; offset < row_len; offset += kWarpSize )
+        {
+            shared_row_cols[offset] = lu_aj[row_begin + offset] - base;
+        }
+        __syncwarp();
+    }
+
+    for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
+    {
+        const COLTYPE k = lu_aj[k_pos] - base;
+        if ( !WaitForRowDone<COLTYPE, SleepPolicy>( k, row_done, status, lane ) )
+        {
+            return;
+        }
+        if constexpr ( SyncAfterWait )
+        {
+            __syncwarp();
+        }
+
+        const VALTYPE aik =
+            NormalizeLowerEntryWithDiagInv<ROWTYPE, COLTYPE, VALTYPE>( k_pos, k, lu_av, diag_inv, lane );
+        if ( aik == VALTYPE( 0 ) )
+        {
+            continue;
+        }
+
+        const ROWTYPE k_u_begin = ( lu_diag[k] - base ) + 1;
+        const ROWTYPE k_u_end = lu_ai[k + 1] - base;
+        for ( ROWTYPE j_pos = k_u_begin + lane; j_pos < k_u_end; j_pos += kWarpSize )
+        {
+            const COLTYPE j = lu_aj[j_pos] - base;
+            ROWTYPE pos_i = ROWTYPE( -1 );
+            if constexpr ( Lookup == RowIndexLookup::Shared )
+            {
+                pos_i = BinarySearchRow<ROWTYPE, COLTYPE>( j, k_pos + 1, row_end, shared_row_cols,
+                                                           COLTYPE( 0 ), row_begin );
+            }
+            else
+            {
+                pos_i = BinarySearchRow<ROWTYPE, COLTYPE>( j, k_pos + 1, row_end, lu_aj, base );
+            }
+            if ( pos_i >= 0 )
+            {
+                lu_av[pos_i] -= aik * lu_av[j_pos];
+            }
+        }
+    }
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>

@@ -49,8 +49,8 @@ path on this matrix, but still trails cuSPARSE by about 8.6 ms.
 
 Primary files:
 
-- `sparse_mat_op/cuda/ilu/ilu_numeric_workqueue.cu`
-- `sparse_mat_op/cuda/ilu/ilu_numeric_workqueue.cuh`
+- `sparse_mat_op/cuda/ilu/ilu_numeric_persistent.cu`
+- `sparse_mat_op/cuda/ilu/ilu_numeric_persistent.cuh`
 - `benchmarks/cuda_ilu0_bench.cpp`
 - `tests/cuda_ilu_base_test.cpp`
 

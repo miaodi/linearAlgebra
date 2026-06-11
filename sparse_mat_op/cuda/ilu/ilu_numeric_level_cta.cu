@@ -1,7 +1,6 @@
 #include "ilu_numeric_level_cta.cuh"
 #include "ilu_numeric_common.cuh"
 
-#include <cuda/atomic>
 #include <cuda_runtime.h>
 
 #include <algorithm>
@@ -69,152 +68,6 @@ COLTYPE checkedZeroBasedIndex( const COLTYPE value, const COLTYPE base, const CO
     return index;
 }
 
-__device__ __forceinline__ int load_device_int( const int* value )
-{
-    cuda::atomic_ref<int, cuda::thread_scope_device> device_value( *const_cast<int*>( value ) );
-    return device_value.load( cuda::memory_order_relaxed );
-}
-
-template <typename COLTYPE>
-__device__ __forceinline__ bool wait_for_row_done( const COLTYPE row, const int* row_done, const int* status, const int lane )
-{
-    int success = 1;
-    if ( lane == 0 )
-    {
-        cuda::atomic_ref<int, cuda::thread_scope_device> ready( *const_cast<int*>( row_done + row ) );
-        int spins = 0;
-        while ( ready.load( cuda::memory_order_acquire ) == 0 )
-        {
-            if ( ( spins++ & 0xff ) == 0 && load_device_int( status ) != 0 )
-            {
-                success = 0;
-                break;
-            }
-#if __CUDA_ARCH__ >= 700
-            if ( spins > 64 )
-            {
-                __nanosleep( 64 );
-            }
-#endif
-        }
-    }
-    return __shfl_sync( 0xffffffffu, success, 0 ) != 0;
-}
-
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-__device__ __forceinline__ VALTYPE normalize_lower_entry_with_diag_inv( const ROWTYPE k_pos,
-                                                                        const COLTYPE k,
-                                                                        VALTYPE* lu_av,
-                                                                        const VALTYPE* diag_inv,
-                                                                        const int lane )
-{
-    VALTYPE aik = lu_av[k_pos];
-    if ( aik == VALTYPE( 0 ) )
-    {
-        return VALTYPE( 0 );
-    }
-
-    if ( lane == 0 )
-    {
-        aik *= diag_inv[k];
-        lu_av[k_pos] = aik;
-    }
-
-    return __shfl_sync( 0xffffffffu, aik, 0 );
-}
-
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-__device__ __forceinline__ void publish_row_done( const COLTYPE row,
-                                                  const ROWTYPE diag_pos,
-                                                  VALTYPE* lu_av,
-                                                  VALTYPE* diag_inv,
-                                                  int* status,
-                                                  int* row_done,
-                                                  const int lane )
-{
-    __threadfence();
-    __syncwarp();
-    if ( lane == 0 && load_device_int( status ) == 0 )
-    {
-        const VALTYPE diagonal = lu_av[diag_pos];
-        if ( diagonal == VALTYPE( 0 ) )
-        {
-            atomicCAS( status, 0, 1 );
-        }
-        else
-        {
-            diag_inv[row] = VALTYPE( 1 ) / diagonal;
-            cuda::atomic_ref<int, cuda::thread_scope_device> ready( row_done[row] );
-            ready.store( 1, cuda::memory_order_release );
-        }
-    }
-}
-
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup>
-__device__ void factor_lu_row_binary_search_wait( const ROWTYPE row_begin,
-                                                  const ROWTYPE row_end,
-                                                  const ROWTYPE lower_end,
-                                                  const ROWTYPE* lu_ai,
-                                                  const COLTYPE* lu_aj,
-                                                  const ROWTYPE* lu_diag,
-                                                  const COLTYPE base,
-                                                  VALTYPE* lu_av,
-                                                  const VALTYPE* diag_inv,
-                                                  int* status,
-                                                  const int* row_done,
-                                                  const int lane,
-                                                  COLTYPE* shared_row_cols = nullptr )
-{
-    const ROWTYPE row_len = row_end - row_begin;
-
-    if constexpr ( Lookup == ilu_detail::RowIndexLookup::Shared )
-    {
-        for ( ROWTYPE offset = lane; offset < row_len; offset += kWarpSize )
-        {
-            shared_row_cols[offset] = lu_aj[row_begin + offset] - base;
-        }
-        __syncwarp();
-    }
-
-    for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
-    {
-        const COLTYPE k = lu_aj[k_pos] - base;
-        if ( !wait_for_row_done<COLTYPE>( k, row_done, status, lane ) )
-        {
-            return;
-        }
-        __syncwarp();
-
-        const VALTYPE aik = normalize_lower_entry_with_diag_inv<ROWTYPE, COLTYPE, VALTYPE>(
-            k_pos, k, lu_av, diag_inv, lane );
-        if ( aik == VALTYPE( 0 ) )
-        {
-            continue;
-        }
-
-        const ROWTYPE k_u_begin = ( lu_diag[k] - base ) + 1;
-        const ROWTYPE k_u_end = lu_ai[k + 1] - base;
-        for ( ROWTYPE j_pos = k_u_begin + lane; j_pos < k_u_end; j_pos += kWarpSize )
-        {
-            const COLTYPE j = lu_aj[j_pos] - base;
-            ROWTYPE pos_i = ROWTYPE( -1 );
-            if constexpr ( Lookup == ilu_detail::RowIndexLookup::Shared )
-            {
-                pos_i = ilu_detail::BinarySearchRow<ROWTYPE, COLTYPE>(
-                    j, k_pos + 1, row_end, shared_row_cols, COLTYPE( 0 ), row_begin );
-            }
-            else
-            {
-                pos_i = ilu_detail::BinarySearchRow<ROWTYPE, COLTYPE>( j, k_pos + 1, row_end, lu_aj, base );
-            }
-            if ( pos_i >= 0 )
-            {
-                lu_av[pos_i] -= aik * lu_av[j_pos];
-            }
-        }
-    }
-}
-
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup>
 __device__ void factor_lu_row_merge_wait( const ROWTYPE row_begin,
                                           const ROWTYPE row_end,
@@ -233,13 +86,13 @@ __device__ void factor_lu_row_merge_wait( const ROWTYPE row_begin,
     for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
     {
         const COLTYPE k = lu_aj[k_pos] - base;
-        if ( !wait_for_row_done<COLTYPE>( k, row_done, status, lane ) )
+        if ( !ilu_detail::WaitForRowDone<COLTYPE>( k, row_done, status, lane ) )
         {
             return;
         }
         __syncwarp();
 
-        const VALTYPE aik = normalize_lower_entry_with_diag_inv<ROWTYPE, COLTYPE, VALTYPE>(
+        const VALTYPE aik = ilu_detail::NormalizeLowerEntryWithDiagInv<ROWTYPE, COLTYPE, VALTYPE>(
             k_pos, k, lu_av, diag_inv, lane );
         if ( aik == VALTYPE( 0 ) )
         {
@@ -312,7 +165,7 @@ __device__ void factor_level_cta_task( const int cta,
     const COLTYPE cta_begin = cta_row_ptr[cta];
     const COLTYPE cta_end = cta_row_ptr[cta + 1];
     const COLTYPE row_slot = cta_begin + static_cast<COLTYPE>( warp_in_block );
-    if ( row_slot >= cta_end || load_device_int( status ) != 0 )
+    if ( row_slot >= cta_end || ilu_detail::LoadDeviceInt( status ) != 0 )
     {
         return;
     }
@@ -334,26 +187,27 @@ __device__ void factor_level_cta_task( const int cta,
         {
             if ( row_end - row_begin <= static_cast<ROWTYPE>( kSharedRowColumnsPerWarp ) )
             {
-                factor_lu_row_binary_search_wait<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Shared>(
+                ilu_detail::FactorLURowBinarySearchWithRowDone<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Shared>(
                     row_begin, row_end, lower_end, lu_ai, lu_aj, lu_diag, base, lu_av, diag_inv,
                     status, row_done, lane, shared_row_cols );
             }
             else
             {
-                factor_lu_row_binary_search_wait<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>(
+                ilu_detail::FactorLURowBinarySearchWithRowDone<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>(
                     row_begin, row_end, lower_end, lu_ai, lu_aj, lu_diag, base, lu_av, diag_inv,
                     status, row_done, lane );
             }
         }
         else
         {
-            factor_lu_row_binary_search_wait<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>(
+            ilu_detail::FactorLURowBinarySearchWithRowDone<ROWTYPE, COLTYPE, VALTYPE, ilu_detail::RowIndexLookup::Global>(
                 row_begin, row_end, lower_end, lu_ai, lu_aj, lu_diag, base, lu_av, diag_inv, status,
                 row_done, lane );
         }
     }
 
-    publish_row_done<ROWTYPE, COLTYPE, VALTYPE>( i, lower_end, lu_av, diag_inv, status, row_done, lane );
+    ilu_detail::PublishRowDone<ROWTYPE, COLTYPE, VALTYPE>( i, lower_end, true, lu_av, diag_inv,
+                                                           status, row_done, lane );
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup, ilu_detail::RowUpdateStrategy Update>
@@ -400,7 +254,7 @@ __global__ __launch_bounds__( kLevelCtaThreadsPerBlock,
     {
         if ( threadIdx.x == 0 )
         {
-            shared_cta = ( load_device_int( status ) == 0 ) ? atomicAdd( next_cta, 1 ) : cta_count;
+            shared_cta = ( ilu_detail::LoadDeviceInt( status ) == 0 ) ? atomicAdd( next_cta, 1 ) : cta_count;
         }
         __syncthreads();
 
