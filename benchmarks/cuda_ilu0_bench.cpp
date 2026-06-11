@@ -170,6 +170,7 @@ struct ILU0BenchmarkData
     cuda_utils::ILUCtaGranularLaunchConfig cta_granular_global_launch;
     cuda_utils::ILUCtaGranularLaunchConfig cta_granular_global_identity_launch;
     cuda_utils::ILUCtaGranularLaunchConfig cta_granular_cached_launch;
+    cuda_utils::ILUCtaGranularLaunchConfig cta_granular_cached_identity_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_perm_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_cached_launch;
@@ -261,31 +262,33 @@ struct ILU0BenchmarkData
         prepareCusparseAnalysis();
         warmUpAndValidate();
 
-        std::cout << "Loaded " << matrix_file << ": n=" << n << ", nnz(A)=" << nnz_a
-                  << ", nnz(LU0 pattern)=" << nnz_lu << ", levels=" << levels
-                  << ", strict lower nnz=" << update_cache.strict_lower_nnz
-                  << ", cached updates=" << update_cache.total_updates
-                  << ", cache bytes=" << update_cache.bytes() << ", cuSPARSE buffer bytes=" << cusparse_buffer_size
-                  << ", CTA-granular grid blocks=" << cta_granular_launch.total_blocks
-                  << ", CTA-granular hollow warps=" << cta_granular_launch.hollow_warps
-                  << ", identity CTA-granular grid blocks=" << cta_granular_identity_launch.total_blocks
-                  << ", identity CTA-granular hollow warps=" << cta_granular_identity_launch.hollow_warps
-                  << ", global CTA-granular grid blocks=" << cta_granular_global_launch.total_blocks
-                  << ", global CTA-granular hollow warps=" << cta_granular_global_launch.hollow_warps
-                  << ", identity global CTA-granular grid blocks="
-                  << cta_granular_global_identity_launch.total_blocks << ", identity global CTA-granular hollow warps="
-                  << cta_granular_global_identity_launch.hollow_warps
-                  << ", cached CTA-granular grid blocks=" << cta_granular_cached_launch.total_blocks
-                  << ", cached CTA-granular hollow warps=" << cta_granular_cached_launch.hollow_warps
-                  << ", persistent block size=" << persistent_launch.block_size
-                  << ", persistent grid blocks=" << persistent_launch.grid_blocks
-                  << ", persistent perm block size=" << persistent_perm_launch.block_size
-                  << ", persistent perm grid blocks=" << persistent_perm_launch.grid_blocks
-                  << ", persistent cached block size=" << persistent_cached_launch.block_size
-                  << ", persistent cached grid blocks=" << persistent_cached_launch.grid_blocks
-                  << ", persistent cached perm block size=" << persistent_cached_perm_launch.block_size
-                  << ", persistent cached perm grid blocks=" << persistent_cached_perm_launch.grid_blocks
-                  << std::endl;
+        std::cout
+            << "Loaded " << matrix_file << ": n=" << n << ", nnz(A)=" << nnz_a
+            << ", nnz(LU0 pattern)=" << nnz_lu << ", levels=" << levels
+            << ", strict lower nnz=" << update_cache.strict_lower_nnz
+            << ", cached updates=" << update_cache.total_updates
+            << ", cache bytes=" << update_cache.bytes() << ", cuSPARSE buffer bytes=" << cusparse_buffer_size
+            << ", CTA-granular grid blocks=" << cta_granular_launch.total_blocks
+            << ", CTA-granular hollow warps=" << cta_granular_launch.hollow_warps
+            << ", identity CTA-granular grid blocks=" << cta_granular_identity_launch.total_blocks
+            << ", identity CTA-granular hollow warps=" << cta_granular_identity_launch.hollow_warps
+            << ", global CTA-granular grid blocks=" << cta_granular_global_launch.total_blocks
+            << ", global CTA-granular hollow warps=" << cta_granular_global_launch.hollow_warps
+            << ", identity global CTA-granular grid blocks=" << cta_granular_global_identity_launch.total_blocks
+            << ", identity global CTA-granular hollow warps=" << cta_granular_global_identity_launch.hollow_warps
+            << ", cached CTA-granular grid blocks=" << cta_granular_cached_launch.total_blocks
+            << ", cached CTA-granular hollow warps=" << cta_granular_cached_launch.hollow_warps
+            << ", identity cached CTA-granular grid blocks=" << cta_granular_cached_identity_launch.total_blocks
+            << ", identity cached CTA-granular hollow warps=" << cta_granular_cached_identity_launch.hollow_warps
+            << ", persistent block size=" << persistent_launch.block_size
+            << ", persistent grid blocks=" << persistent_launch.grid_blocks
+            << ", persistent perm block size=" << persistent_perm_launch.block_size
+            << ", persistent perm grid blocks=" << persistent_perm_launch.grid_blocks
+            << ", persistent cached block size=" << persistent_cached_launch.block_size
+            << ", persistent cached grid blocks=" << persistent_cached_launch.grid_blocks
+            << ", persistent cached perm block size=" << persistent_cached_perm_launch.block_size
+            << ", persistent cached perm grid blocks=" << persistent_cached_perm_launch.grid_blocks
+            << std::endl;
     }
 
     ~ILU0BenchmarkData()
@@ -450,6 +453,7 @@ struct ILU0BenchmarkData
         warmUpCtaGranular( "identity global CTA-granular", d_identity_perm,
                            cuda_utils::ILUNumericRowLookup::Global, cta_granular_global_identity_launch );
         warmUpCtaGranularCached( "cached CTA-granular", d_level_perm, cta_granular_cached_launch );
+        warmUpCtaGranularCached( "identity cached CTA-granular", d_identity_perm, cta_granular_cached_identity_launch );
 
         resetOurValues();
         checkCuda( cuda_utils::ILUBaseNumericFactorizationPersistentAsync<int, int, double>(
@@ -769,32 +773,52 @@ void BM_OurILU0NumericCtaGranularGlobalIdentity( benchmark::State& state, ILU0Be
         data.cta_granular_global_identity_launch, "identity global CTA-granular" );
 }
 
-void BM_OurILU0NumericCtaGranularCached( benchmark::State& state, ILU0BenchmarkData& data )
+void BM_OurILU0NumericCtaGranularCachedImpl( benchmark::State& state,
+                                             ILU0BenchmarkData& data,
+                                             const DeviceIntArray& row_perm,
+                                             cuda_utils::ILUCtaGranularLaunchConfig& launch_config,
+                                             const char* label )
 {
+    const std::string start_message =
+        std::string( "start CUDA profiler for " ) + label + " ILU0 numeric factorization";
+    const std::string run_message = std::string( "run " ) + label + " ILU0 numeric factorization";
+    const std::string sync_message =
+        std::string( "sync after " ) + label + " ILU0 numeric factorization";
+    const std::string stop_message =
+        std::string( "stop CUDA profiler after " ) + label + " ILU0 numeric factorization";
+
     for ( auto _ : state )
     {
         state.PauseTiming();
         data.resetOurValues();
-        startCudaProfilerRange(
-            "start CUDA profiler for cached CTA-granular ILU0 numeric factorization" );
+        startCudaProfilerRange( start_message.c_str() );
         state.ResumeTiming();
 
         checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularCachedAsync<int, int, double>(
                        data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
                        data.update_cache.lower_row_ptr.data(), data.update_cache.update_ptr.data(),
                        data.update_cache.update_jpos.data(), data.update_cache.update_pos.data(),
-                       data.d_level_perm.data(), data.base, data.d_our_lu_av.data(),
-                       data.d_diag_inv.data(), data.d_status.data(), data.cta_granular_scratch,
-                       data.stream, &data.cta_granular_cached_launch ),
-                   "run cached CTA-granular ILU0 numeric factorization" );
-        checkCuda( cudaStreamSynchronize( data.stream ),
-                   "sync after cached CTA-granular ILU0 numeric factorization" );
+                       row_perm.data(), data.base, data.d_our_lu_av.data(), data.d_diag_inv.data(),
+                       data.d_status.data(), data.cta_granular_scratch, data.stream, &launch_config ),
+                   run_message.c_str() );
+        checkCuda( cudaStreamSynchronize( data.stream ), sync_message.c_str() );
         state.PauseTiming();
-        stopCudaProfilerRange(
-            "stop CUDA profiler after cached CTA-granular ILU0 numeric factorization" );
+        stopCudaProfilerRange( stop_message.c_str() );
         state.ResumeTiming();
     }
-    setCounters( state, data, data.cta_granular_cached_launch );
+    setCounters( state, data, launch_config );
+}
+
+void BM_OurILU0NumericCtaGranularCached( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    BM_OurILU0NumericCtaGranularCachedImpl(
+        state, data, data.d_level_perm, data.cta_granular_cached_launch, "cached CTA-granular" );
+}
+
+void BM_OurILU0NumericCtaGranularCachedIdentity( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    BM_OurILU0NumericCtaGranularCachedImpl( state, data, data.d_identity_perm, data.cta_granular_cached_identity_launch,
+                                            "identity cached CTA-granular" );
 }
 
 void BM_OurILU0NumericPersistentCached( benchmark::State& state, ILU0BenchmarkData& data )
@@ -992,6 +1016,11 @@ int main( int argc, char** argv )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/cta_granular_cached", [data]( benchmark::State& state )
                                       { BM_OurILU0NumericCtaGranularCached( state, *data ); } )
+            ->Unit( benchmark::kMillisecond )
+            ->UseRealTime();
+        benchmark::RegisterBenchmark( "ILU0Numeric/cta_granular_cached_identity",
+                                      [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericCtaGranularCachedIdentity( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/persistent_spin", [data]( benchmark::State& state )
