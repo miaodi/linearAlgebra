@@ -174,8 +174,11 @@ __global__ void ilu_persistent_cached_kernel( COLTYPE n,
     }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
-cudaError_t select_persistent_launch_config( const COLTYPE n, ILUPersistentLaunchConfig* config )
+template <typename COLTYPE, typename Kernel, typename DynamicSharedBytes>
+cudaError_t select_persistent_launch_config_impl( const COLTYPE n,
+                                                  ILUPersistentLaunchConfig* config,
+                                                  Kernel kernel,
+                                                  DynamicSharedBytes dynamic_shared_bytes )
 {
     if ( n <= 0 || config == nullptr )
     {
@@ -209,12 +212,9 @@ cudaError_t select_persistent_launch_config( const COLTYPE n, ILUPersistentLaunc
         }
 
         const int warps_per_block = block_size / kWarpSize;
-        const std::size_t shared_bytes =
-            static_cast<std::size_t>( warps_per_block ) * kSharedRowColumnsPerWarp * sizeof( COLTYPE );
+        const std::size_t shared_bytes = dynamic_shared_bytes( block_size );
         int blocks_per_sm = 0;
-        status = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-            &blocks_per_sm, ilu_persistent_spin_kernel<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>,
-            block_size, shared_bytes );
+        status = cudaOccupancyMaxActiveBlocksPerMultiprocessor( &blocks_per_sm, kernel, block_size, shared_bytes );
         if ( status != cudaSuccess )
         {
             return status;
@@ -254,79 +254,23 @@ cudaError_t select_persistent_launch_config( const COLTYPE n, ILUPersistentLaunc
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
+cudaError_t select_persistent_launch_config( const COLTYPE n, ILUPersistentLaunchConfig* config )
+{
+    return select_persistent_launch_config_impl<COLTYPE>(
+        n, config, ilu_persistent_spin_kernel<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>,
+        []( const int block_size ) -> std::size_t
+        {
+            const int warps_per_block = block_size / kWarpSize;
+            return static_cast<std::size_t>( warps_per_block ) * kSharedRowColumnsPerWarp * sizeof( COLTYPE );
+        } );
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
 cudaError_t select_persistent_cached_launch_config( const COLTYPE n, ILUPersistentLaunchConfig* config )
 {
-    if ( n <= 0 || config == nullptr )
-    {
-        return cudaErrorInvalidValue;
-    }
-
-    int device = 0;
-    cudaError_t status = cudaGetDevice( &device );
-    if ( status != cudaSuccess )
-    {
-        return status;
-    }
-
-    cudaDeviceProp prop{};
-    status = cudaGetDeviceProperties( &prop, device );
-    if ( status != cudaSuccess )
-    {
-        return status;
-    }
-
-    constexpr int candidates[] = { 64, 128, 256, 512 };
-    int best_block_size = 0;
-    int best_blocks_per_sm = 0;
-    int best_resident_warps_per_sm = -1;
-
-    for ( const int block_size : candidates )
-    {
-        if ( block_size > prop.maxThreadsPerBlock )
-        {
-            continue;
-        }
-
-        const int warps_per_block = block_size / kWarpSize;
-        int blocks_per_sm = 0;
-        status = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-            &blocks_per_sm, ilu_persistent_cached_kernel<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>, block_size, 0 );
-        if ( status != cudaSuccess )
-        {
-            return status;
-        }
-        if ( blocks_per_sm <= 0 )
-        {
-            continue;
-        }
-
-        const int resident_warps_per_sm = blocks_per_sm * warps_per_block;
-        if ( resident_warps_per_sm > best_resident_warps_per_sm ||
-             ( resident_warps_per_sm == best_resident_warps_per_sm && block_size < best_block_size ) )
-        {
-            best_block_size = block_size;
-            best_blocks_per_sm = blocks_per_sm;
-            best_resident_warps_per_sm = resident_warps_per_sm;
-        }
-    }
-
-    if ( best_block_size <= 0 || best_blocks_per_sm <= 0 )
-    {
-        return cudaErrorInvalidValue;
-    }
-
-    const int warps_per_block = best_block_size / kWarpSize;
-    const long long static_blocks = ( static_cast<long long>( n ) + warps_per_block - 1 ) / warps_per_block;
-    const long long occupancy_blocks =
-        static_cast<long long>( std::max( prop.multiProcessorCount, 1 ) ) * best_blocks_per_sm;
-    const long long grid_blocks = std::max<long long>( 1, std::min( static_blocks, occupancy_blocks ) );
-
-    config->block_size = best_block_size;
-    config->grid_blocks =
-        static_cast<int>( std::min<long long>( grid_blocks, std::numeric_limits<int>::max() ) );
-    config->blocks_per_sm = best_blocks_per_sm;
-    config->resident_warps = config->grid_blocks * warps_per_block;
-    return cudaSuccess;
+    return select_persistent_launch_config_impl<COLTYPE>(
+        n, config, ilu_persistent_cached_kernel<ROWTYPE, COLTYPE, VALTYPE, UseRowPerm>,
+        []( const int ) -> std::size_t { return 0; } );
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, bool UseRowPerm>
