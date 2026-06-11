@@ -67,8 +67,11 @@ Approximate RTP timings observed during development:
 | Persistent wait-path tuning | ~45.9 ms | Reduced polling/status overhead and delayed sleep. |
 | Persistent with `diag_inv` | ~34.6 ms | Dependents multiply by published reciprocal diagonal. |
 | Persistent cached | ~30.5 ms | Persistent scheduler plus lower-only update cache. |
-| `cta_granular` | ~22.4 ms | Topological `level_perm` order, one grid block per 8-row CTA task. |
-| `cta_granular_identity` | ~44.3 ms | Identity row order experiment, CTA chunks `[0..7]`, `[8..15]`, ... |
+| `cta_granular` | ~22.4 ms | Topological `level_perm` order with shared current-row column staging. |
+| `cta_granular_identity` | ~44.3 ms | Identity row order with shared current-row column staging. |
+| `cta_granular_global` | ~24.9 ms | Topological `level_perm` order, global row lookup, no shared row-column staging. |
+| `cta_granular_global_identity` | ~56.0 ms | Identity row order with global row lookup. |
+| `cta_granular_cached` | ~18.5 ms | Topological CTA scheduler plus lower-only update cache. |
 | `persistent_spin_perm` | ~18.5 ms | Persistent scheduler with topological `level_perm` row order. |
 | `persistent_cached_perm` | ~17.6 ms | Topological persistent scheduler plus lower-only update cache. |
 | cuSPARSE `csrilu02` | ~21.8 ms | Reference library implementation on the same matrix. |
@@ -78,7 +81,7 @@ The most important recent experiment compared these variants:
 ```sh
 release/benchmarks/cuda_ilu0_bench \
   -f ~/repo/matrix_lib/RTP_metis.bin \
-  --benchmark_filter='ILU0Numeric/(persistent_spin|persistent_spin_perm|persistent_cached|persistent_cached_perm|cta_granular|cta_granular_identity)' \
+  --benchmark_filter='ILU0Numeric/(persistent_spin|persistent_spin_perm|persistent_cached|persistent_cached_perm|cta_granular|cta_granular_identity|cta_granular_global|cta_granular_global_identity|cta_granular_cached)' \
   --benchmark_min_time=5s \
   --benchmark_counters_tabular=true
 ```
@@ -89,6 +92,9 @@ Observed result:
 | --- | ---: |
 | `ILU0Numeric/cta_granular/real_time` | 22.4 ms |
 | `ILU0Numeric/cta_granular_identity/real_time` | 44.3 ms |
+| `ILU0Numeric/cta_granular_global/real_time` | 24.9 ms |
+| `ILU0Numeric/cta_granular_global_identity/real_time` | 56.0 ms |
+| `ILU0Numeric/cta_granular_cached/real_time` | 18.5 ms |
 | `ILU0Numeric/persistent_spin/real_time` | 34.7 ms |
 | `ILU0Numeric/persistent_spin_perm/real_time` | 18.5 ms |
 | `ILU0Numeric/persistent_cached/real_time` | 30.6 ms |
@@ -227,14 +233,72 @@ row can be searched many times while processing its lower dependencies.
 Important constraint:
 
 - `kSharedRowColumnsPerWarp = 256`.
-- The persistent and CTA-granular paths use shared staging only when
+- The persistent path uses shared staging only when
   `row_end - row_begin <= kSharedRowColumnsPerWarp`.
+- The default CTA-granular benchmark uses shared staging; the `cta_granular_global`
+  variants use global lookup to compare against cuSPARSE's low-shared-memory path.
 - Larger rows fall back to global lookup to avoid overflowing the per-warp shared
   buffer.
 
 Takeaway: shared memory helps the binary-search path when the current row is
 large enough to make repeated global-memory searches expensive, but still small
 enough to fit in the per-warp shared row cache.
+
+Measured CTA-granular lookup experiment on RTP:
+
+| CTA-granular lookup mode | Topological order | Identity order |
+| --- | ---: | ---: |
+| Shared current-row staging | ~22.4 ms | ~44.3 ms |
+| Global current-row lookup | ~24.9 ms | ~56.0 ms |
+
+Removing shared staging reduced shared-memory footprint and register pressure,
+but it increased repeated global lookup cost enough to regress the benchmark.
+
+## Optimization: Cached CTA-Granular Updates
+
+The `cta_granular_cached` path keeps the same 8-warps/block CTA scheduler as
+`cta_granular`, but replaces runtime row-column searches with the lower-only
+update cache:
+
+```text
+lower_row_ptr, update_ptr, update_jpos, update_pos
+```
+
+The cache stores the exact `(j_pos, pos_i)` update pairs for every strict-lower
+entry. This removes the binary search inside the numeric kernel at the cost of a
+large persistent cache. On RTP, the cache is about `1.01 GiB` for `124.0M`
+updates.
+
+Measured focused benchmark:
+
+| Path | Time |
+| --- | ---: |
+| `cta_granular_global` | ~24.9 ms |
+| `cta_granular` | ~22.3 ms |
+| cuSPARSE `USE_LEVEL` | ~21.8 ms |
+| `cta_granular_cached` | ~18.5 ms |
+| `persistent_cached_perm` | ~17.6 ms |
+
+Focused NCU reports:
+
+| Metric | `cta_granular_global` | cuSPARSE `USE_LEVEL` | `cta_granular_cached` |
+| --- | ---: | ---: | ---: |
+| Kernel time | 27.609 ms | 23.792 ms | 19.486 ms |
+| Grid/block | 243686 x 256 | 243686 x 256 | 243686 x 256 |
+| Registers/thread | 24 | 32 | 36 |
+| L2 sectors | 604.6M | 421.8M | 366.2M |
+| L2 read sectors | 496.1M | 325.8M | 262.8M |
+| DRAM read | 2.996 GB | 2.961 GB | 2.898 GB |
+| DRAM write | 301.5 MB | 268.5 MB | 300.9 MB |
+| Executed SM instructions | 2.892B | 2.898B | 1.569B |
+| Thread instructions | 54.779B | 63.884B | 31.244B |
+| Long-scoreboard not issued | 1.688M | 1.160M | 1.317M |
+
+The cached CTA path does not eliminate memory latency, but it removes enough
+row-search traffic and instructions to beat both the global lookup variant and
+cuSPARSE on this matrix. This supports the earlier interpretation that
+`cta_granular_global` was losing mostly to repeated global row lookup work, not
+to occupancy or shared-memory footprint.
 
 ## Optimization: Persistent Row Scheduling
 
@@ -295,7 +359,9 @@ shows that topological `level_perm` ordering is essential on RTP.
 | --- | ---: | --- |
 | Row fetch chunking | ~337 ms | Rejected due to severe regression. |
 | 32-warps/SM cap | ~54.6 ms | Rejected for the tuned persistent path. |
-| Forced global lookup | ~53.0 ms | Rejected; shared row-column staging remains useful. |
+| Forced global lookup | ~53.0 ms | Rejected for the level-scheduled path; shared row-column staging remains useful. |
+| CTA-granular global lookup | ~24.9 ms | Slower than the shared-staged CTA-granular variant; retained for cuSPARSE comparison. |
+| CTA-granular cached lookup | ~18.5 ms | Retained as a high-memory comparison path using the existing lower-only update cache. |
 | Busy spin without `__nanosleep` | ~49.5 ms | Rejected; delayed sleep performed better. |
 | Forced 128/256 block size | Neutral | Not retained as a tuning knob. |
 | Identity CTA-granular order | ~44.3 ms | Rejected; topological ordering matters. |
@@ -303,8 +369,8 @@ shows that topological `level_perm` ordering is essential on RTP.
 ## Current Interpretation
 
 The best current in-repo path for RTP is `persistent_cached_perm` at roughly
-`17.6 ms`, ahead of the measured cuSPARSE `csrilu02` result of roughly
-`21.8 ms`.
+`17.6 ms`, ahead of `cta_granular_cached` at roughly `18.5 ms` and the measured
+cuSPARSE `csrilu02` result of roughly `21.8 ms`.
 
 The main lessons are:
 
@@ -315,6 +381,8 @@ The main lessons are:
 - `diag_inv` is a major row-done path optimization.
 - Shared row-column staging helps binary search when the current row fits the
   shared cache and is searched repeatedly.
+- Precomputed update positions are the strongest known way to remove repeated
+  current-row lookup work, but they require a large update cache.
 - Coarser CTA scheduling reduces work-counter atomic traffic, but without
   topological ordering it can be slower than the finer persistent row scheduler.
 - With topological ordering, the fine-grained persistent scheduler can beat the
@@ -337,7 +405,7 @@ Run the focused topological-order experiment:
 ```sh
 release/benchmarks/cuda_ilu0_bench \
   -f ~/repo/matrix_lib/RTP_metis.bin \
-  --benchmark_filter='ILU0Numeric/(persistent_spin|persistent_spin_perm|persistent_cached|persistent_cached_perm|cta_granular|cta_granular_identity)' \
+  --benchmark_filter='ILU0Numeric/(persistent_spin|persistent_spin_perm|persistent_cached|persistent_cached_perm|cta_granular|cta_granular_identity|cta_granular_global|cta_granular_global_identity|cta_granular_cached)' \
   --benchmark_min_time=5s \
   --benchmark_counters_tabular=true
 ```

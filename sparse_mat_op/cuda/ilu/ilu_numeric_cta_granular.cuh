@@ -50,6 +50,31 @@ cudaError_t ILUBaseNumericFactorizationCtaGranularAsync( COLTYPE n,
                                                          cudaStream_t stream = nullptr,
                                                          ILUCtaGranularLaunchConfig* h_launch_config = nullptr );
 
+/**
+ * @brief CTA-granular ILU numeric factorization using precomputed update positions.
+ *
+ * This keeps the same 8-row CTA work-claim model as
+ * ILUBaseNumericFactorizationCtaGranularAsync, but replaces per-update row-column
+ * searches with the lower-only update cache built by BuildILUUpdateCacheAsync.
+ */
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t ILUBaseNumericFactorizationCtaGranularCachedAsync( COLTYPE n,
+                                                               const ROWTYPE* d_lu_ai,
+                                                               const COLTYPE* d_lu_aj,
+                                                               const ROWTYPE* d_lu_diag,
+                                                               const ROWTYPE* d_lower_row_ptr,
+                                                               const ROWTYPE* d_update_ptr,
+                                                               const ROWTYPE* d_update_jpos,
+                                                               const ROWTYPE* d_update_pos,
+                                                               const COLTYPE* d_row_perm,
+                                                               COLTYPE base,
+                                                               VALTYPE* d_lu_av,
+                                                               VALTYPE* d_diag_inv,
+                                                               int* d_status,
+                                                               ILUCtaGranularScratch& scratch,
+                                                               cudaStream_t stream = nullptr,
+                                                               ILUCtaGranularLaunchConfig* h_launch_config = nullptr );
+
 extern template cudaError_t ILUBaseNumericFactorizationCtaGranularAsync<int, int, float>(
     int,
     const int*,
@@ -94,6 +119,60 @@ extern template cudaError_t ILUBaseNumericFactorizationCtaGranularAsync<std::int
     int*,
     ILUNumericRowLookup,
     ILUNumericRowUpdateStrategy,
+    ILUCtaGranularScratch&,
+    cudaStream_t,
+    ILUCtaGranularLaunchConfig* );
+
+extern template cudaError_t ILUBaseNumericFactorizationCtaGranularCachedAsync<int, int, float>(
+    int,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    int,
+    float*,
+    float*,
+    int*,
+    ILUCtaGranularScratch&,
+    cudaStream_t,
+    ILUCtaGranularLaunchConfig* );
+
+extern template cudaError_t ILUBaseNumericFactorizationCtaGranularCachedAsync<int, int, double>(
+    int,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    const int*,
+    int,
+    double*,
+    double*,
+    int*,
+    ILUCtaGranularScratch&,
+    cudaStream_t,
+    ILUCtaGranularLaunchConfig* );
+
+extern template cudaError_t ILUBaseNumericFactorizationCtaGranularCachedAsync<std::int64_t, int, double>(
+    int,
+    const std::int64_t*,
+    const int*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const int*,
+    int,
+    double*,
+    double*,
+    int*,
     ILUCtaGranularScratch&,
     cudaStream_t,
     ILUCtaGranularLaunchConfig* );

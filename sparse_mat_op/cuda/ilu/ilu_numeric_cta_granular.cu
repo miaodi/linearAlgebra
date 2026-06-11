@@ -130,6 +130,47 @@ __device__ void factor_lu_row_merge_wait( const ROWTYPE row_begin,
     }
 }
 
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+__device__ void factor_lu_row_cached_wait( const ROWTYPE row_begin,
+                                           const ROWTYPE lower_end,
+                                           const ROWTYPE lower_begin,
+                                           const COLTYPE* lu_aj,
+                                           VALTYPE* lu_av,
+                                           const VALTYPE* diag_inv,
+                                           const ROWTYPE* update_ptr,
+                                           const ROWTYPE* update_jpos,
+                                           const ROWTYPE* update_pos,
+                                           const COLTYPE base,
+                                           const int* row_done,
+                                           const int* status,
+                                           const int lane )
+{
+    for ( ROWTYPE k_pos = row_begin; k_pos < lower_end; ++k_pos )
+    {
+        const COLTYPE k = lu_aj[k_pos] - base;
+        if ( !ilu_detail::WaitForRowDone<COLTYPE>( k, row_done, status, lane ) )
+        {
+            return;
+        }
+        __syncwarp();
+
+        const VALTYPE aik = ilu_detail::NormalizeLowerEntryWithDiagInv<ROWTYPE, COLTYPE, VALTYPE>(
+            k_pos, k, lu_av, diag_inv, lane );
+        if ( aik == VALTYPE( 0 ) )
+        {
+            continue;
+        }
+
+        const ROWTYPE lower_id = lower_begin + ( k_pos - row_begin );
+        const ROWTYPE update_begin = update_ptr[lower_id];
+        const ROWTYPE update_end = update_ptr[lower_id + 1];
+        for ( ROWTYPE update = update_begin + lane; update < update_end; update += kWarpSize )
+        {
+            lu_av[update_pos[update]] -= aik * lu_av[update_jpos[update]];
+        }
+    }
+}
+
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup, ilu_detail::RowUpdateStrategy Update>
 __device__ void factor_cta_granular_row_slot( const COLTYPE row_slot,
                                               const COLTYPE n,
@@ -185,6 +226,44 @@ __device__ void factor_cta_granular_row_slot( const COLTYPE row_slot,
                 row_begin, row_end, lower_end, lu_ai, lu_aj, lu_diag, base, lu_av, diag_inv, status,
                 row_done, lane );
         }
+    }
+
+    ilu_detail::PublishRowDone<ROWTYPE, COLTYPE, VALTYPE>( i, lower_end, true, lu_av, diag_inv,
+                                                           status, row_done, lane );
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+__device__ void factor_cta_granular_cached_row_slot( const COLTYPE row_slot,
+                                                     const COLTYPE n,
+                                                     const COLTYPE* row_perm,
+                                                     const ROWTYPE* lu_ai,
+                                                     const COLTYPE* lu_aj,
+                                                     const ROWTYPE* lu_diag,
+                                                     const ROWTYPE* lower_row_ptr,
+                                                     const ROWTYPE* update_ptr,
+                                                     const ROWTYPE* update_jpos,
+                                                     const ROWTYPE* update_pos,
+                                                     const COLTYPE base,
+                                                     VALTYPE* lu_av,
+                                                     VALTYPE* diag_inv,
+                                                     int* status,
+                                                     int* row_done,
+                                                     const int lane )
+{
+    if ( row_slot >= n || ilu_detail::LoadDeviceInt( status ) != 0 )
+    {
+        return;
+    }
+
+    const COLTYPE i = row_perm[row_slot] - base;
+    const ROWTYPE row_begin = lu_ai[i] - base;
+    const ROWTYPE lower_end = lu_diag[i] - base;
+
+    if ( row_begin < lower_end )
+    {
+        factor_lu_row_cached_wait<ROWTYPE, COLTYPE, VALTYPE>(
+            row_begin, lower_end, lower_row_ptr[i], lu_aj, lu_av, diag_inv, update_ptr, update_jpos,
+            update_pos, base, row_done, status, lane );
     }
 
     ilu_detail::PublishRowDone<ROWTYPE, COLTYPE, VALTYPE>( i, lower_end, true, lu_av, diag_inv,
@@ -249,6 +328,47 @@ __global__ __launch_bounds__( kCtaGranularThreadsPerBlock, kCtaGranularMinBlocks
         shared_row_cols, shared_ref_cols );
 }
 
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+__global__ __launch_bounds__( kCtaGranularThreadsPerBlock, kCtaGranularMinBlocksPerSm ) void ilu_cta_granular_cached_kernel(
+    COLTYPE n,
+    const COLTYPE* row_perm,
+    const ROWTYPE* lu_ai,
+    const COLTYPE* lu_aj,
+    const ROWTYPE* lu_diag,
+    const ROWTYPE* lower_row_ptr,
+    const ROWTYPE* update_ptr,
+    const ROWTYPE* update_jpos,
+    const ROWTYPE* update_pos,
+    COLTYPE base,
+    VALTYPE* lu_av,
+    VALTYPE* diag_inv,
+    int* status,
+    int* row_done,
+    int* next_row )
+{
+    const int warp_in_block = threadIdx.x / kWarpSize;
+    const int lane = threadIdx.x & ( kWarpSize - 1 );
+    __shared__ int shared_row_begin;
+
+    if ( threadIdx.x == 0 )
+    {
+        shared_row_begin = ( ilu_detail::LoadDeviceInt( status ) == 0 )
+                               ? atomicAdd( next_row, kCtaGranularWarpsPerBlock )
+                               : static_cast<int>( n );
+    }
+    __syncthreads();
+
+    const COLTYPE row_slot = static_cast<COLTYPE>( shared_row_begin + warp_in_block );
+    if ( row_slot >= n )
+    {
+        return;
+    }
+
+    factor_cta_granular_cached_row_slot<ROWTYPE, COLTYPE, VALTYPE>(
+        row_slot, n, row_perm, lu_ai, lu_aj, lu_diag, lower_row_ptr, update_ptr, update_jpos,
+        update_pos, base, lu_av, diag_inv, status, row_done, lane );
+}
+
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, ilu_detail::RowIndexLookup Lookup, ilu_detail::RowUpdateStrategy Update>
 cudaError_t select_cta_granular_launch_config( const COLTYPE n,
                                                const std::size_t shared_bytes,
@@ -263,6 +383,35 @@ cudaError_t select_cta_granular_launch_config( const COLTYPE n,
     cudaError_t status = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
         &blocks_per_sm, ilu_cta_granular_kernel<ROWTYPE, COLTYPE, VALTYPE, Lookup, Update>,
         kCtaGranularThreadsPerBlock, shared_bytes );
+    if ( status != cudaSuccess )
+    {
+        return status;
+    }
+    if ( blocks_per_sm <= 0 )
+    {
+        return cudaErrorInvalidValue;
+    }
+
+    config->warps_per_block = kCtaGranularWarpsPerBlock;
+    config->block_size = kCtaGranularThreadsPerBlock;
+    config->kernel_launches = 1;
+    config->total_blocks = static_cast<int>( ( n + kCtaGranularWarpsPerBlock - 1 ) / kCtaGranularWarpsPerBlock );
+    config->hollow_warps = config->total_blocks * kCtaGranularWarpsPerBlock - n;
+    return cudaSuccess;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t select_cta_granular_cached_launch_config( const COLTYPE n, ILUCtaGranularLaunchConfig* config )
+{
+    if ( n <= 0 || config == nullptr )
+    {
+        return cudaErrorInvalidValue;
+    }
+
+    int blocks_per_sm = 0;
+    cudaError_t status = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &blocks_per_sm, ilu_cta_granular_cached_kernel<ROWTYPE, COLTYPE, VALTYPE>,
+        kCtaGranularThreadsPerBlock, 0 );
     if ( status != cudaSuccess )
     {
         return status;
@@ -307,6 +456,49 @@ cudaError_t launch_cta_granular_kernel( const COLTYPE n,
         <<<config.total_blocks, kCtaGranularThreadsPerBlock, shared_bytes, stream>>>(
             n, row_perm, lu_ai, lu_aj, lu_diag, base, lu_av, diag_inv, status,
             scratch.row_done.data(), scratch.next_row.data() );
+    launch_status = ilu_detail::CudaLaunchStatus();
+    if ( launch_status != cudaSuccess )
+    {
+        return launch_status;
+    }
+
+    if ( h_launch_config != nullptr )
+    {
+        *h_launch_config = config;
+    }
+    return cudaSuccess;
+}
+
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t launch_cta_granular_cached_kernel( const COLTYPE n,
+                                               const ROWTYPE* lu_ai,
+                                               const COLTYPE* lu_aj,
+                                               const ROWTYPE* lu_diag,
+                                               const ROWTYPE* lower_row_ptr,
+                                               const ROWTYPE* update_ptr,
+                                               const ROWTYPE* update_jpos,
+                                               const ROWTYPE* update_pos,
+                                               const COLTYPE* row_perm,
+                                               const COLTYPE base,
+                                               VALTYPE* lu_av,
+                                               VALTYPE* diag_inv,
+                                               int* status,
+                                               ILUCtaGranularScratch& scratch,
+                                               cudaStream_t stream,
+                                               ILUCtaGranularLaunchConfig* h_launch_config )
+{
+    ILUCtaGranularLaunchConfig config;
+    cudaError_t launch_status =
+        select_cta_granular_cached_launch_config<ROWTYPE, COLTYPE, VALTYPE>( n, &config );
+    if ( launch_status != cudaSuccess )
+    {
+        return launch_status;
+    }
+
+    ilu_cta_granular_cached_kernel<ROWTYPE, COLTYPE, VALTYPE>
+        <<<config.total_blocks, kCtaGranularThreadsPerBlock, 0, stream>>>(
+            n, row_perm, lu_ai, lu_aj, lu_diag, lower_row_ptr, update_ptr, update_jpos, update_pos,
+            base, lu_av, diag_inv, status, scratch.row_done.data(), scratch.next_row.data() );
     launch_status = ilu_detail::CudaLaunchStatus();
     if ( launch_status != cudaSuccess )
     {
@@ -410,6 +602,56 @@ cudaError_t ILUBaseNumericFactorizationCtaGranularAsync( COLTYPE n,
     return status;
 }
 
+template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
+cudaError_t ILUBaseNumericFactorizationCtaGranularCachedAsync( COLTYPE n,
+                                                               const ROWTYPE* d_lu_ai,
+                                                               const COLTYPE* d_lu_aj,
+                                                               const ROWTYPE* d_lu_diag,
+                                                               const ROWTYPE* d_lower_row_ptr,
+                                                               const ROWTYPE* d_update_ptr,
+                                                               const ROWTYPE* d_update_jpos,
+                                                               const ROWTYPE* d_update_pos,
+                                                               const COLTYPE* d_row_perm,
+                                                               COLTYPE base,
+                                                               VALTYPE* d_lu_av,
+                                                               VALTYPE* d_diag_inv,
+                                                               int* d_status,
+                                                               ILUCtaGranularScratch& scratch,
+                                                               cudaStream_t stream,
+                                                               ILUCtaGranularLaunchConfig* h_launch_config )
+{
+    if ( n <= 0 || d_lu_ai == nullptr || d_lu_aj == nullptr || d_lu_diag == nullptr || d_lower_row_ptr == nullptr ||
+         d_update_ptr == nullptr || d_update_jpos == nullptr || d_update_pos == nullptr ||
+         d_row_perm == nullptr || d_lu_av == nullptr || d_diag_inv == nullptr || d_status == nullptr )
+    {
+        return cudaErrorInvalidValue;
+    }
+
+    initializeLaunchConfig( h_launch_config );
+    scratch.row_done.resize( static_cast<std::size_t>( n ) );
+    scratch.next_row.resize( 1 );
+
+    cudaError_t status = cudaMemsetAsync( d_status, 0, sizeof( int ), stream );
+    if ( status != cudaSuccess )
+    {
+        return status;
+    }
+    status = cudaMemsetAsync( scratch.row_done.data(), 0, static_cast<std::size_t>( n ) * sizeof( int ), stream );
+    if ( status != cudaSuccess )
+    {
+        return status;
+    }
+    status = cudaMemsetAsync( scratch.next_row.data(), 0, sizeof( int ), stream );
+    if ( status != cudaSuccess )
+    {
+        return status;
+    }
+
+    return launch_cta_granular_cached_kernel<ROWTYPE, COLTYPE, VALTYPE>(
+        n, d_lu_ai, d_lu_aj, d_lu_diag, d_lower_row_ptr, d_update_ptr, d_update_jpos, d_update_pos,
+        d_row_perm, base, d_lu_av, d_diag_inv, d_status, scratch, stream, h_launch_config );
+}
+
 template cudaError_t ILUBaseNumericFactorizationCtaGranularAsync<int, int, float>( int,
                                                                                    const int*,
                                                                                    const int*,
@@ -452,6 +694,58 @@ template cudaError_t ILUBaseNumericFactorizationCtaGranularAsync<std::int64_t, i
     int*,
     ILUNumericRowLookup,
     ILUNumericRowUpdateStrategy,
+    ILUCtaGranularScratch&,
+    cudaStream_t,
+    ILUCtaGranularLaunchConfig* );
+
+template cudaError_t ILUBaseNumericFactorizationCtaGranularCachedAsync<int, int, float>( int,
+                                                                                         const int*,
+                                                                                         const int*,
+                                                                                         const int*,
+                                                                                         const int*,
+                                                                                         const int*,
+                                                                                         const int*,
+                                                                                         const int*,
+                                                                                         const int*,
+                                                                                         int,
+                                                                                         float*,
+                                                                                         float*,
+                                                                                         int*,
+                                                                                         ILUCtaGranularScratch&,
+                                                                                         cudaStream_t,
+                                                                                         ILUCtaGranularLaunchConfig* );
+
+template cudaError_t ILUBaseNumericFactorizationCtaGranularCachedAsync<int, int, double>( int,
+                                                                                          const int*,
+                                                                                          const int*,
+                                                                                          const int*,
+                                                                                          const int*,
+                                                                                          const int*,
+                                                                                          const int*,
+                                                                                          const int*,
+                                                                                          const int*,
+                                                                                          int,
+                                                                                          double*,
+                                                                                          double*,
+                                                                                          int*,
+                                                                                          ILUCtaGranularScratch&,
+                                                                                          cudaStream_t,
+                                                                                          ILUCtaGranularLaunchConfig* );
+
+template cudaError_t ILUBaseNumericFactorizationCtaGranularCachedAsync<std::int64_t, int, double>(
+    int,
+    const std::int64_t*,
+    const int*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const std::int64_t*,
+    const int*,
+    int,
+    double*,
+    double*,
+    int*,
     ILUCtaGranularScratch&,
     cudaStream_t,
     ILUCtaGranularLaunchConfig* );

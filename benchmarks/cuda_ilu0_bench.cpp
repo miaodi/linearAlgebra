@@ -167,6 +167,9 @@ struct ILU0BenchmarkData
     cuda_utils::ILUCtaGranularScratch cta_granular_scratch;
     cuda_utils::ILUCtaGranularLaunchConfig cta_granular_launch;
     cuda_utils::ILUCtaGranularLaunchConfig cta_granular_identity_launch;
+    cuda_utils::ILUCtaGranularLaunchConfig cta_granular_global_launch;
+    cuda_utils::ILUCtaGranularLaunchConfig cta_granular_global_identity_launch;
+    cuda_utils::ILUCtaGranularLaunchConfig cta_granular_cached_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_perm_launch;
     cuda_utils::ILUPersistentLaunchConfig persistent_cached_launch;
@@ -267,6 +270,13 @@ struct ILU0BenchmarkData
                   << ", CTA-granular hollow warps=" << cta_granular_launch.hollow_warps
                   << ", identity CTA-granular grid blocks=" << cta_granular_identity_launch.total_blocks
                   << ", identity CTA-granular hollow warps=" << cta_granular_identity_launch.hollow_warps
+                  << ", global CTA-granular grid blocks=" << cta_granular_global_launch.total_blocks
+                  << ", global CTA-granular hollow warps=" << cta_granular_global_launch.hollow_warps
+                  << ", identity global CTA-granular grid blocks="
+                  << cta_granular_global_identity_launch.total_blocks << ", identity global CTA-granular hollow warps="
+                  << cta_granular_global_identity_launch.hollow_warps
+                  << ", cached CTA-granular grid blocks=" << cta_granular_cached_launch.total_blocks
+                  << ", cached CTA-granular hollow warps=" << cta_granular_cached_launch.hollow_warps
                   << ", persistent block size=" << persistent_launch.block_size
                   << ", persistent grid blocks=" << persistent_launch.grid_blocks
                   << ", persistent perm block size=" << persistent_perm_launch.block_size
@@ -351,6 +361,60 @@ struct ILU0BenchmarkData
         checkCusparse( status, message );
     }
 
+    void warmUpCtaGranular( const char* label,
+                            const DeviceIntArray& row_perm,
+                            const cuda_utils::ILUNumericRowLookup row_lookup,
+                            cuda_utils::ILUCtaGranularLaunchConfig& launch_config )
+    {
+        resetOurValues();
+        const std::string warmup_message = std::string( "warm up " ) + label + " ILU0 factorization";
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularAsync<int, int, double>(
+                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), row_perm.data(), base,
+                       d_our_lu_av.data(), d_diag_inv.data(), d_status.data(), row_lookup,
+                       cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch, cta_granular_scratch,
+                       stream, &launch_config ),
+                   warmup_message.c_str() );
+
+        int host_status = 1;
+        const std::string copy_message = std::string( "copy " ) + label + " ILU0 status";
+        checkCuda( cudaMemcpyAsync( &host_status, d_status.data(), sizeof( int ), cudaMemcpyDeviceToHost, stream ),
+                   copy_message.c_str() );
+        const std::string sync_message = std::string( "sync after " ) + label + " ILU0 warmup";
+        checkCuda( cudaStreamSynchronize( stream ), sync_message.c_str() );
+        if ( host_status != 0 )
+        {
+            throw std::runtime_error( std::string( label ) +
+                                      " ILU0 factorization found a zero pivot during warmup" );
+        }
+    }
+
+    void warmUpCtaGranularCached( const char* label,
+                                  const DeviceIntArray& row_perm,
+                                  cuda_utils::ILUCtaGranularLaunchConfig& launch_config )
+    {
+        resetOurValues();
+        const std::string warmup_message = std::string( "warm up " ) + label + " ILU0 factorization";
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularCachedAsync<int, int, double>(
+                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(),
+                       update_cache.lower_row_ptr.data(), update_cache.update_ptr.data(),
+                       update_cache.update_jpos.data(), update_cache.update_pos.data(),
+                       row_perm.data(), base, d_our_lu_av.data(), d_diag_inv.data(),
+                       d_status.data(), cta_granular_scratch, stream, &launch_config ),
+                   warmup_message.c_str() );
+
+        int host_status = 1;
+        const std::string copy_message = std::string( "copy " ) + label + " ILU0 status";
+        checkCuda( cudaMemcpyAsync( &host_status, d_status.data(), sizeof( int ), cudaMemcpyDeviceToHost, stream ),
+                   copy_message.c_str() );
+        const std::string sync_message = std::string( "sync after " ) + label + " ILU0 warmup";
+        checkCuda( cudaStreamSynchronize( stream ), sync_message.c_str() );
+        if ( host_status != 0 )
+        {
+            throw std::runtime_error( std::string( label ) +
+                                      " ILU0 factorization found a zero pivot during warmup" );
+        }
+    }
+
     void warmUpAndValidate()
     {
         for ( const auto row_lookup :
@@ -378,42 +442,14 @@ struct ILU0BenchmarkData
             }
         }
 
-        resetOurValues();
-        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularAsync<int, int, double>(
-                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), d_level_perm.data(),
-                       base, d_our_lu_av.data(), d_diag_inv.data(), d_status.data(),
-                       cuda_utils::ILUNumericRowLookup::Shared, cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
-                       cta_granular_scratch, stream, &cta_granular_launch ),
-                   "warm up CTA-granular ILU0 factorization" );
-        int cta_granular_host_status = 1;
-        checkCuda( cudaMemcpyAsync( &cta_granular_host_status, d_status.data(), sizeof( int ),
-                                    cudaMemcpyDeviceToHost, stream ),
-                   "copy CTA-granular ILU0 status" );
-        checkCuda( cudaStreamSynchronize( stream ), "sync after CTA-granular ILU0 warmup" );
-        if ( cta_granular_host_status != 0 )
-        {
-            throw std::runtime_error(
-                "CTA-granular ILU0 factorization found a zero pivot during warmup" );
-        }
-
-        resetOurValues();
-        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularAsync<int, int, double>(
-                       n, d_lu_ai.data(), d_lu_aj.data(), d_lu_diag.data(), d_identity_perm.data(),
-                       base, d_our_lu_av.data(), d_diag_inv.data(), d_status.data(),
-                       cuda_utils::ILUNumericRowLookup::Shared, cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
-                       cta_granular_scratch, stream, &cta_granular_identity_launch ),
-                   "warm up identity CTA-granular ILU0 factorization" );
-        int cta_granular_identity_host_status = 1;
-        checkCuda( cudaMemcpyAsync( &cta_granular_identity_host_status, d_status.data(),
-                                    sizeof( int ), cudaMemcpyDeviceToHost, stream ),
-                   "copy identity CTA-granular ILU0 status" );
-        checkCuda( cudaStreamSynchronize( stream ),
-                   "sync after identity CTA-granular ILU0 warmup" );
-        if ( cta_granular_identity_host_status != 0 )
-        {
-            throw std::runtime_error(
-                "identity CTA-granular ILU0 factorization found a zero pivot during warmup" );
-        }
+        warmUpCtaGranular( "CTA-granular", d_level_perm, cuda_utils::ILUNumericRowLookup::Shared, cta_granular_launch );
+        warmUpCtaGranular( "identity CTA-granular", d_identity_perm,
+                           cuda_utils::ILUNumericRowLookup::Shared, cta_granular_identity_launch );
+        warmUpCtaGranular( "global CTA-granular", d_level_perm,
+                           cuda_utils::ILUNumericRowLookup::Global, cta_granular_global_launch );
+        warmUpCtaGranular( "identity global CTA-granular", d_identity_perm,
+                           cuda_utils::ILUNumericRowLookup::Global, cta_granular_global_identity_launch );
+        warmUpCtaGranularCached( "cached CTA-granular", d_level_perm, cta_granular_cached_launch );
 
         resetOurValues();
         checkCuda( cuda_utils::ILUBaseNumericFactorizationPersistentAsync<int, int, double>(
@@ -672,56 +708,93 @@ void BM_OurILU0NumericCached( benchmark::State& state, ILU0BenchmarkData& data )
     setCounters( state, data );
 }
 
-void BM_OurILU0NumericCtaGranular( benchmark::State& state, ILU0BenchmarkData& data )
+void BM_OurILU0NumericCtaGranularImpl( benchmark::State& state,
+                                       ILU0BenchmarkData& data,
+                                       const DeviceIntArray& row_perm,
+                                       const cuda_utils::ILUNumericRowLookup row_lookup,
+                                       cuda_utils::ILUCtaGranularLaunchConfig& launch_config,
+                                       const char* label )
 {
+    const std::string start_message =
+        std::string( "start CUDA profiler for " ) + label + " ILU0 numeric factorization";
+    const std::string run_message = std::string( "run " ) + label + " ILU0 numeric factorization";
+    const std::string sync_message =
+        std::string( "sync after " ) + label + " ILU0 numeric factorization";
+    const std::string stop_message =
+        std::string( "stop CUDA profiler after " ) + label + " ILU0 numeric factorization";
+
     for ( auto _ : state )
     {
         state.PauseTiming();
         data.resetOurValues();
-        startCudaProfilerRange( "start CUDA profiler for CTA-granular ILU0 numeric factorization" );
+        startCudaProfilerRange( start_message.c_str() );
         state.ResumeTiming();
 
         checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularAsync<int, int, double>(
                        data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
-                       data.d_level_perm.data(), data.base, data.d_our_lu_av.data(),
-                       data.d_diag_inv.data(), data.d_status.data(), cuda_utils::ILUNumericRowLookup::Shared,
-                       cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
-                       data.cta_granular_scratch, data.stream, &data.cta_granular_launch ),
-                   "run CTA-granular ILU0 numeric factorization" );
-        checkCuda( cudaStreamSynchronize( data.stream ),
-                   "sync after CTA-granular ILU0 numeric factorization" );
+                       row_perm.data(), data.base, data.d_our_lu_av.data(), data.d_diag_inv.data(),
+                       data.d_status.data(), row_lookup, cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
+                       data.cta_granular_scratch, data.stream, &launch_config ),
+                   run_message.c_str() );
+        checkCuda( cudaStreamSynchronize( data.stream ), sync_message.c_str() );
         state.PauseTiming();
-        stopCudaProfilerRange( "stop CUDA profiler after CTA-granular ILU0 numeric factorization" );
+        stopCudaProfilerRange( stop_message.c_str() );
         state.ResumeTiming();
     }
-    setCounters( state, data );
+    setCounters( state, data, launch_config );
+}
+
+void BM_OurILU0NumericCtaGranular( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    BM_OurILU0NumericCtaGranularImpl( state, data, data.d_level_perm, cuda_utils::ILUNumericRowLookup::Shared,
+                                      data.cta_granular_launch, "CTA-granular" );
 }
 
 void BM_OurILU0NumericCtaGranularIdentity( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    BM_OurILU0NumericCtaGranularImpl( state, data, data.d_identity_perm, cuda_utils::ILUNumericRowLookup::Shared,
+                                      data.cta_granular_identity_launch, "identity CTA-granular" );
+}
+
+void BM_OurILU0NumericCtaGranularGlobal( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    BM_OurILU0NumericCtaGranularImpl( state, data, data.d_level_perm, cuda_utils::ILUNumericRowLookup::Global,
+                                      data.cta_granular_global_launch, "global CTA-granular" );
+}
+
+void BM_OurILU0NumericCtaGranularGlobalIdentity( benchmark::State& state, ILU0BenchmarkData& data )
+{
+    BM_OurILU0NumericCtaGranularImpl(
+        state, data, data.d_identity_perm, cuda_utils::ILUNumericRowLookup::Global,
+        data.cta_granular_global_identity_launch, "identity global CTA-granular" );
+}
+
+void BM_OurILU0NumericCtaGranularCached( benchmark::State& state, ILU0BenchmarkData& data )
 {
     for ( auto _ : state )
     {
         state.PauseTiming();
         data.resetOurValues();
         startCudaProfilerRange(
-            "start CUDA profiler for identity CTA-granular ILU0 numeric factorization" );
+            "start CUDA profiler for cached CTA-granular ILU0 numeric factorization" );
         state.ResumeTiming();
 
-        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularAsync<int, int, double>(
+        checkCuda( cuda_utils::ILUBaseNumericFactorizationCtaGranularCachedAsync<int, int, double>(
                        data.n, data.d_lu_ai.data(), data.d_lu_aj.data(), data.d_lu_diag.data(),
-                       data.d_identity_perm.data(), data.base, data.d_our_lu_av.data(),
-                       data.d_diag_inv.data(), data.d_status.data(), cuda_utils::ILUNumericRowLookup::Shared,
-                       cuda_utils::ILUNumericRowUpdateStrategy::BinarySearch,
-                       data.cta_granular_scratch, data.stream, &data.cta_granular_identity_launch ),
-                   "run identity CTA-granular ILU0 numeric factorization" );
+                       data.update_cache.lower_row_ptr.data(), data.update_cache.update_ptr.data(),
+                       data.update_cache.update_jpos.data(), data.update_cache.update_pos.data(),
+                       data.d_level_perm.data(), data.base, data.d_our_lu_av.data(),
+                       data.d_diag_inv.data(), data.d_status.data(), data.cta_granular_scratch,
+                       data.stream, &data.cta_granular_cached_launch ),
+                   "run cached CTA-granular ILU0 numeric factorization" );
         checkCuda( cudaStreamSynchronize( data.stream ),
-                   "sync after identity CTA-granular ILU0 numeric factorization" );
+                   "sync after cached CTA-granular ILU0 numeric factorization" );
         state.PauseTiming();
         stopCudaProfilerRange(
-            "stop CUDA profiler after identity CTA-granular ILU0 numeric factorization" );
+            "stop CUDA profiler after cached CTA-granular ILU0 numeric factorization" );
         state.ResumeTiming();
     }
-    setCounters( state, data, data.cta_granular_identity_launch );
+    setCounters( state, data, data.cta_granular_cached_launch );
 }
 
 void BM_OurILU0NumericPersistentCached( benchmark::State& state, ILU0BenchmarkData& data )
@@ -906,6 +979,19 @@ int main( int argc, char** argv )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/cta_granular_identity", [data]( benchmark::State& state )
                                       { BM_OurILU0NumericCtaGranularIdentity( state, *data ); } )
+            ->Unit( benchmark::kMillisecond )
+            ->UseRealTime();
+        benchmark::RegisterBenchmark( "ILU0Numeric/cta_granular_global", [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericCtaGranularGlobal( state, *data ); } )
+            ->Unit( benchmark::kMillisecond )
+            ->UseRealTime();
+        benchmark::RegisterBenchmark( "ILU0Numeric/cta_granular_global_identity",
+                                      [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericCtaGranularGlobalIdentity( state, *data ); } )
+            ->Unit( benchmark::kMillisecond )
+            ->UseRealTime();
+        benchmark::RegisterBenchmark( "ILU0Numeric/cta_granular_cached", [data]( benchmark::State& state )
+                                      { BM_OurILU0NumericCtaGranularCached( state, *data ); } )
             ->Unit( benchmark::kMillisecond )
             ->UseRealTime();
         benchmark::RegisterBenchmark( "ILU0Numeric/persistent_spin", [data]( benchmark::State& state )
