@@ -104,13 +104,20 @@ endforeach()
 # 1,453,908
 # no symmetry
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/data)
+
+function(expose_benchmark_matrix matrix_name source_dir)
+   set(_matrix_file "${source_dir}/${matrix_name}/${matrix_name}.mtx")
+   linear_algebra_expose_file("${_matrix_file}" "${CMAKE_CURRENT_BINARY_DIR}/data/${matrix_name}.mtx")
+   linear_algebra_expose_sparsity_pattern("${_matrix_file}" "${CMAKE_CURRENT_BINARY_DIR}/data")
+endfunction()
+
 download_file( https://suitesparse-collection-website.herokuapp.com/MM/VLSI/nv2.tar.gz
                b393f2abcb55732da1259c8c53b0a213e49f0c619511db68fa91f24104827cb0
                nv2
 )
 
 FetchContent_GetProperties(nv2 SOURCE_DIR NV2_SOURCE_DIR)
-file(CREATE_LINK ${NV2_SOURCE_DIR}/nv2/nv2.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/nv2.mtx SYMBOLIC)
+expose_benchmark_matrix(nv2 "${NV2_SOURCE_DIR}")
 
 download_file( 
    https://suitesparse-collection-website.herokuapp.com/MM/HB/mcfe.tar.gz
@@ -119,7 +126,7 @@ download_file(
 )
 
 FetchContent_GetProperties(mcfe SOURCE_DIR FILE_SOURCE_DIR)
-file(CREATE_LINK ${FILE_SOURCE_DIR}/mcfe/mcfe.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/mcfe.mtx SYMBOLIC)
+expose_benchmark_matrix(mcfe "${FILE_SOURCE_DIR}")
 
 # https://sparse.tamu.edu/GHS_psdef/ldoor
 # 952,203
@@ -131,7 +138,7 @@ download_file(
 )
 
 FetchContent_GetProperties(ldoor SOURCE_DIR FILE_SOURCE_DIR)
-file(CREATE_LINK ${FILE_SOURCE_DIR}/ldoor/ldoor.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/ldoor.mtx SYMBOLIC)
+expose_benchmark_matrix(ldoor "${FILE_SOURCE_DIR}")
 
 
 # https://sparse.tamu.edu/Schmid/thermal2
@@ -144,4 +151,4 @@ download_file(
 )
 
 FetchContent_GetProperties(thermal2 SOURCE_DIR FILE_SOURCE_DIR)
-file(CREATE_LINK ${FILE_SOURCE_DIR}/thermal2/thermal2.mtx ${CMAKE_CURRENT_BINARY_DIR}/data/thermal2.mtx SYMBOLIC)
+expose_benchmark_matrix(thermal2 "${FILE_SOURCE_DIR}")

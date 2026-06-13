@@ -2,6 +2,7 @@ include_guard(GLOBAL)
 
 include(FetchContent)
 include("${CMAKE_CURRENT_LIST_DIR}/DownloadCache.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/SparsityPattern.cmake")
 
 option(CMAKE_TLS_VERIFY "Verify SSL certificates" ON)
 
