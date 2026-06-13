@@ -88,6 +88,7 @@ endforeach()
 set(TEST_DATA_DIR ${CMAKE_CURRENT_BINARY_DIR}/data)
 set(SPD_DATA_DIR ${TEST_DATA_DIR}/spd)
 set(UNSYMM_WITH_DIAG_DATA_DIR ${TEST_DATA_DIR}/unsymm_with_diag)
+set(NO_FULL_DIAG_DATA_DIR ${TEST_DATA_DIR}/no_full_diag)
 set(OTHER_DATA_DIR ${TEST_DATA_DIR}/other)
 
 # Local synthetic unsymmetric matrices with every diagonal entry explicitly present:
@@ -120,6 +121,23 @@ download_sparse_matrix("HB/pores_2" ${UNSYMM_WITH_DIAG_DATA_DIR})
 
 # FIDAP/ex27: 974 x 974, 40,782 nnz.
 download_sparse_matrix("FIDAP/ex27" ${UNSYMM_WITH_DIAG_DATA_DIR})
+
+# SuiteSparse matrices with full structural rank but missing diagonal entries.
+# These exercise structural matching beyond the trivial diagonal permutation.
+# Grund/d_ss: 53 x 53, 149 pattern entries, 4 explicit diagonal entries.
+# Grund/d_dyn: 87 x 87, 238 pattern entries, 4 explicit diagonal entries.
+# VDOL/spaceStation_1: 99 x 99, 927 pattern entries, not all diagonal entries explicit.
+# Morandini/robot: 120 x 120, 870 pattern entries, 80 explicit diagonal entries.
+# Morandini/rotor2: 791 x 791, 10,685 pattern entries, 681 explicit diagonal entries.
+# HB/west0067: 67 x 67, 294 pattern entries, 2 explicit diagonal entries.
+# HB/west0132: 132 x 132, 414 pattern entries, 6 explicit diagonal entries.
+download_sparse_matrix("Grund/d_ss" ${NO_FULL_DIAG_DATA_DIR})
+download_sparse_matrix("Grund/d_dyn" ${NO_FULL_DIAG_DATA_DIR})
+download_sparse_matrix("VDOL/spaceStation_1" ${NO_FULL_DIAG_DATA_DIR})
+download_sparse_matrix("Morandini/robot" ${NO_FULL_DIAG_DATA_DIR})
+download_sparse_matrix("Morandini/rotor2" ${NO_FULL_DIAG_DATA_DIR})
+download_sparse_matrix("HB/west0067" ${NO_FULL_DIAG_DATA_DIR})
+download_sparse_matrix("HB/west0132" ${NO_FULL_DIAG_DATA_DIR})
 
 # SPD SuiteSparse matrices.
 # HB/bcsstk17: 10,974 x 10,974, 428,650 nnz.

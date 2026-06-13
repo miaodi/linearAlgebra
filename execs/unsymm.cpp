@@ -1,9 +1,11 @@
+#include "MaximumMatching.hpp"
 #include "UnsymmReordering.hpp"
 #include "io.hpp"
 #include "matrix_utils.hpp"
 #include "permutation.hpp"
 #include <cxxopts.hpp>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -35,8 +37,13 @@ int main( int argc, char** argv )
 
     std::vector<int> matching_row( csr_matrix.rows );
     std::vector<int> matching_col( csr_matrix.rows );
-    reordering::MaximumMatching( csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(),
-                                 matching_row.data(), matching_col.data() );
+    const int matching_size = reordering::MaximumMatching(
+        csr_matrix.rows, csr_matrix.AI(), csr_matrix.AJ(), matching_row.data(), matching_col.data() );
+    if ( matching_size != csr_matrix.rows )
+    {
+        std::cerr << "No perfect matching found; cannot build a row permutation" << std::endl;
+        return 1;
+    }
     // for (int i = 0; i < csr_matrix.rows; i++) {
     //   std::cout << matching_row[i] << " ";
     // }

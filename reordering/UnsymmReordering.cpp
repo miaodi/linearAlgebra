@@ -1,79 +1,8 @@
 #include "UnsymmReordering.hpp"
+#include <algorithm>
 #include <iostream>
-#include <queue>
 namespace reordering
 {
-template <typename ROWTYPE, typename COLTYPE>
-void MaximumMatching( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* matching_row, COLTYPE* matching_col )
-{
-    const COLTYPE INVALID = std::numeric_limits<COLTYPE>::max();
-    const ROWTYPE base = ai[0];
-    std::vector<bool> visited( rows, false );
-    std::vector<COLTYPE> parent( rows, INVALID );
-    std::fill_n( matching_row, rows, INVALID );
-    std::fill_n( matching_col, rows, INVALID );
-
-    auto augment_path = [&]( COLTYPE t )
-    {
-        while ( true )
-        {
-            COLTYPE s = parent[t];
-            COLTYPE next_t = matching_row[s];
-            matching_row[s] = t + base;
-            matching_col[t] = s + base;
-            if ( next_t == INVALID )
-                break;
-            t = next_t - base;
-        }
-    };
-
-    std::function<bool( COLTYPE )> bpm = [&]( COLTYPE u )
-    {
-        std::fill( visited.begin(), visited.end(), false );
-        std::fill( parent.begin(), parent.end(), INVALID );
-
-        std::queue<COLTYPE> q;
-        q.push( u );
-
-        while ( !q.empty() )
-        {
-            COLTYPE s = q.front();
-            q.pop();
-            for ( ROWTYPE i = ai[s] - base; i < ai[s + 1] - base; i++ )
-            {
-                COLTYPE t = aj[i] - base;
-                if ( !visited[t] )
-                {
-                    visited[t] = true;
-                    parent[t] = s;
-                    if ( matching_col[t] == INVALID )
-                    {
-                        // Found an augmenting path
-                        augment_path( t );
-                        return true;
-                    }
-                    else
-                    {
-                        q.push( matching_col[t] - base );
-                    }
-                }
-            }
-        }
-        return false;
-    };
-
-    for ( COLTYPE u = 0; u < rows; u++ )
-    {
-        if ( matching_row[u] == INVALID )
-            if ( !bpm( u ) )
-            {
-                matching_row[u] = u + base;
-                matching_col[u] = u + base;
-                std::cerr << "Warning: failed to find augmenting path for row " << u << std::endl;
-            }
-    }
-}
-
 // HungarianAlgorithm member function definitions
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 void HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::operator()( const COLTYPE n,
@@ -316,8 +245,6 @@ bool HungarianAlgorithm<ROWTYPE, COLTYPE, VALTYPE>::match_row( const COLTYPE row
     }
     return false;
 }
-
-template void MaximumMatching<int, int>( const int rows, int const* ai, int const* aj, int* matching_row, int* matching_col );
 
 template class HungarianAlgorithm<int, int, double>;
 

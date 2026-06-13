@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.18...3.20)
 project(reordering CXX)
 
-set(REORDERING_SRC BFS.cpp Reordering.cpp UnionFind.cpp MinimumDegree.cpp quotient_graph.cpp UnsymmReordering.cpp)
+set(REORDERING_SRC BFS.cpp Reordering.cpp UnionFind.cpp MinimumDegree.cpp quotient_graph.cpp UnsymmReordering.cpp MaximumMatching.cpp)
 
 add_library(${PROJECT_NAME} STATIC ${REORDERING_SRC})
 

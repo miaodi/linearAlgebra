@@ -1,25 +1,9 @@
 #pragma once
 #include <deque>
-#include <functional>
 #include <limits>
 #include <vector>
 namespace reordering
 {
-
-/// @brief Find maximum matching for a bipartite graph represented in CSR format
-/// @tparam ROWTYPE Type for row indices
-/// @tparam COLTYPE Type for column indices
-/// @param rows Number of rows (and columns) in the square matrix
-/// @param ai Row pointer array (size rows + 1)
-/// @param aj Column indices array (size nnz)
-/// @param matching_row Output array for matching from rows to columns (size
-/// rows). For example, if row i is matched to column j, matching_row[i] = j
-/// @param matching_col Output array for matching from columns to rows (size
-/// rows). For example, if column j is matched to row i, matching_col[j] = i
-/// Unmatched columns will have matching_col[j] =
-/// std::numeric_limits<COLTYPE>::max()
-template <typename ROWTYPE, typename COLTYPE>
-void MaximumMatching( const COLTYPE rows, ROWTYPE const* ai, COLTYPE const* aj, COLTYPE* matching_row, COLTYPE* matching_col );
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 class HungarianAlgorithm
