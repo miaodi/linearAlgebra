@@ -68,6 +68,7 @@ option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(ENABLE_CUDA_PROFILER_RANGE "Enable cudaProfilerStart/Stop scopes in CUDA benchmarks" OFF)
 option(ENABLE_TESTS "Enable building tests and downloading test data" ON)
 option(ENABLE_DATA_DOWNLOADS "Download SuiteSparse matrices into the build tree" ON)
+option(ENABLE_CSR5_REFERENCE_TESTS "Fetch CSR5 reference code and build CSR5 reference comparison tests" OFF)
 option(BUILD_DATA "Build data subdirectory" OFF)
 
 list(APPEND CMAKE_MODULE_PATH

@@ -3,6 +3,7 @@
 #include "BitVector.hpp"
 #include "matrix_utils.hpp"
 #include "spmv_load.hpp"
+#include "csr5_spmv.hpp"
 #include <concepts>
 #include <cstring>
 #if defined( __x86_64__ ) || defined( __i386__ ) || defined( _M_X64 ) || defined( _M_IX86 )

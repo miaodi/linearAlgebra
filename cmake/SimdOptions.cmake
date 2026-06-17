@@ -49,42 +49,60 @@ if(LINEAR_ALGEBRA_X86_TARGET)
   # Probe FMA
   check_simd_support(
     "${SIMD_FLAG_FMA}" "FMA" COMPILER_SUPPORTS_FMA FMA_CPU_SUPPORTS
-    "
+    [=[
     #include <immintrin.h>
     int main() {
+      #if defined(__GNUC__) || defined(__clang__)
+      __builtin_cpu_init();
+      if (!__builtin_cpu_supports("fma")) return 1;
+      #endif
       __m128d a = _mm_set1_pd(1.0);
       __m128d b = _mm_set1_pd(2.0);
       __m128d c = _mm_fmadd_pd(a, b, a);
-      (void)c;
-      return 0;
+      alignas(16) double out[2];
+      _mm_store_pd(out, c);
+      volatile double sink = out[0];
+      return sink > 0.0 ? 0 : 1;
     }
-    "
+    ]=]
   )
 
   # Probe AVX2
   check_simd_support(
     "${SIMD_FLAG_AVX2}" "AVX2" COMPILER_SUPPORTS_AVX2 AVX2_CPU_SUPPORTS
-    "
+    [=[
     #include <immintrin.h>
     int main() {
+      #if defined(__GNUC__) || defined(__clang__)
+      __builtin_cpu_init();
+      if (!__builtin_cpu_supports("avx2")) return 1;
+      #endif
       __m256 a = _mm256_set1_ps(1.0f);
-      (void)a;
-      return 0;
+      alignas(32) float out[8];
+      _mm256_store_ps(out, a);
+      volatile float sink = out[0];
+      return sink > 0.0f ? 0 : 1;
     }
-    "
+    ]=]
   )
 
   # Probe AVX-512F
   check_simd_support(
     "${SIMD_FLAG_AVX512}" "AVX512F" COMPILER_SUPPORTS_AVX512F AVX512_CPU_SUPPORTS
-    "
+    [=[
     #include <immintrin.h>
     int main() {
+      #if defined(__GNUC__) || defined(__clang__)
+      __builtin_cpu_init();
+      if (!__builtin_cpu_supports("avx512f")) return 1;
+      #endif
       __m512 a = _mm512_set1_ps(1.0f);
-      (void)a;
-      return 0;
+      alignas(64) float out[16];
+      _mm512_store_ps(out, a);
+      volatile float sink = out[0];
+      return sink > 0.0f ? 0 : 1;
     }
-    "
+    ]=]
   )
 else()
   message(STATUS "Skipping x86 SIMD probes for non-x86 target: ${CMAKE_SYSTEM_PROCESSOR}")

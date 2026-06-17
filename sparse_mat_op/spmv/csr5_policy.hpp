@@ -6,6 +6,36 @@
 namespace matrix_utils
 {
 
+constexpr int csr5BitsNeeded( const int value )
+{
+    int bits = 1;
+    int capacity = 2;
+    while ( capacity < value )
+    {
+        capacity <<= 1;
+        ++bits;
+    }
+    return bits;
+}
+
+template <int Omega, int Sigma>
+struct CSR5StaticPolicy
+{
+    static_assert( Omega > 0, "CSR5 omega must be positive" );
+    static_assert( Sigma > 0, "CSR5 sigma must be positive" );
+
+    static constexpr int OMEGA = Omega;
+    static constexpr int SIGMA = Sigma;
+    static constexpr int TILE_SIZE = OMEGA * SIGMA;
+    static constexpr int BIT_Y_OFFSET = csr5BitsNeeded( TILE_SIZE );
+    static constexpr int BIT_SEG_OFFSET = csr5BitsNeeded( OMEGA );
+    static constexpr int DESCRIPTOR_BITS = BIT_Y_OFFSET + BIT_SEG_OFFSET + SIGMA;
+
+    static_assert( SIGMA <= 32, "CSR5 sigma bit flags must fit in uint32_t" );
+    static_assert( DESCRIPTOR_BITS <= 32,
+                   "This CSR5 implementation supports only one 32-bit descriptor packet per lane" );
+};
+
 /**
  * @brief Type trait for checking CSR5 policy requirements
  *
@@ -20,7 +50,7 @@ struct is_csr5_policy : std::false_type
 };
 
 template <typename T>
-struct is_csr5_policy<T, std::void_t<decltype( T::OMEGA ), decltype( T::SIGMA ), decltype( T::TILE_SIZE )>>
+struct is_csr5_policy<T, std::void_t<decltype( T::OMEGA ), decltype( T::SIGMA ), decltype( T::TILE_SIZE ), decltype( T::BIT_Y_OFFSET ), decltype( T::BIT_SEG_OFFSET ), decltype( T::DESCRIPTOR_BITS )>>
     : std::true_type
 {
 };
@@ -60,24 +90,14 @@ struct CSR5_AVX2_Policy;
 
 // Specialization for double precision
 template <>
-struct CSR5_AVX2_Policy<double>
+struct CSR5_AVX2_Policy<double> : CSR5StaticPolicy<4, 16>
 {
-    static constexpr int OMEGA = 4;                 // AVX2 double-precision lanes
-    static constexpr int SIGMA = 32;                // Tunable tile width
-    static constexpr int TILE_SIZE = OMEGA * SIGMA; // 128 elements per tile
-
-    static_assert( OMEGA <= 32, "OMEGA must be <= 32 for bit-flag to fit in uint32_t" );
 };
 
 // Specialization for single precision
 template <>
-struct CSR5_AVX2_Policy<float>
+struct CSR5_AVX2_Policy<float> : CSR5StaticPolicy<8, 16>
 {
-    static constexpr int OMEGA = 8;                 // AVX2 single-precision lanes
-    static constexpr int SIGMA = 32;                // Tunable tile width
-    static constexpr int TILE_SIZE = OMEGA * SIGMA; // 256 elements per tile
-
-    static_assert( OMEGA <= 32, "OMEGA must be <= 32 for bit-flag to fit in uint32_t" );
 };
 
 // Future policy placeholders:

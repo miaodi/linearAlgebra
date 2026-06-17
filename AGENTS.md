@@ -78,12 +78,23 @@ Useful CMake options:
 - `BUILD_BENCHMARKS=OFF` by default.
 - `ENABLE_TESTS=ON` by default.
 - `ENABLE_DATA_DOWNLOADS=ON` by default.
+- `ENABLE_CSR5_REFERENCE_TESTS=OFF` by default. When enabled, tests fetch
+  the CSR5 reference implementation with `FetchContent` and build the CSR5
+  reference preprocess comparison test; this requires AVX2 support.
 - `BUILD_DATA=OFF` by default.
 - Optional libraries include `USE_METIS_LIB`, `USE_MUMPS_LIB`,
   `USE_ARPACK_LIB`, `USE_AMGCL_LIB`, `USE_SPECTRA_LIB`, and `USE_CUDSS`.
 
 Tests and data downloads may require the Python package `ssgetpy` in the Python
 interpreter selected by CMake.
+
+Focused CSR5 reference preprocess verification:
+
+```sh
+cmake -S . -B release-csr5-reference -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_CSR5_REFERENCE_TESTS=ON
+cmake --build release-csr5-reference --target TEST_csr5_reference_preprocess_test -j
+ctest --test-dir release-csr5-reference -R csr5_reference_preprocess_test --output-on-failure
+```
 
 ## Development Guidance
 

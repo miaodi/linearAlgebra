@@ -26,6 +26,29 @@ set(DISABLED_ILU_TESTS
 )
 list(APPEND EXCLUDED_TESTS ${DISABLED_ILU_TESTS})
 
+set(CSR5_REFERENCE_TEST "csr5_reference_preprocess_test.cpp")
+if(ENABLE_CSR5_REFERENCE_TESTS)
+   if(NOT DEFINED AVX2_CPU_SUPPORTS OR NOT AVX2_CPU_SUPPORTS)
+      message(STATUS "Skipping CSR5 reference test because AVX2 is not available")
+      list(APPEND EXCLUDED_TESTS ${CSR5_REFERENCE_TEST})
+   else()
+      FetchContent_Declare(
+         csr5_reference
+         GIT_REPOSITORY https://github.com/weifengliu-ssslab/Benchmark_SpMV_using_CSR5.git
+         GIT_TAG 4b06ce35e45c3c61a51e249e12e1c4954af443fa
+      )
+      FetchContent_MakeAvailable(csr5_reference)
+
+      add_library(csr5_reference_avx2 INTERFACE)
+      target_include_directories(csr5_reference_avx2 INTERFACE
+         ${csr5_reference_SOURCE_DIR}/CSR5_avx2/detail/avx2
+      )
+      target_compile_options(csr5_reference_avx2 INTERFACE ${SIMD_FLAG_AVX2})
+   endif()
+else()
+   list(APPEND EXCLUDED_TESTS ${CSR5_REFERENCE_TEST})
+endif()
+
 # Conditionally exclude CUDA tests if CUDA is not enabled
 if(NOT USE_CUDA)
    list(APPEND EXCLUDED_TESTS "cuda_csr_utils_test.cu")
@@ -74,6 +97,10 @@ foreach(ONE_TEST_CPP ${ALL_TEST_CPP})
    
    # Link standard libraries
    target_link_libraries(${TARGET_NAME} PRIVATE ${TEST_LIBS})
+
+   if(ONE_TEST_FILENAME STREQUAL ${CSR5_REFERENCE_TEST})
+      target_link_libraries(${TARGET_NAME} PRIVATE csr5_reference_avx2)
+   endif()
    
    # Add CUDA-specific dependencies if this is a CUDA test
    if(IS_CUDA_TEST GREATER -1 AND USE_CUDA)

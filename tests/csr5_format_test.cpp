@@ -1,249 +1,358 @@
 #include <gtest/gtest.h>
-#include "csr5_policy.hpp"
-#include "csr5_format.hpp"
+
 #include "csr5_convert.hpp"
+#include "csr5_format.hpp"
+#include "csr5_policy.hpp"
+#include "csr5_spmv.hpp"
+
+#include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 using namespace matrix_utils;
 
-// Test CSR5 policy constants
-TEST( CSR5PolicyTest, AVX2DoublePolicy )
+namespace
 {
-    using Policy = CSR5_AVX2_Policy<double>;
 
-    EXPECT_EQ( Policy::OMEGA, 4 );
-    EXPECT_EQ( Policy::SIGMA, 32 );
-    EXPECT_EQ( Policy::TILE_SIZE, 128 );
-}
+using SmallPolicy = CSR5StaticPolicy<4, 4>;
 
-TEST( CSR5PolicyTest, AVX2FloatPolicy )
+template <typename T>
+std::vector<T> expectedTransposedTile( const std::vector<T>& input )
 {
-    using Policy = CSR5_AVX2_Policy<float>;
-
-    EXPECT_EQ( Policy::OMEGA, 8 );
-    EXPECT_EQ( Policy::SIGMA, 32 );
-    EXPECT_EQ( Policy::TILE_SIZE, 256 );
-}
-
-// Test metadata packing/unpacking
-TEST( CSR5ConvertTest, PackUnpackMetadata )
-{
-    // Test with OMEGA = 4
+    std::vector<T> out( input.size() );
+    for ( int lane = 0; lane < SmallPolicy::OMEGA; ++lane )
     {
-        uint32_t bit_flag_in = 0b1010; // 4 bits
-        uint32_t y_offset_in = 12345;
-        uint16_t seg_offset_in = 7;
-
-        uint64_t packed = packCSR5TileDesc( bit_flag_in, y_offset_in, seg_offset_in, 4 );
-
-        uint32_t bit_flag_out, y_offset_out;
-        uint16_t seg_offset_out;
-        unpackCSR5TileDesc( packed, bit_flag_out, y_offset_out, seg_offset_out, 4 );
-
-        EXPECT_EQ( bit_flag_out, bit_flag_in );
-        EXPECT_EQ( y_offset_out, y_offset_in );
-        EXPECT_EQ( seg_offset_out, seg_offset_in );
+        for ( int i = 0; i < SmallPolicy::SIGMA; ++i )
+        {
+            const int old_idx = lane * SmallPolicy::SIGMA + i;
+            const int new_idx = i * SmallPolicy::OMEGA + lane;
+            out[new_idx] = input[old_idx];
+        }
     }
+    return out;
+}
 
-    // Test with OMEGA = 8
+std::vector<int> rowPtrFromLengths( const std::vector<int>& row_lengths )
+{
+    std::vector<int> row_ptr( row_lengths.size() + 1, 0 );
+    for ( std::size_t row = 0; row < row_lengths.size(); ++row )
     {
-        uint32_t bit_flag_in = 0b10101010; // 8 bits
-        uint32_t y_offset_in = 54321;
-        uint16_t seg_offset_in = 15;
+        row_ptr[row + 1] = row_ptr[row] + row_lengths[row];
+    }
+    return row_ptr;
+}
 
-        uint64_t packed = packCSR5TileDesc( bit_flag_in, y_offset_in, seg_offset_in, 8 );
-
-        uint32_t bit_flag_out, y_offset_out;
-        uint16_t seg_offset_out;
-        unpackCSR5TileDesc( packed, bit_flag_out, y_offset_out, seg_offset_out, 8 );
-
-        EXPECT_EQ( bit_flag_out, bit_flag_in );
-        EXPECT_EQ( y_offset_out, y_offset_in );
-        EXPECT_EQ( seg_offset_out, seg_offset_in );
+void referenceSpmv( const std::vector<int>& row_ptr,
+                    const std::vector<int>& col_idx,
+                    const std::vector<double>& values,
+                    const std::vector<double>& x,
+                    std::vector<double>& y,
+                    const double alpha,
+                    const double beta )
+{
+    for ( std::size_t row = 0; row + 1 < row_ptr.size(); ++row )
+    {
+        double sum = 0;
+        for ( int idx = row_ptr[row]; idx < row_ptr[row + 1]; ++idx )
+        {
+            sum += values[idx] * x[col_idx[idx]];
+        }
+        y[row] = alpha * sum + beta * y[row];
     }
 }
 
-// Test conversion with a small matrix
-TEST( CSR5ConvertTest, SmallMatrixConversion )
+} // namespace
+
+TEST( CSR5PolicyTest, StaticPolicyComputesDescriptorBits )
 {
-    using Policy = CSR5_AVX2_Policy<double>;
-
-    // Create a simple 3x3 matrix with 5 non-zeros (0-based indexing)
-    // [1 0 2]
-    // [0 3 0]
-    // [4 5 0]
-    std::vector<int> ai = { 0, 2, 3, 5 };                 // row pointers
-    std::vector<int> aj = { 0, 2, 1, 0, 1 };              // column indices
-    std::vector<double> av = { 1.0, 2.0, 3.0, 4.0, 5.0 }; // values
-
-    int num_rows = 3;
-
-    CSR5Data<int, int, double, Policy> csr5_data;
-
-    convertCSRtoCSR5<int, int, double, Policy>( num_rows, ai.data(), aj.data(), av.data(), csr5_data );
-
-    EXPECT_EQ( csr5_data._num_rows, 3 );
-    EXPECT_EQ( csr5_data._nnz, 5 );
-    EXPECT_EQ( csr5_data._num_tiles, 1 ); // 5 elements < 128, so 1 tile
-    EXPECT_EQ( csr5_data._tail_tile_length, 5 );
-
-    // Verify tile_ptr
-    EXPECT_EQ( csr5_data._tile_ptr.size(), 2 ); // num_tiles + 1
-    auto tile_start_row = CSR5Data<int, int, double, Policy>::getTileStartRow( csr5_data._tile_ptr[0] );
-    EXPECT_EQ( tile_start_row, 0 );
-    EXPECT_EQ( csr5_data._tile_ptr[1], 3 ); // Points to row after last element
-    auto has_empty = CSR5Data<int, int, double, Policy>::hasEmptyRows( csr5_data._tile_ptr[0] );
-    EXPECT_FALSE( has_empty );
-
-    // Verify data is stored column-major
-    // Element 0: lane 0, col 0, index = 0*4 + 0 = 0
-    // Element 1: lane 1, col 0, index = 0*4 + 1 = 1
-    // Element 2: lane 2, col 0, index = 0*4 + 2 = 2
-    // Element 3: lane 3, col 0, index = 0*4 + 3 = 3
-    // Element 4: lane 0, col 1, index = 1*4 + 0 = 4
-
-    const int* tile_col = csr5_data.getTileColIdx( 0 );
-    const double* tile_val = csr5_data.getTileVal( 0 );
-
-    EXPECT_EQ( tile_col[0], 0 ); // element 0, lane 0
-    EXPECT_EQ( tile_val[0], 1.0 );
-
-    EXPECT_EQ( tile_col[1], 2 ); // element 1, lane 1
-    EXPECT_EQ( tile_val[1], 2.0 );
-
-    EXPECT_EQ( tile_col[2], 1 ); // element 2, lane 2
-    EXPECT_EQ( tile_val[2], 3.0 );
-
-    EXPECT_EQ( tile_col[3], 0 ); // element 3, lane 3
-    EXPECT_EQ( tile_val[3], 4.0 );
-
-    EXPECT_EQ( tile_col[4], 1 ); // element 4, lane 0, col 1
-    EXPECT_EQ( tile_val[4], 5.0 );
-
-    // Check metadata
-    uint32_t bit_flag;
-    int y_offset;
-    uint16_t seg_offset;
-    csr5_data.unpackTileDesc( 0, bit_flag, y_offset, seg_offset );
-
-    EXPECT_EQ( y_offset, 0 );   // starts at row 0
-    EXPECT_EQ( seg_offset, 0 ); // first segment
-
-    // Bit flag should indicate new rows:
-    // Lane 0: element 0 starts row 0 -> bit 0 = 1
-    // Lane 1: element 1 is in row 0 -> bit 1 = 0
-    // Lane 2: element 2 starts row 1 -> bit 2 = 1
-    // Lane 3: element 3 starts row 2 -> bit 3 = 1
-    EXPECT_EQ( bit_flag & 0b0001, 0b0001 ); // bit 0 set
-    EXPECT_EQ( bit_flag & 0b0100, 0b0100 ); // bit 2 set
-    EXPECT_EQ( bit_flag & 0b1000, 0b1000 ); // bit 3 set
+    EXPECT_EQ( SmallPolicy::OMEGA, 4 );
+    EXPECT_EQ( SmallPolicy::SIGMA, 4 );
+    EXPECT_EQ( SmallPolicy::TILE_SIZE, 16 );
+    EXPECT_EQ( SmallPolicy::BIT_Y_OFFSET, 4 );
+    EXPECT_EQ( SmallPolicy::BIT_SEG_OFFSET, 2 );
+    EXPECT_LE( SmallPolicy::DESCRIPTOR_BITS, 32 );
 }
 
-// Test memory estimation
-TEST( CSR5FormatTest, MemoryEstimation )
+TEST( CSR5PolicyTest, AVX2PoliciesUseSingleDescriptorPacket )
 {
-    using Policy = CSR5_AVX2_Policy<double>;
+    EXPECT_EQ( CSR5_AVX2_Policy<double>::OMEGA, 4 );
+    EXPECT_EQ( CSR5_AVX2_Policy<double>::SIGMA, 16 );
+    EXPECT_EQ( CSR5_AVX2_Policy<double>::TILE_SIZE, 64 );
+    EXPECT_LE( CSR5_AVX2_Policy<double>::DESCRIPTOR_BITS, 32 );
 
-    int nnz = 1000;
-    size_t estimated = CSR5Data<int, int, double, Policy>::estimateMemoryBytes( nnz );
-
-    // Expected: ceil(1000/128) = 8 tiles
-    // (8 + 1) * sizeof(int) tile pointers
-    // + 8 * 128 * (sizeof(int) + sizeof(double)) tile data
-    // + 8 * sizeof(uint64_t) descriptors
-
-    int num_tiles = ( nnz + Policy::TILE_SIZE - 1 ) / Policy::TILE_SIZE;
-    size_t expected = ( num_tiles + 1 ) * sizeof( int ) +
-                      num_tiles * Policy::TILE_SIZE * ( sizeof( int ) + sizeof( double ) ) +
-                      num_tiles * sizeof( uint64_t );
-
-    EXPECT_EQ( estimated, expected );
+    EXPECT_EQ( CSR5_AVX2_Policy<float>::OMEGA, 8 );
+    EXPECT_EQ( CSR5_AVX2_Policy<float>::SIGMA, 16 );
+    EXPECT_EQ( CSR5_AVX2_Policy<float>::TILE_SIZE, 128 );
+    EXPECT_LE( CSR5_AVX2_Policy<float>::DESCRIPTOR_BITS, 32 );
 }
 
-// Test tail tile handling
-TEST( CSR5ConvertTest, TailTileHandling )
+TEST( CSR5ConvertTest, PackUnpackLaneDescriptor )
 {
-    using Policy = CSR5_AVX2_Policy<double>;
+    const uint32_t bit_flags_in = 0b1010;
+    const uint32_t y_offset_in = 7;
+    const uint32_t seg_offset_in = 2;
 
-    // Create matrix with 135 elements (1 full tile + 7 element tail)
-    int nnz = 135;
-    int num_rows = 10;
+    const uint32_t packed = packCSR5LaneDesc<SmallPolicy>( bit_flags_in, y_offset_in, seg_offset_in );
 
-    std::vector<int> ai( num_rows + 1 );
-    std::vector<int> aj( nnz );
-    std::vector<double> av( nnz );
+    uint32_t bit_flags_out = 0;
+    uint32_t y_offset_out = 0;
+    uint32_t seg_offset_out = 0;
+    unpackCSR5LaneDesc<SmallPolicy>( packed, bit_flags_out, y_offset_out, seg_offset_out );
 
-    // Simple pattern: each row has roughly nnz/num_rows elements
-    for ( int i = 0; i <= num_rows; ++i )
+    EXPECT_EQ( bit_flags_out, bit_flags_in );
+    EXPECT_EQ( y_offset_out, y_offset_in );
+    EXPECT_EQ( seg_offset_out, seg_offset_in );
+}
+
+TEST( CSR5ConvertTest, FullTileAoSoATransposeAndDescriptor )
+{
+    std::vector<int> ai = { 0, 4, 8, 12, 16 };
+    std::vector<int> aj( 16 );
+    std::vector<double> av( 16 );
+    for ( int i = 0; i < 16; ++i )
     {
-        ai[i] = ( i * nnz ) / num_rows;
+        aj[i] = i;
+        av[i] = 100.0 + i;
     }
 
-    for ( int i = 0; i < nnz; ++i )
+    CSR5Data<int, int, double, SmallPolicy> data;
+    convertCSRtoCSR5<int, int, double, SmallPolicy>( 4, ai.data(), aj.data(), av.data(), data, 2 );
+
+    EXPECT_EQ( data._num_rows, 4 );
+    EXPECT_EQ( data._nnz, 16 );
+    EXPECT_EQ( data._num_full_tiles, 1 );
+    EXPECT_EQ( data._num_tiles, 1 );
+    EXPECT_EQ( data._tail_tile_length, 0 );
+    EXPECT_EQ( data._row_ptr, ai );
+    EXPECT_EQ( data._tile_ptr, ( std::vector<int>{ 0, 4 } ) );
+
+    EXPECT_EQ( data._tile_col_idx, expectedTransposedTile( aj ) );
+    EXPECT_EQ( data._tile_val, expectedTransposedTile( av ) );
+
+    for ( int lane = 0; lane < SmallPolicy::OMEGA; ++lane )
     {
-        aj[i] = i % num_rows;
+        uint32_t bit_flags = 0;
+        uint32_t y_offset = 0;
+        uint32_t seg_offset = 0;
+        data.unpackTileDesc( 0, lane, bit_flags, y_offset, seg_offset );
+
+        EXPECT_EQ( bit_flags, 0b0001u );
+        EXPECT_EQ( y_offset, lane == 0 ? 0u : static_cast<uint32_t>( lane - 1 ) );
+        EXPECT_EQ( seg_offset, 0u );
+    }
+}
+
+TEST( CSR5ConvertTest, FastTrackLongRowKeepsOnlyBitFlags )
+{
+    std::vector<int> ai = { 0, 20, 24 };
+    std::vector<int> aj( 24 );
+    std::vector<double> av( 24 );
+    for ( int i = 0; i < 24; ++i )
+    {
+        aj[i] = i;
         av[i] = static_cast<double>( i );
     }
 
-    CSR5Data<int, int, double, Policy> csr5_data;
+    CSR5Data<int, int, double, SmallPolicy> data;
+    convertCSRtoCSR5<int, int, double, SmallPolicy>( 2, ai.data(), aj.data(), av.data(), data, 3 );
 
-    convertCSRtoCSR5<int, int, double, Policy>( num_rows, ai.data(), aj.data(), av.data(), csr5_data );
+    EXPECT_EQ( data._num_full_tiles, 1 );
+    EXPECT_EQ( data._num_tiles, 2 );
+    EXPECT_EQ( data._tail_tile_length, 8 );
+    EXPECT_EQ( data._tile_ptr, ( std::vector<int>{ 0, 0, 2 } ) );
 
-    EXPECT_EQ( csr5_data._num_tiles, 2 );        // ceil(135/128) = 2
-    EXPECT_EQ( csr5_data._tail_tile_length, 7 ); // 135 % 128 = 7
+    uint32_t bit_flags = 0;
+    uint32_t y_offset = 0;
+    uint32_t seg_offset = 0;
+    data.unpackTileDesc( 0, 0, bit_flags, y_offset, seg_offset );
+    EXPECT_EQ( bit_flags, 0b0001u );
+    EXPECT_EQ( y_offset, 0u );
+    EXPECT_EQ( seg_offset, 0u );
 
-    // Tail tile should be padded with zeros
-    const double* tile_val_tail = csr5_data.getTileVal( 1 );
-    for ( int i = 7; i < Policy::TILE_SIZE; ++i )
+    for ( int lane = 1; lane < SmallPolicy::OMEGA; ++lane )
     {
-        EXPECT_EQ( tile_val_tail[i], 0.0 );
+        data.unpackTileDesc( 0, lane, bit_flags, y_offset, seg_offset );
+        EXPECT_EQ( bit_flags, 0u );
+        EXPECT_EQ( seg_offset, 0u );
+    }
+
+    for ( int idx = 16; idx < 24; ++idx )
+    {
+        EXPECT_EQ( data._tile_col_idx[idx], aj[idx] );
+        EXPECT_EQ( data._tile_val[idx], av[idx] );
     }
 }
 
-// Test empty matrix
-TEST( CSR5ConvertTest, EmptyMatrix )
+TEST( CSR5ConvertTest, NormalTileProducesCrossLaneSegmentOffset )
 {
-    using Policy = CSR5_AVX2_Policy<double>;
+    std::vector<int> ai = { 0, 9, 20 };
+    std::vector<int> aj( 20 );
+    std::vector<double> av( 20 );
+    for ( int i = 0; i < 20; ++i )
+    {
+        aj[i] = i % 2;
+        av[i] = static_cast<double>( i );
+    }
 
-    int num_rows = 5;
-    std::vector<int> ai( num_rows + 1, 0 ); // All zeros -> empty matrix
+    CSR5Data<int, int, double, SmallPolicy> data;
+    convertCSRtoCSR5<int, int, double, SmallPolicy>( 2, ai.data(), aj.data(), av.data(), data, 2 );
 
-    CSR5Data<int, int, double, Policy> csr5_data;
+    EXPECT_EQ( data._num_full_tiles, 1 );
+    EXPECT_EQ( data._tile_ptr, ( std::vector<int>{ 0, 1, 2 } ) );
 
-    convertCSRtoCSR5<int, int, double, Policy>( num_rows, ai.data(), nullptr, nullptr, csr5_data );
+    uint32_t bit_flags = 0;
+    uint32_t y_offset = 0;
+    uint32_t seg_offset = 0;
+    data.unpackTileDesc( 0, 0, bit_flags, y_offset, seg_offset );
+    EXPECT_EQ( bit_flags, 0b0001u );
+    EXPECT_EQ( y_offset, 0u );
+    EXPECT_EQ( seg_offset, 1u );
 
-    EXPECT_EQ( csr5_data._num_rows, 5 );
-    EXPECT_EQ( csr5_data._nnz, 0 );
-    EXPECT_EQ( csr5_data._num_tiles, 0 );
+    data.unpackTileDesc( 0, 1, bit_flags, y_offset, seg_offset );
+    EXPECT_EQ( bit_flags, 0u );
+    EXPECT_EQ( y_offset, 0u );
+    EXPECT_EQ( seg_offset, 0u );
+
+    data.unpackTileDesc( 0, 2, bit_flags, y_offset, seg_offset );
+    EXPECT_EQ( bit_flags, 0b0010u );
+    EXPECT_EQ( y_offset, 0u );
+    EXPECT_EQ( seg_offset, 1u );
 }
 
-// Test matrix with empty rows
-TEST( CSR5ConvertTest, MatrixWithEmptyRows )
+TEST( CSR5ConvertTest, OneBasedInputIsNormalized )
 {
-    using Policy = CSR5_AVX2_Policy<double>;
+    std::vector<int> ai = { 1, 5, 9, 13, 17 };
+    std::vector<int> aj( 16 );
+    std::vector<double> av( 16 );
+    for ( int i = 0; i < 16; ++i )
+    {
+        aj[i] = i + 1;
+        av[i] = static_cast<double>( i );
+    }
 
-    // Create a 5x5 matrix with empty row 2 (0-based indexing)
-    // Row 0: [1, 2]
-    // Row 1: [3]
-    // Row 2: []      <- empty
-    // Row 3: [4, 5]
-    // Row 4: [6]
-    std::vector<int> ai = { 0, 2, 3, 3, 5, 6 }; // Note: ai[2] == ai[3]
-    std::vector<int> aj = { 0, 1, 0, 0, 1, 0 };
-    std::vector<double> av = { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
+    CSR5Data<int, int, double, SmallPolicy> data;
+    convertCSRtoCSR5<int, int, double, SmallPolicy>( 4, ai.data(), aj.data(), av.data(), data, 2 );
 
-    int num_rows = 5;
+    EXPECT_EQ( data._base, 1 );
+    EXPECT_EQ( data._row_ptr, ( std::vector<int>{ 0, 4, 8, 12, 16 } ) );
 
-    CSR5Data<int, int, double, Policy> csr5_data;
+    std::vector<int> normalized_aj( 16 );
+    for ( int i = 0; i < 16; ++i )
+    {
+        normalized_aj[i] = i;
+    }
+    EXPECT_EQ( data._tile_col_idx, expectedTransposedTile( normalized_aj ) );
+}
 
-    convertCSRtoCSR5<int, int, double, Policy>( num_rows, ai.data(), aj.data(), av.data(), csr5_data );
+TEST( CSR5ConvertTest, EmptyRowsAreRejectedInFirstVersion )
+{
+    std::vector<int> ai = { 0, 2, 2, 4 };
+    std::vector<int> aj = { 0, 1, 0, 1 };
+    std::vector<double> av = { 1.0, 2.0, 3.0, 4.0 };
 
-    EXPECT_EQ( csr5_data._num_tiles, 1 );
-    EXPECT_EQ( csr5_data._nnz, 6 );
+    CSR5Data<int, int, double, SmallPolicy> data;
+    EXPECT_THROW(
+        ( convertCSRtoCSR5<int, int, double, SmallPolicy>( 3, ai.data(), aj.data(), av.data(), data, 2 ) ),
+        std::invalid_argument );
+}
 
-    // Check that empty row flag is set (MSB = 1)
-    auto has_empty_rows = CSR5Data<int, int, double, Policy>::hasEmptyRows( csr5_data._tile_ptr[0] );
-    EXPECT_TRUE( has_empty_rows );
-    auto start_row = CSR5Data<int, int, double, Policy>::getTileStartRow( csr5_data._tile_ptr[0] );
-    EXPECT_EQ( start_row, 0 );
+TEST( CSR5FormatTest, MemoryEstimationMatchesOwnedData )
+{
+    const int num_rows = 4;
+    const int nnz = 16;
+    const size_t estimated = CSR5Data<int, int, double, SmallPolicy>::estimateMemoryBytes( num_rows, nnz );
+
+    const size_t expected = static_cast<size_t>( num_rows + 1 ) * sizeof( int ) +
+                            static_cast<size_t>( 2 ) * sizeof( int ) +
+                            static_cast<size_t>( nnz ) * ( sizeof( int ) + sizeof( double ) ) +
+                            static_cast<size_t>( SmallPolicy::OMEGA ) * sizeof( uint32_t );
+    EXPECT_EQ( estimated, expected );
+}
+
+TEST( CSR5SPMVTest, ConstructorControlsPreprocessThreads )
+{
+    std::vector<int> ai = { 0, 4, 8, 12, 16 };
+    std::vector<int> aj( 16 );
+    std::vector<double> av( 16 );
+    for ( int i = 0; i < 16; ++i )
+    {
+        aj[i] = i;
+        av[i] = static_cast<double>( i );
+    }
+
+    CSR5SPMV<int, int, double, SmallPolicy> spmv( 2 );
+    EXPECT_EQ( spmv.numThreads(), 2 );
+    spmv.preprocess( 4, ai.data(), aj.data(), av.data() );
+    EXPECT_EQ( spmv.data()._num_full_tiles, 1 );
+
+    spmv.setNumThreads( -5 );
+    EXPECT_EQ( spmv.numThreads(), 1 );
+}
+
+TEST( CSR5SPMVTest, DoubleKernelMatchesReferenceAcrossTilesAndTail )
+{
+    const std::vector<int> row_lengths = { 7, 70, 5, 68, 16 };
+    std::vector<int> ai = rowPtrFromLengths( row_lengths );
+    const int nnz = ai.back();
+
+    std::vector<int> aj( nnz );
+    std::vector<double> av( nnz );
+    for ( int idx = 0; idx < nnz; ++idx )
+    {
+        aj[idx] = ( 3 * idx + 1 ) % static_cast<int>( row_lengths.size() );
+        av[idx] = 0.25 + static_cast<double>( ( idx % 11 ) - 5 ) * 0.125;
+    }
+
+    std::vector<double> x = { 1.0, -2.0, 0.5, 3.0, -1.5 };
+    std::vector<double> expected( row_lengths.size(), 2.0 );
+    std::vector<double> actual = expected;
+
+    const double alpha = 1.75;
+    const double beta = -0.25;
+    referenceSpmv( ai, aj, av, x, expected, alpha, beta );
+
+    CSR5SPMV<int, int, double> spmv( 4 );
+    spmv.preprocess( static_cast<int>( row_lengths.size() ), ai.data(), aj.data(), av.data() );
+    EXPECT_EQ( spmv.data()._num_full_tiles, 2 );
+    EXPECT_EQ( spmv.data()._tail_tile_length, 38 );
+
+    spmv( x.data(), actual.data(), alpha, beta );
+
+    for ( std::size_t row = 0; row < expected.size(); ++row )
+    {
+        EXPECT_NEAR( actual[row], expected[row], 1e-12 );
+    }
+}
+
+TEST( CSR5SPMVTest, DoubleKernelHandlesTailOnlyMatrix )
+{
+    const std::vector<int> row_lengths = { 3, 4, 5 };
+    std::vector<int> ai = rowPtrFromLengths( row_lengths );
+    const int nnz = ai.back();
+
+    std::vector<int> aj( nnz );
+    std::vector<double> av( nnz );
+    for ( int idx = 0; idx < nnz; ++idx )
+    {
+        aj[idx] = idx % static_cast<int>( row_lengths.size() );
+        av[idx] = static_cast<double>( idx + 1 ) * 0.5;
+    }
+
+    std::vector<double> x = { 2.0, -1.0, 0.25 };
+    std::vector<double> expected( row_lengths.size(), 1.0 );
+    std::vector<double> actual = expected;
+
+    referenceSpmv( ai, aj, av, x, expected, 1.0, 0.5 );
+
+    CSR5SPMV<int, int, double> spmv( 2 );
+    spmv.preprocess( static_cast<int>( row_lengths.size() ), ai.data(), aj.data(), av.data() );
+    EXPECT_EQ( spmv.data()._num_full_tiles, 0 );
+    EXPECT_EQ( spmv.data()._tail_tile_length, nnz );
+
+    spmv( x.data(), actual.data(), 1.0, 0.5 );
+
+    for ( std::size_t row = 0; row < expected.size(); ++row )
+    {
+        EXPECT_NEAR( actual[row], expected[row], 1e-12 );
+    }
 }
