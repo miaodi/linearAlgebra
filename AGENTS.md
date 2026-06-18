@@ -78,9 +78,9 @@ Useful CMake options:
 - `BUILD_BENCHMARKS=OFF` by default.
 - `ENABLE_TESTS=ON` by default.
 - `ENABLE_DATA_DOWNLOADS=ON` by default.
-- `ENABLE_CSR5_REFERENCE_TESTS=OFF` by default. When enabled, tests fetch
-  the CSR5 reference implementation with `FetchContent` and build the CSR5
-  reference preprocess comparison test; this requires AVX2 support.
+- `ENABLE_CSR5_REFERENCE_TESTS=OFF` by default. When enabled, tests and
+  benchmarks can fetch the CSR5 reference implementation with `FetchContent`;
+  this requires AVX2 support, and the reference SpMV benchmark also needs FMA.
 - `BUILD_DATA=OFF` by default.
 - Optional libraries include `USE_METIS_LIB`, `USE_MUMPS_LIB`,
   `USE_ARPACK_LIB`, `USE_AMGCL_LIB`, `USE_SPECTRA_LIB`, and `USE_CUDSS`.

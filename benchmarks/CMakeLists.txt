@@ -4,6 +4,34 @@ project(benchmarks)
 # Add Google Benchmark
 include(../cmake/GoogleBenchmark.cmake)
 include(../cmake/DownloadFile.cmake)
+include(FetchContent)
+
+if(ENABLE_CSR5_REFERENCE_TESTS)
+   if(NOT DEFINED AVX2_CPU_SUPPORTS OR NOT AVX2_CPU_SUPPORTS OR
+      NOT DEFINED FMA_CPU_SUPPORTS OR NOT FMA_CPU_SUPPORTS)
+      message(STATUS "Skipping CSR5 reference benchmark because AVX2/FMA is not available")
+   else()
+      FetchContent_Declare(
+         csr5_reference
+         GIT_REPOSITORY https://github.com/weifengliu-ssslab/Benchmark_SpMV_using_CSR5.git
+         GIT_TAG 4b06ce35e45c3c61a51e249e12e1c4954af443fa
+      )
+      FetchContent_MakeAvailable(csr5_reference)
+
+      add_library(csr5_reference_avx2_bench INTERFACE)
+      target_include_directories(csr5_reference_avx2_bench INTERFACE
+         ${csr5_reference_SOURCE_DIR}/CSR5_avx2
+         ${csr5_reference_SOURCE_DIR}/CSR5_avx2/detail/avx2
+      )
+      target_compile_options(csr5_reference_avx2_bench INTERFACE
+         ${SIMD_FLAG_AVX2}
+         ${SIMD_FLAG_FMA}
+      )
+      target_compile_definitions(csr5_reference_avx2_bench INTERFACE
+         LINEAR_ALGEBRA_ENABLE_CSR5_REFERENCE_BENCH=1
+      )
+   endif()
+endif()
 
 file(GLOB_RECURSE ALL_BENCH_CPP *.cpp)
 if(USE_CUDA)
@@ -80,7 +108,11 @@ foreach(ONE_BENCH_CPP ${ALL_BENCH_CPP})
        target_link_libraries(${TARGET_NAME} PRIVATE factorization)
     endif()
 
-     # CUDA benchmarks keep the normal benchmark dependencies and add CUDA usage.
+    if(ONE_BENCH_FILENAME STREQUAL "spmv_bench.cpp" AND TARGET csr5_reference_avx2_bench)
+       target_link_libraries(${TARGET_NAME} PRIVATE csr5_reference_avx2_bench)
+    endif()
+
+      # CUDA benchmarks keep the normal benchmark dependencies and add CUDA usage.
    if(IS_CUDA_BENCH)
       if(BENCH_EXT STREQUAL ".cu")
          set_target_properties(${TARGET_NAME} PROPERTIES 

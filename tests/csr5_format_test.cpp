@@ -73,17 +73,12 @@ TEST( CSR5PolicyTest, StaticPolicyComputesDescriptorBits )
     EXPECT_LE( SmallPolicy::DESCRIPTOR_BITS, 32 );
 }
 
-TEST( CSR5PolicyTest, AVX2PoliciesUseSingleDescriptorPacket )
+TEST( CSR5PolicyTest, AVX2DoublePolicyUsesSingleDescriptorPacket )
 {
-    EXPECT_EQ( CSR5_AVX2_Policy<double>::OMEGA, 4 );
-    EXPECT_EQ( CSR5_AVX2_Policy<double>::SIGMA, 16 );
-    EXPECT_EQ( CSR5_AVX2_Policy<double>::TILE_SIZE, 64 );
-    EXPECT_LE( CSR5_AVX2_Policy<double>::DESCRIPTOR_BITS, 32 );
-
-    EXPECT_EQ( CSR5_AVX2_Policy<float>::OMEGA, 8 );
-    EXPECT_EQ( CSR5_AVX2_Policy<float>::SIGMA, 16 );
-    EXPECT_EQ( CSR5_AVX2_Policy<float>::TILE_SIZE, 128 );
-    EXPECT_LE( CSR5_AVX2_Policy<float>::DESCRIPTOR_BITS, 32 );
+    EXPECT_EQ( CSR5AVX2DoublePolicy::OMEGA, 4 );
+    EXPECT_EQ( CSR5AVX2DoublePolicy::SIGMA, 16 );
+    EXPECT_EQ( CSR5AVX2DoublePolicy::TILE_SIZE, 64 );
+    EXPECT_LE( CSR5AVX2DoublePolicy::DESCRIPTOR_BITS, 32 );
 }
 
 TEST( CSR5ConvertTest, PackUnpackLaneDescriptor )
@@ -115,8 +110,8 @@ TEST( CSR5ConvertTest, FullTileAoSoATransposeAndDescriptor )
         av[i] = 100.0 + i;
     }
 
-    CSR5Data<int, int, double, SmallPolicy> data;
-    convertCSRtoCSR5<int, int, double, SmallPolicy>( 4, ai.data(), aj.data(), av.data(), data, 2 );
+    CSR5Data<SmallPolicy> data;
+    convertCSRtoCSR5<SmallPolicy>( 4, ai.data(), aj.data(), av.data(), data, 2 );
 
     EXPECT_EQ( data._num_rows, 4 );
     EXPECT_EQ( data._nnz, 16 );
@@ -153,8 +148,8 @@ TEST( CSR5ConvertTest, FastTrackLongRowKeepsOnlyBitFlags )
         av[i] = static_cast<double>( i );
     }
 
-    CSR5Data<int, int, double, SmallPolicy> data;
-    convertCSRtoCSR5<int, int, double, SmallPolicy>( 2, ai.data(), aj.data(), av.data(), data, 3 );
+    CSR5Data<SmallPolicy> data;
+    convertCSRtoCSR5<SmallPolicy>( 2, ai.data(), aj.data(), av.data(), data, 3 );
 
     EXPECT_EQ( data._num_full_tiles, 1 );
     EXPECT_EQ( data._num_tiles, 2 );
@@ -194,8 +189,8 @@ TEST( CSR5ConvertTest, NormalTileProducesCrossLaneSegmentOffset )
         av[i] = static_cast<double>( i );
     }
 
-    CSR5Data<int, int, double, SmallPolicy> data;
-    convertCSRtoCSR5<int, int, double, SmallPolicy>( 2, ai.data(), aj.data(), av.data(), data, 2 );
+    CSR5Data<SmallPolicy> data;
+    convertCSRtoCSR5<SmallPolicy>( 2, ai.data(), aj.data(), av.data(), data, 2 );
 
     EXPECT_EQ( data._num_full_tiles, 1 );
     EXPECT_EQ( data._tile_ptr, ( std::vector<int>{ 0, 1, 2 } ) );
@@ -230,8 +225,8 @@ TEST( CSR5ConvertTest, OneBasedInputIsNormalized )
         av[i] = static_cast<double>( i );
     }
 
-    CSR5Data<int, int, double, SmallPolicy> data;
-    convertCSRtoCSR5<int, int, double, SmallPolicy>( 4, ai.data(), aj.data(), av.data(), data, 2 );
+    CSR5Data<SmallPolicy> data;
+    convertCSRtoCSR5<SmallPolicy>( 4, ai.data(), aj.data(), av.data(), data, 2 );
 
     EXPECT_EQ( data._base, 1 );
     EXPECT_EQ( data._row_ptr, ( std::vector<int>{ 0, 4, 8, 12, 16 } ) );
@@ -250,17 +245,16 @@ TEST( CSR5ConvertTest, EmptyRowsAreRejectedInFirstVersion )
     std::vector<int> aj = { 0, 1, 0, 1 };
     std::vector<double> av = { 1.0, 2.0, 3.0, 4.0 };
 
-    CSR5Data<int, int, double, SmallPolicy> data;
-    EXPECT_THROW(
-        ( convertCSRtoCSR5<int, int, double, SmallPolicy>( 3, ai.data(), aj.data(), av.data(), data, 2 ) ),
-        std::invalid_argument );
+    CSR5Data<SmallPolicy> data;
+    EXPECT_THROW( ( convertCSRtoCSR5<SmallPolicy>( 3, ai.data(), aj.data(), av.data(), data, 2 ) ),
+                  std::invalid_argument );
 }
 
 TEST( CSR5FormatTest, MemoryEstimationMatchesOwnedData )
 {
     const int num_rows = 4;
     const int nnz = 16;
-    const size_t estimated = CSR5Data<int, int, double, SmallPolicy>::estimateMemoryBytes( num_rows, nnz );
+    const size_t estimated = CSR5Data<SmallPolicy>::estimateMemoryBytes( num_rows, nnz );
 
     const size_t expected = static_cast<size_t>( num_rows + 1 ) * sizeof( int ) +
                             static_cast<size_t>( 2 ) * sizeof( int ) +
@@ -271,16 +265,16 @@ TEST( CSR5FormatTest, MemoryEstimationMatchesOwnedData )
 
 TEST( CSR5SPMVTest, ConstructorControlsPreprocessThreads )
 {
-    std::vector<int> ai = { 0, 4, 8, 12, 16 };
-    std::vector<int> aj( 16 );
-    std::vector<double> av( 16 );
-    for ( int i = 0; i < 16; ++i )
+    std::vector<int> ai = { 0, 16, 32, 48, 64 };
+    std::vector<int> aj( 64 );
+    std::vector<double> av( 64 );
+    for ( int i = 0; i < 64; ++i )
     {
-        aj[i] = i;
+        aj[i] = i % 4;
         av[i] = static_cast<double>( i );
     }
 
-    CSR5SPMV<int, int, double, SmallPolicy> spmv( 2 );
+    CSR5SPMV spmv( 2 );
     EXPECT_EQ( spmv.numThreads(), 2 );
     spmv.preprocess( 4, ai.data(), aj.data(), av.data() );
     EXPECT_EQ( spmv.data()._num_full_tiles, 1 );
@@ -311,7 +305,7 @@ TEST( CSR5SPMVTest, DoubleKernelMatchesReferenceAcrossTilesAndTail )
     const double beta = -0.25;
     referenceSpmv( ai, aj, av, x, expected, alpha, beta );
 
-    CSR5SPMV<int, int, double> spmv( 4 );
+    CSR5SPMV spmv( 4 );
     spmv.preprocess( static_cast<int>( row_lengths.size() ), ai.data(), aj.data(), av.data() );
     EXPECT_EQ( spmv.data()._num_full_tiles, 2 );
     EXPECT_EQ( spmv.data()._tail_tile_length, 38 );
@@ -320,7 +314,109 @@ TEST( CSR5SPMVTest, DoubleKernelMatchesReferenceAcrossTilesAndTail )
 
     for ( std::size_t row = 0; row < expected.size(); ++row )
     {
-        EXPECT_NEAR( actual[row], expected[row], 1e-12 );
+        EXPECT_NEAR( actual[row], expected[row], 1e-12 ) << "row=" << row;
+    }
+}
+
+TEST( CSR5SPMVTest, DoubleKernelHandlesFastTrackTilesAcrossThreadBoundaries )
+{
+    const std::vector<int> row_lengths = { 220, 5, 70, 3 };
+    std::vector<int> ai = rowPtrFromLengths( row_lengths );
+    const int nnz = ai.back();
+
+    std::vector<int> aj( nnz );
+    std::vector<double> av( nnz );
+    for ( int idx = 0; idx < nnz; ++idx )
+    {
+        aj[idx] = ( 7 * idx + 3 ) % static_cast<int>( row_lengths.size() );
+        av[idx] = -0.5 + static_cast<double>( idx % 17 ) * 0.0625;
+    }
+
+    std::vector<double> x = { 1.25, -0.75, 2.0, -1.5 };
+    std::vector<double> expected( row_lengths.size(), -3.0 );
+    std::vector<double> actual = expected;
+
+    const double alpha = -0.5;
+    const double beta = 0.25;
+    referenceSpmv( ai, aj, av, x, expected, alpha, beta );
+
+    CSR5SPMV spmv( 4 );
+    spmv.preprocess( static_cast<int>( row_lengths.size() ), ai.data(), aj.data(), av.data() );
+    ASSERT_GE( spmv.data()._num_full_tiles, 4 );
+    ASSERT_EQ( spmv.data()._tile_ptr[0], spmv.data()._tile_ptr[1] );
+    ASSERT_EQ( spmv.data()._tile_ptr[1], spmv.data()._tile_ptr[2] );
+
+    spmv( x.data(), actual.data(), alpha, beta );
+
+    for ( std::size_t row = 0; row < expected.size(); ++row )
+    {
+        EXPECT_NEAR( actual[row], expected[row], 1e-12 ) << "row=" << row;
+    }
+}
+
+TEST( CSR5SPMVTest, DoubleKernelBetaZeroOverwritesExistingOutput )
+{
+    const std::vector<int> row_lengths = { 70, 5, 68, 3, 90 };
+    std::vector<int> ai = rowPtrFromLengths( row_lengths );
+    const int nnz = ai.back();
+
+    std::vector<int> aj( nnz );
+    std::vector<double> av( nnz );
+    for ( int idx = 0; idx < nnz; ++idx )
+    {
+        aj[idx] = ( 5 * idx + 2 ) % static_cast<int>( row_lengths.size() );
+        av[idx] = 0.125 * static_cast<double>( ( idx % 23 ) - 11 );
+    }
+
+    std::vector<double> x = { -1.0, 2.0, 0.75, -0.5, 1.5 };
+    std::vector<double> expected( row_lengths.size(), 123.0 );
+    std::vector<double> actual( row_lengths.size(), -456.0 );
+
+    referenceSpmv( ai, aj, av, x, expected, 1.25, 0.0 );
+
+    CSR5SPMV spmv( 3 );
+    spmv.preprocess( static_cast<int>( row_lengths.size() ), ai.data(), aj.data(), av.data() );
+
+    spmv( x.data(), actual.data(), 1.25, 0.0 );
+    spmv( x.data(), actual.data(), 1.25, 0.0 );
+
+    for ( std::size_t row = 0; row < expected.size(); ++row )
+    {
+        EXPECT_NEAR( actual[row], expected[row], 1e-12 ) << "row=" << row;
+    }
+}
+
+TEST( CSR5SPMVTest, DoubleKernelHandlesRowsContinuingWithinThread )
+{
+    const std::vector<int> row_lengths = { 128, 128 };
+    std::vector<int> ai = rowPtrFromLengths( row_lengths );
+    const int nnz = ai.back();
+
+    std::vector<int> aj( nnz );
+    std::vector<double> av( nnz );
+    for ( int idx = 0; idx < nnz; ++idx )
+    {
+        aj[idx] = idx % static_cast<int>( row_lengths.size() );
+        av[idx] = 0.25 + 0.03125 * static_cast<double>( idx % 13 );
+    }
+
+    std::vector<double> x = { -0.75, 1.25 };
+    std::vector<double> expected( row_lengths.size(), 4.0 );
+    std::vector<double> actual = expected;
+
+    const double alpha = 0.5;
+    const double beta = -0.125;
+    referenceSpmv( ai, aj, av, x, expected, alpha, beta );
+
+    CSR5SPMV spmv( 2 );
+    spmv.preprocess( static_cast<int>( row_lengths.size() ), ai.data(), aj.data(), av.data() );
+    ASSERT_EQ( spmv.data()._num_full_tiles, 4 );
+
+    spmv( x.data(), actual.data(), alpha, beta );
+
+    for ( std::size_t row = 0; row < expected.size(); ++row )
+    {
+        EXPECT_NEAR( actual[row], expected[row], 1e-12 ) << "row=" << row;
     }
 }
 
@@ -344,7 +440,7 @@ TEST( CSR5SPMVTest, DoubleKernelHandlesTailOnlyMatrix )
 
     referenceSpmv( ai, aj, av, x, expected, 1.0, 0.5 );
 
-    CSR5SPMV<int, int, double> spmv( 2 );
+    CSR5SPMV spmv( 2 );
     spmv.preprocess( static_cast<int>( row_lengths.size() ), ai.data(), aj.data(), av.data() );
     EXPECT_EQ( spmv.data()._num_full_tiles, 0 );
     EXPECT_EQ( spmv.data()._tail_tile_length, nnz );

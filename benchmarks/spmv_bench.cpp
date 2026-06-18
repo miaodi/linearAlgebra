@@ -4,12 +4,17 @@
 #include "utils.h"
 #include <algorithm>
 #include <benchmark/benchmark.h>
+#include <cstdint>
 #include <cxxopts.hpp>
 #include <fstream>
 #include <memory>
+#include <new>
 #include <numeric>
 #include <omp.h>
+#include <stdexcept>
+#include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -20,6 +25,10 @@
 #ifdef USE_CUDA
 #include "cuda_spmv.cuh"
 #include <cuda_runtime.h>
+#endif
+
+#ifdef LINEAR_ALGEBRA_ENABLE_CSR5_REFERENCE_BENCH
+#include "anonymouslib_avx2.h"
 #endif
 
 using CSRTYPE_DOUBLE = typename matrix_utils::CSRMatrixVec<int, int, double>;
@@ -41,15 +50,13 @@ int64_t csrSpmvBytesPerIteration( const CSRMatrixType& mat )
 template <typename CSRMatrixType>
 void setSpmvBytesProcessed( benchmark::State& state, const CSRMatrixType& mat, const int it )
 {
-    state.SetBytesProcessed( int64_t( state.iterations() ) * int64_t( it ) *
-                             csrSpmvBytesPerIteration( mat ) );
+    state.SetBytesProcessed( int64_t( state.iterations() ) * int64_t( it ) * csrSpmvBytesPerIteration( mat ) );
 }
 
 template <typename Fn, typename... Args>
 void registerSpmvBenchmark( const char* name, Fn&& fn, Args&&... args )
 {
-    benchmark::RegisterBenchmark( name, std::forward<Fn>( fn ), std::forward<Args>( args )... )
-        ->UseRealTime();
+    benchmark::RegisterBenchmark( name, std::forward<Fn>( fn ), std::forward<Args>( args )... )->UseRealTime();
 }
 
 template <typename VALTYPE>
@@ -214,6 +221,154 @@ auto CAMLBSimd = []( benchmark::State& state, const auto& mat, const int threads
     }
     setSpmvBytesProcessed( state, mat, it );
 };
+
+auto CSR5Double_Bench = []( benchmark::State& state, const auto& mat, const int threads, const int it )
+{
+    std::vector<double> x( mat.rows, 0.0 );
+    std::vector<double> b( mat.rows, 1.0 );
+
+    matrix_utils::SPMV<std::remove_cvref_t<decltype( mat )>, matrix_utils::CSR5SPMV> spmv;
+    spmv.setMatrix( &mat );
+    spmv._spmv.setNumThreads( threads );
+    try
+    {
+        spmv.preprocess();
+    }
+    catch ( const std::invalid_argument& e )
+    {
+        state.SkipWithError( e.what() );
+        return;
+    }
+
+    for ( auto _ : state )
+    {
+        for ( int i = 0; i < it; i++ )
+        {
+            spmv( b.data(), x.data() );
+        }
+    }
+    setSpmvBytesProcessed( state, mat, it );
+};
+
+#ifdef LINEAR_ALGEBRA_ENABLE_CSR5_REFERENCE_BENCH
+struct ScopedOmpNumThreads
+{
+    explicit ScopedOmpNumThreads( const int threads ) : old_threads( omp_get_max_threads() )
+    {
+        omp_set_num_threads( threads );
+    }
+
+    ~ScopedOmpNumThreads() { omp_set_num_threads( old_threads ); }
+
+    int old_threads;
+};
+
+template <typename T>
+struct CSR5ReferenceAlignedFree
+{
+    void operator()( T* ptr ) const { _mm_free( ptr ); }
+};
+
+template <typename T>
+using CSR5ReferenceAlignedPtr = std::unique_ptr<T, CSR5ReferenceAlignedFree<T>>;
+
+template <typename T>
+CSR5ReferenceAlignedPtr<T> makeCSR5ReferenceAlignedArray( const std::size_t count )
+{
+    auto* ptr = static_cast<T*>( _mm_malloc( count * sizeof( T ), ANONYMOUSLIB_X86_CACHELINE ) );
+    if ( count != 0 && ptr == nullptr )
+    {
+        throw std::bad_alloc{};
+    }
+    return CSR5ReferenceAlignedPtr<T>{ ptr };
+}
+
+template <typename T>
+CSR5ReferenceAlignedPtr<T> makeCSR5ReferenceAlignedCopy( const std::vector<T>& values )
+{
+    auto copy = makeCSR5ReferenceAlignedArray<T>( values.size() );
+    std::copy( values.begin(), values.end(), copy.get() );
+    return copy;
+}
+
+void skipCSR5ReferenceError( benchmark::State& state, const std::string_view stage, const int err )
+{
+    const std::string message =
+        "reference CSR5 " + std::string( stage ) + " failed with error " + std::to_string( err );
+    state.SkipWithError( message.c_str() );
+}
+
+auto CSR5ReferenceDouble_Bench =
+    []( benchmark::State& state, const CSRTYPE_DOUBLE& mat, const int threads, const int it )
+{
+    ScopedOmpNumThreads scoped_threads( threads );
+
+    const int base = mat.ai.empty() ? 0 : mat.ai.front();
+    auto row_ptr = makeCSR5ReferenceAlignedArray<int>( mat.ai.size() );
+    std::transform( mat.ai.begin(), mat.ai.end(), row_ptr.get(),
+                    [base]( const int row_offset ) { return row_offset - base; } );
+
+    auto col_idx = makeCSR5ReferenceAlignedArray<int>( mat.aj.size() );
+    std::transform( mat.aj.begin(), mat.aj.end(), col_idx.get(),
+                    [base]( const int col ) { return col - base; } );
+
+    auto val = makeCSR5ReferenceAlignedCopy( mat.av );
+    auto x = makeCSR5ReferenceAlignedArray<double>( static_cast<std::size_t>( mat.rows ) );
+    auto y = makeCSR5ReferenceAlignedArray<double>( static_cast<std::size_t>( mat.rows ) );
+    std::fill_n( x.get(), mat.rows, 1.0 );
+    std::fill_n( y.get(), mat.rows, 0.0 );
+
+    anonymouslibHandle<int, uint32_t, double> spmv( mat.rows, mat.rows );
+
+    int err = spmv.inputCSR( mat.NNZ(), row_ptr.get(), col_idx.get(), val.get() );
+    if ( err != ANONYMOUSLIB_SUCCESS )
+    {
+        skipCSR5ReferenceError( state, "inputCSR", err );
+        return;
+    }
+
+    err = spmv.setX( x.get() );
+    if ( err != ANONYMOUSLIB_SUCCESS )
+    {
+        skipCSR5ReferenceError( state, "setX", err );
+        return;
+    }
+
+    spmv.setSigma( ANONYMOUSLIB_CSR5_SIGMA );
+    err = spmv.asCSR5();
+    if ( err != ANONYMOUSLIB_SUCCESS )
+    {
+        skipCSR5ReferenceError( state, "asCSR5", err );
+        return;
+    }
+
+    bool spmv_failed = false;
+    for ( auto _ : state )
+    {
+        for ( int i = 0; i < it; i++ )
+        {
+            err = spmv.spmv( 1.0, y.get() );
+            if ( err != ANONYMOUSLIB_SUCCESS )
+            {
+                state.SkipWithError( "reference CSR5 spmv failed" );
+                spmv_failed = true;
+                break;
+            }
+        }
+        if ( spmv_failed )
+        {
+            break;
+        }
+    }
+
+    spmv.destroy();
+    if ( spmv_failed )
+    {
+        return;
+    }
+    setSpmvBytesProcessed( state, mat, it );
+};
+#endif
 
 #ifdef USE_MKL
 template <typename VALTYPE>
@@ -529,37 +684,37 @@ int main( int argc, char** argv )
     std::cout << "  Iterations: " << iterations << "\n";
 
     // Double precision benchmarks
-    registerSpmvBenchmark( "Serial_double", Serial<double>, mat_double, num_threads, iterations );
+    // registerSpmvBenchmark( "Serial_double", Serial<double>, mat_double, num_threads, iterations );
     registerSpmvBenchmark( "Parallel_double", Parallel<double>, mat_double, num_threads, iterations );
     registerSpmvBenchmark( "RowBalanced_double", RowBalanced<double>, mat_double, num_threads, iterations );
-    registerSpmvBenchmark( "RowBalancedSimd_double", RowBalancedSimd<double>, mat_double,
-                           num_threads, iterations );
+    registerSpmvBenchmark( "RowBalancedSimd_double", RowBalancedSimd<double>, mat_double, num_threads, iterations );
     registerSpmvBenchmark( "ALBUSSum_double", ALBUSSum<double>, mat_double, num_threads, iterations );
     registerSpmvBenchmark( "ALBUSSimd_double", ALBUSSimd<double>, mat_double, num_threads, iterations );
     registerSpmvBenchmark( "CAMLBSum_double", CAMLBSum<double>, mat_double, num_threads, iterations );
     registerSpmvBenchmark( "CAMLBSimd_double", CAMLBSimd<double>, mat_double, num_threads, iterations );
+    registerSpmvBenchmark( "CSR5_double", CSR5Double_Bench, mat_double, num_threads, iterations );
+#ifdef LINEAR_ALGEBRA_ENABLE_CSR5_REFERENCE_BENCH
+    registerSpmvBenchmark( "CSR5Reference_double", CSR5ReferenceDouble_Bench, mat_double, num_threads, iterations );
+#endif
 
 #ifdef USE_MKL
     registerSpmvBenchmark( "MKLSPMV_double", MKLSPMV_Bench<double>, mat_double, num_threads, iterations );
 #endif
 
 #ifdef USE_CUDA
-    registerSpmvBenchmark( "CuSparseSPMV_double", CuSparseSPMV_Bench<double>, mat_double,
-                           num_threads, iterations );
+    registerSpmvBenchmark( "CuSparseSPMV_double", CuSparseSPMV_Bench<double>, mat_double, num_threads, iterations );
     registerSpmvBenchmark( "CSRScalarSPMV_double", CSRScalarSPMV_Bench<double>, mat_double,
                            num_threads, iterations );
     registerSpmvBenchmark( "CSRVectorSPMV_double", CSRVectorSPMV_Bench<double>, mat_double,
                            num_threads, iterations );
-    registerSpmvBenchmark( "CSRMergeSPMV_double", CSRMergeSPMV_Bench<double>, mat_double,
-                           num_threads, iterations );
+    registerSpmvBenchmark( "CSRMergeSPMV_double", CSRMergeSPMV_Bench<double>, mat_double, num_threads, iterations );
 #endif
 
     // Float precision benchmarks
-    registerSpmvBenchmark( "Serial_float", Serial<float>, mat_float, num_threads, iterations );
+    // registerSpmvBenchmark( "Serial_float", Serial<float>, mat_float, num_threads, iterations );
     registerSpmvBenchmark( "Parallel_float", Parallel<float>, mat_float, num_threads, iterations );
     registerSpmvBenchmark( "RowBalanced_float", RowBalanced<float>, mat_float, num_threads, iterations );
-    registerSpmvBenchmark( "RowBalancedSimd_float", RowBalancedSimd<float>, mat_float,
-                           num_threads, iterations );
+    registerSpmvBenchmark( "RowBalancedSimd_float", RowBalancedSimd<float>, mat_float, num_threads, iterations );
     registerSpmvBenchmark( "ALBUSSum_float", ALBUSSum<float>, mat_float, num_threads, iterations );
     registerSpmvBenchmark( "ALBUSSimd_float", ALBUSSimd<float>, mat_float, num_threads, iterations );
     registerSpmvBenchmark( "CAMLBSum_float", CAMLBSum<float>, mat_float, num_threads, iterations );
@@ -570,14 +725,10 @@ int main( int argc, char** argv )
 #endif
 
 #ifdef USE_CUDA
-    registerSpmvBenchmark( "CuSparseSPMV_float", CuSparseSPMV_Bench<float>, mat_float,
-                           num_threads, iterations );
-    registerSpmvBenchmark( "CSRScalarSPMV_float", CSRScalarSPMV_Bench<float>, mat_float,
-                           num_threads, iterations );
-    registerSpmvBenchmark( "CSRVectorSPMV_float", CSRVectorSPMV_Bench<float>, mat_float,
-                           num_threads, iterations );
-    registerSpmvBenchmark( "CSRMergeSPMV_float", CSRMergeSPMV_Bench<float>, mat_float,
-                           num_threads, iterations );
+    registerSpmvBenchmark( "CuSparseSPMV_float", CuSparseSPMV_Bench<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "CSRScalarSPMV_float", CSRScalarSPMV_Bench<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "CSRVectorSPMV_float", CSRVectorSPMV_Bench<float>, mat_float, num_threads, iterations );
+    registerSpmvBenchmark( "CSRMergeSPMV_float", CSRMergeSPMV_Bench<float>, mat_float, num_threads, iterations );
 #endif
 
     benchmark::Initialize( &argc, argv );

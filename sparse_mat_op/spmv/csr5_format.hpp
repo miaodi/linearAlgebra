@@ -34,18 +34,19 @@ namespace matrix_utils
  * - descriptor layout: [y_offset][seg_offset][SIGMA row-start bits][unused]
  * - empty rows are intentionally unsupported in this first version
  *
- * @tparam ROWTYPE Integer type for row pointers (int, int64_t)
- * @tparam COLTYPE Integer type for column indices (int, int64_t)
- * @tparam VALTYPE Value type (double, float)
  * @tparam Policy CSR5 policy defining OMEGA, SIGMA, TILE_SIZE
  */
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename Policy>
+template <typename Policy>
 struct CSR5Data
 {
     static_assert( is_csr5_policy_v<Policy>, "Policy must satisfy CSR5 policy requirements" );
     static_assert( Policy::TILE_SIZE == Policy::OMEGA * Policy::SIGMA, "Invalid CSR5 tile size" );
     static_assert( Policy::DESCRIPTOR_BITS <= 32,
                    "CSR5Data stores one uint32_t descriptor packet per lane" );
+
+    using ROWTYPE = typename Policy::ROWTYPE;
+    using COLTYPE = typename Policy::COLTYPE;
+    using VALTYPE = typename Policy::VALTYPE;
 
     // Matrix dimensions
     COLTYPE _num_rows;

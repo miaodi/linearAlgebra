@@ -70,11 +70,14 @@ constexpr void unpackCSR5LaneDesc( const uint32_t desc, uint32_t& bit_flags, uin
     }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename Policy>
-std::array<uint32_t, Policy::OMEGA> makeCSR5TileBitFlags( const std::vector<ROWTYPE>& row_ptr,
-                                                          const std::vector<COLTYPE>& tile_ptr,
-                                                          const ROWTYPE tile_idx )
+template <typename Policy>
+std::array<uint32_t, Policy::OMEGA> makeCSR5TileBitFlags( const std::vector<typename Policy::ROWTYPE>& row_ptr,
+                                                          const std::vector<typename Policy::COLTYPE>& tile_ptr,
+                                                          const typename Policy::ROWTYPE tile_idx )
 {
+    using ROWTYPE = typename Policy::ROWTYPE;
+    using COLTYPE = typename Policy::COLTYPE;
+
     constexpr int SIGMA = Policy::SIGMA;
     constexpr int TILE_SIZE = Policy::TILE_SIZE;
 
@@ -167,16 +170,20 @@ std::array<uint32_t, Policy::OMEGA> makeCSR5TileDesc( const std::array<uint32_t,
  * @param av Values (size: nnz)
  * @param[out] csr5_data Output CSR5 data structure
  */
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename Policy>
-void convertCSRtoCSR5( COLTYPE num_rows,
-                       const ROWTYPE* ai,
-                       const COLTYPE* aj,
-                       const VALTYPE* av,
-                       CSR5Data<ROWTYPE, COLTYPE, VALTYPE, Policy>& csr5_data,
+template <typename Policy>
+void convertCSRtoCSR5( typename Policy::COLTYPE num_rows,
+                       const typename Policy::ROWTYPE* ai,
+                       const typename Policy::COLTYPE* aj,
+                       const typename Policy::VALTYPE* av,
+                       CSR5Data<Policy>& csr5_data,
                        int num_threads = omp_get_max_threads() )
 {
     static_assert( is_csr5_policy_v<Policy>, "Policy must satisfy CSR5 policy requirements" );
     static_assert( Policy::DESCRIPTOR_BITS <= 32, "CSR5 preprocess supports only num_packet == 1" );
+
+    using ROWTYPE = typename Policy::ROWTYPE;
+    using COLTYPE = typename Policy::COLTYPE;
+    using VALTYPE = typename Policy::VALTYPE;
 
     constexpr int OMEGA = Policy::OMEGA;
     constexpr int SIGMA = Policy::SIGMA;
@@ -208,7 +215,7 @@ void convertCSRtoCSR5( COLTYPE num_rows,
             "convertCSRtoCSR5 requires non-null column and value arrays when nnz > 0" );
     }
 
-    csr5_data = CSR5Data<ROWTYPE, COLTYPE, VALTYPE, Policy>{};
+    csr5_data = CSR5Data<Policy>{};
     csr5_data._num_rows = num_rows;
     csr5_data._nnz = nnz;
     csr5_data._base = base;
@@ -272,8 +279,8 @@ void convertCSRtoCSR5( COLTYPE num_rows,
             }
         }
 
-        const auto lane_bit_flags = makeCSR5TileBitFlags<ROWTYPE, COLTYPE, Policy>(
-            csr5_data._row_ptr, csr5_data._tile_ptr, tile );
+        const auto lane_bit_flags =
+            makeCSR5TileBitFlags<Policy>( csr5_data._row_ptr, csr5_data._tile_ptr, tile );
         const bool fast_track = csr5_data._tile_ptr[tile] == csr5_data._tile_ptr[tile + 1];
         const auto tile_desc =
             fast_track ? std::array<uint32_t, OMEGA>{} : makeCSR5TileDesc<Policy>( lane_bit_flags );
@@ -303,12 +310,12 @@ void convertCSRtoCSR5( COLTYPE num_rows,
     }
 }
 
-template <typename ROWTYPE, typename COLTYPE, typename VALTYPE, typename Policy>
-void CSR5Data<ROWTYPE, COLTYPE, VALTYPE, Policy>::unpackTileDesc( ROWTYPE tile_idx,
-                                                                  int lane,
-                                                                  uint32_t& bit_flags,
-                                                                  uint32_t& y_offset,
-                                                                  uint32_t& seg_offset ) const
+template <typename Policy>
+void CSR5Data<Policy>::unpackTileDesc( typename Policy::ROWTYPE tile_idx,
+                                       int lane,
+                                       uint32_t& bit_flags,
+                                       uint32_t& y_offset,
+                                       uint32_t& seg_offset ) const
 {
     unpackCSR5LaneDesc<Policy>( getTileDesc( tile_idx, lane ), bit_flags, y_offset, seg_offset );
 }

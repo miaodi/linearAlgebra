@@ -11,4 +11,5 @@ target_include_directories(${PROJECT_NAME} INTERFACE
 target_link_libraries(${PROJECT_NAME} INTERFACE
     OpenMP::OpenMP_CXX
     Eigen3::Eigen
+    utils
 )

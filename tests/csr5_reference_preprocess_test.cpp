@@ -19,7 +19,7 @@
 namespace
 {
 
-using Policy = matrix_utils::CSR5_AVX2_Policy<double>;
+using Policy = matrix_utils::CSR5AVX2DoublePolicy;
 using Matrix = matrix_utils::CSRMatrixVec<int, int, double>;
 
 static_assert( Policy::OMEGA == ANONYMOUSLIB_CSR5_OMEGA );
@@ -146,9 +146,9 @@ void compareMatrixWithReference( const std::filesystem::path& path, ComparisonSt
         return;
     }
 
-    matrix_utils::CSR5Data<int, int, double, Policy> actual;
-    matrix_utils::convertCSRtoCSR5<int, int, double, Policy>(
-        matrix.rows, matrix.ai.data(), matrix.aj.data(), matrix.av.data(), actual, 4 );
+    matrix_utils::CSR5Data<Policy> actual;
+    matrix_utils::convertCSRtoCSR5<Policy>( matrix.rows, matrix.ai.data(), matrix.aj.data(),
+                                            matrix.av.data(), actual, 4 );
 
     const ReferenceCSR5 ref = buildReferenceCSR5( matrix );
 
