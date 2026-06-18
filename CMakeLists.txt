@@ -34,6 +34,15 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Keep FetchContent checkouts in a descriptive directory while preserving
+# explicit user overrides and migrating existing build trees from CMake's default.
+if(NOT DEFINED FETCHCONTENT_BASE_DIR
+   OR FETCHCONTENT_BASE_DIR STREQUAL ""
+   OR FETCHCONTENT_BASE_DIR STREQUAL "${CMAKE_BINARY_DIR}/_deps")
+  set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/third-party"
+    CACHE PATH "Directory used by FetchContent for third-party dependencies" FORCE)
+endif()
+
 # set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mtune=native -fno-strict-aliasing -Wno-unused-variable")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -265,7 +274,7 @@ include_directories(${CMAKE_BINARY_DIR})
 
 add_subdirectory(enums)
 add_subdirectory(utils)
-add_subdirectory(third_party/stb)
+add_subdirectory(third-party/stb)
 add_subdirectory(sparse_mat_op)
 add_subdirectory(graph)
 if(USE_MKL)
