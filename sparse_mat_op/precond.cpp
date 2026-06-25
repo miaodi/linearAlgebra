@@ -1733,15 +1733,15 @@ struct ILURowEliminator
             }
         }
 
+        // Mark this row as ready before local marker cleanup so dependent rows can proceed sooner.
+        policy.mark_row_ready( i );
+
         // Clear marker entries touched in row i (make them ABSENT for next row)
         for ( ROWT pos = row_start; pos < row_end; ++pos )
         {
             COLT col = ilu_aj[pos] - base;
             marker[col] = MARKER_ABSENT;
         }
-
-        // Mark this row as ready (no-op in sequential)
-        policy.mark_row_ready( i );
 
         return true;
     }
