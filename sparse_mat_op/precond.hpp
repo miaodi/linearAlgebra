@@ -58,16 +58,15 @@ void ICCLevelSymbolic3( const typename CSRMatrixType::COLTYPE size,
                         CSRMatrixType& icc );
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool ICCLevelNumeric( const COLTYPE size,
-                      ROWTYPE const* ai,
-                      COLTYPE const* aj,
-                      VALTYPE const* av,
-                      COLTYPE const* diag_pos,
-                      const int lvl,
-                      const VALTYPE omega,
-                      ROWTYPE const* icc_ai,
-                      COLTYPE const* icc_aj,
-                      VALTYPE* icc_av );
+bool ICCNumeric( const COLTYPE size,
+                 ROWTYPE const* ai,
+                 COLTYPE const* aj,
+                 VALTYPE const* av,
+                 COLTYPE const* diag_pos,
+                 const VALTYPE omega,
+                 ROWTYPE const* icc_ai,
+                 COLTYPE const* icc_aj,
+                 VALTYPE* icc_av );
 
 template <ResizableDiagonal CSRMatrixType>
 class ICCLevelSymbolicParallel

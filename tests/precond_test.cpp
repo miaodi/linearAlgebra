@@ -184,8 +184,8 @@ TEST_F( precond_Test, icc_level_numeric_factorize )
         mkl_wrapper::mkl_sparse_mat matU( mat.rows(), mat.rows(), U.ai, U.aj, U.av, mat.mkl_base() );
 
         matrix_utils::ICCLevelSymbolic0( mat.rows(), U.ai.get(), U.aj.get(), U.ai.get(), lvl, ICC0 );
-        matrix_utils::ICCLevelNumeric( mat.rows(), U.ai.get(), U.aj.get(), U.av.get(), U.ai.get(),
-                                       lvl, 0., ICC0.ai.get(), ICC0.aj.get(), ICC0.av.get() );
+        matrix_utils::ICCNumeric( mat.rows(), U.ai.get(), U.aj.get(), U.av.get(), U.ai.get(), 0.,
+                                  ICC0.ai.get(), ICC0.aj.get(), ICC0.av.get() );
         mkl_wrapper::mkl_sparse_mat matICC0( mat.rows(), mat.rows(), ICC0.ai, ICC0.aj, ICC0.av, mat.mkl_base() );
         std::cout << std::endl;
         auto prec = std::make_shared<mkl_wrapper::incomplete_cholesky_k>();

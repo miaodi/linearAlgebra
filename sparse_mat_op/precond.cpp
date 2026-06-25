@@ -681,16 +681,15 @@ void ICCLevelSymbolic3( const typename CSRMatrixType::COLTYPE size,
 }
 
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
-bool ICCLevelNumeric( const COLTYPE size,
-                      ROWTYPE const* ai,
-                      COLTYPE const* aj,
-                      VALTYPE const* av,
-                      COLTYPE const* diag_pos,
-                      const int lvl,
-                      const VALTYPE omega,
-                      ROWTYPE const* icc_ai,
-                      COLTYPE const* icc_aj,
-                      VALTYPE* icc_av )
+bool ICCNumeric( const COLTYPE size,
+                 ROWTYPE const* ai,
+                 COLTYPE const* aj,
+                 VALTYPE const* av,
+                 COLTYPE const* diag_pos,
+                 const VALTYPE omega,
+                 ROWTYPE const* icc_ai,
+                 COLTYPE const* icc_aj,
+                 VALTYPE* icc_av )
 {
     const auto base = ai[0];
     const ROWTYPE nnz = ai[size] - base;
@@ -2283,16 +2282,15 @@ template void ICCLevelSymbolic3<CSRMatrix<int, int, double>>( const int rows,
                                                               const int lvl,
                                                               CSRMatrix<int, int, double>& icc );
 
-template bool ICCLevelNumeric<int, int, double>( const int rows,
-                                                 int const* ai,
-                                                 int const* aj,
-                                                 double const* av,
-                                                 int const* diag_pos,
-                                                 const int lvl,
-                                                 const double omega,
-                                                 int const* icc_ai,
-                                                 int const* icc_aj,
-                                                 double* icc_av );
+template bool ICCNumeric<int, int, double>( const int rows,
+                                            int const* ai,
+                                            int const* aj,
+                                            double const* av,
+                                            int const* diag_pos,
+                                            const double omega,
+                                            int const* icc_ai,
+                                            int const* icc_aj,
+                                            double* icc_av );
 
 template class ICCLevelSymbolicParallel<matrix_utils::CSRMatrix<int, int, double>>;
 template class ICCLevelNumericFixedPoint<matrix_utils::CSRMatrix<int, int, double>>;

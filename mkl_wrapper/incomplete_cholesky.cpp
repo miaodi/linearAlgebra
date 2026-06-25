@@ -359,8 +359,8 @@ bool incomplete_cholesky_k_2::numeric_factorize( mkl_sparse_mat const* const A )
 
     do
     {
-        if ( !matrix_utils::ICCLevelNumeric( rows(), ai.get(), aj.get(), av.get(), _diagPos.data(),
-                                             _level, shift, _ai.get(), _aj.get(), _av.get() ) )
+        if ( !matrix_utils::ICCNumeric( rows(), ai.get(), aj.get(), av.get(), _diagPos.data(),
+                                        shift, _ai.get(), _aj.get(), _av.get() ) )
         {
             if ( !_shift || ++iter > _nrestart )
                 return false;
