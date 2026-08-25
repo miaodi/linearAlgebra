@@ -1,15 +1,16 @@
 #pragma once
 
+#include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cusparse.h>
-#include <cuda_runtime.h>
-#include <iostream>
-#include <vector>
+
 #include <cmath>
+#include <stdexcept>
+
 #include "cuda_memory.cuh"
 #include "cuda_preconditioner.cuh"
-#include "cuda_spmv.cuh"
 #include "cuda_solver_types.cuh"
+#include "cuda_spmv.cuh"
 
 namespace matrix_utils::sparse_cuda
 {
@@ -25,12 +26,27 @@ namespace matrix_utils::sparse_cuda
  * - Self-contained (only depends on cuBLAS/cuSPARSE/std libraries)
  * - Fixed double precision (no templates)
  * - Supports left and right preconditioning
- * - More memory efficient than GMRES (no restart needed)
+ * - Fixed-memory short recurrence (no growing Krylov basis)
  *
  * Algorithm:
  * - BiCGSTAB is a variant of the BiCG method that uses a two-term recurrence
  * - Typically converges faster than GMRES for some problems
- * - Requires 8 vectors: r0, r, p, v, s, t, x_hat and temporary storage
+ * - Uses 8 workspace vectors: r0, r, p, v, s, t, x_hat and temporary storage
+ * - Detects scale-aware near-breakdown and performs bounded full restarts
+ *
+ * References:
+ * [1] H. A. van der Vorst, "Bi-CGSTAB: A Fast and Smoothly Converging Variant
+ *     of Bi-CG for the Solution of Nonsymmetric Linear Systems," 1992.
+ *     https://doi.org/10.1137/0913035
+ * [2] G. L. G. Sleijpen and H. A. van der Vorst, "Maintaining Convergence
+ *     Properties of BiCGstab Methods in Finite Precision Arithmetic," 1995.
+ *     https://doi.org/10.1007/BF02140769
+ * [3] G. L. G. Sleijpen and H. A. van der Vorst, "Reliable Updated Residuals
+ *     in Hybrid Bi-CG Methods," 1996.
+ *     https://doi.org/10.1007/BF02309342
+ *
+ * The main recurrence follows [1]. Robustness extensions beyond [1] are
+ * identified and attributed at their implementation sites.
  */
 class CudaBiCGSTAB
 {
@@ -47,15 +63,73 @@ public:
 
     // Configuration methods
     void setMaxIter( size_t max_iter ) { _max_iter = max_iter; }
-    void setAbsTol( double abs_tol ) { _abs_tol = abs_tol; }
-    void setRelTol( double rel_tol ) { _rel_tol = rel_tol; }
+    void setAbsTol( double abs_tol )
+    {
+        if ( !std::isfinite( abs_tol ) || abs_tol < 0.0 )
+        {
+            throw std::invalid_argument(
+                "BiCGSTAB absolute tolerance must be finite and non-negative" );
+        }
+        _abs_tol = abs_tol;
+    }
+    void setRelTol( double rel_tol )
+    {
+        if ( !std::isfinite( rel_tol ) || rel_tol < 0.0 )
+        {
+            throw std::invalid_argument(
+                "BiCGSTAB relative tolerance must be finite and non-negative" );
+        }
+        _rel_tol = rel_tol;
+    }
     void setPreconditionerType( PreconditionerType prec_type ) { _prec_type = prec_type; }
+
+    /**
+     * @brief Limit full restarts after denominator breakdown (default: 2)
+     *
+     * This bounded breakdown-recovery policy is an implementation choice beyond
+     * [1]. Reference [3] discusses residual recomputation and restart trade-offs,
+     * but does not prescribe this limit.
+     */
+    void setMaxRestarts( size_t max_restarts ) { _max_restarts = max_restarts; }
+
+    /**
+     * @brief Set periodic true-residual replacement interval; zero disables it
+     *
+     * The default interval of 50 is a fixed-frequency simplification of [3]'s
+     * residual-driven reliable-update strategies, not a value from [1] or [3].
+     */
+    void setResidualReplacementFrequency( size_t frequency )
+    {
+        _residual_replacement_frequency = frequency;
+    }
+
+    /**
+     * @brief Set the normalized inner-product breakdown threshold
+     *
+     * The angle-based test is motivated by [2]. The default sqrt(epsilon) is a
+     * conservative implementation choice, not a constant prescribed by [2].
+     */
+    void setBreakdownTolerance( double tolerance )
+    {
+        if ( !std::isfinite( tolerance ) || tolerance <= 0.0 )
+        {
+            throw std::invalid_argument(
+                "BiCGSTAB breakdown tolerance must be finite and positive" );
+        }
+        _breakdown_tol = tolerance;
+    }
+    void setVerbose( bool verbose ) { _verbose = verbose; }
 
     /**
      * @brief Get the number of iterations from the last solve
      * @return Number of iterations performed in the last solve call
      */
     int getLastIterations() const { return _last_iterations; }
+
+    /**
+     * @brief Get the number of full breakdown restarts from the last solve
+     */
+    int getLastRestarts() const { return _last_restarts; }
 
     /**
      * @brief Get the cuSPARSE handle for setting up preconditioners
@@ -126,8 +200,13 @@ private:
     size_t _max_iter;
     double _abs_tol;
     double _rel_tol;
+    double _breakdown_tol;
     PreconditionerType _prec_type;
+    size_t _max_restarts;
+    size_t _residual_replacement_frequency;
+    bool _verbose;
     int _last_iterations;
+    int _last_restarts;
 
     // Setup state
     bool _is_operator_setup;
@@ -168,7 +247,7 @@ private:
     /**
      * @brief Compute initial residual r = b - Ax
      */
-    double compute_initial_residual( const DeviceVectorView& d_b, const DeviceVectorView& d_x );
+    double compute_residual( const DeviceVectorView& d_b, const DeviceVectorView& d_x, double* true_residual = nullptr );
 
     /**
      * @brief Apply matrix-vector product with preconditioning

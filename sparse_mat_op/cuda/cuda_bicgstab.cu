@@ -1,11 +1,39 @@
 #include "cuda_bicgstab.cuh"
-#include <cstring>
+
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
+#include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace matrix_utils::sparse_cuda
 {
+
+namespace
+{
+
+bool near_inner_product_breakdown( const double inner_product, const double lhs_norm, const double rhs_norm, const double tolerance )
+{
+    // Extension beyond the original recurrence [1]: use an angle/scale-aware
+    // test instead of an absolute threshold. The near-breakdown analysis in
+    // [2] is formulated in terms of angles between Krylov and shadow spaces.
+    // [2]: https://doi.org/10.1007/BF02140769
+    if ( !std::isfinite( inner_product ) || !std::isfinite( lhs_norm ) || !std::isfinite( rhs_norm ) )
+    {
+        return true;
+    }
+
+    if ( lhs_norm == 0.0 || rhs_norm == 0.0 )
+    {
+        return true;
+    }
+
+    const long double scale = static_cast<long double>( lhs_norm ) * static_cast<long double>( rhs_norm );
+    return std::abs( static_cast<long double>( inner_product ) ) <= static_cast<long double>( tolerance ) * scale;
+}
+
+} // namespace
 
 CudaBiCGSTAB::CudaBiCGSTAB()
     : _cublas_handle( nullptr ),
@@ -16,8 +44,13 @@ CudaBiCGSTAB::CudaBiCGSTAB()
       _max_iter( 100 ),
       _abs_tol( 0.0 ),
       _rel_tol( 1e-8 ),
+      _breakdown_tol( std::sqrt( std::numeric_limits<double>::epsilon() ) ),
       _prec_type( PreconditionerType::LEFT ),
+      _max_restarts( 2 ),
+      _residual_replacement_frequency( 50 ),
+      _verbose( false ),
       _last_iterations( 0 ),
+      _last_restarts( 0 ),
       _is_operator_setup( false ),
       _n( 0 )
 {
@@ -97,7 +130,11 @@ void CudaBiCGSTAB::setupOperator( SpMVOperator<double>* spmv_operator )
     _spmv_operator = spmv_operator;
 
     // Get matrix size from operator
-    size_t n = _spmv_operator->size();
+    const size_t n = _spmv_operator->size();
+    if ( n > static_cast<size_t>( std::numeric_limits<int>::max() ) )
+    {
+        throw std::runtime_error( "CudaBiCGSTAB matrix size exceeds the cuBLAS integer limit" );
+    }
 
     // Initialize workspace for this problem size
     initialize_workspace( n );
@@ -132,10 +169,14 @@ State CudaBiCGSTAB::solve( const double* h_b, double* h_x )
     }
 
     // Check if preconditioner is required but not setup
-    if ( _prec_type != PreconditionerType::NONE && !_preconditioner )
+    if ( _prec_type != PreconditionerType::NONE && ( !_preconditioner || !_preconditioner->isSetup() ) )
     {
         throw std::runtime_error(
-            "setPreconditioner must be called before solve when using preconditioner" );
+            "A setup preconditioner is required before solve when preconditioning is enabled" );
+    }
+    if ( _n > 0 && ( !h_b || !h_x ) )
+    {
+        throw std::runtime_error( "CudaBiCGSTAB solve requires non-null b and x pointers" );
     }
 
     // Copy host data to device
@@ -145,7 +186,8 @@ State CudaBiCGSTAB::solve( const double* h_b, double* h_x )
     {
         // Initialize device memory to zero instead of copying
         _d_x.resize( static_cast<size_t>( _n ) ); // Ensure size
-        cudaMemset( _d_x.data(), 0, static_cast<size_t>( _n ) * sizeof( double ) );
+        check_cuda_error( cudaMemset( _d_x.data(), 0, static_cast<size_t>( _n ) * sizeof( double ) ),
+                          "Failed to zero the initial guess" );
     }
     else
     {
@@ -161,7 +203,8 @@ State CudaBiCGSTAB::solve( const double* h_b, double* h_x )
     State result = deviceSolve( _view_d_b, _view_d_x );
 
     // Copy solution back to host
-    cudaMemcpy( h_x, _d_x.data(), static_cast<size_t>( _n ) * sizeof( double ), cudaMemcpyDeviceToHost );
+    check_cuda_error( cudaMemcpy( h_x, _d_x.data(), static_cast<size_t>( _n ) * sizeof( double ), cudaMemcpyDeviceToHost ),
+                      "Failed to copy the BiCGSTAB solution to host" );
 
     return result;
 }
@@ -179,37 +222,95 @@ State CudaBiCGSTAB::deviceSolve( const DeviceVectorView& d_b, DeviceVectorView& 
     }
 
     // Check if preconditioner is required but not setup
-    if ( _prec_type != PreconditionerType::NONE && !_preconditioner )
+    if ( _prec_type != PreconditionerType::NONE && ( !_preconditioner || !_preconditioner->isSetup() ) )
     {
         throw std::runtime_error(
-            "setPreconditioner must be called before solve when using preconditioner" );
+            "A setup preconditioner is required before solve when preconditioning is enabled" );
     }
 
-    // Initialize iteration counter
     _last_iterations = 0;
-
-    // Compute initial residual r = b - Ax (with preconditioning if LEFT)
-    double init_resid = compute_initial_residual( d_b, d_x );
-    if ( init_resid < _abs_tol )
+    _last_restarts = 0;
+    if ( _n == 0 )
     {
         return State::CONVERGED;
     }
 
-    // Choose arbitrary r_tilde (commonly r_tilde = r0)
-    _d_r0.copy<MemoryLocation::Device>( _d_r.data(), _n );
+    check_cuda_error( cudaMemset( _d_x_hat.data(), 0, static_cast<size_t>( _n ) * sizeof( double ) ),
+                      "Failed to initialize the BiCGSTAB solution update" );
 
-    // Initialize p0 = r0
-    _d_p.copy<MemoryLocation::Device>( _d_r.data(), _n );
+    double init_true_resid = 0.0;
+    const double init_resid = compute_residual( d_b, d_x, &init_true_resid );
+    if ( !std::isfinite( init_resid ) || !std::isfinite( init_true_resid ) )
+    {
+        return State::FAILED;
+    }
+    if ( check_convergence( init_true_resid, init_true_resid ) )
+    {
+        return State::CONVERGED;
+    }
 
-    // Initialize _x_hat to zero
-    cudaMemset( _d_x_hat.data(), 0, static_cast<size_t>( _n ) * sizeof( double ) );
+    double resid = init_resid;
+    double rho = 0.0;
+    double r0_norm = 0.0;
+    bool at_recurrence_start = false;
+    bool shadow_repaired = false;
 
-    // Initialize scalars
-    double rho, alpha = 1.0, omega = 1.0;
+    auto initialize_recurrence = [&]()
+    {
+        _d_r0.copy<MemoryLocation::Device>( _d_r.data(), static_cast<size_t>( _n ) );
+        _d_p.copy<MemoryLocation::Device>( _d_r.data(), static_cast<size_t>( _n ) );
+        r0_norm = resid;
+        check_cublas_error( cublasDdot( _cublas_handle, _n, _d_r0.data(), 1, _d_r.data(), 1, &rho ),
+                            "Failed to initialize rho" );
+        at_recurrence_start = true;
+        shadow_repaired = false;
+    };
 
-    // Compute initial rho = <r_tilde, r>
-    check_cublas_error( cublasDdot( _cublas_handle, _n, _d_r0.data(), 1, _d_r.data(), 1, &rho ),
-                        "Failed to compute initial rho" );
+    enum class RefreshOutcome
+    {
+        RESTARTED,
+        CONVERGED,
+        FAILED
+    };
+
+    auto refresh_solution_and_residual = [&]( const bool breakdown_restart )
+    {
+        // Extension beyond the original recurrence [1]: commit the grouped
+        // update and recompute b-A*x before accepting convergence or restarting.
+        // [3] analyzes reliable residual updates and restart trade-offs. Its
+        // "flying restart" preserves more recurrence state; this implementation
+        // deliberately performs a full recurrence restart to remain simple and
+        // to discard state after an invalid denominator.
+        // [3]: https://doi.org/10.1007/BF02309342
+        update_solution( d_x );
+        check_cuda_error( cudaMemset( _d_x_hat.data(), 0, static_cast<size_t>( _n ) * sizeof( double ) ),
+                          "Failed to clear the committed BiCGSTAB solution update" );
+
+        double true_resid = 0.0;
+        resid = compute_residual( d_b, d_x, &true_resid );
+        if ( !std::isfinite( resid ) || !std::isfinite( true_resid ) )
+        {
+            return RefreshOutcome::FAILED;
+        }
+        if ( check_convergence( true_resid, init_true_resid ) )
+        {
+            return RefreshOutcome::CONVERGED;
+        }
+
+        if ( breakdown_restart )
+        {
+            if ( static_cast<size_t>( _last_restarts ) >= _max_restarts )
+            {
+                return RefreshOutcome::FAILED;
+            }
+            ++_last_restarts;
+        }
+
+        initialize_recurrence();
+        return RefreshOutcome::RESTARTED;
+    };
+
+    initialize_recurrence();
 
     // BiCGSTAB main iteration loop
     for ( size_t iter = 0; iter < _max_iter; ++iter )
@@ -224,19 +325,96 @@ State CudaBiCGSTAB::deviceSolve( const DeviceVectorView& d_b, DeviceVectorView& 
         double rtilde_v;
         check_cublas_error( cublasDdot( _cublas_handle, _n, _d_r0.data(), 1, _d_v.data(), 1, &rtilde_v ),
                             "Failed to compute <r_tilde, v>" );
+        double v_norm = 0.0;
+        check_cublas_error( cublasDnrm2( _cublas_handle, _n, _d_v.data(), 1, &v_norm ),
+                            "Failed to compute ||v||" );
 
-        // if (std::abs(rtilde_v) < 1e-14) {
-        //     std::cerr << "BiCGSTAB breakdown: r_tilde_v = " << rtilde_v << std::endl;
-        //     _last_iterations = iter;
-        //     return State::FAILED;
-        // }
-        alpha = rho / rtilde_v;
+        bool alpha_breakdown = near_inner_product_breakdown( rtilde_v, r0_norm, v_norm, _breakdown_tol ) ||
+                               near_inner_product_breakdown( rho, r0_norm, resid, _breakdown_tol );
+        if ( alpha_breakdown && at_recurrence_start && !shadow_repaired && resid > 0.0 && v_norm > 0.0 )
+        {
+            // Extension beyond [1]: r_tilde is arbitrary, so repair a nearly
+            // orthogonal initial shadow vector deterministically. This exact
+            // repair formula is an implementation policy; [2] provides the
+            // finite-precision shadow-space/near-breakdown motivation.
+            // [2]: https://doi.org/10.1007/BF02140769
+            _d_r0.copy<MemoryLocation::Device>( _d_r.data(), static_cast<size_t>( _n ) );
+            const double shadow_scale = resid / v_norm;
+            check_cublas_error(
+                cublasDaxpy( _cublas_handle, _n, &shadow_scale, _d_v.data(), 1, _d_r0.data(), 1 ),
+                "Failed to repair the BiCGSTAB shadow residual" );
+            check_cublas_error( cublasDnrm2( _cublas_handle, _n, _d_r0.data(), 1, &r0_norm ),
+                                "Failed to compute the repaired shadow residual norm" );
+            check_cublas_error( cublasDdot( _cublas_handle, _n, _d_r0.data(), 1, _d_r.data(), 1, &rho ),
+                                "Failed to recompute rho after shadow repair" );
+            check_cublas_error( cublasDdot( _cublas_handle, _n, _d_r0.data(), 1, _d_v.data(), 1, &rtilde_v ),
+                                "Failed to recompute <r_tilde, v> after shadow repair" );
+            shadow_repaired = true;
+            alpha_breakdown = near_inner_product_breakdown( rtilde_v, r0_norm, v_norm, _breakdown_tol ) ||
+                              near_inner_product_breakdown( rho, r0_norm, resid, _breakdown_tol );
+        }
 
-        // step 2: Compute s = r - alpha * v
-        _d_s.copy<MemoryLocation::Device>( _d_r.data(), _n );
+        if ( alpha_breakdown )
+        {
+            _last_iterations = static_cast<int>( iter + 1 );
+            const RefreshOutcome outcome = refresh_solution_and_residual( true );
+            if ( outcome == RefreshOutcome::CONVERGED )
+            {
+                return State::CONVERGED;
+            }
+            if ( outcome == RefreshOutcome::FAILED )
+            {
+                return State::FAILED;
+            }
+            continue;
+        }
+
+        const double alpha = rho / rtilde_v;
+        if ( !std::isfinite( alpha ) )
+        {
+            _last_iterations = static_cast<int>( iter + 1 );
+            const RefreshOutcome outcome = refresh_solution_and_residual( true );
+            if ( outcome == RefreshOutcome::CONVERGED )
+            {
+                return State::CONVERGED;
+            }
+            if ( outcome == RefreshOutcome::FAILED )
+            {
+                return State::FAILED;
+            }
+            continue;
+        }
+
+        // step 2: s = r - alpha * v.
+        _d_s.copy<MemoryLocation::Device>( _d_r.data(), static_cast<size_t>( _n ) );
         const double neg_alpha = -alpha;
         check_cublas_error( cublasDaxpy( _cublas_handle, _n, &neg_alpha, _d_v.data(), 1, _d_s.data(), 1 ),
                             "Failed to compute s" );
+        double s_norm = 0.0;
+        check_cublas_error( cublasDnrm2( _cublas_handle, _n, _d_s.data(), 1, &s_norm ),
+                            "Failed to compute ||s||" );
+
+        // Practical guard around [1]'s recurrence: the alpha step may already
+        // be the exact solution. Algorithm 1 in [3], which reproduces standard
+        // Bi-CGSTAB [1], proceeds directly to omega; checking here prevents the
+        // resulting exact 0/0 when s=0.
+        // [3]: https://doi.org/10.1007/BF02309342
+        if ( check_convergence( s_norm, init_resid ) )
+        {
+            check_cublas_error( cublasDaxpy( _cublas_handle, _n, &alpha, _d_p.data(), 1, _d_x_hat.data(), 1 ),
+                                "Failed to commit the converged alpha update" );
+            _last_iterations = static_cast<int>( iter + 1 );
+            const RefreshOutcome outcome = refresh_solution_and_residual( false );
+            if ( outcome == RefreshOutcome::CONVERGED )
+            {
+                return State::CONVERGED;
+            }
+            if ( outcome == RefreshOutcome::FAILED )
+            {
+                return State::FAILED;
+            }
+            continue;
+        }
 
         // step 3: Compute omega
         // step 3.1: Compute t = A * s (with preconditioning)
@@ -245,73 +423,167 @@ State CudaBiCGSTAB::deviceSolve( const DeviceVectorView& d_b, DeviceVectorView& 
         apply_operator_with_preconditioning( _view_prec_x, _view_prec_y );
 
         // step 3.2: omega = (t, s) / (t, t)
-        double t_s, t_t;
+        double t_s = 0.0;
+        double t_t = 0.0;
         check_cublas_error( cublasDdot( _cublas_handle, _n, _d_t.data(), 1, _d_s.data(), 1, &t_s ),
                             "Failed to compute <t, s>" );
         check_cublas_error( cublasDdot( _cublas_handle, _n, _d_t.data(), 1, _d_t.data(), 1, &t_t ),
                             "Failed to compute <t, t>" );
-        omega = t_s / t_t;
+        const double t_norm = t_t > 0.0 ? std::sqrt( t_t ) : 0.0;
+        const bool omega_breakdown =
+            t_t <= 0.0 || near_inner_product_breakdown( t_s, t_norm, s_norm, _breakdown_tol );
+        if ( omega_breakdown )
+        {
+            // The alpha update is valid even if the minimal-residual omega
+            // step breaks down, so preserve it before the full restart.
+            check_cublas_error( cublasDaxpy( _cublas_handle, _n, &alpha, _d_p.data(), 1, _d_x_hat.data(), 1 ),
+                                "Failed to preserve the alpha update before restart" );
+            _last_iterations = static_cast<int>( iter + 1 );
+            const RefreshOutcome outcome = refresh_solution_and_residual( true );
+            if ( outcome == RefreshOutcome::CONVERGED )
+            {
+                return State::CONVERGED;
+            }
+            if ( outcome == RefreshOutcome::FAILED )
+            {
+                return State::FAILED;
+            }
+            continue;
+        }
 
-        // step 4: Update solution x_hat = x_hat + alpha * p + omega * s
+        const double omega = t_s / t_t;
+        if ( !std::isfinite( omega ) )
+        {
+            check_cublas_error( cublasDaxpy( _cublas_handle, _n, &alpha, _d_p.data(), 1, _d_x_hat.data(), 1 ),
+                                "Failed to preserve the alpha update before restart" );
+            _last_iterations = static_cast<int>( iter + 1 );
+            const RefreshOutcome outcome = refresh_solution_and_residual( true );
+            if ( outcome == RefreshOutcome::CONVERGED )
+            {
+                return State::CONVERGED;
+            }
+            if ( outcome == RefreshOutcome::FAILED )
+            {
+                return State::FAILED;
+            }
+            continue;
+        }
+
+        // step 4: x_hat = x_hat + alpha * p + omega * s.
         check_cublas_error( cublasDaxpy( _cublas_handle, _n, &alpha, _d_p.data(), 1, _d_x_hat.data(), 1 ),
-                            "Failed to update x_hat (alpha*p)" );
+                            "Failed to apply the alpha solution update" );
         check_cublas_error( cublasDaxpy( _cublas_handle, _n, &omega, _d_s.data(), 1, _d_x_hat.data(), 1 ),
-                            "Failed to update x_hat (omega*s)" );
+                            "Failed to apply the omega solution update" );
 
-        // step 5: Update residual r = s - omega * t
-        _d_r.copy<MemoryLocation::Device>( _d_s.data(), _n );
+        // step 5: r = s - omega * t.
+        _d_r.copy<MemoryLocation::Device>( _d_s.data(), static_cast<size_t>( _n ) );
         const double neg_omega = -omega;
         check_cublas_error( cublasDaxpy( _cublas_handle, _n, &neg_omega, _d_t.data(), 1, _d_r.data(), 1 ),
-                            "Failed to update residual" );
+                            "Failed to update the residual" );
 
-        // step 6: Check convergence
-        double resid;
+        // step 6: test the recursively updated residual.
         check_cublas_error( cublasDnrm2( _cublas_handle, _n, _d_r.data(), 1, &resid ),
-                            "Failed to compute residual norm" );
+                            "Failed to compute the residual norm" );
 
-        print_iteration_info( iter, resid, init_resid );
+        if ( _verbose )
+        {
+            print_iteration_info( static_cast<int>( iter ), resid, init_resid );
+        }
+
+        if ( !std::isfinite( resid ) )
+        {
+            _last_iterations = static_cast<int>( iter + 1 );
+            return State::FAILED;
+        }
 
         if ( check_convergence( resid, init_resid ) )
         {
-            _last_iterations = iter + 1;
-            update_solution( d_x );
-            return State::CONVERGED;
+            _last_iterations = static_cast<int>( iter + 1 );
+            const RefreshOutcome outcome = refresh_solution_and_residual( false );
+            if ( outcome == RefreshOutcome::CONVERGED )
+            {
+                return State::CONVERGED;
+            }
+            if ( outcome == RefreshOutcome::FAILED )
+            {
+                return State::FAILED;
+            }
+            continue;
         }
 
-        // step 7: Compute beta
-        double rho_new;
-        check_cublas_error( cublasDdot( _cublas_handle, _n, _d_r0.data(), 1, _d_r.data(), 1, &rho_new ),
-                            "Failed to compute rho_new" );
+        if ( _residual_replacement_frequency > 0 && ( iter + 1 ) % _residual_replacement_frequency == 0 )
+        {
+            // Extension beyond [1]: fixed-frequency residual replacement is a
+            // simple version of the reliable-update framework in [3]. The
+            // interval of 50 is an implementation default, not prescribed by
+            // that paper; set the frequency to zero to disable it.
+            // [3]: https://doi.org/10.1007/BF02309342
+            _last_iterations = static_cast<int>( iter + 1 );
+            const RefreshOutcome outcome = refresh_solution_and_residual( false );
+            if ( outcome == RefreshOutcome::CONVERGED )
+            {
+                return State::CONVERGED;
+            }
+            if ( outcome == RefreshOutcome::FAILED )
+            {
+                return State::FAILED;
+            }
+            continue;
+        }
 
-        // if (std::abs(rho_new) < 1e-14) {
-        //     std::cerr << "BiCGSTAB breakdown: rho_new = " << rho_new << std::endl;
-        //     _last_iterations = iter + 1;
-        //     return State::FAILED;
-        // }
+        // step 7: rho_new = (r_tilde, r).
+        double rho_new = 0.0;
+        check_cublas_error( cublasDdot( _cublas_handle, _n, _d_r0.data(), 1, _d_r.data(), 1, &rho_new ),
+                            "Failed to compute the next rho" );
+        if ( near_inner_product_breakdown( rho_new, r0_norm, resid, _breakdown_tol ) )
+        {
+            _last_iterations = static_cast<int>( iter + 1 );
+            const RefreshOutcome outcome = refresh_solution_and_residual( true );
+            if ( outcome == RefreshOutcome::CONVERGED )
+            {
+                return State::CONVERGED;
+            }
+            if ( outcome == RefreshOutcome::FAILED )
+            {
+                return State::FAILED;
+            }
+            continue;
+        }
 
         const double beta = ( rho_new / rho ) * ( alpha / omega );
+        if ( !std::isfinite( beta ) )
+        {
+            _last_iterations = static_cast<int>( iter + 1 );
+            const RefreshOutcome outcome = refresh_solution_and_residual( true );
+            if ( outcome == RefreshOutcome::CONVERGED )
+            {
+                return State::CONVERGED;
+            }
+            if ( outcome == RefreshOutcome::FAILED )
+            {
+                return State::FAILED;
+            }
+            continue;
+        }
         rho = rho_new;
 
-        // step 8: Update search direction p = r + beta * (p - omega * v)
-        // This implements: p = r + beta * p - beta * omega * v
-        // First: p = p - omega * v
+        // step 8: p = r + beta * (p - omega * v).
         check_cublas_error( cublasDaxpy( _cublas_handle, _n, &neg_omega, _d_v.data(), 1, _d_p.data(), 1 ),
-                            "Failed to update p (subtract omega*v)" );
-
-        // Then: p = r + beta * p
+                            "Failed to compute p - omega*v" );
         check_cublas_error( cublasDscal( _cublas_handle, _n, &beta, _d_p.data(), 1 ),
-                            "Failed to scale p by beta" );
+                            "Failed to scale the search direction" );
         const double one = 1.0;
         check_cublas_error( cublasDaxpy( _cublas_handle, _n, &one, _d_r.data(), 1, _d_p.data(), 1 ),
-                            "Failed to update p (add r)" );
+                            "Failed to add the residual to the search direction" );
+        at_recurrence_start = false;
     }
 
-    _last_iterations = _max_iter;
+    _last_iterations = static_cast<int>( _max_iter );
     update_solution( d_x );
     return State::MAX_ITER_REACHED;
 }
 
-double CudaBiCGSTAB::compute_initial_residual( const DeviceVectorView& d_b, const DeviceVectorView& d_x )
+double CudaBiCGSTAB::compute_residual( const DeviceVectorView& d_b, const DeviceVectorView& d_x, double* true_residual )
 {
     // Compute r = b - Ax
     // First compute Ax into a temporary vector
@@ -323,18 +595,24 @@ double CudaBiCGSTAB::compute_initial_residual( const DeviceVectorView& d_b, cons
     check_cublas_error( cublasDaxpy( _cublas_handle, _n, &neg_one, _d_tmp.data(), 1, _d_r.data(), 1 ),
                         "Failed to compute residual" );
 
-    // Apply left preconditioning if needed
+    double norm = 0.0;
+    check_cublas_error( cublasDnrm2( _cublas_handle, _n, _d_r.data(), 1, &norm ),
+                        "Failed to compute the true residual norm" );
+    if ( true_residual )
+    {
+        *true_residual = norm;
+    }
+
+    // Apply left preconditioning after recording the true residual norm.
     if ( _prec_type == PreconditionerType::LEFT )
     {
         _view_prec_x.setData( _d_r.data() );
         _view_prec_y.setData( _d_r.data() );
         _preconditioner->operator()( _view_prec_x, _view_prec_y );
+        check_cublas_error( cublasDnrm2( _cublas_handle, _n, _d_r.data(), 1, &norm ),
+                            "Failed to compute the preconditioned residual norm" );
     }
 
-    // Compute norm of residual
-    double norm;
-    check_cublas_error( cublasDnrm2( _cublas_handle, _n, _d_r.data(), 1, &norm ),
-                        "Failed to compute residual norm" );
     return norm;
 }
 
@@ -384,14 +662,22 @@ void CudaBiCGSTAB::update_solution( DeviceVectorView& d_x )
 
 bool CudaBiCGSTAB::check_convergence( double resid, double init_resid ) const
 {
-    return std::abs( resid ) < _abs_tol || std::abs( resid ) < _rel_tol * init_resid;
+    if ( !std::isfinite( resid ) || !std::isfinite( init_resid ) )
+    {
+        return false;
+    }
+
+    const double tolerance = std::max( _abs_tol, _rel_tol * std::abs( init_resid ) );
+    return std::abs( resid ) <= tolerance;
 }
 
 void CudaBiCGSTAB::print_iteration_info( int iter, double resid, double init_resid ) const
 {
     std::cout << "iter: " << std::setw( 4 ) << iter << " resid: " << std::scientific
-              << std::setprecision( 4 ) << std::abs( resid ) << " relative resid: " << std::scientific
-              << std::setprecision( 4 ) << std::abs( resid ) / init_resid << std::endl;
+              << std::setprecision( 4 ) << std::abs( resid )
+              << " relative resid: " << std::scientific << std::setprecision( 4 )
+              << std::abs( resid ) / std::max( std::abs( init_resid ), std::numeric_limits<double>::min() )
+              << std::endl;
 }
 
 void CudaBiCGSTAB::check_cuda_error( cudaError_t error, const char* message )
