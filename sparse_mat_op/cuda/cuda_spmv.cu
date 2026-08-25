@@ -831,31 +831,34 @@ void CuSparseSPMV<ROWTYPE, COLTYPE, VALTYPE>::check_cuda_error( cudaError_t erro
 /**
  * @brief Binary search to find merge path diagonal intersection
  *
- * Given two sorted arrays A (rows) and B (nonzeros), find the coordinate
- * (i,j) where diagonal 'diag' intersects the merge path.
+ * Given row-end markers A[row] = ia[row + 1] - base and nonzero indices
+ * B[nz] = nz, find the row coordinate where diagonal 'diag' intersects the
+ * merge path. Ties emit row-end markers before nonzeros.
  *
  * @param diag Diagonal number to find
- * @param a_len Length of array A (number of rows + 1)
- * @param b_len Length of array B (number of nonzeros)
- * @param a_data Row pointer array
+ * @param row_count Length of array A (number of rows)
+ * @param nnz Length of array B (number of nonzeros)
+ * @param row_offsets CSR row pointer array
  * @param base Index base offset
  * @return Row index where diagonal intersects
  */
 template <typename ROWTYPE>
-__device__ __forceinline__ ROWTYPE
-merge_path_search( ROWTYPE diag, ROWTYPE a_len, ROWTYPE b_len, const ROWTYPE* a_data, ROWTYPE base )
+__host__ __device__ inline ROWTYPE merge_path_search( ROWTYPE diag,
+                                                      ROWTYPE row_count,
+                                                      ROWTYPE nnz,
+                                                      const ROWTYPE* row_offsets,
+                                                      ROWTYPE base )
 {
-    ROWTYPE begin = diag > b_len ? diag - b_len : 0;
-    ROWTYPE end = diag < a_len ? diag : a_len;
+    ROWTYPE begin = diag > nnz ? diag - nnz : 0;
+    ROWTYPE end = diag < row_count ? diag : row_count;
 
     while ( begin < end )
     {
         ROWTYPE mid = ( begin + end ) >> 1;
-        ROWTYPE a_idx = mid;
-        ROWTYPE b_idx = diag - mid - 1;
+        ROWTYPE nz_before_boundary = diag - mid - 1;
 
-        ROWTYPE a_val = ( a_idx < a_len - 1 ) ? ( a_data[a_idx + 1] - base ) : b_len;
-        bool pred = ( b_idx < 0 ) || ( a_val > b_idx );
+        const ROWTYPE row_end = row_offsets[mid + 1] - base;
+        const bool pred = ( nz_before_boundary < 0 ) || ( row_end > nz_before_boundary );
 
         if ( pred )
         {
@@ -869,12 +872,32 @@ merge_path_search( ROWTYPE diag, ROWTYPE a_len, ROWTYPE b_len, const ROWTYPE* a_
     return begin;
 }
 
+template <typename COLTYPE, typename VALTYPE>
+__global__ void scale_vector_kernel( const COLTYPE n, VALTYPE* __restrict y, const VALTYPE beta )
+{
+    const COLTYPE row = static_cast<COLTYPE>( blockIdx.x ) * static_cast<COLTYPE>( blockDim.x ) +
+                        static_cast<COLTYPE>( threadIdx.x );
+    if ( row >= n )
+    {
+        return;
+    }
+
+    if ( beta == static_cast<VALTYPE>( 0 ) )
+    {
+        y[row] = static_cast<VALTYPE>( 0 );
+    }
+    else if ( beta != static_cast<VALTYPE>( 1 ) )
+    {
+        y[row] *= beta;
+    }
+}
+
 /**
  * @brief Merge-based CSR SpMV kernel
  *
- * Uses precomputed merge path boundaries to partition work evenly across thread blocks.
- * Each block processes a contiguous range of nonzeros, handling row boundaries
- * cooperatively.
+ * Partitions the merged stream of CSR row-end markers and nonzero indices. Each
+ * CUDA thread receives a contiguous merge-path interval and atomically adds row
+ * fragments into y, which has already been scaled by beta.
  */
 template <typename ROWTYPE, typename COLTYPE, typename VALTYPE>
 __global__ void csr_merge_spmv_kernel( const COLTYPE n,
@@ -884,141 +907,75 @@ __global__ void csr_merge_spmv_kernel( const COLTYPE n,
                                        VALTYPE const* __restrict x,
                                        VALTYPE* __restrict y,
                                        const VALTYPE alpha,
-                                       const VALTYPE beta,
-                                       const int base,
+                                       const ROWTYPE base,
                                        const ROWTYPE nnz,
                                        const ROWTYPE* __restrict merge_path_boundaries )
 {
-    constexpr int threads_per_block = 256;
     constexpr int items_per_thread = 8;
-    constexpr int items_per_block = threads_per_block * items_per_thread;
-
-    __shared__ struct
+    const ROWTYPE n_rows = static_cast<ROWTYPE>( n );
+    const ROWTYPE total_work = n_rows + nnz;
+    const ROWTYPE partition = static_cast<ROWTYPE>( blockIdx.x ) * static_cast<ROWTYPE>( blockDim.x ) +
+                              static_cast<ROWTYPE>( threadIdx.x );
+    const ROWTYPE work_begin = partition * static_cast<ROWTYPE>( items_per_thread );
+    if ( work_begin >= total_work )
     {
-        ROWTYPE row_start;
-        ROWTYPE row_end;
-        VALTYPE sums[threads_per_block];
-    } shared;
-
-    // Compute merge path range for this block
-    const ROWTYPE block_offset = static_cast<ROWTYPE>( blockIdx.x ) * items_per_block;
-    const ROWTYPE block_end = min( block_offset + items_per_block, nnz );
-
-    // Load precomputed row range
-    ROWTYPE row_start_idx = merge_path_boundaries[blockIdx.x];
-    ROWTYPE row_end_idx = merge_path_boundaries[blockIdx.x + 1];
-
-    if ( threadIdx.x == 0 )
-    {
-        shared.row_start = row_start_idx;
-        shared.row_end = row_end_idx;
+        return;
     }
-    __syncthreads();
 
-    row_start_idx = shared.row_start;
-    row_end_idx = shared.row_end;
+    const ROWTYPE unclamped_work_end = work_begin + static_cast<ROWTYPE>( items_per_thread );
+    const ROWTYPE work_end = unclamped_work_end < total_work ? unclamped_work_end : total_work;
+    const ROWTYPE row_begin = merge_path_boundaries[partition];
+    const ROWTYPE row_end = merge_path_boundaries[partition + 1];
+    ROWTYPE nz = work_begin - row_begin;
+    const ROWTYPE nz_end = work_end - row_end;
 
-    // Process nonzeros in this block
-    ROWTYPE current_row = row_start_idx;
-    ROWTYPE row_begin = ( current_row < n ) ? ( ia[current_row] - base ) : nnz;
-    ROWTYPE row_end = ( current_row < n ) ? ( ia[current_row + 1] - base ) : nnz;
+    if ( nz >= nz_end )
+    {
+        return;
+    }
+
+    ROWTYPE row = row_begin;
+    while ( row < n_rows && ( ia[row + 1] - base ) <= nz )
+    {
+        ++row;
+    }
+
     VALTYPE sum = static_cast<VALTYPE>( 0 );
+    ROWTYPE sum_row = row;
+    bool has_sum = false;
 
-    // Each thread processes items_per_thread nonzeros
-    for ( int item = 0; item < items_per_thread; ++item )
+    for ( ; nz < nz_end; ++nz )
     {
-        const ROWTYPE nz_idx = block_offset + threadIdx.x * items_per_thread + item;
-
-        if ( nz_idx < block_end )
+        while ( row < n_rows && ( ia[row + 1] - base ) <= nz )
         {
-            // Advance to correct row
-            while ( nz_idx >= row_end && current_row < row_end_idx )
+            if ( has_sum )
             {
-                // Write out previous row sum
-                if ( nz_idx == row_end && current_row < n )
-                {
-                    const VALTYPE ax = alpha * sum;
-                    if ( beta == static_cast<VALTYPE>( 0 ) )
-                    {
-                        y[current_row] = ax;
-                    }
-                    else if ( beta == static_cast<VALTYPE>( 1 ) )
-                    {
-                        atomicAdd( &y[current_row], ax );
-                    }
-                    else
-                    {
-                        VALTYPE old = y[current_row];
-                        VALTYPE val = ax + beta * old;
-                        y[current_row] = val;
-                    }
-                    sum = static_cast<VALTYPE>( 0 );
-                }
-
-                current_row++;
-                row_begin = row_end;
-                row_end = ( current_row < n ) ? ( ia[current_row + 1] - base ) : nnz;
+                atomicAdd( &y[sum_row], alpha * sum );
+                sum = static_cast<VALTYPE>( 0 );
+                has_sum = false;
             }
-
-            // Accumulate for current row
-            if ( current_row < n )
-            {
-                const COLTYPE col = ja[nz_idx] - base;
-                sum += av[nz_idx] * x[col];
-            }
+            ++row;
         }
+
+        if ( row >= n_rows )
+        {
+            break;
+        }
+
+        if ( !has_sum )
+        {
+            sum_row = row;
+            sum = static_cast<VALTYPE>( 0 );
+            has_sum = true;
+        }
+
+        const COLTYPE col = ja[nz] - static_cast<COLTYPE>( base );
+        sum += av[nz] * x[col];
     }
 
-    // Store partial sums in shared memory
-    shared.sums[threadIdx.x] = sum;
-    __syncthreads();
-
-    // Reduce partial sums for rows that span multiple threads
-    if ( threadIdx.x == 0 )
+    if ( has_sum )
     {
-        for ( ROWTYPE row = row_start_idx; row < row_end_idx; ++row )
-        {
-            if ( row >= n )
-                break;
-
-            const ROWTYPE row_nnz_start = ia[row] - base;
-            const ROWTYPE row_nnz_end = ia[row + 1] - base;
-
-            // Check if this row spans multiple threads
-            if ( row_nnz_start < block_end && row_nnz_end > block_offset )
-            {
-                VALTYPE row_sum = static_cast<VALTYPE>( 0 );
-
-                // Collect contributions from all threads
-                for ( int tid = 0; tid < threads_per_block; ++tid )
-                {
-                    const ROWTYPE tid_start = block_offset + tid * items_per_thread;
-                    const ROWTYPE tid_end = tid_start + items_per_thread;
-
-                    if ( tid_start < row_nnz_end && tid_end > row_nnz_start )
-                    {
-                        row_sum += shared.sums[tid];
-                    }
-                }
-
-                // Write result
-                const VALTYPE ax = alpha * row_sum;
-                if ( beta == static_cast<VALTYPE>( 0 ) )
-                {
-                    y[row] = ax;
-                }
-                else if ( beta == static_cast<VALTYPE>( 1 ) )
-                {
-                    atomicAdd( &y[row], ax );
-                }
-                else
-                {
-                    VALTYPE old = y[row];
-                    VALTYPE val = ax + beta * old;
-                    y[row] = val;
-                }
-            }
-        }
+        atomicAdd( &y[sum_row], alpha * sum );
     }
 }
 
@@ -1167,8 +1124,21 @@ void CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::operator()( const VALTYPE* d_x, VA
     // Launch configuration
     constexpr int threads_per_block = 256;
 
+    if ( beta != static_cast<VALTYPE>( 1 ) )
+    {
+        const int scale_blocks =
+            static_cast<int>( ( static_cast<size_t>( _rows ) + threads_per_block - 1 ) / threads_per_block );
+        scale_vector_kernel<<<scale_blocks, threads_per_block>>>( _rows, d_y, beta );
+        check_cuda_error( cudaGetLastError(), "CSRMergeSPMV y scaling kernel launch failed" );
+    }
+
+    if ( _nnz <= static_cast<ROWTYPE>( 0 ) )
+    {
+        return;
+    }
+
     csr_merge_spmv_kernel<<<_num_blocks, threads_per_block>>>(
-        _rows, _d_ia, _d_ja, _d_av, d_x, d_y, alpha, beta, _index_base, _nnz, _d_merge_path_boundaries );
+        _rows, _d_ia, _d_ja, _d_av, d_x, d_y, alpha, _index_base, _nnz, _d_merge_path_boundaries );
     check_cuda_error( cudaGetLastError(), "CSRMergeSPMV kernel launch failed" );
 }
 
@@ -1186,54 +1156,38 @@ void CSRMergeSPMV<ROWTYPE, COLTYPE, VALTYPE>::compute_merge_path_boundaries()
 {
     constexpr int threads_per_block = 256;
     constexpr int items_per_thread = 8;
-    constexpr int items_per_block = threads_per_block * items_per_thread;
+    const ROWTYPE total_work = static_cast<ROWTYPE>( _rows ) + _nnz;
+    const ROWTYPE num_partitions = ( total_work + static_cast<ROWTYPE>( items_per_thread - 1 ) ) /
+                                   static_cast<ROWTYPE>( items_per_thread );
 
-    _num_blocks = ( _nnz + items_per_block - 1 ) / items_per_block;
+    _num_blocks = static_cast<int>( ( num_partitions + static_cast<ROWTYPE>( threads_per_block - 1 ) ) /
+                                    static_cast<ROWTYPE>( threads_per_block ) );
 
-    // Allocate host array for boundaries
-    std::vector<ROWTYPE> h_boundaries( _num_blocks + 1 );
+    // One row coordinate per thread partition plus the exact final endpoint.
+    std::vector<ROWTYPE> h_boundaries( static_cast<size_t>( num_partitions ) + 1 );
 
     // Copy row pointers to host for merge path computation
     std::vector<ROWTYPE> h_ia( _rows + 1 );
     check_cuda_error( cudaMemcpy( h_ia.data(), _d_ia, ( _rows + 1 ) * sizeof( ROWTYPE ), cudaMemcpyDeviceToHost ),
                       "Failed to copy row pointers to host" );
 
-    // Compute merge path boundaries on host
-    const ROWTYPE n_rows = static_cast<ROWTYPE>( _rows ) + static_cast<ROWTYPE>( 1 );
-    for ( int block = 0; block <= _num_blocks; ++block )
+    // Compute merge path boundaries on the merged row-end/nonzero streams.
+    const ROWTYPE n_rows = static_cast<ROWTYPE>( _rows );
+    for ( ROWTYPE partition = 0; partition <= num_partitions; ++partition )
     {
-        const ROWTYPE diag = static_cast<ROWTYPE>( block ) * items_per_block;
-
-        // Binary search for merge path diagonal
-        ROWTYPE begin = diag > _nnz ? diag - _nnz : 0;
-        ROWTYPE end = diag < n_rows ? diag : n_rows;
-
-        while ( begin < end )
-        {
-            ROWTYPE mid = ( begin + end ) >> 1;
-            ROWTYPE a_idx = mid;
-            ROWTYPE b_idx = diag - mid - 1;
-
-            ROWTYPE a_val = ( a_idx < n_rows - 1 ) ? ( h_ia[a_idx + 1] - _index_base ) : _nnz;
-            bool pred = ( b_idx < 0 ) || ( a_val > b_idx );
-
-            if ( pred )
-            {
-                end = mid;
-            }
-            else
-            {
-                begin = mid + 1;
-            }
-        }
-        h_boundaries[block] = begin;
+        const ROWTYPE unclamped_diag = partition * static_cast<ROWTYPE>( items_per_thread );
+        const ROWTYPE diag = unclamped_diag < total_work ? unclamped_diag : total_work;
+        h_boundaries[static_cast<size_t>( partition )] =
+            merge_path_search( diag, n_rows, _nnz, h_ia.data(), _index_base );
     }
 
     // Allocate and copy boundaries to device
-    check_cuda_error( cudaMalloc( &_d_merge_path_boundaries, ( _num_blocks + 1 ) * sizeof( ROWTYPE ) ),
+    check_cuda_error( cudaMalloc( &_d_merge_path_boundaries,
+                                  ( static_cast<size_t>( num_partitions ) + 1 ) * sizeof( ROWTYPE ) ),
                       "Failed to allocate merge path boundaries" );
     check_cuda_error( cudaMemcpy( _d_merge_path_boundaries, h_boundaries.data(),
-                                  ( _num_blocks + 1 ) * sizeof( ROWTYPE ), cudaMemcpyHostToDevice ),
+                                  ( static_cast<size_t>( num_partitions ) + 1 ) * sizeof( ROWTYPE ),
+                                  cudaMemcpyHostToDevice ),
                       "Failed to copy merge path boundaries to device" );
 }
 

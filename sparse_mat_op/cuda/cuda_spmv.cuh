@@ -295,13 +295,13 @@ private:
  * Key features:
  * - Merge path decomposition for balanced workload distribution
  * - Better performance on irregular sparsity patterns
- * - Cooperative thread block processing
+ * - Correct handling of split rows and empty rows
  *
  * Algorithm overview:
- * 1. Treat matrix as linearized array of (row_id, col_id, value) tuples
- * 2. Use merge path to partition work among thread blocks
- * 3. Each block cooperatively processes its assigned nonzeros
- * 4. Use shared memory for partial sums and atomic reduction
+ * 1. Treat CSR row-end markers and nonzero indices as two sorted streams
+ * 2. Use merge path to partition the combined rows + nnz work among threads
+ * 3. Each thread processes its exact merge-path interval
+ * 4. Atomically accumulate row fragments produced by split rows
  */
 template <typename ROWTYPE = int, typename COLTYPE = int, typename VALTYPE = double>
 class CSRMergeSPMV : public SpMVOperator<VALTYPE>
@@ -329,7 +329,7 @@ private:
     bool _is_initialized;
     COLTYPE _rows;
 
-    // Precomputed merge path boundaries for each block
+    // Precomputed row coordinates for each merge-path thread partition
     ROWTYPE* _d_merge_path_boundaries;
     int _num_blocks;
 
